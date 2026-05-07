@@ -165,6 +165,25 @@
     line-height: 1.3;
     margin: 0.8em 0 0.3em;
   }
+  /* Code blocks — distinct slab so users can tell at a glance it's a block,
+   * not inline code. The inner <code> inherits font-family from <pre>; null
+   * out any background it might have so styling doesn't double up. */
+  .editor-host :global(.ProseMirror pre) {
+    background: #f4f6f8;
+    border: 1px solid #e0e4e8;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin: 0 0 0.75em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    line-height: 1.5;
+    overflow-x: auto;
+  }
+  .editor-host :global(.ProseMirror pre code) {
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+  }
   /* Heading-fold chevron (rendered as a Decoration.widget by foldHeadings.ts).
    * Sits in the heading's left gutter via a negative absolute offset; the
    * heading itself is the positioning ancestor. Hidden until hover for
