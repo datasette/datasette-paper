@@ -280,8 +280,11 @@ class TableTooltipView {
 
   private positionAboveTable(view: EditorView, tablePos: number) {
     // Anchor to the horizontal center of the table's DOM rect; the CSS
-    // class `pm-tt-pos-table` shifts the bar up + half-left from this
-    // origin so it sits centered above the table.
+    // shifts the bar up + half-left from this origin so it sits centered
+    // above the table. When that would land it under the sticky page
+    // toolbar (e.g. the table is the first block in the doc, or has been
+    // scrolled to the top), fall back to anchoring below the table —
+    // toggled via the `pm-tt-below` class which inverts the y-transform.
     const dom = view.nodeDOM(tablePos);
     if (!(dom instanceof HTMLElement)) return;
     const parent = this.root.offsetParent as HTMLElement | null;
@@ -293,7 +296,27 @@ class TableTooltipView {
     const box = parent.getBoundingClientRect();
     const cx = tableBox.left + tableBox.width / 2;
     this.root.style.left = `${cx - box.left}px`;
-    this.root.style.top = `${tableBox.top - box.top}px`;
+
+    const toolbar = document.querySelector(".paper-toolbar");
+    const toolbarBottom = toolbar
+      ? toolbar.getBoundingClientRect().bottom
+      : 0;
+    // Tooltip's would-be top in viewport coords if anchored above. Use a
+    // 6px gap to match the CSS margin. offsetHeight may be 0 the very
+    // first time we render (root just appended); in that case prefer
+    // above so the bar isn't briefly mis-placed, then re-flow on the
+    // next selection update once height is known.
+    const rootHeight = this.root.offsetHeight;
+    const wouldOverlapToolbar =
+      rootHeight > 0 && tableBox.top - rootHeight - 6 < toolbarBottom + 4;
+
+    if (wouldOverlapToolbar) {
+      this.root.classList.add("pm-tt-below");
+      this.root.style.top = `${tableBox.bottom - box.top}px`;
+    } else {
+      this.root.classList.remove("pm-tt-below");
+      this.root.style.top = `${tableBox.top - box.top}px`;
+    }
   }
 
   destroy() {

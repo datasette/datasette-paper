@@ -17,7 +17,14 @@
 
 import type { Command, EditorState, Transaction } from "prosemirror-state";
 import type { Node as PMNode } from "prosemirror-model";
-import { addRowAfter, goToNextCell } from "prosemirror-tables";
+import {
+  CellSelection,
+  addRowAfter,
+  deleteColumn,
+  deleteRow,
+  deleteTable,
+  goToNextCell,
+} from "prosemirror-tables";
 import { schema } from "./schema";
 
 /**
@@ -139,6 +146,28 @@ export function tabOrAddRow(): Command {
     if (!after) return true;
     goToNextCell(1)(after, dispatch);
     return true;
+  };
+}
+
+/**
+ * Backspace/Delete handler for table CellSelections. When the user has
+ * selected one-or-more whole rows (or columns), delete the rows (cols)
+ * outright rather than letting `baseKeymap`'s `deleteSelection` clear the
+ * cell contents in place. A selection covering every cell collapses to
+ * `deleteTable` so users don't have to delete row-by-row to remove the
+ * whole thing. Returns false for any other selection so normal text
+ * editing keystrokes inside cells still pass through.
+ */
+export function deleteRowOrColSelection(): Command {
+  return (state: EditorState, dispatch?: (tr: Transaction) => void) => {
+    const sel = state.selection;
+    if (!(sel instanceof CellSelection)) return false;
+    const isRow = sel.isRowSelection();
+    const isCol = sel.isColSelection();
+    if (isRow && isCol) return deleteTable(state, dispatch);
+    if (isRow) return deleteRow(state, dispatch);
+    if (isCol) return deleteColumn(state, dispatch);
+    return false;
   };
 }
 

@@ -11,7 +11,8 @@ import {
   getVersion,
 } from "prosemirror-collab";
 import { tableEditing, goToNextCell } from "prosemirror-tables";
-import { tabOrAddRow } from "./tables";
+import { gapCursor } from "prosemirror-gapcursor";
+import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
@@ -529,12 +530,19 @@ export class EditorConnection {
         // At the bottom-right cell, Tab appends a new row (tabOrAddRow).
         // Shift-Tab is plain reverse navigation — we don't auto-add a
         // row before the first cell since that would be surprising.
+        // Backspace/Delete on a row- or column-spanning CellSelection
+        // remove the row(s) or column(s) instead of just clearing cell
+        // contents (which is what baseKeymap's deleteSelection does on
+        // a CellSelection). Returns false outside that case so normal
+        // editing keystrokes pass through.
         // Registered separately from the indent/outdent keymap so cell
         // navigation wins inside tables; outside, both return false and
         // the indent keymap gets its turn.
         keymap({
           Tab: tabOrAddRow(),
           "Shift-Tab": goToNextCell(-1),
+          Backspace: deleteRowOrColSelection(),
+          Delete: deleteRowOrColSelection(),
         }),
         keymap(buildKeymap(schema)),
         keymap(baseKeymap),
@@ -549,6 +557,13 @@ export class EditorConnection {
         // — anchored above the table when the cursor is inside one. The
         // docId is baked in so the API button can build the right URL.
         tableInsertTooltipPlugin(this.opts.docId),
+        // gap cursor — gives ArrowDown/Right past the last block (and
+        // ArrowUp/Left before the first) a place to land when no normal
+        // text position exists, e.g. between two adjacent tables or after
+        // a table that's the last block in the doc. Typing converts the
+        // gap into a paragraph. Must come BEFORE tableEditing per the
+        // prosemirror-tables README.
+        gapCursor(),
         // Per upstream README, tableEditing belongs near the end of the
         // plugin chain — it handles mouse + arrow keys broadly, so other
         // plugins (gap cursor, columnResizing if we ever add it) need to

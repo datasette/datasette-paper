@@ -422,6 +422,13 @@
     transform: translate(-50%, -100%);
     margin-top: -6px;
   }
+  /* Flipped placement when anchoring above the table would land the bar
+   * under the sticky page toolbar — see positionAboveTable in
+   * tableInsertTooltip.ts. */
+  .editor-host :global(.pm-table-tooltip-root.pm-tt-below) {
+    transform: translate(-50%, 0);
+    margin-top: 6px;
+  }
   /* Always visible while the cursor is in a table — no opacity ramp
    * because table editing is an explicit mode. */
   .editor-host :global(.pm-tt-bar) {
