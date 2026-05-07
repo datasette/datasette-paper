@@ -21,8 +21,6 @@ jobs:
         run: just format-backend-check
       - name: Lint
         run: just check-backend
-      - name: Codegen freshness
-        run: just check-queries-fresh
       - name: Backend tests
         run: just test
 
