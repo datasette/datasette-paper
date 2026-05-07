@@ -47,6 +47,15 @@ export interface BootstrapPermissions {
   visibility: "private" | "link-view" | "link-edit";
 }
 
+export type DocState = "active" | "archived" | "trashed";
+
+export interface DocStatePayload {
+  state: DocState;
+  archived_at: string | null;
+  trashed_at: string | null;
+  delete_at: string | null;
+}
+
 export interface ConnectionOpts {
   /** Document ID (used in API URL path). */
   docId: string;
@@ -71,6 +80,13 @@ export interface ConnectionOpts {
    * false.
    */
   onPermissions?: (perms: BootstrapPermissions) => void;
+  /**
+   * Called with the doc's lifecycle state — once at bootstrap and
+   * again whenever the server broadcasts a ``state-changed`` SSE
+   * event (archive / unarchive / trash / restore). The renderer uses
+   * this to show the archived pill or trashed banner.
+   */
+  onDocState?: (payload: DocStatePayload) => void;
 }
 
 type CommState =
@@ -90,6 +106,10 @@ interface BootstrapData {
   users?: number;
   selfActor?: string | null;
   permissions?: BootstrapPermissions;
+  state?: DocState;
+  archived_at?: string | null;
+  trashed_at?: string | null;
+  delete_at?: string | null;
 }
 
 interface SendableResult {
@@ -567,6 +587,14 @@ export class EditorConnection {
     this.opts.onView?.(this.view);
     if (typeof boot.users === "number") this.opts.onUsers?.(boot.users);
     if (boot.permissions) this.opts.onPermissions?.(boot.permissions);
+    if (boot.state) {
+      this.opts.onDocState?.({
+        state: boot.state,
+        archived_at: boot.archived_at ?? null,
+        trashed_at: boot.trashed_at ?? null,
+        delete_at: boot.delete_at ?? null,
+      });
+    }
 
     this.comm = "loaded";
     this.openStream();
@@ -633,6 +661,24 @@ export class EditorConnection {
       }
     };
     es.addEventListener("presence", handlePresence as EventListener);
+
+    const handleStateChanged = (evt: MessageEvent) => {
+      try {
+        const data = JSON.parse(evt.data) as Partial<DocStatePayload>;
+        if (data.state !== "active" && data.state !== "archived" && data.state !== "trashed") {
+          return;
+        }
+        this.opts.onDocState?.({
+          state: data.state,
+          archived_at: data.archived_at ?? null,
+          trashed_at: data.trashed_at ?? null,
+          delete_at: data.delete_at ?? null,
+        });
+      } catch {
+        // ignore malformed
+      }
+    };
+    es.addEventListener("state-changed", handleStateChanged as EventListener);
 
     es.addEventListener("error", () => {
       this.closeStream();

@@ -174,3 +174,39 @@ def m001_internal(db: Database):
             ON _datasette_paper_share(actor_id);
         """
     )
+
+
+@migrations()
+def m002_archive_trash(db: Database):
+    # Adds the listing-state model: a paper can be 'active' (default,
+    # shown on /-/paper), 'archived' (hidden from the main list, still
+    # accessible via the Archive tab), or 'trashed' (in the trash, with
+    # ``delete_at`` driving an eventual hard-delete sweep run by
+    # datasette-cron — see datasette_paper/cron.py).
+    #
+    # State changes are owner-only and orthogonal to the permission
+    # model: an editor share still grants edit on a trashed paper if you
+    # navigate to it directly. The list endpoint filters by state.
+    db.executescript(
+        """
+        ALTER TABLE _datasette_paper_doc
+            ADD COLUMN state TEXT NOT NULL DEFAULT 'active'
+                CHECK (state IN ('active','archived','trashed'));
+
+        --- ISO-8601 UTC; NULL while the paper is active.
+        ALTER TABLE _datasette_paper_doc ADD COLUMN archived_at TEXT;
+
+        --- ISO-8601 UTC; NULL unless state = 'trashed'.
+        ALTER TABLE _datasette_paper_doc ADD COLUMN trashed_at TEXT;
+
+        --- ISO-8601 UTC; cron sweep hard-deletes rows whose delete_at
+        --- has passed. Set at trash time to trashed_at + 7 days; cleared
+        --- on restore.
+        ALTER TABLE _datasette_paper_doc ADD COLUMN delete_at TEXT;
+
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_state
+            ON _datasette_paper_doc(state);
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_delete_at
+            ON _datasette_paper_doc(delete_at) WHERE delete_at IS NOT NULL;
+        """
+    )

@@ -71,15 +71,71 @@ class PaperDB:
     async def list_docs(self) -> list[_queries.Doc]:
         return await self.database.execute_write_fn(_queries.list_docs)
 
-    async def list_docs_by_ids(self, *, doc_ids: list[int]) -> list[_queries.Doc]:
+    async def list_docs_by_ids_and_states(
+        self, *, doc_ids: list[int], states: list[str]
+    ) -> list[_queries.Doc]:
         # Variable-length IN goes through json_each on the SQL side; serialize
-        # here so the helper signature stays a single string parameter.
+        # here so the helper signature stays two string parameters.
         doc_ids_json = json.dumps(doc_ids)
+        states_json = json.dumps(states)
 
         def read(conn):
-            return _queries.list_docs_by_ids(conn, doc_ids_json=doc_ids_json)
+            return _queries.list_docs_by_ids_and_states(
+                conn, doc_ids_json=doc_ids_json, states_json=states_json
+            )
 
         return await self.database.execute_write_fn(read)
+
+    # ------------------------------------------------------------------
+    # State transitions (archive / trash)
+    # ------------------------------------------------------------------
+
+    async def archive_doc(self, *, doc_id: int) -> None:
+        def write(conn):
+            _queries.archive_doc(conn, doc_id=doc_id)
+
+        await self.database.execute_write_fn(write)
+
+    async def unarchive_doc(self, *, doc_id: int) -> None:
+        def write(conn):
+            _queries.unarchive_doc(conn, doc_id=doc_id)
+
+        await self.database.execute_write_fn(write)
+
+    async def trash_doc(self, *, doc_id: int, delete_at: str) -> None:
+        def write(conn):
+            _queries.trash_doc(conn, doc_id=doc_id, delete_at=delete_at)
+
+        await self.database.execute_write_fn(write)
+
+    async def restore_doc(self, *, doc_id: int) -> None:
+        def write(conn):
+            _queries.restore_doc(conn, doc_id=doc_id)
+
+        await self.database.execute_write_fn(write)
+
+    async def list_trashed_to_delete(self, *, now: str) -> list[_queries.Doc]:
+        def read(conn):
+            return _queries.list_trashed_to_delete(conn, now=now)
+
+        return await self.database.execute_write_fn(read)
+
+    async def hard_delete_doc(self, *, doc_id: int) -> None:
+        """Delete the doc and all its child rows in one transaction.
+
+        SQLite's ``ON DELETE CASCADE`` requires ``PRAGMA foreign_keys = ON``
+        per-connection — we don't control every host env, so we wipe each
+        child table explicitly. Order doesn't matter (no FKs honored), but
+        deleting children first matches what cascade *would* do.
+        """
+
+        def write(conn):
+            _queries.delete_steps_for_doc(conn, doc_id=doc_id)
+            _queries.delete_snapshots_for_doc(conn, doc_id=doc_id)
+            _queries.delete_shares_for_doc(conn, doc_id=doc_id)
+            _queries.hard_delete_doc(conn, doc_id=doc_id)
+
+        await self.database.execute_write_fn(write)
 
     # ------------------------------------------------------------------
     # Steps

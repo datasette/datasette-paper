@@ -22,40 +22,118 @@
 
 -- ============================================================================
 -- Docs
+--
+-- Every Doc-returning query selects the same column set so the generated
+-- ``Doc`` dataclass has one shape. The state/timestamp columns added by
+-- migration m002 are part of that set.
 -- ============================================================================
 
 -- name: insertDoc :row -> Doc
 INSERT INTO _datasette_paper_doc (name, created_by, schema_name)
 VALUES ($name::text, $created_by::text::, $schema_name::text)
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility;
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;
 
 -- name: updateDocName :row -> Doc
 UPDATE _datasette_paper_doc
 SET name = $name::text,
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id = $doc_id::integer
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility;
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;
 
 -- name: selectDocById :row -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
 FROM _datasette_paper_doc
 WHERE id = $doc_id::integer;
 
 -- name: listDocs :rows -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
 FROM _datasette_paper_doc
 ORDER BY created_at;
 
--- Variable-length IN clause: caller passes a JSON array of integers
--- (db.py uses ``json.dumps(doc_ids)``); ``json_each`` unpacks it.
+-- Variable-length IN clauses: caller passes JSON arrays of integers /
+-- strings (db.py uses ``json.dumps(...)``); ``json_each`` unpacks them.
 -- Empty list collapses to no rows naturally — no special case needed.
--- name: listDocsByIds :rows -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility
+-- ``$states_json`` is a JSON array of strings drawn from the same set as
+-- the CHECK constraint, e.g. ``["active"]`` or ``["archived","trashed"]``.
+-- name: listDocsByIdsAndStates :rows -> Doc
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
 FROM _datasette_paper_doc
 WHERE id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
 )
+  AND state IN (
+    SELECT value FROM json_each($states_json::text)
+)
 ORDER BY updated_at DESC;
+
+-- ============================================================================
+-- State transitions (archive / trash)
+--
+-- Owner-only — enforced inline in the route handler. Each query is a
+-- single-row UPDATE keyed on id; the route fetches the post-update row
+-- via selectDocById to get the full Doc shape for the response and the
+-- SSE state-changed broadcast.
+-- ============================================================================
+
+-- name: archiveDoc
+UPDATE _datasette_paper_doc
+SET state = 'archived',
+    archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    trashed_at = NULL,
+    delete_at = NULL
+WHERE id = $doc_id::integer;
+
+-- ``unarchiveDoc`` and ``restoreDoc`` are the same statement: both put
+-- the doc back in 'active' and clear all three timestamps. They're kept
+-- as separate names so route handlers read clearly. The codegen will
+-- emit identical bodies.
+-- name: unarchiveDoc
+UPDATE _datasette_paper_doc
+SET state = 'active',
+    archived_at = NULL,
+    trashed_at = NULL,
+    delete_at = NULL
+WHERE id = $doc_id::integer;
+
+-- name: trashDoc
+UPDATE _datasette_paper_doc
+SET state = 'trashed',
+    trashed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+    delete_at = $delete_at::text
+WHERE id = $doc_id::integer;
+
+-- name: restoreDoc
+UPDATE _datasette_paper_doc
+SET state = 'active',
+    archived_at = NULL,
+    trashed_at = NULL,
+    delete_at = NULL
+WHERE id = $doc_id::integer;
+
+-- Cron sweep: rows whose delete_at has passed. Caller passes ``$now``
+-- as an ISO-8601 UTC string in the same format strftime emits, so
+-- string comparison matches chronological order.
+-- name: listTrashedToDelete :rows -> Doc
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+FROM _datasette_paper_doc
+WHERE state = 'trashed'
+  AND delete_at IS NOT NULL
+  AND delete_at < $now::text
+ORDER BY delete_at;
+
+-- ``hardDeleteDoc`` deletes from each child table explicitly because
+-- SQLite only honors ON DELETE CASCADE when ``PRAGMA foreign_keys = ON``
+-- is set per-connection and we can't guarantee that in every host
+-- environment. Caller wraps these in a single execute_write_fn closure
+-- so the four statements run in one transaction.
+-- name: deleteStepsForDoc
+DELETE FROM _datasette_paper_step WHERE doc_id = $doc_id::integer;
+
+-- name: deleteSnapshotsForDoc
+DELETE FROM _datasette_paper_snapshot WHERE doc_id = $doc_id::integer;
+
+-- name: hardDeleteDoc
+DELETE FROM _datasette_paper_doc WHERE id = $doc_id::integer;
 
 -- ============================================================================
 -- Steps

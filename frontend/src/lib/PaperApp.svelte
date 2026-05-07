@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { onDestroy } from "svelte";
+  import { onDestroy, onMount } from "svelte";
   import type { EditorView } from "prosemirror-view";
   import "prosemirror-tables/style/tables.css";
   import { EditorConnection } from "./collab";
-  import type { BootstrapPermissions } from "./collab";
+  import type { BootstrapPermissions, DocStatePayload } from "./collab";
   import { Reporter } from "./reporter";
   import type { ReporterState } from "./reporter";
   import Toolbar from "./Toolbar.svelte";
@@ -19,9 +19,13 @@
   let users = $state(0);
   let mode: "edit" | "view" = $state("edit");
   let permissions = $state<BootstrapPermissions | null>(null);
+  let docState = $state<DocStatePayload | null>(null);
+  // Re-render the trash countdown each minute.
+  let nowTick = $state(Date.now());
   // Read-only when the server says canEdit=false. When this flips on we
   // also force mode='view' so the toggle reflects reality.
   let canEdit = $derived(permissions?.canEdit ?? true);
+  let isOwner = $derived(permissions?.isOwner ?? false);
 
   let conn: EditorConnection | undefined;
   let unsub: (() => void) | undefined;
@@ -47,6 +51,9 @@
         onPermissions: (p) => {
           permissions = p;
           if (!p.canEdit) mode = "view";
+        },
+        onDocState: (s) => {
+          docState = s;
         },
       },
       reporter,
@@ -99,6 +106,42 @@
     }
   }
 
+  onMount(() => {
+    const t = setInterval(() => {
+      nowTick = Date.now();
+    }, 60_000);
+    return () => clearInterval(t);
+  });
+
+  function deletesInLabel(deleteAt: string | null): string {
+    if (!deleteAt) return "";
+    const target = Date.parse(deleteAt);
+    if (Number.isNaN(target)) return "";
+    const diffMs = target - nowTick;
+    if (diffMs <= 0) return "Deleting…";
+    const days = Math.floor(diffMs / 86_400_000);
+    if (days >= 1) return `${days} day${days === 1 ? "" : "s"}`;
+    const hours = Math.floor(diffMs / 3_600_000);
+    if (hours >= 1) return `${hours} hour${hours === 1 ? "" : "s"}`;
+    return "less than an hour";
+  }
+
+  async function restoreFromBanner(): Promise<void> {
+    // Bypass openapi-fetch here so we don't need to thread the union
+    // through paths.GET; this view only ever issues /restore.
+    try {
+      const resp = await fetch(`/-/paper/api/docs/${docId}/restore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!resp.ok) return;
+      // The state-changed SSE will arrive shortly and update docState;
+      // no local override needed.
+    } catch {
+      // Network error — leave the banner up; the user can retry.
+    }
+  }
+
   onDestroy(() => {
     unsub?.();
     conn?.close();
@@ -107,6 +150,20 @@
 
 <div class="datasette-paper-app" class:view-mode={mode === "view"}>
   <DocHeader {docId} {users} bind:mode {canEdit} {copyMarkdown} />
+  {#if docState?.state === "trashed"}
+    <div class="status-banner status-trashed" role="status">
+      <span>
+        This paper is in the trash. Auto-deletes in {deletesInLabel(
+          docState.delete_at,
+        )}.
+      </span>
+      {#if isOwner}
+        <button type="button" onclick={restoreFromBanner}>Restore</button>
+      {/if}
+    </div>
+  {:else if docState?.state === "archived"}
+    <div class="archived-pill" aria-label="Archived">Archived</div>
+  {/if}
   {#if status.state !== "ok"}
     <div class="status-banner status-{status.state}">{status.message}</div>
   {/if}
@@ -135,6 +192,37 @@
   .status-banner.status-fail {
     background: #ffd6d6;
     color: #5a0000;
+  }
+  .status-banner.status-trashed {
+    background: #fff1d6;
+    color: #5a3a00;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .status-banner.status-trashed button {
+    font: inherit;
+    font-size: 0.95em;
+    padding: 3px 10px;
+    border: 1px solid #c08000;
+    background: #fff8ec;
+    color: #5a3a00;
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  .status-banner.status-trashed button:hover {
+    background: #ffe8b8;
+  }
+  .archived-pill {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 2px 8px;
+    background: #eef2f7;
+    color: #4a5568;
+    font-size: 12px;
+    border-radius: 10px;
+    border: 1px solid #d0d7e0;
   }
   /* In fullscreen layout the host gets flex:1; make the ProseMirror
    * surface stretch to fill it instead of capping at min-height: 60vh. */

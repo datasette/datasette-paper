@@ -101,6 +101,85 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
+// ─── Test: doc state events ─────────────────────────────────────────────────
+
+describe("doc state (archive/trash)", () => {
+  it("calls onDocState with the bootstrap state and again on `state-changed` SSE", async () => {
+    const el = makeEl();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...BOOTSTRAP,
+        state: "active",
+        archived_at: null,
+        trashed_at: null,
+        delete_at: null,
+      }),
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const events: Array<{ state: string; delete_at: string | null }> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onDocState: (s) => {
+        events.push({ state: s.state, delete_at: s.delete_at });
+      },
+    });
+
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    // Bootstrap fired once with the seeded state.
+    expect(events).toEqual([{ state: "active", delete_at: null }]);
+
+    // Server flips state to trashed and broadcasts state-changed.
+    const es = MockEventSource.instances[0];
+    es.dispatchEvent(
+      "state-changed",
+      JSON.stringify({
+        state: "trashed",
+        archived_at: null,
+        trashed_at: "2026-05-07T12:00:00.000Z",
+        delete_at: "2026-05-14T12:00:00.000Z",
+      }),
+    );
+
+    expect(events).toHaveLength(2);
+    expect(events[1]).toEqual({
+      state: "trashed",
+      delete_at: "2026-05-14T12:00:00.000Z",
+    });
+
+    conn.close();
+  });
+
+  it("ignores malformed `state-changed` payloads without throwing", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const events: string[] = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onDocState: (s) => events.push(s.state),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const es = MockEventSource.instances[0];
+    // Junk JSON.
+    es.dispatchEvent("state-changed", "not-json");
+    // Unknown state.
+    es.dispatchEvent("state-changed", JSON.stringify({ state: "wat" }));
+
+    // No additional callbacks beyond the (missing) bootstrap one — the
+    // bootstrap fixture has no `state` field, so the callback fires zero
+    // times for this test's setup.
+    expect(events).toEqual([]);
+
+    conn.close();
+  });
+});
+
 // ─── Test 1: start() happy path ───────────────────────────────────────────────
 
 describe("start() happy path", () => {

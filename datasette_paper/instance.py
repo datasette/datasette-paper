@@ -313,6 +313,18 @@ class Instance:
             # cleanup path, so we can't await.
             self._broadcast_presence_nowait()
 
+    def broadcast_state_changed(self, payload: dict) -> None:
+        """Push a ``state-changed`` event to every subscriber.
+
+        Caller assembles the payload with the post-update state /
+        timestamp fields. Used by the archive / unarchive / trash /
+        restore routes so currently-editing collaborators see the doc
+        switch state without needing to refetch the bootstrap.
+        """
+        msg = {"kind": "state-changed", **payload}
+        for q in list(self.subscribers):
+            q.put_nowait(msg)
+
     async def revoke_unauthorized(self, datasette) -> int:
         """Close subscriber queues whose actor no longer passes view.
 

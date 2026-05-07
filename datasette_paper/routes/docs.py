@@ -1,8 +1,9 @@
 """Route handlers for datasette-paper document API and HTML pages."""
 
+import datetime
 import json
 
-from datasette import Response
+from datasette import Forbidden, Response
 
 from ..router import router
 from ..instance import get_registry
@@ -18,6 +19,34 @@ from ..permissions import (
 from ..util import read_json_body, actor_id, paper_db
 
 
+VALID_STATES = ("active", "archived", "trashed")
+TRASH_RETENTION_DAYS = 7
+
+
+def _iso(dt: datetime.datetime) -> str:
+    """Format ``dt`` as ISO-8601 UTC with millisecond precision.
+
+    Matches the shape of ``strftime('%Y-%m-%dT%H:%M:%fZ','now')`` that
+    the schema's DEFAULTs emit, so timestamps written from Python sort
+    lexicographically against timestamps written from SQL.
+    """
+    return (
+        dt.strftime("%Y-%m-%dT%H:%M:")
+        + f"{dt.second:02d}.{dt.microsecond // 1000:03d}Z"
+    )
+
+
+def _doc_state_payload(doc) -> dict:
+    """State-related fields shared by the list endpoint, the bootstrap
+    envelope, and the SSE state-changed payload."""
+    return {
+        "state": doc.state,
+        "archived_at": doc.archived_at,
+        "trashed_at": doc.trashed_at,
+        "delete_at": doc.delete_at,
+    }
+
+
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
@@ -26,6 +55,18 @@ from ..util import read_json_body, actor_id, paper_db
 @router.GET(r"^/-/paper/api/docs$")
 async def list_docs(datasette, request):
     await ensure_paper_list(datasette, request)
+    # ``state`` filters the listing only — it isn't a permission concern.
+    # ``allowed_resources`` still pulls every paper the actor can view;
+    # the SQL helper then narrows to the requested state set. Default is
+    # 'active' to match the main listing UI; the renovated /-/paper page
+    # passes ?state=archived and ?state=trashed for the other two tabs.
+    state = (request.args.get("state") or "active").lower()
+    if state not in VALID_STATES:
+        return Response.json(
+            {"error": f"state must be one of: {', '.join(VALID_STATES)}"},
+            status=400,
+        )
+
     # Pull every paper the actor can view in one shot (cap at 1000; if
     # somebody has 1000+ papers visible we'll add proper pagination).
     page = await datasette.allowed_resources(
@@ -34,7 +75,7 @@ async def list_docs(datasette, request):
     # PaperResource is single-level — id lives in `parent`, child is None.
     doc_ids = [int(r.parent) for r in page.resources]
     db = paper_db(datasette)
-    rows = await db.list_docs_by_ids(doc_ids=doc_ids)
+    rows = await db.list_docs_by_ids_and_states(doc_ids=doc_ids, states=[state])
     actor = request.actor
     me = actor.get("id") if actor else None
     return Response.json(
@@ -47,6 +88,7 @@ async def list_docs(datasette, request):
                 "created_by": r.created_by,
                 "visibility": r.visibility,
                 "is_owner": r.created_by is not None and r.created_by == me,
+                **_doc_state_payload(r),
             }
             for r in rows
         ]
@@ -111,6 +153,10 @@ async def get_doc_bootstrap(datasette, request, doc_id: int):
                 "isOwner": is_owner,
                 "visibility": doc.visibility,
             },
+            # State seed for the open-doc UI. The same fields arrive over
+            # SSE as ``state-changed`` whenever the owner flips state mid-
+            # session, so the editor doesn't need to refetch.
+            **_doc_state_payload(doc),
         }
     )
 
@@ -353,8 +399,6 @@ async def post_share(datasette, request, doc_id: int):
     me = actor_id(request)
     if doc.created_by is None or doc.created_by != me:
         # Manage is owner-only — even editors can't reshare.
-        from datasette import Forbidden
-
         raise Forbidden("datasette-paper-manage")
 
     body = await read_json_body(request)
@@ -427,6 +471,108 @@ async def post_share(datasette, request, doc_id: int):
             "canManage": True,
         }
     )
+
+
+async def _ensure_owner(datasette, request, doc_id: int):
+    """Edit-permission check, then escalate to owner-only.
+
+    Returns the post-fetch ``Doc`` row (so the caller doesn't have to
+    refetch). Raises ``Forbidden('datasette-paper-manage')`` for editors
+    who aren't the owner — same surface as the share endpoint uses.
+    Returns ``None`` (caller should 404) if the doc has been hard-deleted
+    between the check and the read.
+    """
+    await ensure_paper_edit(datasette, request, doc_id)
+    db = paper_db(datasette)
+    doc = await db.select_doc_by_id(doc_id)
+    if doc is None:
+        return None
+    me = actor_id(request)
+    if doc.created_by is None or doc.created_by != me:
+        raise Forbidden("datasette-paper-manage")
+    return doc
+
+
+async def _state_response(datasette, doc_id: int):
+    """Refetch the doc and broadcast ``state-changed`` to live subscribers.
+
+    Returns a JSON Response with the post-update state payload. Callers
+    invoke this after the DB write commits so the broadcast carries the
+    new state. If no Instance is hot for this doc, the broadcast is a
+    no-op — subscribers connecting later will pick the state up from the
+    bootstrap envelope.
+    """
+    db = paper_db(datasette)
+    doc = await db.select_doc_by_id(doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+
+    payload = _doc_state_payload(doc)
+    registry = get_registry(datasette)
+    instance = registry._instances.get(doc_id)
+    if instance is not None:
+        instance.broadcast_state_changed(payload)
+
+    return Response.json({"id": doc.id, **payload})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/archive$")
+async def archive_doc_route(datasette, request, doc_id: int):
+    """Hide a paper from the main listing. Owner-only."""
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.archive_doc(doc_id=doc_id)
+    return await _state_response(datasette, doc_id)
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/unarchive$")
+async def unarchive_doc_route(datasette, request, doc_id: int):
+    """Move an archived paper back to active. Owner-only."""
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.unarchive_doc(doc_id=doc_id)
+    return await _state_response(datasette, doc_id)
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/trash$")
+async def trash_doc_route(datasette, request, doc_id: int):
+    """Move a paper to the trash. Owner-only.
+
+    Sets ``delete_at = now + TRASH_RETENTION_DAYS``. The cron sweep
+    (``datasette_paper.cron.sweep_trashed``) hard-deletes rows whose
+    delete_at has passed; until then the paper is recoverable via
+    /restore.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    delete_at = _iso(
+        datetime.datetime.now(datetime.timezone.utc)
+        + datetime.timedelta(days=TRASH_RETENTION_DAYS)
+    )
+    db = paper_db(datasette)
+    await db.trash_doc(doc_id=doc_id, delete_at=delete_at)
+    return await _state_response(datasette, doc_id)
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/restore$")
+async def restore_doc_route(datasette, request, doc_id: int):
+    """Restore a trashed (or archived) paper to active. Owner-only.
+
+    Single ``restore`` collapses both reverse transitions because
+    archive→active and trash→active share the same SQL — there is no
+    state-specific cleanup beyond clearing the three timestamps.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.restore_doc(doc_id=doc_id)
+    return await _state_response(datasette, doc_id)
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/snapshot$")

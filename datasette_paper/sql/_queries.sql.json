@@ -4,7 +4,7 @@
     {
       "name": "insertDoc",
       "result_type": "Row",
-      "sql": "INSERT INTO _datasette_paper_doc (name, created_by, schema_name)\nVALUES ($name::text, $created_by::text::, $schema_name::text)\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility;",
+      "sql": "INSERT INTO _datasette_paper_doc (name, created_by, schema_name)\nVALUES ($name::text, $created_by::text::, $schema_name::text)\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;",
       "parameters": [
         {
           "full_name": "$name::text",
@@ -89,6 +89,38 @@
           "origin_column": "visibility",
           "decltype": "TEXT",
           "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
         }
       ],
       "result_class": "Doc"
@@ -96,7 +128,7 @@
     {
       "name": "updateDocName",
       "result_type": "Row",
-      "sql": "UPDATE _datasette_paper_doc\nSET name = $name::text,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility;",
+      "sql": "UPDATE _datasette_paper_doc\nSET name = $name::text,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;",
       "parameters": [
         {
           "full_name": "$name::text",
@@ -175,6 +207,38 @@
           "origin_column": "visibility",
           "decltype": "TEXT",
           "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
         }
       ],
       "result_class": "Doc"
@@ -182,7 +246,7 @@
     {
       "name": "selectDocById",
       "result_type": "Row",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility\nFROM _datasette_paper_doc\nWHERE id = $doc_id::integer;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at\nFROM _datasette_paper_doc\nWHERE id = $doc_id::integer;",
       "parameters": [
         {
           "full_name": "$doc_id::integer",
@@ -255,6 +319,38 @@
           "origin_column": "visibility",
           "decltype": "TEXT",
           "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
         }
       ],
       "result_class": "Doc"
@@ -262,7 +358,7 @@
     {
       "name": "listDocs",
       "result_type": "Rows",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility\nFROM _datasette_paper_doc\nORDER BY created_at;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at\nFROM _datasette_paper_doc\nORDER BY created_at;",
       "parameters": [],
       "columns": [
         {
@@ -328,18 +424,56 @@
           "origin_column": "visibility",
           "decltype": "TEXT",
           "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
         }
       ],
       "result_class": "Doc"
     },
     {
-      "name": "listDocsByIds",
+      "name": "listDocsByIdsAndStates",
       "result_type": "Rows",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\nORDER BY updated_at DESC;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\n  AND state IN (\n    SELECT value FROM json_each($states_json::text)\n)\nORDER BY updated_at DESC;",
       "parameters": [
         {
           "full_name": "$doc_ids_json::text",
           "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$states_json::text",
+          "name": "states_json",
           "annotated_type": "text",
           "nullable": false
         }
@@ -408,9 +542,264 @@
           "origin_column": "visibility",
           "decltype": "TEXT",
           "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
         }
       ],
       "result_class": "Doc"
+    },
+    {
+      "name": "archiveDoc",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET state = 'archived',\n    archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),\n    trashed_at = NULL,\n    delete_at = NULL\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "unarchiveDoc",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET state = 'active',\n    archived_at = NULL,\n    trashed_at = NULL,\n    delete_at = NULL\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "trashDoc",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET state = 'trashed',\n    trashed_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),\n    delete_at = $delete_at::text\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$delete_at::text",
+          "name": "delete_at",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "restoreDoc",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET state = 'active',\n    archived_at = NULL,\n    trashed_at = NULL,\n    delete_at = NULL\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "listTrashedToDelete",
+      "result_type": "Rows",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at\nFROM _datasette_paper_doc\nWHERE state = 'trashed'\n  AND delete_at IS NOT NULL\n  AND delete_at < $now::text\nORDER BY delete_at;",
+      "parameters": [
+        {
+          "full_name": "$now::text",
+          "name": "now",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "visibility",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "visibility",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
+      "name": "deleteStepsForDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_step WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteSnapshotsForDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_snapshot WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "hardDeleteDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_doc WHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
     },
     {
       "name": "insertStep",
