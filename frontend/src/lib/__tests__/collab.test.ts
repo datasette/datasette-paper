@@ -489,6 +489,67 @@ describe("inline mark input rules", () => {
     conn.close();
   });
 
+  // Regression: when the user has already produced `<code>code</code>` inside
+  // a `[...]` bracket pair (via the `` ` `` autoformat) and then closes the
+  // markdown link with `](url)`, the link input rule should not destroy the
+  // existing inline-code mark on "code". The bug: linkInputRule replaces the
+  // matched range with `schema.text(match[1], [link])` — a plain string with
+  // only the link mark — wiping the code mark.
+  it("`[`code` something](url)` keeps the inline code mark inside the link", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const codeMark = schema.marks.code.create();
+    // Build the paragraph the way it looks just before the user types `)`:
+    //   [<code>code</code> something](https://x.test
+    // Three text nodes: "[", marked "code", " something](https://x.test"
+    const para = schema.nodes.paragraph.create(null, [
+      schema.text("["),
+      schema.text("code", [codeMark]),
+      schema.text(" something](https://x.test"),
+    ]);
+    view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, para));
+
+    // Sanity: code mark is on "code" before the rule runs.
+    // Positions: 1=`[`, 2..6=`code`, 6+ =` something]...`
+    expect(view.state.doc.rangeHasMark(2, 6, schema.marks.code)).toBe(true);
+
+    // Type `)` at the end of the paragraph — the linkInputRule fires.
+    const endPos = view.state.doc.content.size - 1; // inside the paragraph
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, endPos, endPos, ")", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    // Walk the resulting paragraph and dump (text, marks) so a failure shows
+    // exactly what the rule produced.
+    const result = view.state.doc.firstChild!;
+    const segments: Array<{ text: string; marks: string[] }> = [];
+    result.descendants((node) => {
+      if (node.isText) {
+        segments.push({
+          text: node.text ?? "",
+          marks: node.marks.map((m) => m.type.name).sort(),
+        });
+      }
+    });
+
+    // Expected: a "code" segment with both link+code marks, then " something"
+    // with only link.
+    const codeSeg = segments.find((s) => s.text === "code");
+    expect(
+      codeSeg,
+      `no "code" segment in ${JSON.stringify(segments)}`,
+    ).toBeDefined();
+    expect(codeSeg!.marks).toEqual(["code", "link"]);
+
+    conn.close();
+  });
+
   it("the strong rule does not fire mid-word (no leading whitespace before `**`)", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
@@ -844,6 +905,88 @@ describe("clipboardTextParser markdown paste", () => {
       f("# Heading", $context, true, view),
     );
     expect(shiftParsed).toBeUndefined();
+
+    conn.close();
+  });
+
+  // Regression: pasting `[\`code\` something](https://link)` should produce a
+  // link whose `code` portion *also* carries the `code` mark, so it renders in
+  // monospace inside the link. The bug report: the editor drops the inner
+  // `code` mark and renders the whole thing as plain link text.
+  it("preserves inline `code` mark inside a link when pasting markdown", async () => {
+    const el = makeEl();
+    const fetchMock = makeBootstrapFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    await preloadMarkdownParser();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const $context = view.state.doc.resolve(1);
+
+    const parsed = view.someProp("clipboardTextParser", (f) =>
+      f("[`code` something](https://link)", $context, false, view),
+    );
+    expect(parsed).toBeDefined();
+
+    // Walk the slice and gather (text, markTypes) pairs so the assertion
+    // failure message shows the actual structure.
+    const segments: Array<{ text: string; marks: string[] }> = [];
+    parsed!.content.descendants((node) => {
+      if (node.isText) {
+        segments.push({
+          text: node.text ?? "",
+          marks: node.marks.map((m) => m.type.name).sort(),
+        });
+      }
+    });
+
+    // The `code` text segment must carry BOTH the link and code marks.
+    const codeSeg = segments.find((s) => s.text === "code");
+    expect(codeSeg, `no "code" segment in ${JSON.stringify(segments)}`).toBeDefined();
+    expect(codeSeg!.marks).toEqual(["code", "link"]);
+
+    // The trailing " something" segment carries only the link mark.
+    const tailSeg = segments.find((s) => s.text.includes("something"));
+    expect(tailSeg, `no tail segment in ${JSON.stringify(segments)}`).toBeDefined();
+    expect(tailSeg!.marks).toEqual(["link"]);
+
+    conn.close();
+  });
+
+  // Same input, but actually dispatch the slice into the editor and inspect
+  // the rendered DOM. If parsing carries both marks but rendering drops the
+  // inner <code>, the bug lives in the schema's DOM toDOM / mark ordering.
+  it("renders <a><code>code</code> something</a> after pasting markdown", async () => {
+    const el = makeEl();
+    const fetchMock = makeBootstrapFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    await preloadMarkdownParser();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const $context = view.state.doc.resolve(1);
+    const slice = view.someProp("clipboardTextParser", (f) =>
+      f("[`code` something](https://link)", $context, false, view),
+    );
+    expect(slice).toBeDefined();
+
+    // Replace the entire doc with the parsed slice so the test is independent
+    // of where the cursor was.
+    const tr = view.state.tr.replace(0, view.state.doc.content.size, slice!);
+    view.dispatch(tr);
+
+    const html = view.dom.innerHTML;
+    expect(
+      html,
+      `expected anchor wrapping <code>code</code>, got: ${html}`,
+    ).toContain('<code>code</code>');
+    expect(html).toMatch(/<a [^>]*href="https:\/\/link"[^>]*>/);
 
     conn.close();
   });

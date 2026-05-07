@@ -194,18 +194,27 @@ function codeInputRule(): InputRule {
   );
 }
 
-/** `[text](url)` → link. Fires on the closing `)`. URL can't contain spaces or `)`. */
+/** `[text](url)` → link. Fires on the closing `)`. URL can't contain spaces or `)`.
+ *
+ * Mirrors `delimiterMarkRule`'s strategy: add the mark in place, then delete
+ * the surrounding delimiters. Rebuilding the inner range as a fresh
+ * `schema.text(match[1], …)` would discard any existing marks on the inner
+ * text — e.g. an inline-code span produced by `` `code` `` autoformatting just
+ * before the link was closed.
+ */
 function linkInputRule(): InputRule {
   return new InputRule(
     /\[([^\]]+)\]\(([^)\s]+)\)$/,
     (state, match, start, end) => {
       const [, text, href] = match;
       const linkType = schema.marks.link;
-      const tr = state.tr.replaceWith(
-        start,
-        end,
-        schema.text(text, [linkType.create({ href })]),
-      );
+      const innerStart = start + 1;
+      const innerEnd = innerStart + text.length;
+      const tr = state.tr;
+      // Right-to-left so positions stay valid through deletes.
+      tr.delete(innerEnd, end);
+      tr.addMark(innerStart, innerEnd, linkType.create({ href }));
+      tr.delete(start, innerStart);
       return tr.removeStoredMark(linkType);
     },
   );
