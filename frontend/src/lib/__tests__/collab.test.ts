@@ -8,6 +8,8 @@ import {
 } from "vitest";
 import { getVersion, sendableSteps } from "prosemirror-collab";
 import { TextSelection } from "prosemirror-state";
+import type { EditorView } from "prosemirror-view";
+import type { Node as PMNode } from "prosemirror-model";
 import { EditorConnection, preloadMarkdownParser } from "../collab";
 import type { ConnectionOpts } from "../collab";
 import { schema } from "../schema";
@@ -678,7 +680,30 @@ describe("code mark inclusiveness", () => {
 // ─── Test: task list ───────────────────────────────────────────────────────
 
 describe("task list", () => {
-  it("`[ ] ` input rule wraps the paragraph in a task_list / task_item", async () => {
+  // Setup used by all task-list rule tests: replace the bootstrap doc with
+  // a single-item bullet_list whose item's paragraph already contains
+  // `[ ]` or `[x]`. The trailing space is then typed via handleTextInput
+  // so the input rule fires.
+  function setUpBulletWithMarker(view: EditorView, marker: "[ ]" | "[x]") {
+    const para = schema.nodes.paragraph.create(null, schema.text(marker));
+    const item = schema.nodes.list_item.create(null, para);
+    const bullet = schema.nodes.bullet_list.create(null, item);
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, bullet),
+    );
+    // Cursor inside the paragraph, at the end of the marker (just before
+    // the trailing space we're about to type).
+    let pos = -1;
+    view.state.doc.descendants((node: PMNode, p: number) => {
+      if (pos === -1 && node.isText) pos = p + node.nodeSize;
+    });
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)),
+    );
+    return pos;
+  }
+
+  it("inside an empty `- ` item, typing `[ ] ` converts the list to a task_list", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
 
@@ -686,24 +711,25 @@ describe("task list", () => {
     await waitFor(() => expect(conn.view).not.toBeNull());
 
     const view = conn.view!;
-    // Replace "Hello" with "[ ]" so the input rule fires when we type the
-    // trailing space.
-    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("[ ]")));
+    const pos = setUpBulletWithMarker(view, "[ ]");
 
     const handled = view.someProp("handleTextInput", (fn) =>
-      fn(view, 4, 4, " ", () => view.state.tr),
+      fn(view, pos, pos, " ", () => view.state.tr),
     );
     expect(handled).toBe(true);
 
     const top = view.state.doc.firstChild!;
     expect(top.type.name).toBe("task_list");
+    expect(top.childCount).toBe(1);
     expect(top.firstChild!.type.name).toBe("task_item");
     expect(top.firstChild!.attrs.checked).toBe(false);
+    // The new task_item's paragraph is empty.
+    expect(top.firstChild!.firstChild!.content.size).toBe(0);
 
     conn.close();
   });
 
-  it("`[x] ` input rule produces a checked task_item", async () => {
+  it("`[x] ` produces a checked task_item via the same flow", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
 
@@ -711,16 +737,163 @@ describe("task list", () => {
     await waitFor(() => expect(conn.view).not.toBeNull());
 
     const view = conn.view!;
-    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("[x]")));
+    const pos = setUpBulletWithMarker(view, "[x]");
 
     const handled = view.someProp("handleTextInput", (fn) =>
-      fn(view, 4, 4, " ", () => view.state.tr),
+      fn(view, pos, pos, " ", () => view.state.tr),
     );
     expect(handled).toBe(true);
 
     const top = view.state.doc.firstChild!;
     expect(top.type.name).toBe("task_list");
     expect(top.firstChild!.attrs.checked).toBe(true);
+
+    conn.close();
+  });
+
+  it("preserves trailing bullet content when prefixing with `[ ] `", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Existing bullet `- fix branch`, with the user having moved their
+    // cursor to the start of the line and typed `[ ]`. They are now
+    // about to type the trailing space which fires the rule.
+    const para = schema.nodes.paragraph.create(
+      null,
+      schema.text("[ ]fix branch"),
+    );
+    const bullet = schema.nodes.bullet_list.create(
+      null,
+      schema.nodes.list_item.create(null, para),
+    );
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, bullet),
+    );
+    // Cursor between `]` and `f`, i.e. parentOffset 3.
+    let pos = -1;
+    view.state.doc.descendants((node: PMNode, p: number) => {
+      if (pos === -1 && node.isText) pos = p + 3;
+    });
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)),
+    );
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, pos, pos, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    const top = view.state.doc.firstChild!;
+    expect(top.type.name).toBe("task_list");
+    expect(top.childCount).toBe(1);
+    const item = top.firstChild!;
+    expect(item.type.name).toBe("task_item");
+    expect(item.attrs.checked).toBe(false);
+    // The trailing content survives the conversion.
+    expect(item.firstChild!.textContent).toBe("fix branch");
+    // Cursor at the start of the preserved content.
+    expect(view.state.selection.$from.parent.type.name).toBe("paragraph");
+    expect(view.state.selection.$from.parentOffset).toBe(0);
+
+    conn.close();
+  });
+
+  // Negative paths — the new rule is intentionally narrow.
+
+  it("does NOT fire in a plain paragraph (no surrounding bullet_list)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("[ ]")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 4, 4, " ", () => view.state.tr),
+    );
+    expect(handled).not.toBe(true);
+    expect(view.state.doc.firstChild!.type.name).toBe("paragraph");
+
+    conn.close();
+  });
+
+  it("does NOT fire when the bullet_list has more than one item", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const bullet = schema.nodes.bullet_list.create(null, [
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("a")),
+      ),
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("[ ]")),
+      ),
+    ]);
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, bullet),
+    );
+    // Place cursor at end of the second item's "[ ]" text.
+    let pos = -1;
+    view.state.doc.descendants((node, p) => {
+      if (node.isText && node.text === "[ ]") pos = p + node.nodeSize;
+    });
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)),
+    );
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, pos, pos, " ", () => view.state.tr),
+    );
+    expect(handled).not.toBe(true);
+    expect(view.state.doc.firstChild!.type.name).toBe("bullet_list");
+    expect(view.state.doc.firstChild!.childCount).toBe(2);
+
+    conn.close();
+  });
+
+  it("does NOT fire when the bullet item has other content alongside the marker", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // `- foo[ ]` — typing the trailing space here must NOT collapse the
+    // line into a task_item; the rule only fires on a *clean* `[ ]`.
+    const para = schema.nodes.paragraph.create(null, schema.text("foo[ ]"));
+    const bullet = schema.nodes.bullet_list.create(
+      null,
+      schema.nodes.list_item.create(null, para),
+    );
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, bullet),
+    );
+    let pos = -1;
+    view.state.doc.descendants((node, p) => {
+      if (node.isText) pos = p + node.nodeSize;
+    });
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)),
+    );
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, pos, pos, " ", () => view.state.tr),
+    );
+    expect(handled).not.toBe(true);
+    expect(view.state.doc.firstChild!.type.name).toBe("bullet_list");
 
     conn.close();
   });

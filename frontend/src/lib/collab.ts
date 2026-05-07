@@ -14,7 +14,6 @@ import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap, buildInputRules } from "prosemirror-example-setup";
 import { InputRule, inputRules } from "prosemirror-inputrules";
-import { findWrapping } from "prosemirror-transform";
 import {
   wrapInList,
   splitListItem,
@@ -104,41 +103,52 @@ function repeat<T>(val: T, n: number): T[] {
 }
 
 /**
- * Input rule: typing `[ ] ` or `[x] ` at the start of a paragraph wraps
- * it in a task_list with one task_item, checked iff the marker was [x].
+ * Input rule: inside a single-item bullet_list, typing `[ ] ` or `[x] `
+ * at the start of the item's paragraph converts the whole list to a
+ * task_list with one task_item — i.e. `- [ ] ` is the path to a TODO.
  *
- * We can't use wrappingInputRule directly because its getAttrs targets
- * the outer wrapping node (task_list), not the inner task_item where the
- * `checked` attr lives. Build the transaction manually: delete the
- * marker, wrap the block, then patch the task_item's attrs.
+ * Whatever content followed the `[ ]` marker (with marks intact) is
+ * carried into the new task_item's paragraph, so the user can
+ * retroactively turn `- fix branch` into `- [ ] fix branch` by typing
+ * `[ ] ` at the start of the line.
+ *
+ * Restricted to a single-item bullet_list because peeling one item out
+ * of a multi-item list crosses schema boundaries (bullet/task siblings
+ * aren't allowed); leave that to a follow-up.
  */
 function taskListInputRule(): InputRule {
-  return new InputRule(/^\s*\[([ xX])\]\s$/, (state, match, start, end) => {
+  return new InputRule(/^\[([ xX])\]\s$/, (state, match, start, _end) => {
     const checked = /[xX]/.test(match[1]);
-    const tr = state.tr.delete(start, end);
-    const $start = tr.doc.resolve(start);
-    const range = $start.blockRange();
-    if (!range) return null;
-    const wrapping = findWrapping(range, schema.nodes.task_list);
-    if (!wrapping) return null;
-    tr.wrap(range, wrapping);
-    if (checked) {
-      // After wrapping, exactly one task_item exists at the wrap site;
-      // descend the new doc to find it and patch its `checked` attr.
-      let itemPos: number | null = null;
-      tr.doc.descendants((node, pos) => {
-        if (itemPos !== null) return false;
-        if (node.type === schema.nodes.task_item) {
-          itemPos = pos;
-          return false;
-        }
-        return true;
-      });
-      if (itemPos !== null) {
-        tr.setNodeMarkup(itemPos, undefined, { checked: true });
-      }
-    }
-    return tr;
+    const $start = state.doc.resolve(start);
+    // Need depth ≥ 3: bullet_list / list_item / paragraph / text-position
+    if ($start.depth < 3) return null;
+    const paragraph = $start.parent;
+    const listItem = $start.node($start.depth - 1);
+    const list = $start.node($start.depth - 2);
+    if (paragraph.type !== schema.nodes.paragraph) return null;
+    if (listItem.type !== schema.nodes.list_item) return null;
+    if (list.type !== schema.nodes.bullet_list) return null;
+    if (list.childCount !== 1) return null;
+    // Marker must start at the very beginning of the paragraph.
+    if ($start.parentOffset !== 0) return null;
+    // The marker length in the doc is `match[0].length - 1` — the typed
+    // trailing space isn't in the doc yet. Carry the rest of the
+    // paragraph (marks intact) into the new task_item's paragraph.
+    const markerLen = match[0].length - 1;
+    const remainder = paragraph.content.cut(markerLen);
+    const newList = schema.nodes.task_list.create(
+      null,
+      schema.nodes.task_item.create(
+        { checked },
+        schema.nodes.paragraph.create(null, remainder),
+      ),
+    );
+    const listStart = $start.before($start.depth - 2);
+    const listEnd = listStart + list.nodeSize;
+    const tr = state.tr.replaceWith(listStart, listEnd, newList);
+    // Cursor lands at the start of the new task_item's paragraph: open
+    // tokens for task_list (1) + task_item (1) + paragraph (1) = 3.
+    return tr.setSelection(TextSelection.create(tr.doc, listStart + 3));
   });
 }
 
