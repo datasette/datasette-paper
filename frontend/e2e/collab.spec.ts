@@ -148,8 +148,11 @@ test("task list autoformat from `[ ] ` and clicking the checkbox toggles", async
   const { url } = await createPaper(page);
   await gotoPaper(page, url);
 
-  // Type the autoformat marker — produces an empty unchecked task item.
+  // Type `- ` to enter a bullet_list, then `[ ] ` to convert it to a
+  // task_list. The `[ ] ` rule only fires inside a single-item bullet_list
+  // — typing it into a bare paragraph is no longer recognized.
   await page.locator(".ProseMirror").click();
+  await page.keyboard.type("- ");
   await page.keyboard.type("[ ] buy milk");
 
   await expect(page.locator("li[data-task-item]")).toBeVisible();
@@ -172,6 +175,7 @@ test("Enter in a task item creates a fresh unchecked item", async ({ page }) => 
   await gotoPaper(page, url);
 
   await page.locator(".ProseMirror").click();
+  await page.keyboard.type("- ");
   await page.keyboard.type("[ ] first item");
 
   // Sanity: one task item, content "first item"
@@ -202,6 +206,7 @@ test("task list collab: checkbox toggle in tab A is visible in tab B", async ({
   await gotoPaper(pageB, url);
 
   await pageA.locator(".ProseMirror").click();
+  await pageA.keyboard.type("- ");
   await pageA.keyboard.type("[ ] shared");
 
   await expect(pageB.locator("li[data-task-item]")).toBeVisible({
