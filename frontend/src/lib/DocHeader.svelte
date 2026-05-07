@@ -173,13 +173,15 @@
         <span class="saved" aria-live="polite">✓ saved</span>
       {/if}
       <span class="meta-actions">
-        <button
-          type="button"
-          class="share-btn"
-          onclick={() => (shareOpen = true)}
-        >
-          Share
-        </button>
+        {#if canEdit}
+          <button
+            type="button"
+            class="share-btn"
+            onclick={() => (shareOpen = true)}
+          >
+            Share
+          </button>
+        {/if}
         {#if copyState !== "idle"}
           <span
             class="copy-feedback"

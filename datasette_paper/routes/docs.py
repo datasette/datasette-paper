@@ -235,8 +235,8 @@ VALID_ROLES = ("viewer", "editor")
 
 @router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/share$")
 async def get_share(datasette, request, doc_id: int):
-    """Return the share state — anyone who can view the doc can see who else has access."""
-    await ensure_paper_view(datasette, request, doc_id)
+    """Return the share state — owners and editors only."""
+    await ensure_paper_edit(datasette, request, doc_id)
     db = paper_db(datasette)
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:

@@ -57,13 +57,31 @@ async def test_share_get_owner_sees_can_manage_true():
 
 
 @pytest.mark.asyncio
-async def test_share_get_viewer_sees_can_manage_false():
+async def test_share_get_viewer_403():
+    """Viewer-share-recipient cannot read share state — editors+owner only."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
 
     await ds.get_internal_database().execute_write(
         "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
         "VALUES (?, ?, 'viewer', 'alice')",
+        [doc_id, "bob"],
+    )
+
+    r = await ds.client.get(
+        f"/-/paper/api/docs/{doc_id}/share", cookies=_cookie(ds, "bob")
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_share_get_editor_sees_can_manage_false():
+    ds = await _make_ds()
+    doc_id = await _alice_doc(ds)
+
+    await ds.get_internal_database().execute_write(
+        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
+        "VALUES (?, ?, 'editor', 'alice')",
         [doc_id, "bob"],
     )
 
