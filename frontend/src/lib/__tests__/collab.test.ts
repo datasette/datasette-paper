@@ -770,6 +770,214 @@ describe("task list", () => {
   });
 });
 
+// ─── Test: Tab / Shift-Tab indent in lists ──────────────────────────────────
+
+describe("Tab indent in lists", () => {
+  it("Tab inside the second `- ` item nests it under the first", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Build: bullet_list with two top-level items "a" and "b".
+    const bullet = schema.nodes.bullet_list.create(null, [
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("a")),
+      ),
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("b")),
+      ),
+    ]);
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, bullet),
+    );
+
+    // Cursor inside the second item's "b" text node. Walk to find it so
+    // we don't depend on a hard-coded offset.
+    let bPos = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (bPos === -1 && node.isText && node.text === "b") bPos = pos + 1;
+    });
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, bPos)),
+    );
+
+    const evt = new KeyboardEvent("keydown", { key: "Tab" });
+    const handled = view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    expect(handled).toBe(true);
+
+    // After sink: top-level list has one item "a" containing a nested
+    // bullet_list whose only item is "b".
+    const list = view.state.doc.firstChild!;
+    expect(list.type.name).toBe("bullet_list");
+    expect(list.childCount).toBe(1);
+    const onlyItem = list.firstChild!;
+    expect(onlyItem.type.name).toBe("list_item");
+    // Nested structure: list_item → paragraph("a") + bullet_list → list_item("b")
+    expect(onlyItem.childCount).toBe(2);
+    expect(onlyItem.child(1).type.name).toBe("bullet_list");
+    expect(onlyItem.child(1).firstChild!.textContent).toBe("b");
+
+    conn.close();
+  });
+
+  it("Tab inside the second `[ ] ` item nests it under the first", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const taskList = schema.nodes.task_list.create(null, [
+      schema.nodes.task_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("a")),
+      ),
+      schema.nodes.task_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("b")),
+      ),
+    ]);
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, taskList),
+    );
+
+    let bPos = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (bPos === -1 && node.isText && node.text === "b") bPos = pos + 1;
+    });
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, bPos)),
+    );
+
+    const evt = new KeyboardEvent("keydown", { key: "Tab" });
+    const handled = view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    expect(handled).toBe(true);
+
+    const list = view.state.doc.firstChild!;
+    expect(list.type.name).toBe("task_list");
+    expect(list.childCount).toBe(1);
+    const onlyItem = list.firstChild!;
+    expect(onlyItem.child(1).type.name).toBe("task_list");
+    expect(onlyItem.child(1).firstChild!.textContent).toBe("b");
+
+    conn.close();
+  });
+
+  // Regression: when sinkListItem can't make progress (e.g. the cursor is on
+  // the only item in its list, so there's no preceding sibling to nest
+  // under), Tab must still be swallowed so focus doesn't leak to the next
+  // element on the page.
+  it("Tab on the only item in a list is still consumed (no focus shift)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const bullet = schema.nodes.bullet_list.create(
+      null,
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("only")),
+      ),
+    );
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, bullet),
+    );
+
+    let pos = -1;
+    view.state.doc.descendants((node, p) => {
+      if (pos === -1 && node.isText && node.text === "only") pos = p + 1;
+    });
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)),
+    );
+
+    const evt = new KeyboardEvent("keydown", { key: "Tab" });
+    const handled = view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    expect(handled).toBe(true);
+
+    // Doc shape unchanged — the inner sinkListItem couldn't make progress.
+    const list = view.state.doc.firstChild!;
+    expect(list.childCount).toBe(1);
+    expect(list.firstChild!.firstChild!.textContent).toBe("only");
+
+    conn.close();
+  });
+
+  it("Tab outside any list returns false (lets focus move)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Bootstrap doc is a plain paragraph "Hello" — cursor is already inside.
+    const evt = new KeyboardEvent("keydown", { key: "Tab" });
+    const handled = view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    expect(handled).not.toBe(true);
+
+    conn.close();
+  });
+
+  it("Shift-Tab inside a nested `- ` item lifts it back out", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Build: bullet_list[ list_item("a", bullet_list[ list_item("b") ]) ]
+    const inner = schema.nodes.bullet_list.create(
+      null,
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("b")),
+      ),
+    );
+    const outerItem = schema.nodes.list_item.create(null, [
+      schema.nodes.paragraph.create(null, schema.text("a")),
+      inner,
+    ]);
+    const bullet = schema.nodes.bullet_list.create(null, outerItem);
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, bullet),
+    );
+
+    // Find the position inside "b" — walk descendants until we hit it.
+    let bPos = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (bPos === -1 && node.isText && node.text === "b") bPos = pos + 1;
+    });
+    expect(bPos).toBeGreaterThan(0);
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, bPos)),
+    );
+
+    const evt = new KeyboardEvent("keydown", { key: "Tab", shiftKey: true });
+    const handled = view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    expect(handled).toBe(true);
+
+    // After lift: top-level list has two siblings, "a" and "b".
+    const list = view.state.doc.firstChild!;
+    expect(list.type.name).toBe("bullet_list");
+    expect(list.childCount).toBe(2);
+    expect(list.child(0).firstChild!.textContent).toBe("a");
+    expect(list.child(1).firstChild!.textContent).toBe("b");
+
+    conn.close();
+  });
+});
+
 // ─── Test: setEditable / view mode ──────────────────────────────────────────
 
 describe("setEditable (view mode)", () => {

@@ -11,11 +11,16 @@ import {
   getVersion,
 } from "prosemirror-collab";
 import { keymap } from "prosemirror-keymap";
-import { baseKeymap, toggleMark } from "prosemirror-commands";
+import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap, buildInputRules } from "prosemirror-example-setup";
 import { InputRule, inputRules } from "prosemirror-inputrules";
 import { findWrapping } from "prosemirror-transform";
-import { wrapInList, splitListItem } from "prosemirror-schema-list";
+import {
+  wrapInList,
+  splitListItem,
+  sinkListItem,
+  liftListItem,
+} from "prosemirror-schema-list";
 import type { Command } from "prosemirror-state";
 import type { MarkType } from "prosemirror-model";
 
@@ -221,6 +226,33 @@ function linkInputRule(): InputRule {
 }
 
 /**
+ * Wraps a sink / lift command so that Tab always feels "trapped" inside a
+ * list. When the cursor is inside a `list_item` / `task_item`, run the
+ * inner command but always report it handled — otherwise the user's Tab
+ * leaks to the browser and shifts focus once they hit the indent ceiling
+ * (e.g. an only-child item with no preceding sibling to nest under).
+ *
+ * Outside any list item, returns false so Tab falls through to the
+ * browser default — keeps the editor reachable from the keyboard.
+ */
+function consumeTabInList(inner: Command): Command {
+  return (state, dispatch, view) => {
+    const { $from } = state.selection;
+    let inList = false;
+    for (let d = $from.depth; d > 0; d--) {
+      const t = $from.node(d).type;
+      if (t === schema.nodes.task_item || t === schema.nodes.list_item) {
+        inList = true;
+        break;
+      }
+    }
+    if (!inList) return false;
+    inner(state, dispatch, view);
+    return true;
+  };
+}
+
+/**
  * Mod-K link toggle. With a non-empty selection: if it's already linked,
  * remove the mark; otherwise prompt() for a URL and apply. Empty selection
  * is a no-op so the user doesn't get a prompt while just navigating.
@@ -404,6 +436,23 @@ export class EditorConnection {
           // buildKeymap's list_item Enter handler still fires for
           // bullet / ordered lists.
           Enter: splitListItem(schema.nodes.task_item, { checked: false }),
+          // Tab / Shift-Tab indent / outdent the current list item. Wrapped
+          // in `consumeTabInList` so the key is always swallowed inside a
+          // list — even when sink / lift can't make progress — and falls
+          // through to browser focus-navigation when the cursor is not in
+          // any list item.
+          Tab: consumeTabInList(
+            chainCommands(
+              sinkListItem(schema.nodes.task_item),
+              sinkListItem(schema.nodes.list_item),
+            ),
+          ),
+          "Shift-Tab": consumeTabInList(
+            chainCommands(
+              liftListItem(schema.nodes.task_item),
+              liftListItem(schema.nodes.list_item),
+            ),
+          ),
         }),
         keymap(buildKeymap(schema)),
         keymap(baseKeymap),
