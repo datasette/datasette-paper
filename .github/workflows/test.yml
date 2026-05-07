@@ -16,7 +16,15 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
+      - uses: actions/setup-node@v6
+        with:
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
       - uses: extractions/setup-just@v3
+      - name: Install frontend deps
+        run: npm install --prefix frontend
+      - name: Build frontend bundle
+        run: just frontend
       - name: Format check
         run: just format-backend-check
       - name: Lint
