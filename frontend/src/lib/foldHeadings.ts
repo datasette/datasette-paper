@@ -132,11 +132,15 @@ export const foldHeadingsPlugin = new Plugin<DecorationSet>({
               ),
             ]);
           } else {
-            const existing = next.find(
-              meta.pos,
-              meta.pos + node.nodeSize,
-              (s) => s.foldHeading === true,
-            );
+            // Same boundary-touch hazard as the decorations() lookup —
+            // narrow to the marker that actually starts on this heading.
+            const existing = next
+              .find(
+                meta.pos,
+                meta.pos + node.nodeSize,
+                (s) => s.foldHeading === true,
+              )
+              .filter((d) => d.from === meta.pos);
             if (existing.length) next = next.remove(existing);
           }
         }
@@ -150,7 +154,12 @@ export const foldHeadingsPlugin = new Plugin<DecorationSet>({
       if (!set) return DecorationSet.empty;
       const doc = state.doc;
 
-      // Identify which headings are currently folded.
+      // Identify which headings are currently folded. `set.find(from, to)`
+      // returns decorations whose range touches the query — including
+      // boundary-only contact — so a heading's fold marker leaks into the
+      // preceding sibling's range when their ends meet (e.g. `# h1` ends
+      // exactly where `## a` begins). Filter by `d.from === offset` so
+      // each fold marker is bound to *its own* heading.
       const folded: Array<{ pos: number; level: number }> = [];
       doc.forEach((node, offset) => {
         if (node.type.name !== "heading") return;
@@ -159,7 +168,7 @@ export const foldHeadingsPlugin = new Plugin<DecorationSet>({
           offset + node.nodeSize,
           (s) => s.foldHeading === true,
         );
-        if (found.length) {
+        if (found.some((d) => d.from === offset)) {
           folded.push({ pos: offset, level: node.attrs.level as number });
         }
       });

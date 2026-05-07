@@ -623,6 +623,62 @@ describe("heading folding", () => {
     conn.close();
   });
 
+  // Repro for: with `# h1 / ## a / para_a / ## b / para_b / ## c / para_c`,
+  // folding `## a` should hide ONLY para_a — `## b`, `## c` and their paras
+  // must stay visible. Reported bug: folding `## a` collapses everything,
+  // leaving only `# h1` visible.
+  it("folding the first ## under a # hides only its own section", async () => {
+    const { setHeadingFolded } = await import("../foldHeadings");
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const { schema: s } = await import("../schema");
+    const doc = s.nodes.doc.create(null, [
+      s.nodes.heading.create({ level: 1 }, s.text("h1")),
+      s.nodes.heading.create({ level: 2 }, s.text("a")),
+      s.nodes.paragraph.create(null, s.text("para_a")),
+      s.nodes.heading.create({ level: 2 }, s.text("b")),
+      s.nodes.paragraph.create(null, s.text("para_b")),
+      s.nodes.heading.create({ level: 2 }, s.text("c")),
+      s.nodes.paragraph.create(null, s.text("para_c")),
+    ]);
+    view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, doc.content));
+
+    // Position of `## a` is the offset right after `# h1`.
+    let aPos = -1;
+    view.state.doc.forEach((node, offset) => {
+      if (
+        aPos === -1 &&
+        node.type.name === "heading" &&
+        node.attrs.level === 2 &&
+        node.textContent === "a"
+      ) {
+        aPos = offset;
+      }
+    });
+    expect(aPos).toBeGreaterThan(0);
+
+    setHeadingFolded(view, aPos, true);
+
+    const editorRoot = view.dom as HTMLElement;
+    const foldedTexts = Array.from(
+      editorRoot.querySelectorAll(".pm-folded"),
+    ).map((n) => (n.textContent ?? "").trim());
+
+    expect(foldedTexts).toContain("para_a");
+    // The bug: these get folded too. They MUST remain visible.
+    expect(foldedTexts).not.toContain("b");
+    expect(foldedTexts).not.toContain("para_b");
+    expect(foldedTexts).not.toContain("c");
+    expect(foldedTexts).not.toContain("para_c");
+
+    conn.close();
+  });
+
   it("renders a chevron widget on every heading", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
