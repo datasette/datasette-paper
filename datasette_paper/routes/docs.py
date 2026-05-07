@@ -373,7 +373,7 @@ async def post_snapshot(datasette, request, doc_id: int):
 # ---------------------------------------------------------------------------
 
 
-@router.GET(r"^/-/paper/$")
+@router.GET(r"^/-/paper/?$")
 async def paper_index_page(datasette, request):
     await ensure_paper_list(datasette, request)
     return Response.html(

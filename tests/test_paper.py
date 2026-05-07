@@ -29,6 +29,19 @@ async def test_paper_index_renders():
 
 
 @pytest.mark.asyncio
+async def test_paper_index_renders_without_trailing_slash():
+    """`/-/paper` (no slash) must serve the same page as `/-/paper/` so the
+    in-app paper-icon back link works regardless of how the URL is typed."""
+    datasette = Datasette(
+        memory=True,
+        config={"permissions": {"datasette-paper-list": True}},
+    )
+    response = await datasette.client.get("/-/paper")
+    assert response.status_code == 200
+    assert b'id="app-root"' in response.content
+
+
+@pytest.mark.asyncio
 async def test_extra_template_vars_returns_entry_callable():
     """extra_template_vars should expose a vite-entry helper backed by datasette_vite."""
     datasette = Datasette(memory=True)
