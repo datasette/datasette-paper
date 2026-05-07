@@ -133,7 +133,7 @@ test-frontend-watch *flags:
     npm run test:watch --prefix frontend -- {{flags}}
 
 test-e2e *flags:
-    npx playwright test {{flags}}
+    cd frontend && npx playwright test {{flags}}
 
 # Pre-commit sanity for frontend work: tests + type-check + lint +
 # format-check. Skips the Playwright e2e suite (slow, needs backend).

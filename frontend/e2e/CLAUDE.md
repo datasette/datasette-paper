@@ -1,7 +1,8 @@
 # e2e/ — Playwright
 
 Full-stack specs against a real Datasette + bundle subprocess, ~3-4s
-per run. `playwright.config.ts` lives at the repo root.
+per run. `playwright.config.ts` sits next to this directory in
+`frontend/`; run via `just test-e2e` (which `cd`s into `frontend`).
 
 ## Setup quirks
 
@@ -41,6 +42,7 @@ For changes that touch routing, SSE, or the editor, run the suite
 three times locally:
 
 ```
+cd frontend
 for i in 1 2 3; do timeout 90 npx playwright test e2e/collab.spec.ts \
     --reporter=line | tail -2; done
 ```

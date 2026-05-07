@@ -11,7 +11,7 @@ re-bootstrap), 400 = bad version.
 
 - `datasette_paper/` — Python plugin. See `datasette_paper/CLAUDE.md`.
 - `frontend/` — Svelte 5 + ProseMirror, Vite-built. See `frontend/CLAUDE.md`.
-- `tests/` — pytest. `e2e/` — Playwright (build the bundle first).
+- `tests/` — pytest. `frontend/e2e/` — Playwright (build the bundle first).
 - `docs/PERMISSIONS.md` — authoritative permission model.
 - `.att/` — open follow-up tickets (`att list`).
 - `context/` (gitignored) — sibling repos and ProseMirror reference checkout.
