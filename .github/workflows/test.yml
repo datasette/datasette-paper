@@ -6,7 +6,7 @@ permissions:
   contents: read
 
 jobs:
-  test:
+  backend:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -16,20 +16,27 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           python-version: ${{ matrix.python-version }}
+      - uses: extractions/setup-just@v3
+      - name: Format check
+        run: just format-backend-check
+      - name: Lint
+        run: just check-backend
+      - name: Codegen freshness
+        run: just check-queries-fresh
+      - name: Backend tests
+        run: just test
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
       - uses: actions/setup-node@v6
       - uses: extractions/setup-just@v3
       - name: Install frontend deps
         run: npm install --prefix frontend
-      - name: Build frontend bundle
-        run: just frontend
-      - name: Type-check frontend
+      - name: Type-check
         run: just check-frontend
+      - name: Lint
+        run: just lint-frontend
       - name: Frontend tests
         run: just test-frontend
-      - name: Backend tests
-        run: just test
-      - name: Install Playwright browsers
-        working-directory: frontend
-        run: npx playwright install --with-deps chromium
-      - name: E2E tests
-        run: just test-e2e

@@ -1,0 +1,26 @@
+name: E2E
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v6
+      - uses: extractions/setup-just@v3
+      - name: Install frontend deps
+        run: npm install --prefix frontend
+      - name: Build frontend bundle
+        run: just frontend
+      - name: Install Playwright browsers
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: E2E tests
+        run: just test-e2e
