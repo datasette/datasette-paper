@@ -19,7 +19,7 @@ def empty_doc_json() -> dict:
 
 def actor_id(request) -> str | None:
     """Return the actor id from the request, or None if not authenticated."""
-    return request.actor.get("id") if request.actor else None
+    return str(request.actor.get("id")) if request.actor else None
 
 
 def paper_db(datasette) -> PaperDB:
