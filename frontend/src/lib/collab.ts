@@ -1,5 +1,5 @@
 import { Step } from "prosemirror-transform";
-import { EditorState } from "prosemirror-state";
+import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { Slice } from "prosemirror-model";
 import type { ResolvedPos } from "prosemirror-model";
@@ -226,6 +226,40 @@ function linkInputRule(): InputRule {
 }
 
 /**
+ * On Enter: when the cursor is at the end of a `code_block` that is the
+ * last block in the doc and the previous character is a newline (i.e. the
+ * user just pressed Enter once already), strip that trailing newline,
+ * append an empty paragraph after the block, and move the cursor into it.
+ *
+ * This unblocks the "stuck inside a code block at end of doc" UX —
+ * without it, the only way out is to navigate up and add a paragraph
+ * manually. We don't apply this mid-doc because the user can already
+ * arrow-down past the block; restricting to the last-block case keeps
+ * "Enter twice to escape" from surprising people who legitimately want
+ * a blank trailing line in their code.
+ */
+function exitCodeBlockAtDocEnd(): Command {
+  return (state, dispatch) => {
+    const { $from, empty } = state.selection;
+    if (!empty) return false;
+    const block = $from.parent;
+    if (block.type !== schema.nodes.code_block) return false;
+    if ($from.parentOffset !== block.content.size) return false;
+    if ($from.after() !== state.doc.content.size) return false;
+    if (block.textContent.slice(-1) !== "\n") return false;
+    if (!dispatch) return true;
+    let tr = state.tr.delete($from.pos - 1, $from.pos);
+    const paragraph = schema.nodes.paragraph.create();
+    tr = tr.insert(tr.doc.content.size, paragraph);
+    // Cursor sits one position inside the new paragraph (past its open token).
+    const cursor = tr.doc.content.size - paragraph.nodeSize + 1;
+    tr = tr.setSelection(TextSelection.create(tr.doc, cursor));
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
+}
+
+/**
  * Wraps a sink / lift command so that Tab always feels "trapped" inside a
  * list. When the cursor is inside a `list_item` / `task_item`, run the
  * inner command but always report it handled — otherwise the user's Tab
@@ -431,11 +465,15 @@ export class EditorConnection {
         keymap({
           "Mod-k": toggleLinkCommand(),
           "Mod-Shift-7": wrapInList(schema.nodes.task_list),
-          // Enter inside a task_item splits to a fresh unchecked item.
-          // Returns false when the cursor isn't in a task_item, so
-          // buildKeymap's list_item Enter handler still fires for
-          // bullet / ordered lists.
-          Enter: splitListItem(schema.nodes.task_item, { checked: false }),
+          // Enter handlers, tried in order:
+          //   1. Escape a code_block at the end of the doc on the second Enter.
+          //   2. Inside a task_item, split into a fresh unchecked item.
+          // Both return false outside their target context, so buildKeymap's
+          // generic list_item / paragraph Enter handlers still get a turn.
+          Enter: chainCommands(
+            exitCodeBlockAtDocEnd(),
+            splitListItem(schema.nodes.task_item, { checked: false }),
+          ),
           // Tab / Shift-Tab indent / outdent the current list item. Wrapped
           // in `consumeTabInList` so the key is always swallowed inside a
           // list — even when sink / lift can't make progress — and falls

@@ -770,6 +770,129 @@ describe("task list", () => {
   });
 });
 
+// ─── Test: Enter exits a trailing code_block ───────────────────────────────
+
+describe("Enter inside a code_block at end of doc", () => {
+  it("strips the trailing newline and appends a paragraph on the second Enter", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Doc with only a code_block whose content is "x\n" (i.e. the user has
+    // already pressed Enter once, leaving an empty trailing line).
+    const codeBlock = schema.nodes.code_block.create(
+      null,
+      schema.text("x\n"),
+    );
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, codeBlock),
+    );
+
+    // Cursor at end of the code_block.
+    const endOfBlock = view.state.doc.resolve(view.state.doc.content.size - 1);
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, endOfBlock.pos),
+      ),
+    );
+
+    const evt = new KeyboardEvent("keydown", { key: "Enter" });
+    const handled = view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    expect(handled).toBe(true);
+
+    // Expected doc shape: code_block("x") + empty paragraph.
+    const doc = view.state.doc;
+    expect(doc.childCount).toBe(2);
+    expect(doc.firstChild!.type.name).toBe("code_block");
+    expect(doc.firstChild!.textContent).toBe("x");
+    expect(doc.lastChild!.type.name).toBe("paragraph");
+    expect(doc.lastChild!.content.size).toBe(0);
+    // Cursor lives inside the new paragraph.
+    expect(view.state.selection.$from.parent.type.name).toBe("paragraph");
+
+    conn.close();
+  });
+
+  it("does not fire mid-doc (something follows the code_block)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // code_block("x\n") followed by a paragraph — block is NOT last in doc.
+    const tr = view.state.tr.replaceWith(0, view.state.doc.content.size, [
+      schema.nodes.code_block.create(null, schema.text("x\n")),
+      schema.nodes.paragraph.create(null, schema.text("after")),
+    ]);
+    view.dispatch(tr);
+
+    // Place cursor at end of the code_block (inside it).
+    let endOfCode = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (
+        endOfCode === -1 &&
+        node.type === schema.nodes.code_block
+      ) {
+        endOfCode = pos + 1 + node.content.size;
+      }
+    });
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, endOfCode),
+      ),
+    );
+
+    // Snapshot the doc structure before pressing Enter so we can compare.
+    const before = view.state.doc.toJSON();
+    const evt = new KeyboardEvent("keydown", { key: "Enter" });
+    view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    // The exit-code-block command must not have fired — but baseKeymap's
+    // default code_block Enter handler may insert another \n. Either way,
+    // the doc must NOT have grown by an extra paragraph at the end.
+    const after = view.state.doc;
+    expect(after.lastChild!.type.name).toBe("paragraph");
+    expect(after.lastChild!.textContent).toBe("after");
+    // Top-level child count is unchanged (still code_block + paragraph).
+    expect(after.childCount).toBe(before.content!.length);
+
+    conn.close();
+  });
+
+  it("does not fire when the previous char is not a newline (single Enter)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Code block ends with "x" — no trailing newline. The user pressing
+    // Enter here should just insert a newline, not exit the block.
+    const codeBlock = schema.nodes.code_block.create(null, schema.text("x"));
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, codeBlock),
+    );
+    const cursor = view.state.doc.content.size - 1;
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, cursor)),
+    );
+
+    const before = view.state.doc.toJSON();
+    const evt = new KeyboardEvent("keydown", { key: "Enter" });
+    view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    // Doc still has exactly one child (no paragraph appended).
+    expect(view.state.doc.childCount).toBe(before.content!.length);
+    expect(view.state.doc.firstChild!.type.name).toBe("code_block");
+
+    conn.close();
+  });
+});
+
 // ─── Test: Tab / Shift-Tab indent in lists ──────────────────────────────────
 
 describe("Tab indent in lists", () => {
