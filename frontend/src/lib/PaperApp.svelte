@@ -233,6 +233,14 @@
     list-style: decimal;
     padding-left: 1.5em;
   }
+  /* Tighten vertical rhythm inside list items. ProseMirror wraps each item's
+   * text in a <p>, which inherits the global `.ProseMirror p` 0.75em bottom
+   * margin and makes `- ` / `[ ] ` stacks look airy. Zero it out here; the
+   * 1.65 line-height already gives adequate visual separation. */
+  .editor-host :global(.ProseMirror li > p),
+  .editor-host :global(.ProseMirror .task-item-content > p) {
+    margin: 0;
+  }
   /* Task lists draw their own checkbox; keep them marker-less and override
    * the bullet rule above. */
   .editor-host :global(ul[data-task-list]) {
@@ -243,7 +251,7 @@
     display: flex;
     align-items: flex-start;
     gap: 6px;
-    margin: 0.1em 0;
+    margin: 0;
   }
   .editor-host :global(li[data-task-item] > input[type="checkbox"]) {
     margin-top: 0.45em;
