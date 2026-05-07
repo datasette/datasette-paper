@@ -10,12 +10,12 @@ classifiers=[
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "datasette",
+    "datasette>1a",
     "datasette-plugin-router>=0.0.1a3",
     "datasette-vite>=0.0.1a2",
     "prosemirror>=0.6.1",
     "sqlite-migrate>=0.1b0",
-    "sqlite-utils>=4.0a1",
+    "sqlite-utils>=3.38",
 ]
 
 [dependency-groups]
