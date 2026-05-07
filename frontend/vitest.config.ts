@@ -9,5 +9,7 @@ export default defineConfig({
   test: {
     // ProseMirror's EditorView requires a DOM environment
     environment: "jsdom",
+    // e2e/ holds Playwright specs; vitest must skip them.
+    include: ["src/**/*.{test,spec}.?(c|m)[jt]s?(x)"],
   },
 });
