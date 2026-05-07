@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy } from "svelte";
   import type { EditorView } from "prosemirror-view";
+  import "prosemirror-tables/style/tables.css";
   import { EditorConnection } from "./collab";
   import type { BootstrapPermissions } from "./collab";
   import { Reporter } from "./reporter";
@@ -284,5 +285,136 @@
   .editor-host :global(li[data-task-item][data-checked="true"] > .task-item-content) {
     text-decoration: line-through;
     color: #888;
+  }
+
+  /* Tables — prosemirror-tables ships layout but no cell borders. We
+   * draw a light grid + a header background. `--default-cell-min-width`
+   * stops empty cells from collapsing to 0px wide. */
+  .editor-host :global(.ProseMirror) {
+    --default-cell-min-width: 80px;
+  }
+  .editor-host :global(.ProseMirror table) {
+    margin: 0 0 0.75em;
+    border: 1px solid #d4d4d4;
+  }
+  .editor-host :global(.ProseMirror td),
+  .editor-host :global(.ProseMirror th) {
+    border: 1px solid #d4d4d4;
+    padding: 6px 9px;
+  }
+  .editor-host :global(.ProseMirror th) {
+    background: #f4f6f8;
+    text-align: left;
+    font-weight: 600;
+  }
+  /* Cells contain a `block+`; collapse the implicit paragraph margin so
+   * single-line cells don't get the global p { margin-bottom: 0.75em }. */
+  .editor-host :global(.ProseMirror td > p),
+  .editor-host :global(.ProseMirror th > p) {
+    margin: 0;
+  }
+  /* Highlight cells that are part of a CellSelection — prosemirror-tables
+   * tags them with `.selectedCell` and draws an ::after overlay. Tint the
+   * background too so the selection is unmistakable. */
+  .editor-host :global(.ProseMirror .selectedCell) {
+    background: rgba(11, 92, 173, 0.08);
+  }
+
+  /* In-table action bar — owned by tableInsertTooltipPlugin. Anchored
+   * absolutely to the editor host, centered above the table. The
+   * `.editor-host` is position: relative so absolute coords resolve. */
+  .editor-host {
+    position: relative;
+  }
+  .editor-host :global(.pm-table-tooltip-root) {
+    position: absolute;
+    /* Above .paper-toolbar (sticky, z:10) — without this the toolbar
+     * intercepts clicks on the tooltip when a table sits near the top. */
+    z-index: 11;
+    transform: translate(-50%, -100%);
+    margin-top: -6px;
+  }
+  /* Always visible while the cursor is in a table — no opacity ramp
+   * because table editing is an explicit mode. */
+  .editor-host :global(.pm-tt-bar) {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 6px;
+    background: #fff;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    flex-wrap: wrap;
+    max-width: 480px;
+  }
+  .editor-host :global(.pm-tt-btn) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 24px;
+    border: 1px solid transparent;
+    background: transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    color: #333;
+    padding: 0;
+  }
+  .editor-host :global(.pm-tt-btn:hover) {
+    background: #eaeaea;
+  }
+  .editor-host :global(.pm-tt-btn.pm-tt-text) {
+    width: auto;
+    padding: 0 6px;
+    font-size: 12px;
+    color: #555;
+  }
+  .editor-host :global(.pm-tt-sep) {
+    width: 1px;
+    height: 18px;
+    background: #ccc;
+    margin: 0 4px;
+  }
+  .editor-host :global(.pm-tt-name) {
+    height: 22px;
+    padding: 0 6px;
+    font-size: 12px;
+    border: 1px solid #d4d4d4;
+    border-radius: 4px;
+    width: 140px;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  .editor-host :global(.pm-tt-name:focus) {
+    outline: none;
+    border-color: #0b5cad;
+    box-shadow: 0 0 0 2px rgba(11, 92, 173, 0.2);
+  }
+  .editor-host :global(.pm-tt-name.pm-tt-name-warn) {
+    border-color: #c08000;
+    background: #fff8ec;
+  }
+  .editor-host :global(.pm-tt-name.pm-tt-name-warn:focus) {
+    border-color: #c08000;
+    box-shadow: 0 0 0 2px rgba(192, 128, 0, 0.25);
+  }
+  .editor-host :global(.pm-tt-warn) {
+    margin-left: 4px;
+    font-size: 12px;
+    color: #8a5a00;
+    white-space: nowrap;
+  }
+  .editor-host :global(.pm-tt-api) {
+    font-weight: 600;
+    color: #0b5cad;
+  }
+  .editor-host :global(.pm-tt-api:hover:not(:disabled)) {
+    background: #d9e7f8;
+  }
+  .editor-host :global(.pm-tt-api:disabled) {
+    opacity: 0.4;
+    cursor: not-allowed;
+    color: #555;
   }
 </style>

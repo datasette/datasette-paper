@@ -7,6 +7,7 @@ from datasette import Response
 from ..router import router
 from ..instance import get_registry
 from ..markdown import doc_to_markdown, extract_tasks, group_tasks_by_section
+from ..tables import count_tables_with_name, extract_tables, find_table_by_name
 from ..permissions import (
     PaperResource,
     ensure_paper_create,
@@ -203,6 +204,85 @@ async def get_tasks(datasette, request, doc_id: int):
             "pending_steps": instance.version - instance.snapshot_version,
             "tasks": tasks,
             "sections": group_tasks_by_section(tasks),
+        }
+    )
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tables$")
+async def get_tables(datasette, request, doc_id: int):
+    """Return every table in the doc with its name + shape (no row data).
+
+    Anonymous tables (no `name` attr) appear with `name: null` so callers
+    can still discover them. The single-table endpoint below is name-only.
+    """
+    await ensure_paper_view(datasette, request, doc_id)
+    db = paper_db(datasette)
+    doc = await db.select_doc_by_id(doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+
+    registry = get_registry(datasette)
+    instance = await registry.get(db, doc_id)
+    live_doc = instance.materialize_live_doc()
+    tables = extract_tables(live_doc)
+
+    return Response.json(
+        {
+            "doc_id": doc.id,
+            "version": instance.version,
+            "snapshot_version": instance.snapshot_version,
+            "pending_steps": instance.version - instance.snapshot_version,
+            "tables": [
+                {
+                    "name": t["name"],
+                    "columns": t["header"] if t["header"] is not None else None,
+                    "row_count": len(t["rows"]),
+                    "position": t["position"],
+                }
+                for t in tables
+            ],
+        }
+    )
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tables/(?P<name>[^/]+)$")
+async def get_table_by_name(datasette, request, doc_id: int, name: str):
+    """Return the data for the first table whose `name` attr matches.
+
+    `duplicates` reports how many tables share this name in the doc;
+    callers can detect collisions when they expect uniqueness. 404 if
+    no table has the name.
+    """
+    await ensure_paper_view(datasette, request, doc_id)
+    db = paper_db(datasette)
+    doc = await db.select_doc_by_id(doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+
+    name = name.strip()
+    if not name:
+        return Response.json({"error": "name is required"}, status=400)
+
+    registry = get_registry(datasette)
+    instance = await registry.get(db, doc_id)
+    live_doc = instance.materialize_live_doc()
+    found = find_table_by_name(live_doc, name)
+    if found is None:
+        return Response.json(
+            {"error": f"No table named {name!r} in this document"}, status=404
+        )
+
+    return Response.json(
+        {
+            "doc_id": doc.id,
+            "version": instance.version,
+            "snapshot_version": instance.snapshot_version,
+            "pending_steps": instance.version - instance.snapshot_version,
+            "name": found["name"],
+            "header": found["header"],
+            "rows": found["rows"],
+            "position": found["position"],
+            "duplicates": count_tables_with_name(live_doc, name),
         }
     )
 

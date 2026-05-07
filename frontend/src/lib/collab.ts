@@ -10,6 +10,9 @@ import {
   sendableSteps,
   getVersion,
 } from "prosemirror-collab";
+import { tableEditing, goToNextCell } from "prosemirror-tables";
+import { tabOrAddRow } from "./tables";
+import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap, buildInputRules } from "prosemirror-example-setup";
@@ -502,6 +505,17 @@ export class EditorConnection {
             ),
           ),
         }),
+        // Tab navigates between cells when the cursor is inside a table.
+        // At the bottom-right cell, Tab appends a new row (tabOrAddRow).
+        // Shift-Tab is plain reverse navigation — we don't auto-add a
+        // row before the first cell since that would be surprising.
+        // Registered separately from the indent/outdent keymap so cell
+        // navigation wins inside tables; outside, both return false and
+        // the indent keymap gets its turn.
+        keymap({
+          Tab: tabOrAddRow(),
+          "Shift-Tab": goToNextCell(-1),
+        }),
         keymap(buildKeymap(schema)),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
@@ -511,6 +525,15 @@ export class EditorConnection {
         }),
         remoteCursorsPlugin(),
         foldHeadingsPlugin,
+        // In-table action bar (add/delete row/col, name input + API link)
+        // — anchored above the table when the cursor is inside one. The
+        // docId is baked in so the API button can build the right URL.
+        tableInsertTooltipPlugin(this.opts.docId),
+        // Per upstream README, tableEditing belongs near the end of the
+        // plugin chain — it handles mouse + arrow keys broadly, so other
+        // plugins (gap cursor, columnResizing if we ever add it) need to
+        // get a turn first.
+        tableEditing(),
       ],
     });
 

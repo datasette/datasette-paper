@@ -53,6 +53,8 @@ def _render_block(node: dict) -> str:
         return _render_list(node, ordered=True)
     if t == "task_list":
         return _render_task_list(node)
+    if t == "table":
+        return _render_table(node)
     if t == "list_item":
         # list_item is rendered by _render_list with markers; calling here
         # returns the bare child blocks.
@@ -64,6 +66,58 @@ def _render_block(node: dict) -> str:
         return "".join(parts)
     # Fallback: unknown block — render its inlines if any, else empty.
     return _render_inlines(content) + ("\n" if content else "")
+
+
+def _render_table(node: dict) -> str:
+    """GFM-style pipe table.
+
+    First row becomes the header iff every cell in it is a `table_header`.
+    Otherwise we synthesise an empty header (GFM requires one) so the
+    table still parses round-tripped through any CommonMark-GFM reader.
+    Cell text is the flattened inline content of the cell's blocks; pipes
+    inside cell text are escaped. We assume rectangular tables (no
+    colspan/rowspan) since the editor doesn't expose merge.
+    """
+    rows = node.get("content") or []
+    if not rows:
+        return ""
+
+    def cells(row: dict) -> list[dict]:
+        return row.get("content") or []
+
+    def cell_text(cell: dict) -> str:
+        # cell content is `block+`; flatten the inlines of every paragraph.
+        parts: List[str] = []
+        for block in cell.get("content") or []:
+            if block.get("type") == "paragraph":
+                parts.append(_flatten_text(block.get("content") or []))
+            else:
+                parts.append(_flatten_text([block]))
+        text = " ".join(p for p in parts if p)
+        return text.replace("|", r"\|").replace("\n", " ").strip()
+
+    first_cells = cells(rows[0])
+    header_row_first = bool(first_cells) and all(
+        c.get("type") == "table_header" for c in first_cells
+    )
+    width = max(len(cells(r)) for r in rows)
+
+    def pad(values: list[str]) -> list[str]:
+        return values + [""] * (width - len(values))
+
+    if header_row_first:
+        header = pad([cell_text(c) for c in first_cells])
+        body = rows[1:]
+    else:
+        header = [""] * width
+        body = rows
+
+    out: List[str] = []
+    out.append("| " + " | ".join(header) + " |")
+    out.append("| " + " | ".join("---" for _ in range(width)) + " |")
+    for r in body:
+        out.append("| " + " | ".join(pad([cell_text(c) for c in cells(r)])) + " |")
+    return "\n".join(out) + "\n"
 
 
 def _render_task_list(node: dict) -> str:
@@ -111,7 +165,17 @@ def extract_tasks(doc: dict) -> List[dict]:
     "text": "Sprint 1.2"}]`. A task before any heading has `section: []`.
     """
     tasks: List[dict] = []
-    NESTING = {"task_list", "bullet_list", "ordered_list", "list_item", "blockquote"}
+    NESTING = {
+        "task_list",
+        "bullet_list",
+        "ordered_list",
+        "list_item",
+        "blockquote",
+        "table",
+        "table_row",
+        "table_cell",
+        "table_header",
+    }
     section_stack: List[dict] = []
 
     def walk(node: dict, depth: int) -> None:

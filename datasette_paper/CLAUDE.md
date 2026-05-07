@@ -29,7 +29,18 @@ won't find by reading any single file.
   startup, not per-request.
 - `markdown.py` / `pm_schema.py` — server-side ProseMirror schema +
   CommonMark serializer. Both must stay in lock-step with
-  `frontend/src/lib/schema.ts` (see file docstrings).
+  `frontend/src/lib/schema.ts` (see file docstrings). Table specs
+  (`table` / `table_row` / `table_cell` / `table_header`) are
+  hand-ported from `prosemirror-tables`'s JS `tableNodes` helper —
+  `prosemirror-py` 0.6.1 has no equivalent. The `name` attr on the
+  `table` node is the user-supplied id used by the `/tables/{name}`
+  endpoint.
+- `tables.py` — `extract_tables(doc)` walks the materialized doc and
+  returns `[{name, header, rows, position}]`, mirroring how
+  `extract_tasks` walks for the `/tasks` endpoint. Header is detected
+  iff every cell in the first row is a `table_header`. Anonymous
+  tables (no `name` attr) appear in the listing endpoint with
+  `name: null` but aren't addressable via `/tables/{name}`.
 - `migrations.py` — append-only schema; never edit a past step.
 
 ## Routing
@@ -52,15 +63,21 @@ persisted on `_datasette_paper_doc.created_by` and the `actor_id`
 column of `_datasette_paper_step`, `_datasette_paper_snapshot`,
 `_datasette_paper_share`.
 
-## Read-only doc endpoints (`/document`, `/tasks`)
+## Read-only doc endpoints (`/document`, `/tasks`, `/tables`, `/tables/{name}`)
 
-Both call `Instance.materialize_live_doc()`, which applies `steps_tail`
-over the latest snapshot via `prosemirror-py`. Result is cached on the
-Instance and invalidated by version mismatch — `add_events` doesn't
-have to actively bust the cache. On step-apply failure the materializer
-logs and returns the doc as far as steps applied (never raises).
+All four call `Instance.materialize_live_doc()`, which applies
+`steps_tail` over the latest snapshot via `prosemirror-py`. Result is
+cached on the Instance and invalidated by version mismatch —
+`add_events` doesn't have to actively bust the cache. On step-apply
+failure the materializer logs and returns the doc as far as steps
+applied (never raises).
 
 `pending_steps` in the JSON envelope is informational only.
+
+`/tables/{name}` returns the first matching table in document order
+plus a `duplicates` count, so callers can detect collisions without a
+second request. Names are looked up by exact match on the `table`
+node's `name` attr after `.strip()` — empty strips → 400.
 
 ## Don't
 

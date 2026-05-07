@@ -30,7 +30,14 @@ comments at the relevant code site.
    or mark on one side without the other breaks `Step.apply` in the
    server-side materializer. The markdown serializer
    (`datasette_paper/markdown.py`) and `extract_tasks` NESTING set are
-   the third member of that lock-step group.
+   the third member of that lock-step group. The schema spans four
+   node groups: `prosemirror-schema-basic`, lists, the custom
+   `task_list` / `task_item` pair, and the table family
+   (`table` / `table_row` / `table_cell` / `table_header`). The JS
+   side gets the table specs from `prosemirror-tables`'s `tableNodes`
+   helper; `prosemirror-py` ships no equivalent, so `pm_schema.py`
+   hand-ports the same specs (incl. `colspan` / `rowspan` / `colwidth`
+   on cells and a custom `name` attr on `table`).
 2. **Migrations are append-only.** Schema lives in
    `datasette_paper/migrations.py`; add a new `m00N_` step, never edit a
    past one.

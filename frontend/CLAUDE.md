@@ -18,6 +18,13 @@ template injects the matching JS+CSS via `datasette_vite.vite_entry`.
   clientID **and** actorID (multi-tab same user produces ghost otherwise).
 - `src/lib/schema.ts` / `lib/taskItemView.ts` — schema (mirror
   `pm_schema.py`) + checkbox NodeView.
+- `src/lib/tables.ts` — table commands (`insertTable`, `tabOrAddRow`,
+  `setTableName`, `findTable`, `canInsertTable`,
+  `countOtherTablesWithName`).
+- `src/lib/tableInsertTooltip.ts` — `Plugin.view` that owns *all*
+  in-table UI (add/delete row/col, delete table, name input + live
+  duplicate warning, API link). Anchored centered above the enclosing
+  table; not a Svelte component.
 - `src/lib/PaperApp.svelte` / `lib/PaperIndex.svelte` — page wrappers.
 - `src/lib/icons.ts` — bootstrap-icons inner-path data, indexed by name.
 - `src/lib/client.ts` — openapi-fetch with default
@@ -39,6 +46,24 @@ template injects the matching JS+CSS via `datasette_vite.vite_entry`.
   `setRemoteUsers(...)`; dispatch via `setMeta`.
 - **`prosemirror-markdown` is dynamically imported** in
   `PaperApp.copyMarkdown()` — eager import drags markdown-it (~50k) in.
+- **Table UI is split between `Toolbar.svelte` and
+  `tableInsertTooltipPlugin`.** Toolbar holds *only* the disabled-when-
+  not-empty Insert-table button (gated by `canInsertTable(state)`).
+  All in-table actions live in the floating tooltip; don't add new
+  table-mode controls to the toolbar.
+- **Tooltip z-index must stay above `.paper-toolbar` (sticky, z:10).**
+  `.pm-table-tooltip-root` is z:11 — without that, the toolbar
+  intercepts pointer events on tables that scroll near the top.
+- **Name input commits on blur/Enter, never per-keystroke.** The
+  pattern (`tableInsertTooltip.ts`) keeps a local draft synced from the
+  doc only when entering a *different* table; calling `view.focus()`
+  from the input handlers steals focus on every keystroke and will
+  re-break it.
+- **`tabOrAddRow` does two consecutive dispatches** — first
+  `addRowAfter` (so the view applies + re-renders), then
+  `goToNextCell(1)` against the resulting state. Single-transaction
+  chaining doesn't work because `goToNextCell` needs to read the new
+  row's cell positions.
 
 ## Tests (`vitest` + `jsdom`)
 

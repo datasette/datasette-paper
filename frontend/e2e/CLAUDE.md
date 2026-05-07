@@ -28,6 +28,12 @@ per run. `playwright.config.ts` sits next to this directory in
 - `waitForServerVersion(page, docId, minVersion)` — **use this
   before `page.reload()`.** Reload aborts in-flight POST batches;
   without the wait, only the first keystroke's batch is persisted.
+  **Don't use it as a generic "wait for the API to be ready" helper.**
+  When the action you're verifying is the *last* dispatch in a batch
+  (e.g. `setNodeMarkup` for a table name after typing 20+ keystrokes
+  into cells), `minVersion` clears well before that final step lands.
+  Poll the API endpoint directly with `expect.poll(...).toBe(200)` —
+  see `tables.spec.ts` for the pattern.
 
 ## Stubbing the clipboard
 

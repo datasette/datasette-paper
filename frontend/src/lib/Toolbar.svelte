@@ -6,6 +6,10 @@
   import { undo, redo, undoDepth, redoDepth } from "prosemirror-history";
   import { schema } from "./schema";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+  import { canInsertTable, insertTable } from "./tables";
+  // The in-table action bar (add/delete row/col, name input) is owned
+  // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). Only the
+  // initial Insert-table button lives in the toolbar.
 
   let { view }: { view: EditorView | null } = $props();
 
@@ -156,6 +160,10 @@
     void tick;
     return view ? redoDepth(view.state) > 0 : false;
   });
+  const canTable = $derived.by(() => {
+    void tick;
+    return view ? canInsertTable(view.state) : false;
+  });
 </script>
 
 {#snippet btn(name: ToolbarIconName, title: string, onclick: () => void, pressed: boolean | undefined = undefined, disabled = false)}
@@ -198,6 +206,13 @@
   {@render btn("quote", "Blockquote", () => run(wrapIn(schema.nodes.blockquote)), isBlockquote)}
   {@render btn("codeBlock", "Code block", () => run(setBlockType(schema.nodes.code_block)), isCodeBlock)}
   {@render btn("hr", "Horizontal rule", insertHorizontalRule)}
+  {@render btn(
+    "table",
+    "Insert table (empty paragraphs only)",
+    () => run(insertTable(3, 3)),
+    undefined,
+    !canTable,
+  )}
 </div>
 
 <style>
