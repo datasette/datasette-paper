@@ -1,0 +1,197 @@
+/**
+ * Live cursor / presence plugins for ProseMirror.
+ *
+ * - `cursorReporterPlugin(opts)` — watches selection changes and POSTs the
+ *   anchor/head to `/api/docs/:id/presence` (debounced).
+ * - `remoteCursorsPlugin()` — maintains a DecorationSet from incoming
+ *   presence updates dispatched via meta. Renders each remote caret as
+ *   a 2px-wide widget plus a subtle inline-range highlight if the
+ *   selection spans more than zero chars.
+ *
+ * Color is deterministic per client/actor id so the same person shows
+ * up the same color across reconnects.
+ */
+import { Plugin, PluginKey } from "prosemirror-state";
+import { Decoration, DecorationSet } from "prosemirror-view";
+
+const PALETTE = [
+  "#e6194b", "#3cb44b", "#4363d8", "#f58231",
+  "#911eb4", "#46f0f0", "#f032e6", "#bcf60c",
+  "#fabebe", "#008080", "#9a6324", "#800000",
+];
+
+export function colorFor(key: string | number): string {
+  const s = String(key);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return PALETTE[Math.abs(h) % PALETTE.length];
+}
+
+// ── reporter plugin (outbound) ───────────────────────────────────────────────
+
+export const cursorReporterKey = new PluginKey("cursorReporter");
+
+export interface CursorReporterOpts {
+  apiUrl: (path: string) => string;
+  clientID: number;
+  debounceMs?: number;
+}
+
+export function cursorReporterPlugin(opts: CursorReporterOpts): Plugin {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let lastSent = "";
+  const debounce = opts.debounceMs ?? 150;
+
+  return new Plugin({
+    key: cursorReporterKey,
+    view() {
+      return {
+        update(view, prevState) {
+          // Suppress presence broadcasts when the view is read-only —
+          // view-mode users shouldn't show carets to active editors.
+          if (!view.editable) return;
+          if (view.state.selection.eq(prevState.selection)) return;
+          const { anchor, head } = view.state.selection;
+          const sig = `${anchor}:${head}`;
+          if (sig === lastSent) return;
+          if (timer) clearTimeout(timer);
+          timer = setTimeout(() => {
+            lastSent = sig;
+            void fetch(opts.apiUrl("/presence"), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                clientID: opts.clientID,
+                anchor,
+                head,
+              }),
+            }).catch(() => {
+              /* network blips are harmless — reporter retries on next move */
+            });
+          }, debounce);
+        },
+        destroy() {
+          if (timer) clearTimeout(timer);
+        },
+      };
+    },
+  });
+}
+
+// ── remote cursors plugin (inbound) ──────────────────────────────────────────
+
+export interface RemoteUser {
+  clientID: number;
+  actorID: string | null;
+  anchor: number;
+  head: number;
+}
+
+export const remoteCursorsKey = new PluginKey<DecorationSet>("remoteCursors");
+
+/**
+ * Dispatch this from the SSE handler to feed the plugin a fresh presence
+ * snapshot. The plugin reads the meta and rebuilds its DecorationSet.
+ */
+export function setRemoteUsers(
+  view: import("prosemirror-view").EditorView,
+  users: RemoteUser[],
+  selfClientID: number,
+  selfActor: string | null,
+) {
+  const tr = view.state.tr.setMeta(remoteCursorsKey, {
+    users,
+    selfClientID,
+    selfActor,
+  });
+  view.dispatch(tr);
+}
+
+export function remoteCursorsPlugin(): Plugin<DecorationSet> {
+  return new Plugin<DecorationSet>({
+    key: remoteCursorsKey,
+    state: {
+      init: () => DecorationSet.empty,
+      apply(tr, old, _oldState, newState) {
+        const meta = tr.getMeta(remoteCursorsKey) as
+          | { users: RemoteUser[]; selfClientID: number; selfActor: string | null }
+          | undefined;
+        if (!meta) {
+          // Map existing decorations through the document change so they
+          // stay attached to the correct positions.
+          return old.map(tr.mapping, tr.doc);
+        }
+        const docSize = newState.doc.content.size;
+        const decos: Decoration[] = [];
+        for (const u of meta.users) {
+          if (u.clientID === meta.selfClientID) continue;
+          if (meta.selfActor !== null && u.actorID === meta.selfActor) continue;
+          const color = colorFor(u.actorID ?? u.clientID);
+          const label = u.actorID ?? `user ${u.clientID.toString(36).slice(0, 4)}`;
+          const head = clampPos(u.head, docSize);
+          const anchor = clampPos(u.anchor, docSize);
+          // Selection range highlight (only if spanning at least one char)
+          if (anchor !== head) {
+            decos.push(
+              Decoration.inline(
+                Math.min(anchor, head),
+                Math.max(anchor, head),
+                {
+                  style: `background: ${color}33;`,
+                  class: "remote-selection",
+                },
+              ),
+            );
+          }
+          // Caret widget — a 2px vertical bar at `head` with a small label
+          decos.push(
+            Decoration.widget(head, () => buildCaret(color, label), {
+              key: `caret-${u.clientID}`,
+              side: -1,
+            }),
+          );
+        }
+        return DecorationSet.create(newState.doc, decos);
+      },
+    },
+    props: {
+      decorations(state) {
+        return remoteCursorsKey.getState(state);
+      },
+    },
+  });
+}
+
+function clampPos(pos: number, max: number): number {
+  if (pos < 0) return 0;
+  if (pos > max) return max;
+  return pos;
+}
+
+function buildCaret(color: string, label: string): HTMLElement {
+  const wrap = document.createElement("span");
+  wrap.className = "remote-caret";
+  wrap.style.borderLeft = `2px solid ${color}`;
+  wrap.style.height = "1.2em";
+  wrap.style.marginLeft = "-1px";
+  wrap.style.position = "relative";
+  wrap.style.display = "inline-block";
+  wrap.style.verticalAlign = "text-bottom";
+
+  const tag = document.createElement("span");
+  tag.className = "remote-caret-label";
+  tag.textContent = label;
+  tag.style.position = "absolute";
+  tag.style.top = "-1.2em";
+  tag.style.left = "0";
+  tag.style.background = color;
+  tag.style.color = "#fff";
+  tag.style.fontSize = "10px";
+  tag.style.padding = "0 4px";
+  tag.style.borderRadius = "3px";
+  tag.style.whiteSpace = "nowrap";
+  tag.style.pointerEvents = "none";
+  wrap.appendChild(tag);
+
+  return wrap;
+}

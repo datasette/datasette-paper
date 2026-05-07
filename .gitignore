@@ -1,0 +1,28 @@
+.venv
+__pycache__/
+*.py[cod]
+*$py.class
+venv
+.eggs
+.pytest_cache
+*.egg-info
+.DS_Store
+.vscode
+dist
+build
+uv.lock
+context/
+
+# Frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+datasette_paper/static/gen/
+datasette_paper/manifest.json
+
+# SQLite scratch files (dev / test smoke databases)
+*.db
+
+# Playwright artifacts
+test-results/
+playwright-report/

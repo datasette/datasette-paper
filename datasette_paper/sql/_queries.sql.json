@@ -1,0 +1,771 @@
+{
+  "setup": [],
+  "exports": [
+    {
+      "name": "insertDoc",
+      "result_type": "Row",
+      "sql": "INSERT INTO _datasette_paper_doc (name, created_by, schema_name)\nVALUES ($name::text, $created_by::text::, $schema_name::text)\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility;",
+      "parameters": [
+        {
+          "full_name": "$name::text",
+          "name": "name",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$created_by::text::",
+          "name": "created_by",
+          "annotated_type": "text",
+          "nullable": true
+        },
+        {
+          "full_name": "$schema_name::text",
+          "name": "schema_name",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "visibility",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "visibility",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
+      "name": "updateDocName",
+      "result_type": "Row",
+      "sql": "UPDATE _datasette_paper_doc\nSET name = $name::text,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility;",
+      "parameters": [
+        {
+          "full_name": "$name::text",
+          "name": "name",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "visibility",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "visibility",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
+      "name": "selectDocById",
+      "result_type": "Row",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility\nFROM _datasette_paper_doc\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "visibility",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "visibility",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
+      "name": "listDocs",
+      "result_type": "Rows",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility\nFROM _datasette_paper_doc\nORDER BY created_at;",
+      "parameters": [],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "visibility",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "visibility",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
+      "name": "listDocsByIds",
+      "result_type": "Rows",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\nORDER BY updated_at DESC;",
+      "parameters": [
+        {
+          "full_name": "$doc_ids_json::text",
+          "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "visibility",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "visibility",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
+      "name": "insertStep",
+      "result_type": "Value",
+      "sql": "INSERT INTO _datasette_paper_step (doc_id, version, client_id, actor_id, step_json)\nVALUES (\n    $doc_id::integer,\n    (SELECT current_version + 1 FROM _datasette_paper_doc WHERE id = $doc_id::integer),\n    $client_id::integer,\n    $actor_id::text::,\n    $step_json::text\n)\nRETURNING version;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$client_id::integer",
+          "name": "client_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$actor_id::text::",
+          "name": "actor_id",
+          "annotated_type": "text",
+          "nullable": true
+        },
+        {
+          "full_name": "$step_json::text",
+          "name": "step_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "version",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": null
+    },
+    {
+      "name": "bumpDocVersion",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET current_version = $version::integer,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "selectStepsAfter",
+      "result_type": "Rows",
+      "sql": "SELECT doc_id, version, client_id, actor_id, step_json, created_at\nFROM _datasette_paper_step\nWHERE doc_id = $doc_id::integer\n  AND version > $after_version::integer\nORDER BY version;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$after_version::integer",
+          "name": "after_version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "client_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "client_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "actor_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "actor_id",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "step_json",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "step_json",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Step"
+    },
+    {
+      "name": "selectMaxVersion",
+      "result_type": "Value",
+      "sql": "SELECT MAX(version) FROM _datasette_paper_step WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "MAX(version)",
+          "origin_database": null,
+          "origin_table": null,
+          "origin_column": null,
+          "decltype": null,
+          "nullable": null
+        }
+      ],
+      "result_class": null
+    },
+    {
+      "name": "insertSnapshot",
+      "result_type": "Void",
+      "sql": "INSERT INTO _datasette_paper_snapshot (doc_id, version, doc_json, actor_id)\nVALUES ($doc_id::integer, $version::integer, $doc_json::text, $actor_id::text::);",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_json::text",
+          "name": "doc_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$actor_id::text::",
+          "name": "actor_id",
+          "annotated_type": "text",
+          "nullable": true
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "selectLatestSnapshot",
+      "result_type": "Row",
+      "sql": "SELECT doc_id, version, doc_json, created_at\nFROM _datasette_paper_snapshot\nWHERE doc_id = $doc_id::integer\nORDER BY version DESC\nLIMIT 1;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_snapshot",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_snapshot",
+          "origin_column": "version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "doc_json",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_snapshot",
+          "origin_column": "doc_json",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_snapshot",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Snapshot"
+    },
+    {
+      "name": "selectShares",
+      "result_type": "Rows",
+      "sql": "SELECT actor_id, role, granted_by, granted_at\nFROM _datasette_paper_share\nWHERE doc_id = $doc_id::integer\nORDER BY actor_id;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "actor_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_share",
+          "origin_column": "actor_id",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "role",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_share",
+          "origin_column": "role",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "granted_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_share",
+          "origin_column": "granted_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "granted_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_share",
+          "origin_column": "granted_at",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Share"
+    },
+    {
+      "name": "updateDocVisibility",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET visibility = $visibility::text\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$visibility::text",
+          "name": "visibility",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteSharesForDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_share WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "insertShare",
+      "result_type": "Void",
+      "sql": "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by)\nVALUES ($doc_id::integer, $actor_id::text, $role::text, $granted_by::text::);",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$actor_id::text",
+          "name": "actor_id",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$role::text",
+          "name": "role",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$granted_by::text::",
+          "name": "granted_by",
+          "annotated_type": "text",
+          "nullable": true
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    }
+  ]
+}

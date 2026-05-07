@@ -1,0 +1,53 @@
+/*
+ * Layout CSS for the paper doc editor page.
+ *
+ * Scoped to body.paper-fullscreen so Datasette's other pages and the
+ * paper doc-list page are unaffected. Imported by the doc-page entry
+ * (pages/doc/main.ts), so Vite extracts it to a real <link> tag via
+ * the manifest's `css` array — no flash-of-default-layout, since the
+ * shell DOM (<body>, .not-footer, .content) the rules target is styled
+ * before the Svelte app mounts.
+ *
+ * Mirrors `datasette-sheets`'s sheets_layout.css but keeps the footer
+ * visible — papers are document-shaped so the page can grow past the
+ * viewport when the doc is long, instead of forcing internal scroll.
+ */
+
+body.paper-fullscreen {
+  margin: 0;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+body.paper-fullscreen .not-footer {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+body.paper-fullscreen .content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* Datasette's default `.content { margin: 0 1rem }` would create a
+   * second horizontal gutter on top of the editor app's own padding;
+   * the editor centers itself with max-width + auto margins instead. */
+  margin: 0;
+}
+
+body.paper-fullscreen .datasette-paper-app {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* The 1rem top/bottom margin from app.css still applies; nothing to
+   * override here. */
+}
+
+body.paper-fullscreen .editor-host {
+  flex: 1;
+  min-height: 0;
+}

@@ -1,0 +1,56 @@
+[project]
+name = "datasette-paper"
+version = "0.1"
+description = ""
+readme = "README.md"
+authors = [{name = "Alex Garcia"}]
+license = "Apache-2.0"
+classifiers=[
+    "Framework :: Datasette"
+]
+requires-python = ">=3.10"
+dependencies = [
+    "datasette",
+    "datasette-plugin-router>=0.0.1a3",
+    "datasette-vite>=0.0.1a2",
+    "prosemirror>=0.6.1",
+    "sqlite-migrate>=0.1b0",
+    "sqlite-utils>=4.0a1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff>=0.15.12",
+    "solite>=0.0.1a36",
+]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+
+[project.urls]
+Homepage = "https://github.com/datasette/datasette-paper"
+Changelog = "https://github.com/datasette/datasette-paper/releases"
+Issues = "https://github.com/datasette/datasette-paper/issues"
+CI = "https://github.com/datasette/datasette-paper/actions"
+
+[project.entry-points.datasette]
+paper = "datasette_paper"
+
+[tool.pytest.ini_options]
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.setuptools.packages.find]
+include = ["datasette_paper*"]
+
+[tool.setuptools.package-data]
+# `**/*` is recursive — Vite writes JS/CSS into static/gen/, and a plain
+# `static/*` glob would skip the subdir's contents. `manifest.json` lives
+# at the package root because that's where `datasette_vite._load_manifest`
+# looks for it.
+datasette_paper = ["static/**/*", "templates/**/*", "manifest.json"]
+
