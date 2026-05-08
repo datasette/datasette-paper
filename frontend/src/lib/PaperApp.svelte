@@ -512,4 +512,51 @@
     cursor: not-allowed;
     color: #555;
   }
+
+  /* Row-drag handle owned by tableRowDragPlugin. The button is hosted
+   * on .editor-host (positioned absolutely) and parked at the left edge
+   * of whichever table row the cursor is over. transform centers it
+   * vertically on the row's mid-line; the handle's right edge sits flush
+   * with the row's left border so moving the cursor left from inside
+   * the row lands directly on the handle (no dead-zone gap). */
+  .editor-host :global(.pm-row-drag-handle) {
+    position: absolute;
+    transform: translate(-100%, -50%);
+    width: 18px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    color: #999;
+    cursor: grab;
+    padding: 0;
+    z-index: 11;
+  }
+  .editor-host :global(.pm-row-drag-handle:hover) {
+    background: #eaeaea;
+    color: #333;
+  }
+  .editor-host :global(.pm-row-drag-handle.pm-row-drag-handle-grabbing) {
+    cursor: grabbing;
+    background: #d9e7f8;
+    color: #0b5cad;
+  }
+  /* Drop indicator — 2px line spanning the table's row width at the
+   * boundary above/below the row currently under the pointer. */
+  .editor-host :global(.pm-row-drop-indicator) {
+    position: absolute;
+    height: 2px;
+    background: #0b5cad;
+    pointer-events: none;
+    z-index: 11;
+    transform: translateY(-1px);
+  }
+  /* Visually fade the source row while it's being dragged so the user
+   * can tell which row will move. */
+  .editor-host :global(tr.pm-row-dragging) {
+    opacity: 0.4;
+  }
 </style>

@@ -183,6 +183,107 @@ test("Tab in the bottom-right cell appends a new row", async ({ page }) => {
   await expect(newFirstCell).toContainText("new row");
 });
 
+test("drag a body row by its grip handle to reorder", async ({ page }) => {
+  const { id, url } = await createPaper(page);
+  await gotoPaper(page, url);
+  await insertTableViaToolbar(page);
+
+  // Default 3×3 table — header row + two body rows. Fill the body rows
+  // with distinct values so the order is unambiguous after the drag.
+  const headers = page.locator(".ProseMirror table th");
+  await headers.first().click();
+  // Header row.
+  await page.keyboard.type("col");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("c2");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("c3");
+  // First body row.
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("alpha");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("a2");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("a3");
+  // Second body row.
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("beta");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("b2");
+  await page.keyboard.press("Tab");
+  await page.keyboard.type("b3");
+
+  // Name the table so we can verify the row order via the API.
+  const nameInput = page.locator("input.pm-tt-name");
+  await nameInput.fill("rows");
+  await nameInput.press("Enter");
+
+  // Hover over the first body row (alpha) to reveal the grip handle.
+  // Body rows are tr index 1 and 2 (0 is the header).
+  const alphaRow = page.locator(".ProseMirror table tr").nth(1);
+  const betaRow = page.locator(".ProseMirror table tr").nth(2);
+  // Hover triggers the mousemove listener that places the handle.
+  await alphaRow.hover();
+  const handle = page.locator(".pm-row-drag-handle");
+  await expect(handle).toBeVisible();
+
+  // Drag alpha row's handle past beta's bottom edge so the drop boundary
+  // lands below beta. Playwright's mouse.down/move/up dispatches both
+  // mouse and pointer events, so the plugin's pointer listeners fire.
+  const handleBox = await handle.boundingBox();
+  const betaBox = await betaRow.boundingBox();
+  if (!handleBox || !betaBox) throw new Error("missing bounding boxes");
+  await page.mouse.move(
+    handleBox.x + handleBox.width / 2,
+    handleBox.y + handleBox.height / 2,
+  );
+  await page.mouse.down();
+  // Move in two steps so the plugin's mousemove sees the trail.
+  await page.mouse.move(
+    betaBox.x + betaBox.width / 2,
+    betaBox.y + betaBox.height * 0.75,
+    { steps: 5 },
+  );
+  await page.mouse.up();
+
+  // After reorder: beta row first, then alpha row.
+  await expect
+    .poll(
+      async () => {
+        const r = await page.request.get(`${BASE}/api/docs/${id}/tables/rows`);
+        if (!r.ok()) return null;
+        return (await r.json()).rows;
+      },
+      {
+        timeout: 10000,
+        message: "row order never updated",
+      },
+    )
+    .toEqual([
+      ["beta", "b2", "b3"],
+      ["alpha", "a2", "a3"],
+    ]);
+});
+
+test("header row has no drag handle (pinned at top)", async ({ page }) => {
+  const { url } = await createPaper(page);
+  await gotoPaper(page, url);
+  await insertTableViaToolbar(page);
+
+  const headerRow = page.locator(".ProseMirror table tr").first();
+  await headerRow.hover();
+  // The plugin only renders the handle for body rows. Header row hover
+  // should leave the handle hidden (display:none).
+  const handle = page.locator(".pm-row-drag-handle");
+  await expect(handle).toBeHidden();
+
+  // Hovering a body row reveals it — confirms the plugin is alive,
+  // not just universally hiding.
+  const bodyRow = page.locator(".ProseMirror table tr").nth(1);
+  await bodyRow.hover();
+  await expect(handle).toBeVisible();
+});
+
 test("nameless table appears in listing but lookup 404s", async ({ page }) => {
   const { id, url } = await createPaper(page);
   await gotoPaper(page, url);
