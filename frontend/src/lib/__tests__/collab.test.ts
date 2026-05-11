@@ -927,6 +927,86 @@ describe("structural input rules", () => {
     conn.close();
   });
 
+  it("typing `\"` does NOT produce smart quotes (`“` / `”`)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Clear the bootstrap "Hello" so the paragraph starts empty.
+    view.dispatch(view.state.tr.delete(1, 6));
+
+    // Type an opening `"` — the upstream openDoubleQuote rule would
+    // have replaced it with `“`.
+    const handled1 = view.someProp("handleTextInput", (fn) =>
+      fn(view, 1, 1, '"', () => view.state.tr),
+    );
+    expect(handled1).not.toBe(true);
+    view.dispatch(view.state.tr.insertText('"', 1));
+
+    // Then `hello` + a closing `"` — closeDoubleQuote would have made it `”`.
+    view.dispatch(view.state.tr.insertText("hello", 2));
+    const handled2 = view.someProp("handleTextInput", (fn) =>
+      fn(view, 7, 7, '"', () => view.state.tr),
+    );
+    expect(handled2).not.toBe(true);
+    view.dispatch(view.state.tr.insertText('"', 7));
+
+    const text = view.state.doc.firstChild!.textContent;
+    expect(text).toBe('"hello"');
+    expect(text).not.toMatch(/[“”]/);
+
+    conn.close();
+  });
+
+  it("typing `'` does NOT produce a smart single quote", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.delete(1, 6));
+
+    // Type `don't` — the apostrophe is what closeSingleQuote replaces.
+    view.dispatch(view.state.tr.insertText("don", 1));
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 4, 4, "'", () => view.state.tr),
+    );
+    expect(handled).not.toBe(true);
+    view.dispatch(view.state.tr.insertText("'", 4));
+    view.dispatch(view.state.tr.insertText("t", 5));
+
+    const text = view.state.doc.firstChild!.textContent;
+    expect(text).toBe("don't");
+    expect(text).not.toMatch(/[‘’]/);
+
+    conn.close();
+  });
+
+  it("`...` still becomes an ellipsis (intentionally kept)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Two dots already in the paragraph; typing the third triggers the
+    // ellipsis rule.
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("..")));
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 3, 3, ".", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+    expect(view.state.doc.firstChild!.textContent).toBe("…");
+
+    conn.close();
+  });
+
   it("`- <space>` still wraps a paragraph in a bullet_list", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();

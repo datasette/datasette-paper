@@ -22,7 +22,6 @@ import { buildKeymap } from "prosemirror-example-setup";
 import {
   InputRule,
   inputRules,
-  smartQuotes,
   ellipsis,
   wrappingInputRule,
   textblockTypeInputRule,
@@ -780,12 +779,11 @@ export class EditorConnection {
         // dropped later if/when their own typography bug reports land).
         inputRules({
           rules: [
-            // `smartQuotes` exports as an array of 4 rules; `ellipsis` is
-            // a single rule, not an array. Mixing the two with spread is
-            // a footgun — upstream's `buildInputRules` uses
-            // `smartQuotes.concat(ellipsis, emDash)` for the same
-            // reason. Keep the literal arrangement here.
-            ...smartQuotes,
+            // `smartQuotes` is intentionally absent: turning `"foo"` into
+            // `“foo”` mangles code snippets, JSON, SQL, and URLs that
+            // commonly appear in technical writing. `ellipsis` (`...` →
+            // `…`) is benign and stays. `ellipsis` is a single rule, not
+            // an array — don't spread it.
             ellipsis,
             horizontalRuleInputRule(),
             ...buildPaperStructuralRules(),
