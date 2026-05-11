@@ -6,7 +6,12 @@ from datasette import Response
 
 from ..router import router
 from ..instance import get_registry
-from ..errors import ConflictError, BadVersionError, GoneError
+from ..errors import (
+    BadVersionError,
+    ConflictError,
+    GoneError,
+    InvalidStepError,
+)
 from ..permissions import can_paper_view, ensure_paper_edit, ensure_paper_view
 from ..util import read_json_body, actor_id, paper_db
 from .. import sse
@@ -223,4 +228,17 @@ async def post_events(datasette, request, doc_id: str):
         return Response("Invalid version", status=400)
     except GoneError:
         return Response("History gone", status=410)
+    except InvalidStepError as exc:
+        # The batch was rejected before any write — the doc's
+        # _datasette_paper_step table is untouched. Return enough
+        # structure that the client can identify the failing step and
+        # stop sending; the user is told to refresh.
+        return Response.json(
+            {
+                "error": "invalid_step",
+                "step_index": exc.step_index,
+                "message": exc.message,
+            },
+            status=422,
+        )
     return Response.json({"version": new_version})

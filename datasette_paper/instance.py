@@ -31,7 +31,7 @@ import time
 from typing import Optional
 
 from .db import PaperDB
-from .errors import BadVersionError, ConflictError, GoneError
+from .errors import BadVersionError, ConflictError, GoneError, InvalidStepError
 from .sql import _queries
 
 logger = logging.getLogger("datasette_paper.instance")
@@ -175,6 +175,47 @@ class Instance:
         self._cached_live_version = self.version
         return live
 
+    def _validate_steps(self, step_jsons: list[str]) -> None:
+        """Apply each step against a clone of the live doc; raise on first failure.
+
+        Runs purely in-memory — no DB writes happen until the caller has
+        cleared this gate. The doc clone is discarded; the real
+        materialization still flows through ``materialize_live_doc`` on
+        the next read.
+
+        Raises ``InvalidStepError`` with the offending 0-based batch index.
+        """
+        # Late imports keep prosemirror off the cold-path module import.
+        from prosemirror.model import ReplaceError
+        from prosemirror.transform import Step
+
+        from .pm_schema import schema
+
+        live_json = self.materialize_live_doc()
+        try:
+            doc = schema.node_from_json(live_json)
+        except Exception as exc:
+            # Live doc itself doesn't parse — can't validate against
+            # something we can't materialize. Surface as step 0.
+            raise InvalidStepError(0, f"materialized doc invalid: {exc}") from exc
+
+        for i, step_json in enumerate(step_jsons):
+            try:
+                step = Step.from_json(schema, json.loads(step_json))
+            except Exception as exc:
+                raise InvalidStepError(i, f"step parse failed: {exc}") from exc
+            try:
+                result = step.apply(doc)
+            except (ReplaceError, ValueError) as exc:
+                # `ReplaceError` is what `from_replace` catches today;
+                # `ValueError` is what `Node.check_content` raises on a
+                # content-spec violation, which `from_replace` does NOT
+                # catch (the gap that caused this whole class of bug).
+                raise InvalidStepError(i, str(exc)) from exc
+            if result.failed:
+                raise InvalidStepError(i, result.failed)
+            doc = result.doc
+
     async def add_events(
         self,
         version: int,
@@ -198,6 +239,16 @@ class Instance:
         # `step_json` column stores them as TEXT, so serialize each step
         # back to a JSON string before binding. Strings come through as-is.
         step_jsons = [s if isinstance(s, str) else json.dumps(s) for s in steps]
+
+        # Validate every step against the current live doc before writing
+        # any of them. The wire `Step.from_json` + `Step.apply` accepts
+        # malformed payloads silently — `apply` only catches `ReplaceError`,
+        # so a content-spec violation raises a bare `ValueError` from
+        # `Node.check_content` that escapes both apply and `StepResult`.
+        # Catch both shapes here and reject the batch with `InvalidStepError`
+        # so the client gets a structured 422 instead of a 200 that poisons
+        # the history.
+        self._validate_steps(step_jsons)
 
         def write_all(conn):
             new_ver = base_version

@@ -67,8 +67,13 @@ export interface DocStatePayload {
 export interface StepApplyError {
   /** Server-assigned version of the step that failed. */
   version: number;
-  /** Where the failure happened. */
-  phase: "bootstrap" | "sse";
+  /** Where the failure happened.
+   *
+   * - `bootstrap`: replaying history on initial mount.
+   * - `sse`: applying a step batch broadcast from the server.
+   * - `send`: server rejected a POST /events with 422 (invalid_step).
+   */
+  phase: "bootstrap" | "sse" | "send";
   /** Error message from ProseMirror (or "StepResult.failed" text). */
   message: string;
 }
@@ -897,6 +902,29 @@ export class EditorConnection {
       } else if (resp.status === 410) {
         // Document replaced — full restart
         this.restart();
+      } else if (resp.status === 422) {
+        // Server rejected the batch as invalid (Instance._validate_steps
+        // failed). The local doc is now ahead of what the server
+        // accepted — editing forward would diverge further. Surface as
+        // a stepError and stop sending: a refresh will re-bootstrap from
+        // server truth.
+        let info: { step_index?: number; message?: string } = {};
+        try {
+          info = (await resp.json()) as typeof info;
+        } catch {
+          // Fall through with empty info.
+        }
+        this.reportStepError({
+          version: getVersion(this.view!.state) + (info.step_index ?? 0) + 1,
+          phase: "send",
+          message: info.message ?? "invalid step",
+        });
+        // Don't recover() — we'd just try to resend the same bad batch.
+        this.report.failure(
+          new Error(
+            "Server rejected step: " + (info.message ?? resp.statusText),
+          ),
+        );
       } else {
         // Other server error — backoff
         const err = new Error("Send failed: " + resp.status);

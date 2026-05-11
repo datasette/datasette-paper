@@ -10,6 +10,8 @@ from datasette_paper.errors import BadVersionError, ConflictError, GoneError
 import datasette_paper.instance as instance_module
 from datasette_paper.instance import Instance, InstanceRegistry
 
+from _steps import insert_at, insert_sequence  # noqa: E402  (sibling helper)
+
 
 @pytest.mark.asyncio
 async def test_hydrate_empty_doc(ds_paper):
@@ -31,7 +33,10 @@ async def test_add_events_increments_version(ds_paper):
 
     inst = await Instance.hydrate(db, doc.id)
 
-    steps = ['{"stepType":"replace"}', '{"stepType":"replace"}']
+    # Two valid single-char inserts (".." at the start of the empty doc).
+    # `Instance.add_events` now validates each step against the live doc
+    # before writing; bare {"stepType": "replace"} fails to parse.
+    steps = insert_sequence(1, "..")
     new_ver = await inst.add_events(
         version=0,
         client_id=42,
@@ -59,15 +64,17 @@ async def test_add_events_conflict_raises(ds_paper):
         version=0,
         client_id=1,
         actor_id=None,
-        steps=['{"stepType":"replace"}'],
+        steps=[insert_at(1)],
     )
 
+    # The version-check raises *before* step validation runs, so even a
+    # would-be-valid step still produces ConflictError / BadVersionError.
     with pytest.raises(ConflictError):
         await inst.add_events(
             version=0,
             client_id=1,
             actor_id=None,
-            steps=['{"stepType":"replace"}'],
+            steps=[insert_at(2)],
         )
 
     with pytest.raises(BadVersionError):
@@ -75,7 +82,7 @@ async def test_add_events_conflict_raises(ds_paper):
             version=999,
             client_id=1,
             actor_id=None,
-            steps=['{"stepType":"replace"}'],
+            steps=[insert_at(2)],
         )
 
 
@@ -89,11 +96,15 @@ async def test_get_events_too_old_gone(ds_paper, monkeypatch):
     inst = await Instance.hydrate(db, doc.id)
 
     for _ in range(4):
+        # Always insert at position 1 (start of the paragraph) — this is
+        # position-stable across the MAX_TAIL=2 eviction, so the live-doc
+        # materialization can lose old steps and still produce a valid
+        # apply target.
         await inst.add_events(
             version=inst.version,
             client_id=1,
             actor_id=None,
-            steps=['{"stepType":"replace"}'],
+            steps=[insert_at(1)],
         )
 
     assert inst.version == 4
@@ -124,14 +135,16 @@ async def test_subscribe_receives_broadcast(ds_paper):
         version=0,
         client_id=7,
         actor_id="bob",
-        steps=['{"stepType":"replace"}'],
+        steps=[insert_at(1, "Z")],
     )
 
     payload = await asyncio.wait_for(q.get(), timeout=1.0)
 
     assert payload["version"] == 1
     assert len(payload["steps"]) == 1
-    assert payload["steps"][0] == {"stepType": "replace"}
+    # Steps ship in the broadcast as parsed objects, not JSON strings.
+    assert payload["steps"][0]["stepType"] == "replace"
+    assert payload["steps"][0]["slice"]["content"][0]["text"] == "Z"
     assert payload["clientIDs"][0] == 7
 
     inst.unsubscribe(q)

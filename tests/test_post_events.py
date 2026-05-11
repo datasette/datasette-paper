@@ -9,6 +9,8 @@ import pytest
 
 from datasette_paper.instance import get_registry
 
+from _steps import insert_at  # noqa: E402  (sibling helper)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -24,7 +26,10 @@ async def _create_doc(datasette, name="Test Paper"):
     return resp.json()["id"]
 
 
-STEP_BODY = {"stepType": "replace"}
+# A minimal valid `replace` step against the empty starter doc
+# (`paragraph()`): inserts "." at position 1 (inside the paragraph).
+STEP_BODY_JSON = insert_at(1)
+STEP_BODY = json.loads(STEP_BODY_JSON)
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +46,7 @@ async def test_post_at_version_0_succeeds(ds_paper):
     body = {
         "version": 0,
         "clientID": 42,
-        "steps": [json.dumps(STEP_BODY)],
+        "steps": [STEP_BODY_JSON],
     }
     resp = await ds.client.post(url, json=body)
     assert resp.status_code == 200
@@ -61,7 +66,7 @@ async def test_post_stale_version_409(ds):
     body = {
         "version": 0,
         "clientID": 1,
-        "steps": [json.dumps(STEP_BODY)],
+        "steps": [STEP_BODY_JSON],
     }
 
     resp1 = await ds.client.post(url, json=body)
@@ -79,7 +84,7 @@ async def test_post_invalid_version_400(ds):
     body = {
         "version": 99,
         "clientID": 1,
-        "steps": [json.dumps(STEP_BODY)],
+        "steps": [STEP_BODY_JSON],
     }
     resp = await ds.client.post(url, json=body)
     assert resp.status_code == 400
@@ -92,7 +97,7 @@ async def test_post_unknown_doc_403(ds):
     body = {
         "version": 0,
         "clientID": 1,
-        "steps": [json.dumps(STEP_BODY)],
+        "steps": [STEP_BODY_JSON],
     }
     resp = await ds.client.post(url, json=body)
     assert resp.status_code == 403
@@ -107,7 +112,7 @@ async def test_post_persists_actor_id(ds_paper):
     body = {
         "version": 0,
         "clientID": 7,
-        "steps": [json.dumps(STEP_BODY)],
+        "steps": [STEP_BODY_JSON],
     }
 
     actor_cookie = ds.client.actor_cookie({"id": "alice"})
@@ -117,6 +122,175 @@ async def test_post_persists_actor_id(ds_paper):
     steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
     assert len(steps) == 1
     assert steps[0].actor_id == "alice"
+
+
+# ---------------------------------------------------------------------------
+# Step validation (422 path) — added with the write-time validation gate
+# in `Instance.add_events`.
+#
+# The minimal repro: doc starts as the empty `paragraph()`. POST a `replace`
+# step whose `from`/`to` resolve at the doc level (position 0) with a bare
+# text slice — `<text("x"), paragraph()>` violates doc's `block+` content
+# spec. Before validation landed this would 200 and corrupt history; now
+# it must 422 with the step index and no rows written.
+# ---------------------------------------------------------------------------
+
+
+BAD_STEP_AT_DOC_LEVEL = json.dumps(
+    {
+        "stepType": "replace",
+        "from": 0,
+        "to": 0,
+        "slice": {"content": [{"type": "text", "text": "x"}]},
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_post_invalid_step_422_with_step_index(ds_paper):
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    resp = await ds.client.post(
+        url,
+        json={
+            "version": 0,
+            "clientID": 1,
+            "steps": [BAD_STEP_AT_DOC_LEVEL],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["error"] == "invalid_step"
+    assert body["step_index"] == 0
+    assert "Invalid content" in body["message"] or "doc" in body["message"]
+
+    # Critical: the bad batch must NOT have written anything. If we let a
+    # 422 leave a row behind, we're back to corruption-by-write that the
+    # gate was supposed to stop.
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert steps == []
+
+    # And the doc's current_version stayed at 0.
+    doc = await paper_db.select_doc_by_id(doc_id)
+    assert doc.current_version == 0
+
+
+@pytest.mark.asyncio
+async def test_post_invalid_step_is_atomic_across_batch(ds_paper):
+    """A batch with some valid steps before a bad one rolls back the whole batch."""
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    resp = await ds.client.post(
+        url,
+        json={
+            "version": 0,
+            "clientID": 1,
+            "steps": [
+                insert_at(1, "a"),
+                insert_at(2, "b"),
+                insert_at(3, "c"),
+                BAD_STEP_AT_DOC_LEVEL,
+                insert_at(4, "d"),
+            ],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["step_index"] == 3
+
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert steps == []
+
+
+@pytest.mark.asyncio
+async def test_post_unparseable_step_422(ds_paper):
+    """A step JSON that prosemirror-py can't even parse is rejected the same way."""
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    resp = await ds.client.post(
+        url,
+        json={
+            "version": 0,
+            "clientID": 1,
+            # Missing required keys (from/to/slice) — Step.from_json raises.
+            "steps": [json.dumps({"stepType": "replace"})],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["step_index"] == 0
+    assert "parse failed" in body["message"]
+
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert steps == []
+
+
+@pytest.mark.asyncio
+async def test_post_invalid_step_does_not_broadcast(ds_paper):
+    """A rejected batch must not show up on any subscriber's queue."""
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    registry = get_registry(ds)
+    instance = await registry.get(paper_db, doc_id)
+    q = await instance.subscribe()
+
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    resp = await ds.client.post(
+        url,
+        json={
+            "version": 0,
+            "clientID": 1,
+            "steps": [BAD_STEP_AT_DOC_LEVEL],
+        },
+    )
+    assert resp.status_code == 422
+
+    # The broadcast queue should stay empty — the write txn never ran.
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(q.get(), timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_post_validates_against_post_update_doc(ds_paper):
+    """Validation runs against the materialized doc *after* prior steps applied,
+    not the snapshot.
+
+    Send a valid step, then a second one whose `from` only makes sense if
+    the first applied. If the validator used the snapshot doc, the second
+    step would fail; against the live (post-first-step) doc it succeeds.
+    """
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+    url = f"/-/paper/api/docs/{doc_id}/events"
+
+    # Step 1: insert "X" at pos 1 of paragraph() → paragraph("X").
+    r1 = await ds.client.post(
+        url,
+        json={"version": 0, "clientID": 1, "steps": [insert_at(1, "X")]},
+    )
+    assert r1.status_code == 200
+    assert r1.json()["version"] == 1
+
+    # Step 2: insert "Y" at pos 2 — only valid if "X" is already there.
+    # Against the snapshot doc (paragraph(), size 2), pos 2 is the doc-
+    # level position after the paragraph; inserting text there violates
+    # doc's `block+` spec. Against the live doc (paragraph("X"), size 3),
+    # pos 2 lands inside the paragraph at offset 1 — valid.
+    r2 = await ds.client.post(
+        url,
+        json={"version": 1, "clientID": 1, "steps": [insert_at(2, "Y")]},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["version"] == 2
+
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert len(steps) == 2
 
 
 @pytest.mark.asyncio
@@ -133,7 +307,7 @@ async def test_post_broadcasts_to_subscribers(ds_paper):
     body = {
         "version": 0,
         "clientID": 5,
-        "steps": [json.dumps(STEP_BODY)],
+        "steps": [STEP_BODY_JSON],
     }
     resp = await ds.client.post(url, json=body)
     assert resp.status_code == 200

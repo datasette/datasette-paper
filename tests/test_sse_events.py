@@ -12,6 +12,8 @@ import datasette_paper.sse as sse_module
 from datasette_paper.instance import get_registry
 import datasette_paper.instance as instance_module
 
+from _steps import insert_at  # noqa: E402  (sibling helper)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,7 +34,10 @@ async def _post_step(datasette, doc_id, version, client_id=1):
     body = {
         "version": version,
         "clientID": client_id,
-        "steps": [json.dumps({"stepType": "replace"})],
+        # Always insert at position 1 (start of the paragraph) — position-
+        # stable so a sequence of these always validates against the live
+        # doc regardless of where we are in the run.
+        "steps": [insert_at(1)],
         "comment": [],
     }
     resp = await datasette.client.post(url, json=body)
@@ -246,11 +251,13 @@ async def test_sse_stale_version_410(ds_paper):
     registry._instances[doc_id] = inst
 
     for i in range(5):
+        # Position-stable insert so each step validates regardless of
+        # MAX_TAIL eviction.
         await inst.add_events(
             version=i,
             client_id=1,
             actor_id=None,
-            steps=[json.dumps({"stepType": "replace"})],
+            steps=[insert_at(1)],
         )
 
     path = f"/-/paper/api/docs/{doc_id}/events?version=0"

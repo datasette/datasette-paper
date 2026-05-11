@@ -1879,6 +1879,56 @@ describe("step-apply error handling", () => {
     conn.close();
   });
 
+  it("send: 422 from /events fires onStepError with phase=send and locks read-only", async () => {
+    const el = makeEl();
+
+    // Bootstrap is happy; the 422 only fires on the subsequent POST /events.
+    const fetchMock = vi
+      .fn()
+      .mockImplementationOnce(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...BOOTSTRAP }),
+      }))
+      // Second fetch (POST /events) returns 422.
+      .mockImplementationOnce(async () => ({
+        ok: false,
+        status: 422,
+        statusText: "Unprocessable Entity",
+        json: async () => ({
+          error: "invalid_step",
+          step_index: 0,
+          message: "Invalid content for node list_item",
+        }),
+      }));
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const errors: StepApplyError[] = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onStepError: (e) => errors.push(e),
+    });
+
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    // Drive a local edit so the connection sends to /events.
+    const view = conn.view!;
+    const tr = view.state.tr.insertText("X", 1);
+    view.dispatch(tr);
+
+    // Wait for the 422 to land and the stepError callback to fire.
+    await waitFor(() => expect(errors).toHaveLength(1));
+    expect(errors[0].phase).toBe("send");
+    expect(errors[0].message).toMatch(/Invalid content/i);
+
+    // Editor is now locked read-only — the local doc is ahead of what the
+    // server accepted, so further edits would diverge further.
+    expect(conn.view!.props.editable?.(conn.view!.state)).toBe(false);
+
+    conn.close();
+  });
+
   it("SSE: stops applying further step batches after bootstrap stepError", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = vi
