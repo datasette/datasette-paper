@@ -2,6 +2,7 @@
   import { onMount, untrack } from "svelte";
   import { client } from "./client";
   import ShareDialog from "./ShareDialog.svelte";
+  import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
 
   let {
     docId,
@@ -26,10 +27,16 @@
   type CopyFeedback = "idle" | "copied" | "failed";
   let copyState: CopyFeedback = $state("idle");
   let menuOpen = $state(false);
+  let apiSubOpen = $state(false);
   let menuRoot: HTMLDivElement | undefined = $state();
 
-  async function handleCopy() {
+  function closeMenu() {
     menuOpen = false;
+    apiSubOpen = false;
+  }
+
+  async function handleCopy() {
+    closeMenu();
     if (!copyMarkdown) return;
     const ok = await copyMarkdown();
     copyState = ok ? "copied" : "failed";
@@ -37,12 +44,12 @@
   }
 
   function openInNewTab(path: string) {
-    menuOpen = false;
+    closeMenu();
     window.open(`/-/paper/api/docs/${docId}${path}`, "_blank", "noopener");
   }
 
   async function postStateAction(path: "/archive" | "/trash") {
-    menuOpen = false;
+    closeMenu();
     const label = path === "/archive" ? "archive" : "trash";
     const question =
       path === "/archive"
@@ -64,11 +71,13 @@
 
   function onDocClick(evt: MouseEvent) {
     if (!menuOpen || !menuRoot) return;
-    if (!menuRoot.contains(evt.target as Node)) menuOpen = false;
+    if (!menuRoot.contains(evt.target as Node)) closeMenu();
   }
 
   function onKey(evt: KeyboardEvent) {
-    if (menuOpen && evt.key === "Escape") menuOpen = false;
+    if (!menuOpen || evt.key !== "Escape") return;
+    if (apiSubOpen) apiSubOpen = false;
+    else menuOpen = false;
   }
 
   $effect(() => {
@@ -261,47 +270,90 @@
           {#if menuOpen}
             <div class="overflow-menu" role="menu">
               {#if copyMarkdown}
-                <button type="button" role="menuitem" onclick={handleCopy}>
-                  Copy as markdown
-                </button>
-              {/if}
-              <button
-                type="button"
-                role="menuitem"
-                onclick={() => openInNewTab("/document")}
-              >
-                Open API URL
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onclick={() => openInNewTab("/tasks")}
-              >
-                Open TODOs API URL
-              </button>
-              <button
-                type="button"
-                role="menuitem"
-                onclick={() => openInNewTab("/tables")}
-              >
-                Open tables API URL
-              </button>
-              {#if isOwner && docState === "active"}
                 <button
                   type="button"
                   role="menuitem"
-                  onclick={() => postStateAction("/archive")}
+                  class="mi"
+                  onclick={handleCopy}
+                  onmouseenter={() => (apiSubOpen = false)}
                 >
-                  Archive
+                  {@render icon("copy")}
+                  <span>Copy as markdown</span>
                 </button>
               {/if}
+              <div
+                class="sub-wrap"
+                role="none"
+                onmouseenter={() => (apiSubOpen = true)}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="mi"
+                  aria-haspopup="menu"
+                  aria-expanded={apiSubOpen}
+                  onclick={() => (apiSubOpen = !apiSubOpen)}
+                >
+                  {@render icon("braces")}
+                  <span>Open API URL</span>
+                  <span class="mi-caret">{@render icon("chevronRight")}</span>
+                </button>
+                {#if apiSubOpen}
+                  <div class="overflow-menu submenu" role="menu">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      class="mi"
+                      onclick={() => openInNewTab("/document")}
+                    >
+                      {@render icon("fileText")}
+                      <span>Document</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      class="mi"
+                      onclick={() => openInNewTab("/tasks")}
+                    >
+                      {@render icon("taskList")}
+                      <span>TODOs</span>
+                    </button>
+                    <button
+                      type="button"
+                      role="menuitem"
+                      class="mi"
+                      onclick={() => openInNewTab("/tables")}
+                    >
+                      {@render icon("table")}
+                      <span>Tables</span>
+                    </button>
+                  </div>
+                {/if}
+              </div>
               {#if isOwner && docState !== "trashed"}
+                <hr class="mi-sep" />
+                <div class="mi-section" role="presentation">Danger zone</div>
+                {#if docState === "active"}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postStateAction("/archive")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("archive")}
+                    <span>Archive</span>
+                  </button>
+                {/if}
                 <button
                   type="button"
                   role="menuitem"
+                  class="mi mi-danger"
                   onclick={() => postStateAction("/trash")}
+                  onmouseenter={() => (apiSubOpen = false)}
                 >
-                  Move to trash
+                  {@render icon("trash3")}
+                  <span>Move to trash</span>
                 </button>
               {/if}
             </div>
@@ -313,6 +365,21 @@
     <div class="loading">Loading…</div>
   {/if}
 </header>
+
+{#snippet icon(name: ToolbarIconName)}
+  <svg
+    class="mi-icon"
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+    {@html TOOLBAR_ICONS[name]}
+  </svg>
+{/snippet}
 
 <ShareDialog {docId} bind:open={shareOpen} />
 
@@ -470,7 +537,7 @@
     position: absolute;
     right: 0;
     top: calc(100% + 4px);
-    min-width: 180px;
+    min-width: 200px;
     background: #fff;
     border: 1px solid #d0d7de;
     border-radius: 8px;
@@ -480,7 +547,10 @@
     display: flex;
     flex-direction: column;
   }
-  .overflow-menu button {
+  .mi {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     text-align: left;
     padding: 6px 10px;
     background: transparent;
@@ -490,9 +560,50 @@
     color: #222;
     cursor: pointer;
     white-space: nowrap;
+    width: 100%;
   }
-  .overflow-menu button:hover {
+  .mi:hover {
     background: #f0f3f6;
+  }
+  .mi-icon {
+    flex: 0 0 auto;
+    color: #555;
+  }
+  .mi-caret {
+    margin-left: auto;
+    display: inline-flex;
+    color: #999;
+  }
+  .mi-sep {
+    border: none;
+    border-top: 1px solid #eaeef2;
+    margin: 4px 0;
+  }
+  .mi-section {
+    padding: 4px 10px 2px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #888;
+  }
+  .mi-danger {
+    color: #a40e26;
+  }
+  .mi-danger .mi-icon {
+    color: #a40e26;
+  }
+  .mi-danger:hover {
+    background: #fdecef;
+  }
+  .sub-wrap {
+    position: relative;
+  }
+  .submenu {
+    top: -4px;
+    right: calc(100% + 4px);
+    left: auto;
+    min-width: 160px;
   }
 
   .loading {
