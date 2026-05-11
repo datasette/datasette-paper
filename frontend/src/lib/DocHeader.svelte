@@ -8,12 +8,16 @@
     users,
     mode = $bindable("edit"),
     canEdit = true,
+    isOwner = false,
+    docState = "active",
     copyMarkdown,
   }: {
     docId: string;
     users: number;
     mode?: "edit" | "view";
     canEdit?: boolean;
+    isOwner?: boolean;
+    docState?: "active" | "archived" | "trashed";
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
@@ -35,6 +39,27 @@
   function openInNewTab(path: string) {
     menuOpen = false;
     window.open(`/-/paper/api/docs/${docId}${path}`, "_blank", "noopener");
+  }
+
+  async function postStateAction(path: "/archive" | "/trash") {
+    menuOpen = false;
+    const label = path === "/archive" ? "archive" : "trash";
+    const question =
+      path === "/archive"
+        ? `Archive "${meta?.name ?? "this paper"}"?`
+        : `Move "${meta?.name ?? "this paper"}" to the trash? It auto-deletes in 7 days unless restored.`;
+    if (!window.confirm(question)) return;
+    const url = `/-/paper/api/docs/${docId}${path}` as
+      | "/-/paper/api/docs/{doc_id}/archive"
+      | "/-/paper/api/docs/{doc_id}/trash";
+    const { error: err } = await client.POST(url, {
+      params: { path: { doc_id: Number(docId) } },
+    });
+    if (err) {
+      window.alert(`Failed to ${label} this paper.`);
+    }
+    // On success the state-changed SSE updates docState; no local
+    // override needed.
   }
 
   function onDocClick(evt: MouseEvent) {
@@ -254,6 +279,31 @@
               >
                 Open TODOs API URL
               </button>
+              <button
+                type="button"
+                role="menuitem"
+                onclick={() => openInNewTab("/tables")}
+              >
+                Open tables API URL
+              </button>
+              {#if isOwner && docState === "active"}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onclick={() => postStateAction("/archive")}
+                >
+                  Archive
+                </button>
+              {/if}
+              {#if isOwner && docState !== "trashed"}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onclick={() => postStateAction("/trash")}
+                >
+                  Move to trash
+                </button>
+              {/if}
             </div>
           {/if}
         </div>

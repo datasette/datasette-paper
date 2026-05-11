@@ -166,7 +166,15 @@
 </script>
 
 <div class="datasette-paper-app" class:view-mode={mode === "view"}>
-  <DocHeader {docId} {users} bind:mode {canEdit} {copyMarkdown} />
+  <DocHeader
+    {docId}
+    {users}
+    bind:mode
+    {canEdit}
+    {isOwner}
+    docState={docState?.state ?? "active"}
+    {copyMarkdown}
+  />
   {#if docState?.state === "trashed"}
     <div class="status-banner status-trashed" role="status">
       <span>
