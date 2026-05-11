@@ -1,8 +1,8 @@
 import { Step } from "prosemirror-transform";
 import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
-import { Slice } from "prosemirror-model";
-import type { ResolvedPos } from "prosemirror-model";
+import { Slice, Fragment } from "prosemirror-model";
+import type { Node as PMNode, ResolvedPos } from "prosemirror-model";
 import { history } from "prosemirror-history";
 import {
   collab,
@@ -288,6 +288,47 @@ function linkInputRule(): InputRule {
 }
 
 /**
+ * Bare-URL autolink: typing whitespace after `http://…` / `https://…`
+ * marks the URL as a link and inserts the whitespace. Trailing
+ * punctuation (`.,;:!?)]'"`) is excluded from the link range so
+ * "see https://example.com." links the URL but not the period.
+ *
+ * Skips when the URL range already carries a link mark — keeps the rule
+ * from clobbering a user-set `[text](other-url)` whose visible text
+ * happens to be a URL.
+ *
+ * Other schemes (`ftp:`, `mailto:`, etc.) are intentionally left to
+ * `[text](url)` — keeps the pattern unambiguous and avoids false
+ * positives on prose like `note: see file`.
+ */
+function autoLinkInputRule(): InputRule {
+  return new InputRule(
+    /(?:^|\s)(https?:\/\/\S+)\s$/,
+    (state, match, start, end) => {
+      const linkType = schema.marks.link;
+      const raw = match[1];
+      const url = raw.replace(/[.,;:!?)\]'"]+$/, "");
+      if (!url) return null;
+      // match[0] = (leading ws | empty) + URL + typed whitespace.
+      // The leading ws (0 or 1 char) sits in the doc; the trailing
+      // whitespace is what was just typed and isn't in the doc yet.
+      const leadingLen = match[0].length - raw.length - 1;
+      const urlStart = start + leadingLen;
+      const urlEnd = urlStart + url.length;
+      if (state.doc.rangeHasMark(urlStart, urlEnd, linkType)) return null;
+      // Insert the typed whitespace first so it picks up the marks at
+      // the cursor *before* we add the link mark — link is `inclusive:
+      // false`, so even at the boundary it wouldn't extend, but doing
+      // it in this order keeps the inserted char's marks independent of
+      // our addMark step.
+      const tr = state.tr.insertText(match[0].slice(-1), end);
+      tr.addMark(urlStart, urlEnd, linkType.create({ href: url }));
+      return tr.removeStoredMark(linkType);
+    },
+  );
+}
+
+/**
  * On Enter: when the cursor is at the end of a `code_block` that is the
  * last block in the doc and the previous character is a newline (i.e. the
  * user just pressed Enter once already), strip that trailing newline,
@@ -368,6 +409,79 @@ function toggleLinkCommand(): Command {
     if (!href) return false;
     return toggleMark(linkType, { href })(state, dispatch);
   };
+}
+
+// ─── Linkify (paste) ─────────────────────────────────────────────────────────
+
+/** Bare URLs found in pasted text — same shape as the input-rule regex.
+ *  Stateful (`g` flag) so callers must reset `lastIndex`. */
+const PASTE_URL_RE = /https?:\/\/\S+/g;
+const PASTE_TRAILING_PUNCT_RE = /[.,;:!?)\]'"]+$/;
+
+/**
+ * Walk a fragment, splitting any plain text nodes that contain bare
+ * `http(s)://` URLs and applying a link mark to the URL portion. Text
+ * nodes that already carry a link mark are left alone — the user
+ * intentionally pasted a pre-marked link, possibly with a different href.
+ *
+ * Block / inline-with-content nodes recurse so URLs inside list items,
+ * task items, headings, table cells, etc. all get linkified.
+ */
+function linkifyFragment(fragment: Fragment): Fragment {
+  const linkType = schema.marks.link;
+  const children: PMNode[] = [];
+  fragment.forEach((node) => {
+    if (node.isText) {
+      if (linkType.isInSet(node.marks)) {
+        children.push(node);
+        return;
+      }
+      const text = node.text ?? "";
+      const segments: { text: string; href?: string }[] = [];
+      let lastIndex = 0;
+      let match: RegExpExecArray | null;
+      PASTE_URL_RE.lastIndex = 0;
+      while ((match = PASTE_URL_RE.exec(text)) !== null) {
+        const raw = match[0];
+        const url = raw.replace(PASTE_TRAILING_PUNCT_RE, "");
+        if (!url) continue;
+        const urlStart = match.index;
+        const urlEnd = urlStart + url.length;
+        if (urlStart > lastIndex) {
+          segments.push({ text: text.slice(lastIndex, urlStart) });
+        }
+        segments.push({ text: url, href: url });
+        lastIndex = urlEnd;
+        // The trailing punctuation we stripped is still in the source
+        // text; restart scanning at urlEnd so the next iteration sees it
+        // (and any further URLs that follow).
+        PASTE_URL_RE.lastIndex = urlEnd;
+      }
+      if (segments.length === 0) {
+        children.push(node);
+        return;
+      }
+      if (lastIndex < text.length) {
+        segments.push({ text: text.slice(lastIndex) });
+      }
+      for (const seg of segments) {
+        const marks = seg.href
+          ? linkType.create({ href: seg.href }).addToSet(node.marks)
+          : node.marks;
+        children.push(schema.text(seg.text, marks));
+      }
+    } else if (node.childCount === 0) {
+      children.push(node);
+    } else {
+      children.push(node.copy(linkifyFragment(node.content)));
+    }
+  });
+  return Fragment.fromArray(children);
+}
+
+function linkifyPastedSlice(slice: Slice): Slice {
+  if (slice.size === 0) return slice;
+  return new Slice(linkifyFragment(slice.content), slice.openStart, slice.openEnd);
 }
 
 // ─── Markdown clipboard parser ───────────────────────────────────────────────
@@ -581,6 +695,7 @@ export class EditorConnection {
             emInputRule(),
             codeInputRule(),
             linkInputRule(),
+            autoLinkInputRule(),
           ],
         }),
         history(),
@@ -683,6 +798,12 @@ export class EditorConnection {
         plain: boolean,
         view: EditorView,
       ) => Slice,
+      // Mirror the autoLink input rule: any bare http(s) URL in a paste
+      // becomes a link, regardless of whether the source was plain text,
+      // a markdown round-trip, or rich HTML. Runs after clipboardTextParser
+      // so already-marked links (e.g. from a `[text](url)` paste) pass
+      // through untouched.
+      transformPasted: linkifyPastedSlice,
       dispatchTransaction: (tr) => this.dispatchTransaction(tr),
     });
 

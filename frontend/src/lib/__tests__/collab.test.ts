@@ -631,6 +631,111 @@ describe("inline mark input rules", () => {
     conn.close();
   });
 
+  it("`https://x.test<space>` autoformats as an inline link", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Replace "Hello" with "https://x.test" (14 chars, positions 1..15).
+    view.dispatch(
+      view.state.tr.replaceWith(1, 6, schema.text("https://x.test")),
+    );
+
+    // Type space at position 15 (right after the URL).
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 15, 15, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    const para = view.state.doc.firstChild!;
+    expect(para.textContent).toBe("https://x.test ");
+
+    const linkType = schema.marks.link;
+    expect(view.state.doc.rangeHasMark(1, 15, linkType)).toBe(true);
+    // Trailing space must NOT carry the link mark.
+    expect(view.state.doc.rangeHasMark(15, 16, linkType)).toBe(false);
+
+    let href: string | null = null;
+    para.descendants((node) => {
+      const lm = node.marks.find((m) => m.type === linkType);
+      if (lm) href = lm.attrs.href as string;
+    });
+    expect(href).toBe("https://x.test");
+
+    conn.close();
+  });
+
+  it("strips trailing `.` from autolinked URLs", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // "https://x.test." (15 chars, positions 1..16).
+    view.dispatch(
+      view.state.tr.replaceWith(1, 6, schema.text("https://x.test.")),
+    );
+
+    // Type space at position 16 (right after the period).
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 16, 16, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    const linkType = schema.marks.link;
+    // Link covers "https://x.test" (positions 1..15) — period excluded.
+    expect(view.state.doc.rangeHasMark(1, 15, linkType)).toBe(true);
+    expect(view.state.doc.rangeHasMark(15, 16, linkType)).toBe(false);
+
+    let href: string | null = null;
+    view.state.doc.firstChild!.descendants((node) => {
+      const lm = node.marks.find((m) => m.type === linkType);
+      if (lm) href = lm.attrs.href as string;
+    });
+    expect(href).toBe("https://x.test");
+
+    conn.close();
+  });
+
+  it("autolink does not re-mark a URL already inside a link", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Build a paragraph where the visible text is "https://x.test" but
+    // the link's href points elsewhere — the autolink rule should not
+    // replace the user's intentional href.
+    const linkMark = schema.marks.link.create({ href: "https://elsewhere.test" });
+    const para = schema.nodes.paragraph.create(null, [
+      schema.text("https://x.test", [linkMark]),
+    ]);
+    view.dispatch(view.state.tr.replaceWith(0, view.state.doc.content.size, para));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 15, 15, " ", () => view.state.tr),
+    );
+    // Either the rule reports unhandled, or it fires but leaves the
+    // existing href intact. Asserting the href is what matters.
+    void handled;
+
+    let href: string | null = null;
+    view.state.doc.firstChild!.descendants((node) => {
+      const lm = node.marks.find((m) => m.type === schema.marks.link);
+      if (lm) href = lm.attrs.href as string;
+    });
+    expect(href).toBe("https://elsewhere.test");
+
+    conn.close();
+  });
+
   it("the strong rule does not fire mid-word (no leading whitespace before `**`)", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
@@ -1626,6 +1731,148 @@ describe("clipboardTextParser markdown paste", () => {
       `expected anchor wrapping <code>code</code>, got: ${html}`,
     ).toContain('<code>code</code>');
     expect(html).toMatch(/<a [^>]*href="https:\/\/link"[^>]*>/);
+
+    conn.close();
+  });
+});
+
+// ─── Test: transformPasted linkifies bare URLs ──────────────────────────────
+
+describe("transformPasted linkify", () => {
+  it("a bare URL in pasted text picks up a link mark", async () => {
+    const { Slice } = await import("prosemirror-model");
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Build a slice: one paragraph "see https://example.test for more".
+    const para = schema.nodes.paragraph.create(null, [
+      schema.text("see https://example.test for more"),
+    ]);
+    const slice = new Slice(para.content, 0, 0);
+
+    const result = view.someProp("transformPasted", (f) => f(slice, view, false));
+    expect(result).toBeDefined();
+    const transformed = result as InstanceType<typeof Slice>;
+
+    const segments: Array<{ text: string; marks: string[] }> = [];
+    transformed.content.descendants((node) => {
+      if (node.isText) {
+        segments.push({
+          text: node.text ?? "",
+          marks: node.marks.map((m) => m.type.name).sort(),
+        });
+      }
+    });
+
+    const linkSeg = segments.find((s) => s.text === "https://example.test");
+    expect(linkSeg, `no URL segment in ${JSON.stringify(segments)}`).toBeDefined();
+    expect(linkSeg!.marks).toEqual(["link"]);
+    // Surrounding plain text segments stay unmarked.
+    expect(segments.find((s) => s.text === "see ")?.marks).toEqual([]);
+    expect(segments.find((s) => s.text === " for more")?.marks).toEqual([]);
+
+    conn.close();
+  });
+
+  it("strips trailing punctuation from pasted URLs", async () => {
+    const { Slice } = await import("prosemirror-model");
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const para = schema.nodes.paragraph.create(null, [
+      schema.text("end https://example.test."),
+    ]);
+    const slice = new Slice(para.content, 0, 0);
+
+    const result = view.someProp("transformPasted", (f) => f(slice, view, false));
+    const transformed = result as InstanceType<typeof Slice>;
+
+    const segments: Array<{ text: string; marks: string[] }> = [];
+    transformed.content.descendants((node) => {
+      if (node.isText) {
+        segments.push({
+          text: node.text ?? "",
+          marks: node.marks.map((m) => m.type.name).sort(),
+        });
+      }
+    });
+
+    expect(segments.find((s) => s.text === "https://example.test")?.marks).toEqual(["link"]);
+    // The trailing "." sits in its own unmarked segment.
+    expect(segments.find((s) => s.text === ".")?.marks).toEqual([]);
+
+    conn.close();
+  });
+
+  it("leaves text alone if it already carries a link mark", async () => {
+    const { Slice } = await import("prosemirror-model");
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // User pasted markdown `[https://example.test](https://elsewhere.test)`
+    // — text matches a URL pattern but already has a link mark with a
+    // different href. Don't clobber it.
+    const linkMark = schema.marks.link.create({ href: "https://elsewhere.test" });
+    const para = schema.nodes.paragraph.create(null, [
+      schema.text("https://example.test", [linkMark]),
+    ]);
+    const slice = new Slice(para.content, 0, 0);
+
+    const result = view.someProp("transformPasted", (f) => f(slice, view, false));
+    const transformed = result as InstanceType<typeof Slice>;
+
+    let href: string | null = null;
+    transformed.content.descendants((node) => {
+      const lm = node.marks.find((m) => m.type === schema.marks.link);
+      if (lm) href = lm.attrs.href as string;
+    });
+    expect(href).toBe("https://elsewhere.test");
+
+    conn.close();
+  });
+
+  it("recurses into nested block content (URL inside a list item)", async () => {
+    const { Slice } = await import("prosemirror-model");
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const para = schema.nodes.paragraph.create(null, [
+      schema.text("visit https://nested.test"),
+    ]);
+    const item = schema.nodes.list_item.create(null, [para]);
+    const list = schema.nodes.bullet_list.create(null, [item]);
+    const slice = new Slice(list.content, 0, 0);
+
+    const result = view.someProp("transformPasted", (f) => f(slice, view, false));
+    const transformed = result as InstanceType<typeof Slice>;
+
+    let foundLinked = false;
+    transformed.content.descendants((node) => {
+      if (
+        node.isText &&
+        node.text === "https://nested.test" &&
+        node.marks.some((m) => m.type === schema.marks.link)
+      ) {
+        foundLinked = true;
+      }
+    });
+    expect(foundLinked).toBe(true);
 
     conn.close();
   });
