@@ -6,9 +6,16 @@ import asyncio
 
 import pytest
 
-from datasette_paper.errors import BadVersionError, ConflictError, GoneError
+from datasette_paper.errors import (
+    BadVersionError,
+    ConflictError,
+    GoneError,
+    InvalidStepError,
+)
 import datasette_paper.instance as instance_module
 from datasette_paper.instance import Instance, InstanceRegistry
+
+import json
 
 from _steps import insert_at, insert_sequence  # noqa: E402  (sibling helper)
 
@@ -214,6 +221,101 @@ async def test_materialize_live_doc_caches_until_version_changes(ds_paper):
     third = inst.materialize_live_doc()
     assert third != first
     assert inst._cached_live_version == inst.version
+
+
+@pytest.mark.asyncio
+async def test_add_events_rejects_when_history_is_poisoned(ds_paper):
+    """A step in history that won't apply taints the materialized doc;
+    the cached partial doc is stamped with the full version count, so
+    client-side steps positioned against the latest state can't be
+    validated. Reject new writes with a `history corrupted` marker
+    rather than letting each step fail with the misleading underlying
+    position / content error."""
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Poisoned")
+
+    # Plant a step at v=1 that fails on the empty doc. Inserting a text
+    # node at position 0 (between the doc node and its paragraph child)
+    # tries to make `<text, paragraph>` the doc's content — which
+    # violates `block+` and raises ValueError from check_content. Same
+    # error class the user hit in the wild: "Invalid content for node doc".
+    bad_step = json.dumps(
+        {
+            "stepType": "replace",
+            "from": 0,
+            "to": 0,
+            "slice": {"content": [{"type": "text", "text": "x"}]},
+        }
+    )
+    await db.insert_step(
+        doc_id=doc.id,
+        client_id=1,
+        actor_id=None,
+        step_json=bad_step,
+    )
+
+    inst = await Instance.hydrate(db, doc.id)
+    assert inst.version == 1
+
+    # Materialization breaks at v=1 and records the failure.
+    inst.materialize_live_doc()
+    assert inst._materialization_error is not None
+    bad_version, _ = inst._materialization_error
+    assert bad_version == 1
+
+    # add_events rejects with a clear history-corrupted message before
+    # touching the DB.
+    with pytest.raises(InvalidStepError) as exc_info:
+        await inst.add_events(
+            version=1,
+            client_id=2,
+            actor_id=None,
+            steps=[insert_at(1, "y")],
+        )
+    assert "history corrupted" in exc_info.value.message
+    assert "version 1" in exc_info.value.message
+    assert exc_info.value.step_index == 0
+
+    # And no new step was written.
+    assert inst.version == 1
+    assert len(inst.steps_tail) == 1
+
+
+@pytest.mark.asyncio
+async def test_materialize_clears_error_when_history_becomes_clean(ds_paper):
+    """If the bad step is trimmed and the instance re-hydrated, the
+    `_materialization_error` gate clears on the next materialization
+    so writes can resume."""
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Repairable")
+
+    bad_step = json.dumps(
+        {
+            "stepType": "replace",
+            "from": 0,
+            "to": 0,
+            "slice": {"content": [{"type": "text", "text": "x"}]},
+        }
+    )
+    await db.insert_step(
+        doc_id=doc.id,
+        client_id=1,
+        actor_id=None,
+        step_json=bad_step,
+    )
+
+    inst = await Instance.hydrate(db, doc.id)
+    inst.materialize_live_doc()
+    assert inst._materialization_error is not None
+
+    # Simulate an admin trimming the bad step from the tail. The cache
+    # has to drop so the loop re-runs against the clean tail.
+    inst.steps_tail.clear()
+    inst._cached_live_doc_json = None
+    inst._cached_live_version = None
+
+    inst.materialize_live_doc()
+    assert inst._materialization_error is None
 
 
 @pytest.mark.asyncio

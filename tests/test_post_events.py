@@ -231,6 +231,54 @@ async def test_post_unparseable_step_422(ds_paper):
 
 
 @pytest.mark.asyncio
+async def test_post_with_poisoned_history_returns_clear_422(ds_paper):
+    """A poisoned step already in history (planted before validation
+    landed, or surviving a schema divergence) leaves the server's
+    materialized doc stuck at the last good version while the version
+    counter advances. Old behavior: subsequent POSTs failed with the
+    underlying position / content error, which mis-blames the user's
+    new step. New behavior: a single 422 marker, `history corrupted at
+    version N: ...`, surfaces the actual cause."""
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    # Plant a bad step at v=1 directly via db.insert_step (no
+    # validation) — same shape as BAD_STEP_AT_DOC_LEVEL.
+    await paper_db.insert_step(
+        doc_id=doc_id,
+        client_id=1,
+        actor_id=None,
+        step_json=BAD_STEP_AT_DOC_LEVEL,
+    )
+
+    # Force a re-hydrate so the in-memory Instance picks up the
+    # planted step rather than continuing from the cached empty state.
+    get_registry(ds)._instances.pop(doc_id, None)
+
+    # The client thinks it's at v=1 and tries a valid edit. With the
+    # gate in place, the server rejects with a clear marker.
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    resp = await ds.client.post(
+        url,
+        json={
+            "version": 1,
+            "clientID": 2,
+            "steps": [insert_at(1, "y")],
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["error"] == "invalid_step"
+    assert body["step_index"] == 0
+    assert "history corrupted" in body["message"]
+    assert "version 1" in body["message"]
+
+    # And no new step was written — the bad v=1 row is still alone.
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert len(steps) == 1
+
+
+@pytest.mark.asyncio
 async def test_post_invalid_step_does_not_broadcast(ds_paper):
     """A rejected batch must not show up on any subscriber's queue."""
     ds, paper_db = ds_paper

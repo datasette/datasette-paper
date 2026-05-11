@@ -88,6 +88,12 @@ class Instance:
         # first materialize call, invalidated by version mismatch.
         self._cached_live_doc_json: Optional[str] = None
         self._cached_live_version: Optional[int] = None
+        # Set by ``materialize_live_doc`` when a step in history fails to
+        # apply: ``(failing_version, error_message)``. Persists alongside
+        # the cached partial doc so writers can refuse new edits without
+        # repeating the materialization work. Cleared at the top of each
+        # full re-materialization.
+        self._materialization_error: Optional[tuple[int, str]] = None
 
     @classmethod
     async def hydrate(cls, db: PaperDB, doc_id: int) -> "Instance":
@@ -140,6 +146,11 @@ class Instance:
 
         from .pm_schema import schema
 
+        # Re-materializing — wipe any prior poisoned-history marker so a
+        # subsequently repaired tail (admin trimmed the bad step, the
+        # registry was forced to re-hydrate) clears the gate cleanly.
+        self._materialization_error = None
+
         try:
             doc = schema.node_from_json(json.loads(self.snapshot_doc_json))
         except Exception:
@@ -160,14 +171,16 @@ class Instance:
                         record["version"],
                         result.failed,
                     )
+                    self._materialization_error = (record["version"], result.failed)
                     break
                 doc = result.doc
-            except Exception:
+            except Exception as exc:
                 logger.exception(
                     "doc_id=%s version=%s: Step.apply raised",
                     self.doc_id,
                     record["version"],
                 )
+                self._materialization_error = (record["version"], str(exc))
                 break
 
         live = doc.to_json()
@@ -192,6 +205,18 @@ class Instance:
         from .pm_schema import schema
 
         live_json = self.materialize_live_doc()
+        # If a step in history couldn't be applied during materialization,
+        # ``live_json`` is the doc as of the last good version — but the
+        # instance's version counter is the FULL count, so client batches
+        # are positioned against a doc state the server can't reproduce.
+        # Reject with a clear marker rather than letting each step fail
+        # individually with a misleading position error.
+        if self._materialization_error is not None:
+            bad_version, bad_msg = self._materialization_error
+            raise InvalidStepError(
+                0,
+                f"history corrupted at version {bad_version}: {bad_msg}",
+            )
         try:
             doc = schema.node_from_json(live_json)
         except Exception as exc:
