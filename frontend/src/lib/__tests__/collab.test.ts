@@ -761,6 +761,192 @@ describe("inline mark input rules", () => {
   });
 });
 
+// ─── Test: structural input rules (HR, headings, lists, blockquote) ───────
+
+describe("structural input rules", () => {
+  it("typing `--` does NOT produce an em-dash (`—`)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Replace "Hello" with `-` so typing a second `-` would have
+    // triggered the upstream emDash rule. Confirm it does NOT.
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("-")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 2, 2, "-", () => view.state.tr),
+    );
+    // `handled` is undefined when no rule matches (the typed char falls
+    // through to ProseMirror's default insertion).
+    expect(handled).not.toBe(true);
+    // No em-dash anywhere in the paragraph.
+    const para = view.state.doc.firstChild!;
+    expect(para.textContent).not.toContain("—");
+
+    conn.close();
+  });
+
+  it("`---<space>` at the start of a top-level paragraph becomes a horizontal_rule", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Paragraph content "---", cursor right after the third dash.
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("---")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 4, 4, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    // Doc should be: [horizontal_rule, paragraph()] — one HR followed
+    // by a fresh empty paragraph for the cursor.
+    expect(view.state.doc.childCount).toBe(2);
+    expect(view.state.doc.firstChild!.type).toBe(schema.nodes.horizontal_rule);
+    const tail = view.state.doc.child(1);
+    expect(tail.type).toBe(schema.nodes.paragraph);
+    expect(tail.textContent).toBe("");
+
+    // Cursor lands inside the new paragraph (one past its open token).
+    const { $from, empty } = view.state.selection;
+    expect(empty).toBe(true);
+    expect($from.parent.type).toBe(schema.nodes.paragraph);
+    expect($from.parentOffset).toBe(0);
+
+    conn.close();
+  });
+
+  it("`---<space>` does NOT fire inside a list item (paragraph-first content spec)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Build: bullet_list( list_item( paragraph("---") ) )
+    const para = schema.nodes.paragraph.create(null, schema.text("---"));
+    const item = schema.nodes.list_item.create(null, para);
+    const list = schema.nodes.bullet_list.create(null, item);
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, list),
+    );
+
+    // Position cursor at the end of "---" inside the list-item's paragraph.
+    // Positions: doc=0, list=1 (open token), item=2 (open token), para=3
+    // (open token), then 3 chars at 4..7. End-of-content inside paragraph
+    // is position 4+3 = 7.
+    const cursor = 4 + 3;
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, cursor)),
+    );
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, cursor, cursor, " ", () => view.state.tr),
+    );
+    expect(handled).not.toBe(true);
+    // No HR appeared in the doc.
+    let hasHr = false;
+    view.state.doc.descendants((node) => {
+      if (node.type === schema.nodes.horizontal_rule) hasHr = true;
+    });
+    expect(hasHr).toBe(false);
+
+    conn.close();
+  });
+
+  it("`---<space>` does NOT fire inside a heading", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const heading = schema.nodes.heading.create(
+      { level: 1 },
+      schema.text("---"),
+    );
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, heading),
+    );
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 4, 4, " ", () => view.state.tr),
+    );
+    expect(handled).not.toBe(true);
+    expect(view.state.doc.firstChild!.type).toBe(schema.nodes.heading);
+
+    conn.close();
+  });
+
+  it("`# <space>` still wraps a paragraph as a heading (regression for the curated rules)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Paragraph "#" — typing space should turn it into an h1.
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("#")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 2, 2, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+    const block = view.state.doc.firstChild!;
+    expect(block.type).toBe(schema.nodes.heading);
+    expect(block.attrs.level).toBe(1);
+
+    conn.close();
+  });
+
+  it("`> <space>` still wraps a paragraph in a blockquote", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text(">")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 2, 2, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+    expect(view.state.doc.firstChild!.type).toBe(schema.nodes.blockquote);
+
+    conn.close();
+  });
+
+  it("`- <space>` still wraps a paragraph in a bullet_list", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("-")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 2, 2, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+    expect(view.state.doc.firstChild!.type).toBe(schema.nodes.bullet_list);
+
+    conn.close();
+  });
+});
+
 // ─── Test: heading folding ─────────────────────────────────────────────────
 
 describe("heading folding", () => {

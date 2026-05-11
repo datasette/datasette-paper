@@ -18,8 +18,15 @@ import { tableRowDragPlugin } from "./tableRowDrag";
 import { linkTooltipPlugin } from "./linkTooltip";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
-import { buildKeymap, buildInputRules } from "prosemirror-example-setup";
-import { InputRule, inputRules } from "prosemirror-inputrules";
+import { buildKeymap } from "prosemirror-example-setup";
+import {
+  InputRule,
+  inputRules,
+  smartQuotes,
+  ellipsis,
+  wrappingInputRule,
+  textblockTypeInputRule,
+} from "prosemirror-inputrules";
 import {
   wrapInList,
   splitListItem,
@@ -153,6 +160,83 @@ function repeat<T>(val: T, n: number): T[] {
   const result: T[] = [];
   for (let i = 0; i < n; i++) result.push(val);
   return result;
+}
+
+/**
+ * Curated structural input rules — re-implementation of
+ * `prosemirror-example-setup`'s `buildInputRules` with the typographic
+ * rules pulled out so the user can keep typing `--` / straight quotes
+ * verbatim. The structural rules (heading, blockquote, lists, code
+ * block) are the same regexes upstream uses; lifted here so future
+ * tweaks don't fight the example-setup default.
+ *
+ * `horizontal_rule` is wired by `horizontalRuleInputRule` instead of
+ * coming from example-setup (which has no HR rule at all).
+ */
+function buildPaperStructuralRules(): InputRule[] {
+  const rules: InputRule[] = [];
+  if (schema.nodes.blockquote) {
+    rules.push(wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote));
+  }
+  if (schema.nodes.ordered_list) {
+    rules.push(
+      wrappingInputRule(
+        /^(\d+)\.\s$/,
+        schema.nodes.ordered_list,
+        (match) => ({ order: +match[1] }),
+        (match, node) =>
+          node.childCount + (node.attrs.order as number) === +match[1],
+      ),
+    );
+  }
+  if (schema.nodes.bullet_list) {
+    rules.push(wrappingInputRule(/^\s*([-+*])\s$/, schema.nodes.bullet_list));
+  }
+  if (schema.nodes.code_block) {
+    rules.push(textblockTypeInputRule(/^```$/, schema.nodes.code_block));
+  }
+  if (schema.nodes.heading) {
+    rules.push(
+      textblockTypeInputRule(
+        /^(#{1,6})\s$/,
+        schema.nodes.heading,
+        (match) => ({ level: match[1].length }),
+      ),
+    );
+  }
+  return rules;
+}
+
+/**
+ * `---<space>` at the start of a top-level paragraph → horizontal_rule
+ * + a fresh empty paragraph for the cursor to land in. Restricted to
+ * doc-level paragraphs because list_item's content spec
+ * (`paragraph block*`) requires a paragraph first — replacing a
+ * list-item's only paragraph with an HR would violate the spec.
+ *
+ * Paired with the removal of the upstream `emDash` rule (`--` → `—`):
+ * without that pairing, typing the second `-` would already have been
+ * eaten, and the user could never get to three dashes.
+ */
+function horizontalRuleInputRule(): InputRule {
+  return new InputRule(/^---\s$/, (state, _match, start) => {
+    const $start = state.doc.resolve(start);
+    if ($start.parent.type !== schema.nodes.paragraph) return null;
+    // Only doc-level — see fn docstring.
+    if ($start.depth !== 1) return null;
+    const hrType = schema.nodes.horizontal_rule;
+    const paraType = schema.nodes.paragraph;
+    if (!hrType || !paraType) return null;
+    const blockStart = $start.before();
+    const blockEnd = $start.after();
+    const hr = hrType.create();
+    const newPara = paraType.create();
+    const tr = state.tr.replaceWith(blockStart, blockEnd, [hr, newPara]);
+    // 1 past the new paragraph's open token — the only valid cursor
+    // position inside an empty paragraph.
+    const cursor = blockStart + hr.nodeSize + 1;
+    return tr.setSelection(TextSelection.create(tr.doc, cursor));
+  });
 }
 
 /**
@@ -688,7 +772,25 @@ export class EditorConnection {
     const state = EditorState.create({
       doc,
       plugins: [
-        buildInputRules(schema),
+        // Curated stand-in for prosemirror-example-setup's
+        // `buildInputRules`. We drop the upstream `emDash` rule because
+        // `--` → `—` collides with the markdown HR convention (`---`),
+        // and inline our own `horizontalRuleInputRule` so `---<space>`
+        // turns into an HR. `smartQuotes` and `ellipsis` stay (they're
+        // dropped later if/when their own typography bug reports land).
+        inputRules({
+          rules: [
+            // `smartQuotes` exports as an array of 4 rules; `ellipsis` is
+            // a single rule, not an array. Mixing the two with spread is
+            // a footgun — upstream's `buildInputRules` uses
+            // `smartQuotes.concat(ellipsis, emDash)` for the same
+            // reason. Keep the literal arrangement here.
+            ...smartQuotes,
+            ellipsis,
+            horizontalRuleInputRule(),
+            ...buildPaperStructuralRules(),
+          ],
+        }),
         inputRules({
           rules: [
             taskListInputRule(),
