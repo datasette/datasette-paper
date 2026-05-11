@@ -58,6 +58,21 @@ export interface DocStatePayload {
   delete_at: string | null;
 }
 
+/**
+ * Reported when a step in the bootstrap history or an SSE update can't
+ * be applied — e.g. a malformed step that produces a node-content
+ * violation. Carries the failing step's 1-based version and the
+ * underlying error message. See `EditorConnectionOpts.onStepError`.
+ */
+export interface StepApplyError {
+  /** Server-assigned version of the step that failed. */
+  version: number;
+  /** Where the failure happened. */
+  phase: "bootstrap" | "sse";
+  /** Error message from ProseMirror (or "StepResult.failed" text). */
+  message: string;
+}
+
 export interface ConnectionOpts {
   /** Document ID (used in API URL path). */
   docId: string;
@@ -89,6 +104,13 @@ export interface ConnectionOpts {
    * this to show the archived pill or trashed banner.
    */
   onDocState?: (payload: DocStatePayload) => void;
+  /**
+   * Called when a step can't be applied during bootstrap replay or an
+   * SSE update. Bootstrap stops at the first bad step and renders the
+   * partial doc; SSE skips the bad batch and stays connected. The host
+   * uses this to render an error banner and force the editor read-only.
+   */
+  onStepError?: (err: StepApplyError) => void;
 }
 
 type CommState =
@@ -437,6 +459,12 @@ export class EditorConnection {
   // persists across view rebuilds (e.g. 410 → restart).
   private editable: boolean = true;
 
+  // Set when a step from history (bootstrap) or a live broadcast (SSE)
+  // could not be applied. Locks the editor read-only — editing forward
+  // from a partial / out-of-sync state would corrupt later sync — and
+  // short-circuits SSE step application until a refresh re-bootstraps.
+  private stepError: StepApplyError | null = null;
+
   constructor(opts: ConnectionOpts, report?: Reporter) {
     this.opts = opts;
     this.report = report ?? new Reporter();
@@ -452,12 +480,25 @@ export class EditorConnection {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
+  private reportStepError(err: StepApplyError): void {
+    if (!this.stepError) {
+      this.stepError = err;
+      // Lock the editor immediately — even if setEditable hasn't been
+      // called yet, the EditorView's `editable: () => this.editable`
+      // accessor will pick this up on the next render tick.
+      this.editable = false;
+      if (this.view) this.view.setProps({ editable: () => false });
+    }
+    this.opts.onStepError?.(err);
+  }
+
   /**
    * Fetch the bootstrap data, construct EditorState + EditorView, then open
    * the SSE stream.
    */
   async start(): Promise<void> {
     this.comm = "start";
+    this.stepError = null;
     try {
       const resp = await fetch(this.apiUrl(""), { method: "GET" });
       if (!resp.ok) {
@@ -476,11 +517,38 @@ export class EditorConnection {
 
   private _loaded(boot: BootstrapData): void {
     this.selfActor = boot.selfActor ?? null;
-    // Build head doc by applying all steps from the bootstrap
+    // Build head doc by applying all steps from the bootstrap. Stop at
+    // the first failure: a bad step poisons every subsequent position.
+    //
+    // `Step.apply` only converts `ReplaceError` into a `StepResult.failed`;
+    // a content-spec violation surfaces as `Node.checkContent` throwing
+    // `RangeError`, which escapes `apply`. Catch both shapes so one bad
+    // step in history doesn't take the whole bootstrap down.
     let doc = schema.nodeFromJSON(boot.doc);
-    for (const stepJson of boot.steps ?? []) {
-      const result = Step.fromJSON(schema, stepJson).apply(doc);
-      if (result.doc) doc = result.doc;
+    const snapshotVersion = boot.snapshotVersion ?? boot.version;
+    const stepJsons = boot.steps ?? [];
+    for (let i = 0; i < stepJsons.length; i++) {
+      const stepJson = stepJsons[i];
+      const stepVersion = snapshotVersion + i + 1;
+      try {
+        const result = Step.fromJSON(schema, stepJson).apply(doc);
+        if (result.failed) {
+          this.reportStepError({
+            version: stepVersion,
+            phase: "bootstrap",
+            message: result.failed,
+          });
+          break;
+        }
+        if (result.doc) doc = result.doc;
+      } catch (err) {
+        this.reportStepError({
+          version: stepVersion,
+          phase: "bootstrap",
+          message: err instanceof Error ? err.message : String(err),
+        });
+        break;
+      }
     }
 
     const state = EditorState.create({
@@ -639,28 +707,54 @@ export class EditorConnection {
 
     const handleMessage = (evt: MessageEvent) => {
       if (!this.view) return;
+      let data: {
+        steps?: Array<Record<string, unknown>>;
+        clientIDs?: Array<number | string>;
+        version?: number;
+        users?: number;
+      };
       try {
-        const data: {
-          steps: Array<Record<string, unknown>>;
-          clientIDs: Array<number | string>;
-          users?: number;
-        } = JSON.parse(evt.data);
-
-        if (typeof data.users === "number") {
-          this.opts.onUsers?.(data.users);
-        }
-
-        if (data.steps && data.steps.length > 0) {
-          const steps = data.steps.map((s) => Step.fromJSON(schema, s));
-          const tr = receiveTransaction(
-            this.view.state,
-            steps,
-            data.clientIDs
-          );
-          this.view.dispatch(tr);
-        }
+        data = JSON.parse(evt.data);
       } catch {
-        // Malformed message — ignore
+        // Malformed envelope — drop.
+        return;
+      }
+
+      if (typeof data.users === "number") {
+        this.opts.onUsers?.(data.users);
+      }
+
+      // Skip step application if bootstrap already failed: the local doc
+      // doesn't reflect the version the server is broadcasting, so applying
+      // remote steps would compound the corruption. Presence + users still
+      // flow through.
+      if (this.stepError) return;
+
+      if (!data.steps || data.steps.length === 0) return;
+
+      // `receiveTransaction` builds a single tr from all steps. Wrap the
+      // whole construct + dispatch in a try so a single bad remote step
+      // doesn't crash the page — surface the failure and stay subscribed.
+      try {
+        const steps = data.steps.map((s) => Step.fromJSON(schema, s));
+        const tr = receiveTransaction(
+          this.view.state,
+          steps,
+          data.clientIDs ?? [],
+        );
+        this.view.dispatch(tr);
+      } catch (err) {
+        // `version` in the SSE envelope is the post-batch server version.
+        // Use it directly for the error report so the user / repair tool
+        // can find the offending step.
+        this.reportStepError({
+          version:
+            typeof data.version === "number"
+              ? data.version
+              : getVersion(this.view.state) + (data.steps.length ?? 0),
+          phase: "sse",
+          message: err instanceof Error ? err.message : String(err),
+        });
       }
     };
 
@@ -854,10 +948,16 @@ export class EditorConnection {
 
   // ── Mode ────────────────────────────────────────────────────────────────
 
-  /** Flip read-only state. Reuses the same EditorView so collab state stays. */
+  /** Flip read-only state. Reuses the same EditorView so collab state stays.
+   *
+   * A bootstrap that hit a bad step locks the editor read-only regardless
+   * of caller intent — editing forward from a partial doc would produce
+   * steps with stale positions on the next send.
+   */
   setEditable(editable: boolean): void {
-    this.editable = editable;
-    if (this.view) this.view.setProps({ editable: () => editable });
+    const effective = this.stepError ? false : editable;
+    this.editable = effective;
+    if (this.view) this.view.setProps({ editable: () => effective });
   }
 
   // ── Close ─────────────────────────────────────────────────────────────────

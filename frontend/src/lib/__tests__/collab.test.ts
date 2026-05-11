@@ -11,7 +11,7 @@ import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import type { Node as PMNode } from "prosemirror-model";
 import { EditorConnection, preloadMarkdownParser } from "../collab";
-import type { ConnectionOpts } from "../collab";
+import type { ConnectionOpts, StepApplyError } from "../collab";
 import { schema } from "../schema";
 
 // ─── Mock EventSource ────────────────────────────────────────────────────────
@@ -1626,6 +1626,307 @@ describe("clipboardTextParser markdown paste", () => {
       `expected anchor wrapping <code>code</code>, got: ${html}`,
     ).toContain('<code>code</code>');
     expect(html).toMatch(/<a [^>]*href="https:\/\/link"[^>]*>/);
+
+    conn.close();
+  });
+});
+
+// ─── Step-apply error handling (bootstrap + SSE) ────────────────────────────
+//
+// Real-world cause: a client (or rebase) generated a `replace` step with
+// `slice.openStart=0`/`openEnd=0` whose `from` resolved inside a non-textblock
+// parent (a `list_item` before its paragraph child). `Step.apply` only catches
+// `ReplaceError`, but `Node.checkContent` throws `RangeError` on a content-
+// spec violation, so the throw escaped the bootstrap loop and the whole doc
+// failed to mount.
+//
+// The minimal repro: doc `bullet_list > list_item > paragraph("a")`, then a
+// `replace` step that inserts bare text at position 2 (inside the list_item,
+// before its paragraph). The resulting list_item content would be
+// `<text("x"), paragraph("a")>` which violates list_item's `paragraph block*`
+// spec.
+
+const BAD_STEP_BOOT = {
+  doc: {
+    type: "doc",
+    content: [
+      {
+        type: "bullet_list",
+        content: [
+          {
+            type: "list_item",
+            content: [
+              { type: "paragraph", content: [{ type: "text", text: "a" }] },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  version: 1,
+  snapshotVersion: 0,
+  steps: [
+    {
+      stepType: "replace",
+      from: 2,
+      to: 2,
+      slice: { content: [{ type: "text", text: "x" }] },
+    },
+  ],
+  clientIDs: [62970755],
+  users: 1,
+  permissions: {
+    canView: true,
+    canEdit: true,
+    canManage: false,
+    isOwner: false,
+    visibility: "private" as const,
+  },
+};
+
+describe("step-apply error handling", () => {
+  it("bootstrap: minimal repro — bad step does not throw, renders snapshot doc, fires onStepError, locks read-only", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => BAD_STEP_BOOT,
+      });
+
+    // Capture unhandled rejections / errors so we can fail the test if the
+    // bootstrap throws instead of recovering. vitest surfaces these via
+    // process events under jsdom.
+    const unhandled: unknown[] = [];
+    const onErr = (e: Event) => unhandled.push(e);
+    window.addEventListener("error", onErr);
+    window.addEventListener("unhandledrejection", onErr);
+
+    const errors: StepApplyError[] = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onStepError: (e) => errors.push(e),
+    });
+
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    // Editor mounted with the snapshot doc — the bad step at version 1
+    // was skipped, no later steps to attempt.
+    expect(conn.view!.state.doc.toJSON()).toEqual(BAD_STEP_BOOT.doc);
+
+    // The error callback was called exactly once for the bad step.
+    expect(errors).toHaveLength(1);
+    expect(errors[0].phase).toBe("bootstrap");
+    expect(errors[0].version).toBe(1);
+    expect(errors[0].message).toMatch(/list_item/i);
+
+    // The view is forced read-only — even though the bootstrap permissions
+    // grant canEdit, editing forward from a partial doc would corrupt sync.
+    expect(conn.view!.props.editable?.(conn.view!.state)).toBe(false);
+
+    // setEditable(true) cannot re-enable the editor while stepError is set.
+    conn.setEditable(true);
+    expect(conn.view!.props.editable?.(conn.view!.state)).toBe(false);
+
+    expect(unhandled).toEqual([]);
+
+    window.removeEventListener("error", onErr);
+    window.removeEventListener("unhandledrejection", onErr);
+    conn.close();
+  });
+
+  it("bootstrap: applies steps before the bad one, stops at the first failure", async () => {
+    // Three valid inserts before the bad one. They each prepend a char to
+    // the paragraph: "a" → "ba" → "cba" → "dcba", *then* the bad step tries
+    // to inject bare text inside the list_item.
+    const boot = {
+      ...BAD_STEP_BOOT,
+      version: 4,
+      snapshotVersion: 0,
+      steps: [
+        {
+          stepType: "replace",
+          from: 3,
+          to: 3,
+          slice: { content: [{ type: "text", text: "b" }] },
+        },
+        {
+          stepType: "replace",
+          from: 3,
+          to: 3,
+          slice: { content: [{ type: "text", text: "c" }] },
+        },
+        {
+          stepType: "replace",
+          from: 3,
+          to: 3,
+          slice: { content: [{ type: "text", text: "d" }] },
+        },
+        // Bad step — same shape as the minimal repro.
+        {
+          stepType: "replace",
+          from: 2,
+          to: 2,
+          slice: { content: [{ type: "text", text: "x" }] },
+        },
+      ],
+      clientIDs: [62970755, 62970755, 62970755, 62970755],
+    };
+
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, status: 200, json: async () => boot });
+
+    const errors: StepApplyError[] = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onStepError: (e) => errors.push(e),
+    });
+
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    // The 3 valid steps applied; paragraph reads "dcba".
+    const para = conn.view!.state.doc
+      .firstChild!.firstChild!.firstChild!;
+    expect(para.type.name).toBe("paragraph");
+    expect(para.textContent).toBe("dcba");
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].version).toBe(4);
+    expect(errors[0].phase).toBe("bootstrap");
+
+    conn.close();
+  });
+
+  it("bootstrap: happy path — no onStepError fires for a fully valid history", async () => {
+    const el = makeEl();
+    const fetchMock = makeBootstrapFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const errors: StepApplyError[] = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onStepError: (e) => errors.push(e),
+    });
+
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    expect(errors).toEqual([]);
+    // Confirm editor is editable (no stepError → caller's setEditable wins).
+    expect(conn.view!.props.editable?.(conn.view!.state)).toBe(true);
+
+    conn.close();
+  });
+
+  it("SSE: bad remote step does not crash the connection, fires onStepError, stays subscribed", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const errors: StepApplyError[] = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onStepError: (e) => errors.push(e),
+    });
+
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    expect(errors).toEqual([]);
+
+    // The bootstrap fixture has a `paragraph("Hello")` as the only block.
+    // Position 1 is inside that paragraph. To trigger a content-spec
+    // violation via SSE, send a step that wraps the doc in a list_item
+    // without a paragraph child — straight bare text as list_item content.
+    // Construct that by replacing the whole doc with a slice that produces
+    // an invalid list_item structure.
+    const es = MockEventSource.instances[0];
+    expect(es).toBeDefined();
+
+    // Use the same minimal-repro shape: pretend the server has just promoted
+    // the paragraph to a bullet_list/list_item and is now broadcasting a
+    // bare-text insert into the list_item. The receiveTransaction call must
+    // not throw out of the SSE handler.
+    es.dispatchEvent(
+      "update",
+      JSON.stringify({
+        version: BOOTSTRAP.version + 1,
+        // A step that's syntactically valid but would produce invalid
+        // content: insert a text node at position 0 (the doc level), which
+        // violates doc's `block+` content spec.
+        steps: [
+          {
+            stepType: "replace",
+            from: 0,
+            to: 0,
+            slice: { content: [{ type: "text", text: "x" }] },
+          },
+        ],
+        clientIDs: [99999],
+      }),
+    );
+
+    // The handler captured the error rather than letting it escape.
+    expect(errors).toHaveLength(1);
+    expect(errors[0].phase).toBe("sse");
+    expect(errors[0].version).toBe(BOOTSTRAP.version + 1);
+
+    // EventSource is still open — we only `close()` on explicit teardown.
+    expect(es.readyState).not.toBe(2);
+
+    conn.close();
+  });
+
+  it("SSE: stops applying further step batches after bootstrap stepError", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = vi
+      .fn()
+      .mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: async () => BAD_STEP_BOOT,
+      });
+
+    const errors: StepApplyError[] = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onStepError: (e) => errors.push(e),
+    });
+
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    expect(errors).toHaveLength(1);
+
+    // After the bootstrap stepError, the local doc no longer reflects the
+    // server's version. A "valid-looking" SSE update would still build
+    // positions against the partial doc. Skip it entirely and don't surface
+    // another error (the bootstrap error already told the user).
+    const errorsAtBoot = errors.length;
+    const docBefore = conn.view!.state.doc.toJSON();
+
+    const es = MockEventSource.instances[0];
+    es.dispatchEvent(
+      "update",
+      JSON.stringify({
+        version: 2,
+        steps: [
+          {
+            stepType: "replace",
+            from: 3,
+            to: 3,
+            slice: { content: [{ type: "text", text: "y" }] },
+          },
+        ],
+        clientIDs: [62970755],
+      }),
+    );
+
+    // Doc unchanged.
+    expect(conn.view!.state.doc.toJSON()).toEqual(docBefore);
+    // No new error reported — bootstrap one is sufficient.
+    expect(errors.length).toBe(errorsAtBoot);
 
     conn.close();
   });

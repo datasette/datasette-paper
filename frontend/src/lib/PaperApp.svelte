@@ -3,7 +3,11 @@
   import type { EditorView } from "prosemirror-view";
   import "prosemirror-tables/style/tables.css";
   import { EditorConnection } from "./collab";
-  import type { BootstrapPermissions, DocStatePayload } from "./collab";
+  import type {
+    BootstrapPermissions,
+    DocStatePayload,
+    StepApplyError,
+  } from "./collab";
   import { Reporter } from "./reporter";
   import type { ReporterState } from "./reporter";
   import Toolbar from "./Toolbar.svelte";
@@ -20,6 +24,11 @@
   let mode: "edit" | "view" = $state("edit");
   let permissions = $state<BootstrapPermissions | null>(null);
   let docState = $state<DocStatePayload | null>(null);
+  // First step from the bootstrap or an SSE update that the editor couldn't
+  // apply. When set, the connection forces read-only and we surface a
+  // banner so the user knows the doc has corrupted history that needs a
+  // backend repair before further edits.
+  let stepError = $state<StepApplyError | null>(null);
   // Re-render the trash countdown each minute.
   let nowTick = $state(Date.now());
   // Read-only when the server says canEdit=false. When this flips on we
@@ -54,6 +63,14 @@
         },
         onDocState: (s) => {
           docState = s;
+        },
+        onStepError: (e) => {
+          // Keep the first error — subsequent ones don't add information
+          // and would flap the banner.
+          if (!stepError) {
+            stepError = e;
+            mode = "view";
+          }
         },
       },
       reporter,
@@ -164,6 +181,13 @@
   {:else if docState?.state === "archived"}
     <div class="archived-pill" aria-label="Archived">Archived</div>
   {/if}
+  {#if stepError}
+    <div class="status-banner status-step-error" role="alert">
+      Could not apply edit at version {stepError.version}. The doc is shown
+      up to the last good edit and is read-only until an admin repairs the
+      history.
+    </div>
+  {/if}
   {#if status.state !== "ok"}
     <div class="status-banner status-{status.state}">{status.message}</div>
   {/if}
@@ -192,6 +216,11 @@
   .status-banner.status-fail {
     background: #ffd6d6;
     color: #5a0000;
+  }
+  .status-banner.status-step-error {
+    background: #ffd6d6;
+    color: #5a0000;
+    border: 1px solid #c08080;
   }
   .status-banner.status-trashed {
     background: #fff1d6;
