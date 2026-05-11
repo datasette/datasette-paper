@@ -588,4 +588,51 @@
   .editor-host :global(tr.pm-row-dragging) {
     opacity: 0.4;
   }
+
+  /* Link hover tooltip — appears beneath an `<a>` link mark when the
+   * mouse hovers it in edit mode. Owned by linkTooltipPlugin. Anchored
+   * absolutely to .editor-host (same coordinate space as the table
+   * tooltip). z:11 sits above the sticky .paper-toolbar (z:10). */
+  .editor-host :global(.pm-link-tooltip-root) {
+    position: absolute;
+    z-index: 11;
+    pointer-events: auto;
+  }
+  .editor-host :global(.pm-link-tooltip-bar) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: #fff;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    font-size: 12px;
+    max-width: 460px;
+  }
+  .editor-host :global(.pm-link-tooltip-url) {
+    color: #0b5cad;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 320px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .editor-host :global(.pm-link-tooltip-btn) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid #d4d4d4;
+    border-radius: 4px;
+    background: #f4f6f8;
+    color: #1a1a1a;
+    cursor: pointer;
+    font: inherit;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-link-tooltip-btn:hover) {
+    background: #e6ebf0;
+  }
 </style>

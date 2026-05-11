@@ -25,6 +25,10 @@ template injects the matching JS+CSS via `datasette_vite.vite_entry`.
   in-table UI (add/delete row/col, delete table, name input + live
   duplicate warning, API link). Anchored centered above the enclosing
   table; not a Svelte component.
+- `src/lib/linkTooltip.ts` — `Plugin.view` showing a hover tooltip on
+  inline `<a>` link marks in edit mode (URL display + Open / Copy).
+  View-mode hover is suppressed; the browser handles anchor clicks
+  natively when not editing.
 - `src/lib/PaperApp.svelte` / `lib/PaperIndex.svelte` — page wrappers.
 - `src/lib/icons.ts` — bootstrap-icons inner-path data, indexed by name.
 - `src/lib/client.ts` — openapi-fetch with default

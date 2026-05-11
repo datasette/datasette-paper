@@ -15,6 +15,7 @@ import { gapCursor } from "prosemirror-gapcursor";
 import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { tableRowDragPlugin } from "./tableRowDrag";
+import { linkTooltipPlugin } from "./linkTooltip";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap, buildInputRules } from "prosemirror-example-setup";
@@ -762,6 +763,10 @@ export class EditorConnection {
         tableInsertTooltipPlugin(this.opts.docId),
         // Hover-grip on each table row's left edge that drags to reorder.
         tableRowDragPlugin(),
+        // Hover tooltip over `<a>` link marks (edit-mode only) — shows the
+        // URL and Open/Copy actions since ProseMirror eats anchor clicks
+        // while editing.
+        linkTooltipPlugin(),
         // gap cursor — gives ArrowDown/Right past the last block (and
         // ArrowUp/Left before the first) a place to land when no normal
         // text position exists, e.g. between two adjacent tables or after
