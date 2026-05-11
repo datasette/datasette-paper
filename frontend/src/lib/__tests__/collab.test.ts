@@ -1981,3 +1981,240 @@ describe("step-apply error handling", () => {
     conn.close();
   });
 });
+
+// ─── Auto-snapshot ──────────────────────────────────────────────────────────
+//
+// The server's hydration cost scales with the number of steps replayed
+// since the last snapshot. Without an auto-snapshot trigger every cold
+// load and every new browser tab pays the cost of replaying the full
+// history. Wire the snapshot to fire after `SNAPSHOT_STEP_THRESHOLD`
+// steps drift, debounced by `SNAPSHOT_DEBOUNCE_MS` so a typing burst
+// produces one snapshot, not a hundred.
+
+describe("auto-snapshot", () => {
+  // Capture every URL+body pair so the threshold/debounce assertions can
+  // count exactly how many /snapshot POSTs fired. The default
+  // bootstrap fetch returns the BOOTSTRAP fixture.
+  function makeSnapshotFetch() {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : null });
+      if (url.endsWith("/snapshot")) {
+        return Promise.resolve({ ok: true, status: 204, json: async () => null });
+      }
+      // The bootstrap GET and any /events POST: treat as a happy bootstrap.
+      // Tests in this block don't drive /events sends; they synthesize step
+      // batches via SSE which doesn't hit fetch.
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ ...BOOTSTRAP }),
+      });
+    });
+    return { fetchMock, calls };
+  }
+
+  /**
+   * Dispatch `n` synthetic "received from server" step batches by feeding
+   * the SSE handler. Each batch advances the collab plugin's version by
+   * one — same effect on `getVersion` as a real broadcast. Uses an
+   * always-insert-at-1 step so the steps actually apply against the
+   * bootstrap fixture (paragraph("Hello")).
+   */
+  function feedSseSteps(
+    es: MockEventSource,
+    fromVersion: number,
+    n: number,
+  ): void {
+    for (let i = 0; i < n; i++) {
+      es.dispatchEvent(
+        "update",
+        JSON.stringify({
+          version: fromVersion + i + 1,
+          steps: [
+            {
+              stepType: "replace",
+              from: 1,
+              to: 1,
+              slice: { content: [{ type: "text", text: "." }] },
+            },
+          ],
+          clientIDs: [99999],
+        }),
+      );
+    }
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("fires one /snapshot after 100 steps + debounce window", async () => {
+    const el = makeEl();
+    const { fetchMock, calls } = makeSnapshotFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await vi.waitFor(() => expect(conn.view).not.toBeNull(), { timeout: 1000 });
+
+    feedSseSteps(MockEventSource.instances[0], BOOTSTRAP.version, 100);
+    // Threshold met. Nothing fires until the debounce window elapses.
+    expect(
+      calls.filter((c) => c.url.endsWith("/snapshot")),
+    ).toHaveLength(0);
+
+    vi.advanceTimersByTime(5000);
+    await vi.waitFor(() =>
+      expect(
+        calls.filter((c) => c.url.endsWith("/snapshot")),
+      ).toHaveLength(1),
+    );
+
+    const snap = calls.find((c) => c.url.endsWith("/snapshot"))!;
+    const body = snap.body as { version: number; doc: unknown };
+    expect(body.version).toBe(BOOTSTRAP.version + 100);
+    expect(body.doc).toBeDefined();
+
+    conn.close();
+  });
+
+  it("debounces: 100 steps + 50 more before the timer fires → one /snapshot at the later version", async () => {
+    const el = makeEl();
+    const { fetchMock, calls } = makeSnapshotFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await vi.waitFor(() => expect(conn.view).not.toBeNull(), { timeout: 1000 });
+
+    feedSseSteps(MockEventSource.instances[0], BOOTSTRAP.version, 100);
+    // Halfway through the debounce window, another burst arrives.
+    vi.advanceTimersByTime(2000);
+    feedSseSteps(MockEventSource.instances[0], BOOTSTRAP.version + 100, 50);
+
+    vi.advanceTimersByTime(5000);
+    await vi.waitFor(() =>
+      expect(
+        calls.filter((c) => c.url.endsWith("/snapshot")),
+      ).toHaveLength(1),
+    );
+
+    const snap = calls.find((c) => c.url.endsWith("/snapshot"))!;
+    expect((snap.body as { version: number }).version).toBe(
+      BOOTSTRAP.version + 150,
+    );
+
+    conn.close();
+  });
+
+  it("does not fire below the threshold", async () => {
+    const el = makeEl();
+    const { fetchMock, calls } = makeSnapshotFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await vi.waitFor(() => expect(conn.view).not.toBeNull(), { timeout: 1000 });
+
+    feedSseSteps(MockEventSource.instances[0], BOOTSTRAP.version, 50);
+    vi.advanceTimersByTime(10_000);
+
+    expect(
+      calls.filter((c) => c.url.endsWith("/snapshot")),
+    ).toHaveLength(0);
+
+    conn.close();
+  });
+
+  it("cancels the pending snapshot on close()", async () => {
+    const el = makeEl();
+    const { fetchMock, calls } = makeSnapshotFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await vi.waitFor(() => expect(conn.view).not.toBeNull(), { timeout: 1000 });
+
+    feedSseSteps(MockEventSource.instances[0], BOOTSTRAP.version, 100);
+    // Pending timer scheduled but not fired.
+    vi.advanceTimersByTime(2000);
+    conn.close();
+    vi.advanceTimersByTime(10_000);
+
+    expect(
+      calls.filter((c) => c.url.endsWith("/snapshot")),
+    ).toHaveLength(0);
+  });
+
+  it("re-arms after a successful snapshot: another 100 steps fires another snapshot", async () => {
+    const el = makeEl();
+    const { fetchMock, calls } = makeSnapshotFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await vi.waitFor(() => expect(conn.view).not.toBeNull(), { timeout: 1000 });
+
+    feedSseSteps(MockEventSource.instances[0], BOOTSTRAP.version, 100);
+    vi.advanceTimersByTime(5000);
+    await vi.waitFor(() =>
+      expect(
+        calls.filter((c) => c.url.endsWith("/snapshot")),
+      ).toHaveLength(1),
+    );
+
+    // Drive another 100 steps. The threshold check measures from
+    // lastSnapshotVersion, so this should arm a second timer.
+    feedSseSteps(MockEventSource.instances[0], BOOTSTRAP.version + 100, 100);
+    vi.advanceTimersByTime(5000);
+    await vi.waitFor(() =>
+      expect(
+        calls.filter((c) => c.url.endsWith("/snapshot")),
+      ).toHaveLength(2),
+    );
+
+    const second = calls.filter((c) => c.url.endsWith("/snapshot"))[1];
+    expect((second.body as { version: number }).version).toBe(
+      BOOTSTRAP.version + 200,
+    );
+
+    conn.close();
+  });
+
+  it("does not fire after a step error (editor is locked, doc is desynced)", async () => {
+    const el = makeEl();
+    const { fetchMock, calls } = makeSnapshotFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await vi.waitFor(() => expect(conn.view).not.toBeNull(), { timeout: 1000 });
+
+    // Trigger an SSE step error (bare-text into doc level).
+    MockEventSource.instances[0].dispatchEvent(
+      "update",
+      JSON.stringify({
+        version: BOOTSTRAP.version + 1,
+        steps: [
+          {
+            stepType: "replace",
+            from: 0,
+            to: 0,
+            slice: { content: [{ type: "text", text: "x" }] },
+          },
+        ],
+        clientIDs: [99999],
+      }),
+    );
+
+    // Even if we somehow continued to receive valid steps after the
+    // error, the snapshot scheduler stays off because `stepError` is set.
+    feedSseSteps(MockEventSource.instances[0], BOOTSTRAP.version, 100);
+    vi.advanceTimersByTime(10_000);
+
+    expect(
+      calls.filter((c) => c.url.endsWith("/snapshot")),
+    ).toHaveLength(0);
+
+    conn.close();
+  });
+});

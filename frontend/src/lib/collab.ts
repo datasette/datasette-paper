@@ -470,6 +470,15 @@ export class EditorConnection {
   // short-circuits SSE step application until a refresh re-bootstraps.
   private stepError: StepApplyError | null = null;
 
+  // Version at which we last saved a snapshot (seeded from the bootstrap;
+  // updated after each successful POST /snapshot). Used by the
+  // auto-snapshot timer to decide when the local doc has drifted far
+  // enough from the persisted snapshot to be worth saving.
+  private lastSnapshotVersion: number = 0;
+  // Pending auto-snapshot timer. Debounced so a typing burst doesn't fire
+  // multiple snapshots; cleared on close.
+  private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(opts: ConnectionOpts, report?: Reporter) {
     this.opts = opts;
     this.report = report ?? new Reporter();
@@ -522,6 +531,11 @@ export class EditorConnection {
 
   private _loaded(boot: BootstrapData): void {
     this.selfActor = boot.selfActor ?? null;
+    // Seed the snapshot-version baseline from the server's last
+    // persisted snapshot. If the bootstrap has no snapshot field
+    // (server is at version 0 or the field is missing), default to 0
+    // so the threshold check fires once we accumulate enough steps.
+    this.lastSnapshotVersion = boot.snapshotVersion ?? 0;
     // Build head doc by applying all steps from the bootstrap. Stop at
     // the first failure: a bad step poisons every subsequent position.
     //
@@ -830,6 +844,11 @@ export class EditorConnection {
     ) {
       this._send();
     }
+
+    // Doc may have advanced (either locally via dispatch or remotely via
+    // receiveTransaction routed through dispatch). Snapshot the doc once
+    // we've drifted far enough from the last persisted snapshot.
+    this.maybeScheduleSnapshot();
   }
 
   // ── Send ──────────────────────────────────────────────────────────────────
@@ -994,6 +1013,10 @@ export class EditorConnection {
   close(): void {
     this.comm = "detached";
     this.closeStream();
+    if (this.snapshotTimer !== null) {
+      clearTimeout(this.snapshotTimer);
+      this.snapshotTimer = null;
+    }
     if (this.view) {
       this.view.destroy();
       this.view = null;
@@ -1004,8 +1027,50 @@ export class EditorConnection {
   // ── Snapshot ─────────────────────────────────────────────────────────────
 
   /**
+   * Steps since the last snapshot at or above this count → schedule one.
+   * Mirrors the server's `SNAPSHOT_THRESHOLD = 100` in `instance.py` so
+   * client + server agree on the same horizon and cold-start replay
+   * never has to apply more than ~threshold steps.
+   */
+  static readonly SNAPSHOT_STEP_THRESHOLD = 100;
+  /**
+   * Debounce window before the actual POST fires. A typing burst can
+   * blow past the threshold in seconds; waiting a few seconds before
+   * snapshotting avoids back-to-back POSTs with stale payloads.
+   */
+  static readonly SNAPSHOT_DEBOUNCE_MS = 5000;
+
+  /**
+   * Called after every local dispatch or accepted SSE update to check
+   * whether the doc has drifted far enough from the last snapshot to
+   * warrant a fresh one. Debounced — repeated calls just push the
+   * scheduled fire-time forward.
+   */
+  private maybeScheduleSnapshot(): void {
+    if (!this.view || this.stepError || this.comm === "detached") return;
+    const version = getVersion(this.view.state);
+    if (
+      version - this.lastSnapshotVersion <
+      EditorConnection.SNAPSHOT_STEP_THRESHOLD
+    ) {
+      return;
+    }
+    if (this.snapshotTimer !== null) clearTimeout(this.snapshotTimer);
+    this.snapshotTimer = setTimeout(() => {
+      this.snapshotTimer = null;
+      // Fire-and-forget; failures are non-fatal (a later schedule will
+      // retry once another threshold's worth of steps lands).
+      void this.snapshot();
+    }, EditorConnection.SNAPSHOT_DEBOUNCE_MS);
+  }
+
+  /**
    * Persist a snapshot to the server.
-   * Call on a timer or from `beforeunload`.
+   *
+   * Called by the debounced threshold trigger (`maybeScheduleSnapshot`)
+   * and exposed publicly for tests / future `beforeunload` wiring.
+   * Updates `lastSnapshotVersion` on success so subsequent threshold
+   * checks measure from the freshly saved version.
    */
   async snapshot(): Promise<void> {
     if (!this.view) return;
@@ -1015,13 +1080,17 @@ export class EditorConnection {
     if (this.opts.csrfToken) {
       headers["X-CSRFToken"] = this.opts.csrfToken;
     }
-    await fetch(this.apiUrl("/snapshot"), {
+    const version = getVersion(this.view.state);
+    const resp = await fetch(this.apiUrl("/snapshot"), {
       method: "POST",
       headers,
       body: JSON.stringify({
-        version: getVersion(this.view.state),
+        version,
         doc: this.view.state.doc.toJSON(),
       }),
     });
+    if (resp.ok) {
+      this.lastSnapshotVersion = version;
+    }
   }
 }
