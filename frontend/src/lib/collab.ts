@@ -474,6 +474,83 @@ function consumeTabInList(inner: Command): Command {
 }
 
 /**
+ * Move the current `list_item` / `task_item` up or down within its
+ * parent list. Bound to `Alt-ArrowUp` / `Alt-ArrowDown`.
+ *
+ * Algorithm: walk up from the cursor's depth to find the nearest
+ * list-item-ish ancestor, find its sibling index in the parent list,
+ * and swap with the neighbour by replacing the two-item range with the
+ * reversed pair. Cursor position is preserved relative to the moved
+ * item's start, so the user keeps their place inside the moved item.
+ *
+ * Boundaries (first item + Up, last item + Down) return `false` so the
+ * key falls through to the browser's default arrow behaviour — caret
+ * moves out of the list rather than being silently swallowed.
+ *
+ * Multi-block selection is unsupported (returns `false`); the swap
+ * would have to track and translate multiple ranges, which the issue
+ * scope doesn't call for.
+ */
+function moveListItemCommand(direction: -1 | 1): Command {
+  return (state, dispatch) => {
+    const { $from, empty } = state.selection;
+    let itemDepth = -1;
+    for (let d = $from.depth; d > 0; d--) {
+      const t = $from.node(d).type;
+      if (t === schema.nodes.list_item || t === schema.nodes.task_item) {
+        itemDepth = d;
+        break;
+      }
+    }
+    // Not inside a list — fall through so the editor's other Alt+Arrow
+    // bindings (example-setup's joinUp / joinDown) get a turn.
+    if (itemDepth < 0) return false;
+
+    // Inside a list but the selection isn't collapsed: swallow the
+    // keystroke without moving anything. The fallback joinDown/joinUp
+    // would merge items in this case, which is a confusing UX for what
+    // the user thinks of as a "move" gesture.
+    if (!empty) return true;
+
+    const parent = $from.node(itemDepth - 1);
+    const index = $from.index(itemDepth - 1);
+    const targetIndex = index + direction;
+    // At the boundary, swallow as well — joinUp would happily merge the
+    // first list item into a block above the list, which isn't what
+    // "move up" means to the user.
+    if (targetIndex < 0 || targetIndex >= parent.childCount) return true;
+
+    if (!dispatch) return true;
+
+    const item = $from.node(itemDepth);
+    const itemStart = $from.before(itemDepth);
+    const itemEnd = itemStart + item.nodeSize;
+    // Offset of the cursor relative to the moved item's start position.
+    // Preserved across the swap so the caret keeps its place inside the
+    // moved content (works for any depth — nested paragraph, sublist
+    // headings, etc., since the item's internal layout is unchanged).
+    const cursorOffset = $from.pos - itemStart;
+
+    let tr;
+    let newCursor;
+    if (direction === -1) {
+      const prevItem = parent.child(index - 1);
+      const prevStart = itemStart - prevItem.nodeSize;
+      tr = state.tr.replaceWith(prevStart, itemEnd, [item, prevItem]);
+      newCursor = prevStart + cursorOffset;
+    } else {
+      const nextItem = parent.child(index + 1);
+      const nextEnd = itemEnd + nextItem.nodeSize;
+      tr = state.tr.replaceWith(itemStart, nextEnd, [nextItem, item]);
+      newCursor = itemStart + nextItem.nodeSize + cursorOffset;
+    }
+    tr = tr.setSelection(TextSelection.create(tr.doc, newCursor));
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
+}
+
+/**
  * Mod-K link toggle. With a non-empty selection: if it's already linked,
  * remove the mark; otherwise prompt() for a URL and apply. Empty selection
  * is a no-op so the user doesn't get a prompt while just navigating.
@@ -803,6 +880,11 @@ export class EditorConnection {
         keymap({
           "Mod-k": toggleLinkCommand(),
           "Mod-Shift-7": wrapInList(schema.nodes.task_list),
+          // Move the cursor's enclosing list_item / task_item up or
+          // down within its parent list. Falls through at boundaries
+          // so Opt+Arrow still moves the caret out of the list.
+          "Alt-ArrowUp": moveListItemCommand(-1),
+          "Alt-ArrowDown": moveListItemCommand(1),
           // Enter handlers, tried in order:
           //   1. Escape a code_block at the end of the doc on the second Enter.
           //   2. Inside a task_item, split into a fresh unchecked item.

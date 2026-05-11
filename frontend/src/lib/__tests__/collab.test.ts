@@ -1780,6 +1780,311 @@ describe("Tab indent in lists", () => {
   });
 });
 
+// ─── Test: Alt-ArrowUp / Alt-ArrowDown moves list items ────────────────────
+
+describe("Alt-ArrowUp / Alt-ArrowDown move list items", () => {
+  /** Drive the Alt-ArrowUp / Alt-ArrowDown keymap binding. Returns
+   *  whether the keymap handled the event — `false` means the key
+   *  fell through (e.g. at a list boundary or outside any list). */
+  function moveCommand(
+    view: EditorView,
+    key: "Alt-ArrowUp" | "Alt-ArrowDown",
+  ): boolean {
+    const evt = new KeyboardEvent("keydown", {
+      key: key === "Alt-ArrowUp" ? "ArrowUp" : "ArrowDown",
+      altKey: true,
+    });
+    return Boolean(
+      view.someProp("handleKeyDown", (fn) => fn(view, evt)),
+    );
+  }
+
+  /** Build a bullet_list with the given item paragraph contents and
+   *  replace the bootstrap doc. Returns the view + helper positions. */
+  function setupBulletList(view: EditorView, items: string[]): void {
+    const list = schema.nodes.bullet_list.create(
+      null,
+      items.map((text) =>
+        schema.nodes.list_item.create(
+          null,
+          schema.nodes.paragraph.create(null, schema.text(text)),
+        ),
+      ),
+    );
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, list),
+    );
+  }
+
+  /** Read off the textContent of each top-level list item in order. */
+  function listTexts(view: EditorView): string[] {
+    const list = view.state.doc.firstChild!;
+    const out: string[] = [];
+    list.forEach((item) => out.push(item.textContent));
+    return out;
+  }
+
+  it("Alt-ArrowDown on the first item swaps it with the second", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    setupBulletList(view, ["alpha", "beta", "gamma"]);
+
+    // Cursor at position 4 — inside "alpha", between 'a' and 'l'.
+    // Doc layout: bullet_list at 0..; list_item A at 1..10; paragraph
+    // at 2..9; "alpha" content from 3..8. Position 4 = between 'a' and
+    // 'l'. (Exact offset isn't load-bearing; we just verify it follows
+    // the moved item.)
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 4)),
+    );
+
+    const handled = moveCommand(view, "Alt-ArrowDown");
+    expect(handled).toBe(true);
+
+    expect(listTexts(view)).toEqual(["beta", "alpha", "gamma"]);
+    // Cursor still inside "alpha" at the same intra-item offset.
+    const { $from } = view.state.selection;
+    expect($from.parent.textContent).toBe("alpha");
+    expect($from.parentOffset).toBe(1);
+
+    conn.close();
+  });
+
+  it("Alt-ArrowUp on the second item swaps it with the first", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    setupBulletList(view, ["alpha", "beta", "gamma"]);
+
+    // Cursor inside "beta" — list_item B starts at 10 (after list_item
+    // A's nodeSize=9, plus the bullet_list open token at 1).
+    // bullet_list at 0..21, list_item B at 10..19, paragraph at 11..18,
+    // "beta" content from 12..16. Position 13 = between 'b' and 'e'.
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 13)),
+    );
+
+    const handled = moveCommand(view, "Alt-ArrowUp");
+    expect(handled).toBe(true);
+
+    expect(listTexts(view)).toEqual(["beta", "alpha", "gamma"]);
+    const { $from } = view.state.selection;
+    expect($from.parent.textContent).toBe("beta");
+    expect($from.parentOffset).toBe(1);
+
+    conn.close();
+  });
+
+  it("Alt-ArrowUp on the first item is a no-op (list unchanged, swallowed)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    setupBulletList(view, ["alpha", "beta"]);
+
+    // Cursor inside "alpha".
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 4)),
+    );
+
+    // At the boundary the command swallows the key (returns true) to
+    // keep example-setup's joinUp from merging the first item into the
+    // block above the list — what matters for the user is that the list
+    // contents are unchanged.
+    moveCommand(view, "Alt-ArrowUp");
+    expect(listTexts(view)).toEqual(["alpha", "beta"]);
+
+    conn.close();
+  });
+
+  it("Alt-ArrowDown on the last item is a no-op (list unchanged, swallowed)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    setupBulletList(view, ["alpha", "beta"]);
+
+    // Cursor inside "beta" (last item).
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 13)),
+    );
+
+    moveCommand(view, "Alt-ArrowDown");
+    expect(listTexts(view)).toEqual(["alpha", "beta"]);
+
+    conn.close();
+  });
+
+  it("Alt-ArrowDown works on task_items inside a task_list", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const list = schema.nodes.task_list.create(null, [
+      schema.nodes.task_item.create(
+        { checked: false },
+        schema.nodes.paragraph.create(null, schema.text("one")),
+      ),
+      schema.nodes.task_item.create(
+        { checked: true },
+        schema.nodes.paragraph.create(null, schema.text("two")),
+      ),
+    ]);
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, list),
+    );
+
+    // Cursor inside "one" (first task item).
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 4)),
+    );
+
+    const handled = moveCommand(view, "Alt-ArrowDown");
+    expect(handled).toBe(true);
+
+    // Items swapped — and the `checked` attr travels with each item.
+    const taskList = view.state.doc.firstChild!;
+    const first = taskList.child(0);
+    const second = taskList.child(1);
+    expect(first.textContent).toBe("two");
+    expect(first.attrs.checked).toBe(true);
+    expect(second.textContent).toBe("one");
+    expect(second.attrs.checked).toBe(false);
+
+    conn.close();
+  });
+
+  it("Alt-ArrowUp on a paragraph outside any list falls through to the default binding", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Bootstrap doc already has a top-level paragraph "Hello". The
+    // command should leave that paragraph alone (no list to reorder).
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 3)),
+    );
+
+    moveCommand(view, "Alt-ArrowUp");
+    // Doc structure intact — one paragraph, content unchanged.
+    expect(view.state.doc.childCount).toBe(1);
+    expect(view.state.doc.firstChild!.type).toBe(schema.nodes.paragraph);
+    expect(view.state.doc.firstChild!.textContent).toBe("Hello");
+
+    conn.close();
+  });
+
+  it("a non-empty selection skips the swap (list contents unchanged)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    setupBulletList(view, ["alpha", "beta"]);
+
+    // Select a range inside "alpha".
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 4, 6)),
+    );
+
+    // Note: someProp may still report `true` because example-setup's
+    // buildKeymap binds Alt-ArrowDown to `joinDown`, which can claim the
+    // event on a selection. What matters here is that *our* move command
+    // returned false (no list swap happened); joinDown is a no-op for a
+    // same-block selection so list contents are untouched either way.
+    moveCommand(view, "Alt-ArrowDown");
+    expect(listTexts(view)).toEqual(["alpha", "beta"]);
+
+    conn.close();
+  });
+
+  it("nested list: Alt-ArrowDown on a sublist item swaps within the inner list only", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Outer bullet_list with one item that contains a paragraph + a
+    // nested bullet_list of [x, y]; then a sibling outer item "z".
+    const inner = schema.nodes.bullet_list.create(null, [
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("x")),
+      ),
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("y")),
+      ),
+    ]);
+    const outerA = schema.nodes.list_item.create(null, [
+      schema.nodes.paragraph.create(null, schema.text("a")),
+      inner,
+    ]);
+    const outerZ = schema.nodes.list_item.create(
+      null,
+      schema.nodes.paragraph.create(null, schema.text("z")),
+    );
+    const root = schema.nodes.bullet_list.create(null, [outerA, outerZ]);
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, root),
+    );
+
+    // Walk the rendered doc and find the position of "x".
+    let xParaPos = -1;
+    view.state.doc.descendants((node, pos) => {
+      if (node.isText && node.text === "x") xParaPos = pos;
+    });
+    expect(xParaPos).toBeGreaterThan(0);
+
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, xParaPos + 1),
+      ),
+    );
+
+    const handled = moveCommand(view, "Alt-ArrowDown");
+    expect(handled).toBe(true);
+
+    // Outer list unchanged: still [outerA, outerZ].
+    const outer = view.state.doc.firstChild!;
+    expect(outer.childCount).toBe(2);
+    expect(outer.child(0).firstChild!.textContent).toBe("a");
+    expect(outer.child(1).firstChild!.textContent).toBe("z");
+    // Inner list: x and y swapped.
+    const innerList = outer.child(0).child(1);
+    expect(innerList.type).toBe(schema.nodes.bullet_list);
+    expect(innerList.child(0).textContent).toBe("y");
+    expect(innerList.child(1).textContent).toBe("x");
+
+    conn.close();
+  });
+});
+
 // ─── Test: setEditable / view mode ──────────────────────────────────────────
 
 describe("setEditable (view mode)", () => {
