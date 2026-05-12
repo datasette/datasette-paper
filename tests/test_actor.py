@@ -105,6 +105,8 @@ async def test_step_records_actor(ds_paper):
 
 @pytest.mark.asyncio
 async def test_snapshot_records_actor(ds_paper):
+    from _steps import insert_at  # noqa: E402  (sibling helper)
+
     ds, paper_db = ds_paper
     cookies = _alice_cookie(ds)
 
@@ -115,27 +117,24 @@ async def test_snapshot_records_actor(ds_paper):
     )
     doc_id = create.json()["id"]
 
-    # Pad the step log past the threshold so the next snapshot POST persists.
-    for _i in range(100):
-        await paper_db.insert_step(
-            doc_id=doc_id,
-            client_id=1,
-            actor_id="alice",
-            step_json='{"stepType":"replace"}',
+    # Drive the doc past the snapshot threshold via real steps so the
+    # server can materialize when /snapshot fires (the endpoint refuses
+    # to write a snapshot when materialization is poisoned).
+    events_url = f"/-/paper/api/docs/{doc_id}/events"
+    for i in range(100):
+        resp = await ds.client.post(
+            events_url,
+            json={"version": i, "clientID": 1, "steps": [insert_at(1, "x")]},
+            cookies=cookies,
         )
-
-    registry = get_registry(ds)
-    registry._instances.pop(doc_id, None)
+        assert resp.status_code == 200
 
     snap_resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/snapshot",
-        json={
-            "version": 100,
-            "doc": {"type": "doc", "content": [{"type": "paragraph"}]},
-        },
+        json={},
         cookies=cookies,
     )
-    assert snap_resp.status_code == 204
+    assert snap_resp.status_code == 200
 
     rows = await paper_db.database.execute(
         "SELECT actor_id, version FROM _datasette_paper_snapshot WHERE doc_id = ?",

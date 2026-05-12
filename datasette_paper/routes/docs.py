@@ -577,21 +577,35 @@ async def restore_doc_route(datasette, request, doc_id: int):
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/snapshot$")
 async def post_snapshot(datasette, request, doc_id: int):
+    """Trigger a server-side snapshot at the current version.
+
+    Request body is ignored. Earlier versions of this endpoint accepted
+    ``{version, doc}`` from the client, but ``prosemirror-collab``'s
+    ``getVersion(state)`` returns the *confirmed* version while
+    ``state.doc`` includes locally-dispatched unconfirmed steps — they
+    were inconsistent during any in-flight POST /events, which let
+    corrupt snapshots land and wedge future hydrates. The server
+    materializes its own doc instead.
+    """
     await ensure_paper_edit(datasette, request, doc_id)
     db = paper_db(datasette)
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
 
-    body = await read_json_body(request)
-    version = int(body["version"])
-    doc_json_str = json.dumps(body["doc"])
-
     registry = get_registry(datasette)
     instance = await registry.get(db, doc_id)
-    await instance.record_client_doc(version, doc_json_str, actor_id=actor_id(request))
-
-    return Response("", status=204)
+    materialized = instance.materialize_live_doc()
+    if instance._materialization_error is not None:
+        bad_version, bad_msg = instance._materialization_error
+        return Response.json(
+            {"error": f"history poisoned at version {bad_version}: {bad_msg}"},
+            status=409,
+        )
+    await instance.record_client_doc(
+        instance.version, json.dumps(materialized), actor_id=actor_id(request)
+    )
+    return Response.json({"version": instance.snapshot_version})
 
 
 # ---------------------------------------------------------------------------

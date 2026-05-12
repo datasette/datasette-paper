@@ -96,13 +96,10 @@ async def test_full_grant_unblocks_full_owner_path():
 
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/snapshot",
-        json={
-            "version": 0,
-            "doc": {"type": "doc", "content": [{"type": "paragraph"}]},
-        },
+        json={},
         cookies=cookies,
     )
-    assert r.status_code == 204
+    assert r.status_code == 200
 
     r = await ds.client.get("/-/paper/", cookies=cookies)
     assert r.status_code == 200

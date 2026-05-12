@@ -205,6 +205,9 @@ async def test_bootstrap_with_snapshot(ds_paper):
 
 @pytest.mark.asyncio
 async def test_snapshot_endpoint_writes_row(ds_paper):
+    """POST /snapshot is a server-side trigger — body is ignored, the
+    server materializes its own doc at instance.version and writes that.
+    """
     ds, paper_db = ds_paper
 
     create_resp = await ds.client.post(
@@ -213,29 +216,88 @@ async def test_snapshot_endpoint_writes_row(ds_paper):
     assert create_resp.status_code == 201
     doc_id = create_resp.json()["id"]
 
-    step_data = json.dumps({"stepType": "replace", "from": 1, "to": 1, "slice": {}})
+    # Drive the doc to version 100 via the events endpoint so step
+    # versions, doc.current_version, and the in-memory Instance all stay
+    # coherent (raw paper_db.insert_step bypasses the version bump).
+    events_url = f"/-/paper/api/docs/{doc_id}/events"
+    from _steps import insert_at  # noqa: E402  (sibling helper)
+
     for i in range(100):
-        await paper_db.insert_step(
-            doc_id=doc_id,
-            client_id=400,
-            step_json=step_data,
+        resp = await ds.client.post(
+            events_url,
+            json={"version": i, "clientID": 400, "steps": [insert_at(1, "x")]},
         )
+        assert resp.status_code == 200
 
-    from datasette_paper.instance import get_registry
-
-    registry = get_registry(ds)
-    registry._instances.pop(doc_id, None)
-
-    snapshot_doc = {"type": "doc", "content": [{"type": "paragraph"}]}
-    response = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/snapshot",
-        json={"version": 100, "doc": snapshot_doc},
-    )
-    assert response.status_code == 204
+    response = await ds.client.post(f"/-/paper/api/docs/{doc_id}/snapshot", json={})
+    assert response.status_code == 200
+    assert response.json() == {"version": 100}
 
     snapshot = await paper_db.select_latest_snapshot(doc_id=doc_id)
     assert snapshot is not None
     assert snapshot.version == 100
+
+
+@pytest.mark.asyncio
+async def test_snapshot_endpoint_below_threshold_no_write(ds_paper):
+    """When version - last_snapshot < SNAPSHOT_THRESHOLD, no new row is
+    written. The 200 response still reports the current snapshot version
+    so the client can refresh its threshold baseline."""
+    ds, paper_db = ds_paper
+
+    create_resp = await ds.client.post(
+        "/-/paper/api/docs", json={"name": "Below Threshold"}
+    )
+    doc_id = create_resp.json()["id"]
+
+    response = await ds.client.post(f"/-/paper/api/docs/{doc_id}/snapshot", json={})
+    assert response.status_code == 200
+    assert response.json() == {"version": 0}
+    assert await paper_db.select_latest_snapshot(doc_id=doc_id) is None
+
+
+@pytest.mark.asyncio
+async def test_snapshot_does_not_corrupt_subsequent_materialization(ds_paper):
+    """Regression: after a snapshot lands, the next materialization
+    must apply only steps *after* the new snapshot — not re-apply the
+    ones that are already baked into snapshot_doc_json. Re-applying
+    them on top of the new base used to fail partway with errors like
+    'Structure gap-replace would overwrite content' on the first step
+    whose position math didn't line up against the post-snapshot doc.
+    """
+    from datasette_paper.instance import get_registry
+    from _steps import insert_at  # noqa: E402
+
+    ds, paper_db = ds_paper
+    create_resp = await ds.client.post("/-/paper/api/docs", json={"name": "Trim Tail"})
+    doc_id = create_resp.json()["id"]
+
+    events_url = f"/-/paper/api/docs/{doc_id}/events"
+    for i in range(100):
+        resp = await ds.client.post(
+            events_url,
+            json={"version": i, "clientID": 1, "steps": [insert_at(1, "a")]},
+        )
+        assert resp.status_code == 200
+
+    snap_resp = await ds.client.post(f"/-/paper/api/docs/{doc_id}/snapshot", json={})
+    assert snap_resp.status_code == 200
+
+    # One more step after the snapshot, then re-materialize. If the tail
+    # wasn't trimmed, materialize would replay all 100 pre-snapshot
+    # steps on top of the post-snapshot doc and trip a content-spec
+    # violation before reaching the new step.
+    resp = await ds.client.post(
+        events_url,
+        json={"version": 100, "clientID": 1, "steps": [insert_at(1, "b")]},
+    )
+    assert resp.status_code == 200
+
+    instance = await get_registry(ds).get(paper_db, doc_id)
+    instance._cached_live_doc_json = None
+    instance._cached_live_version = None
+    instance.materialize_live_doc()
+    assert instance._materialization_error is None
 
 
 @pytest.mark.asyncio

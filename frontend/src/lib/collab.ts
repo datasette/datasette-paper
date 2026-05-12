@@ -1373,12 +1373,19 @@ export class EditorConnection {
   }
 
   /**
-   * Persist a snapshot to the server.
+   * Trigger a server-side snapshot.
    *
    * Called by the debounced threshold trigger (`maybeScheduleSnapshot`)
-   * and exposed publicly for tests / future `beforeunload` wiring.
-   * Updates `lastSnapshotVersion` on success so subsequent threshold
-   * checks measure from the freshly saved version.
+   * and exposed publicly for tests / future `beforeunload` wiring. The
+   * server materializes the snapshot from its own state — we used to
+   * send `{version: getVersion(state), doc: state.doc.toJSON()}`, but
+   * `getVersion` is the confirmed version while `state.doc` reflects
+   * unconfirmed steps, and any in-flight POST /events landed a
+   * mismatched pair that corrupted future hydrates.
+   *
+   * `lastSnapshotVersion` is updated from the server's response so the
+   * threshold check measures from the actual stored version, not what
+   * the client thought it asked for.
    */
   async snapshot(): Promise<void> {
     if (!this.view) return;
@@ -1388,17 +1395,18 @@ export class EditorConnection {
     if (this.opts.csrfToken) {
       headers["X-CSRFToken"] = this.opts.csrfToken;
     }
-    const version = getVersion(this.view.state);
     const resp = await fetch(this.apiUrl("/snapshot"), {
       method: "POST",
       headers,
-      body: JSON.stringify({
-        version,
-        doc: this.view.state.doc.toJSON(),
-      }),
+      body: "{}",
     });
     if (resp.ok) {
-      this.lastSnapshotVersion = version;
+      const data = (await resp.json().catch(() => null)) as {
+        version?: number;
+      } | null;
+      if (data && typeof data.version === "number") {
+        this.lastSnapshotVersion = data.version;
+      }
     }
   }
 }

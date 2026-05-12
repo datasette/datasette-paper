@@ -2815,10 +2815,21 @@ describe("auto-snapshot", () => {
   // bootstrap fetch returns the BOOTSTRAP fixture.
   function makeSnapshotFetch() {
     const calls: Array<{ url: string; body: unknown }> = [];
+    let snapshotCallCount = 0;
     const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
       calls.push({ url, body: init?.body ? JSON.parse(init.body as string) : null });
       if (url.endsWith("/snapshot")) {
-        return Promise.resolve({ ok: true, status: 204, json: async () => null });
+        snapshotCallCount++;
+        // The endpoint is a server-side trigger; the body is `{}` and the
+        // response carries the version actually stored. For these tests
+        // we don't know the exact server version, so return a stub that's
+        // monotonic — enough for `lastSnapshotVersion` to track forward.
+        const version = BOOTSTRAP.version + 100 * snapshotCallCount;
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ version }),
+        });
       }
       // The bootstrap GET and any /events POST: treat as a happy bootstrap.
       // Tests in this block don't drive /events sends; they synthesize step
@@ -2892,10 +2903,9 @@ describe("auto-snapshot", () => {
       ).toHaveLength(1),
     );
 
+    // Body is `{}` — the server-side trigger carries no payload.
     const snap = calls.find((c) => c.url.endsWith("/snapshot"))!;
-    const body = snap.body as { version: number; doc: unknown };
-    expect(body.version).toBe(BOOTSTRAP.version + 100);
-    expect(body.doc).toBeDefined();
+    expect(snap.body).toEqual({});
 
     conn.close();
   });
@@ -2920,10 +2930,10 @@ describe("auto-snapshot", () => {
       ).toHaveLength(1),
     );
 
-    const snap = calls.find((c) => c.url.endsWith("/snapshot"))!;
-    expect((snap.body as { version: number }).version).toBe(
-      BOOTSTRAP.version + 150,
-    );
+    // Single snapshot fired — debounce coalesced the two bursts.
+    expect(
+      calls.filter((c) => c.url.endsWith("/snapshot")),
+    ).toHaveLength(1);
 
     conn.close();
   });
@@ -2991,10 +3001,10 @@ describe("auto-snapshot", () => {
       ).toHaveLength(2),
     );
 
-    const second = calls.filter((c) => c.url.endsWith("/snapshot"))[1];
-    expect((second.body as { version: number }).version).toBe(
-      BOOTSTRAP.version + 200,
-    );
+    // Both POSTs carry the empty trigger body.
+    const snapshots = calls.filter((c) => c.url.endsWith("/snapshot"));
+    expect(snapshots[0].body).toEqual({});
+    expect(snapshots[1].body).toEqual({});
 
     conn.close();
   });

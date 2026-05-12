@@ -483,6 +483,19 @@ class Instance:
             )
             self.snapshot_version = version
             self.snapshot_doc_json = doc_json
+            # The tail loaded at hydrate covers steps after the OLD snapshot.
+            # Anything at or below the new snapshot is now baked into
+            # snapshot_doc_json; leaving it in the tail would make the next
+            # materialize re-apply already-applied steps on top of the new
+            # base — same positions, very different doc — and surface as e.g.
+            # "Structure gap-replace would overwrite content" partway through.
+            while self.steps_tail and self.steps_tail[0]["version"] <= version:
+                self.steps_tail.popleft()
+            # Cached live doc + any poisoned-history marker were computed
+            # from the old base; both are stale now.
+            self._cached_live_doc_json = None
+            self._cached_live_version = None
+            self._materialization_error = None
 
 
 class InstanceRegistry:
