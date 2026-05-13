@@ -175,14 +175,15 @@ dev *flags:
             {{flags}}
 
 dev-with-hmr *flags:
-    DATASETTE_PAPER_VITE_PATH=http://localhost:{{DEV_PORT}}/-/static-plugins/datasette_paper/ \
     watchexec \
         --stop-signal SIGKILL \
         -e py,html \
         --ignore '*.db' \
         --restart \
         --clear -- \
-        just dev {{flags}}
+        just dev \
+            -s plugins.datasette-vite.dev_paths.datasette_paper "http://localhost:{{DEV_PORT}}/-/static-plugins/datasette_paper/" \
+            {{flags}}
 
 # Wipe the dev internal DB. Useful when iterating on schema during
 # development (migrations are append-only in production).

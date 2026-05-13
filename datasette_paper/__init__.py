@@ -5,7 +5,6 @@ from .router import router
 from .permissions import PaperResource, permission_resources_sql  # noqa: F401
 from . import routes  # noqa: F401 — triggers decorator registration
 from .routes.events import sse_events
-import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -82,7 +81,6 @@ def extra_template_vars(datasette):
         "datasette_paper_vite_entry": vite_entry(
             datasette=datasette,
             plugin_package="datasette_paper",
-            vite_dev_path=os.environ.get("DATASETTE_PAPER_VITE_PATH"),
         ),
     }
 
