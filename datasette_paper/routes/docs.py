@@ -75,7 +75,9 @@ async def list_docs(datasette, request):
     # PaperResource is single-level — id lives in `parent`, child is None.
     doc_ids = [int(r.parent) for r in page.resources]
     db = paper_db(datasette)
-    rows = await db.list_docs_by_ids_and_states(doc_ids=doc_ids, states=[state])
+    rows = await db.list_docs_by_ids_states_and_kinds(
+        doc_ids=doc_ids, states=[state], kinds=["doc"]
+    )
     actor = request.actor
     me = actor.get("id") if actor else None
     return Response.json(

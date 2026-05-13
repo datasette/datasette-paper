@@ -25,6 +25,8 @@ class Doc:
     archived_at: str | None
     trashed_at: str | None
     delete_at: str | None
+    kind: str
+    locked: int
 
 
 @dataclass
@@ -54,17 +56,22 @@ class Share:
 
 
 def insert_doc(
-    conn: sqlite3.Connection, name: str, created_by: str | None, schema_name: str
+    conn: sqlite3.Connection,
+    name: str,
+    created_by: str | None,
+    schema_name: str,
+    kind: str,
 ) -> Doc | None:
     sql = """\
-INSERT INTO _datasette_paper_doc (name, created_by, schema_name)
-VALUES ($name::text, $created_by::text::, $schema_name::text)
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;
+INSERT INTO _datasette_paper_doc (name, created_by, schema_name, kind)
+VALUES ($name::text, $created_by::text::, $schema_name::text, $kind::text)
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;
 """
     params = {
         "name::text": name,
         "created_by::text::": created_by,
         "schema_name::text": schema_name,
+        "kind::text": kind,
     }
     cursor = conn.execute(sql, params)
     row = cursor.fetchone()
@@ -77,7 +84,7 @@ UPDATE _datasette_paper_doc
 SET name = $name::text,
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id = $doc_id::integer
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;
 """
     params = {"name::text": name, "doc_id::integer": doc_id}
     cursor = conn.execute(sql, params)
@@ -87,7 +94,7 @@ RETURNING id, name, created_at, updated_at, created_by, schema_name, current_ver
 
 def select_doc_by_id(conn: sqlite3.Connection, doc_id: int) -> Doc | None:
     sql = """\
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE id = $doc_id::integer;
 """
@@ -99,7 +106,7 @@ WHERE id = $doc_id::integer;
 
 def list_docs(conn: sqlite3.Connection) -> list[Doc]:
     sql = """\
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 ORDER BY created_at;
 """
@@ -108,11 +115,11 @@ ORDER BY created_at;
     return [Doc(*row) for row in cursor.fetchall()]
 
 
-def list_docs_by_ids_and_states(
-    conn: sqlite3.Connection, doc_ids_json: str, states_json: str
+def list_docs_by_ids_states_and_kinds(
+    conn: sqlite3.Connection, doc_ids_json: str, states_json: str, kinds_json: str
 ) -> list[Doc]:
     sql = """\
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
@@ -120,9 +127,16 @@ WHERE id IN (
   AND state IN (
     SELECT value FROM json_each($states_json::text)
 )
+  AND kind IN (
+    SELECT value FROM json_each($kinds_json::text)
+)
 ORDER BY updated_at DESC;
 """
-    params = {"doc_ids_json::text": doc_ids_json, "states_json::text": states_json}
+    params = {
+        "doc_ids_json::text": doc_ids_json,
+        "states_json::text": states_json,
+        "kinds_json::text": kinds_json,
+    }
     cursor = conn.execute(sql, params)
     return [Doc(*row) for row in cursor.fetchall()]
 
@@ -184,7 +198,7 @@ WHERE id = $doc_id::integer;
 
 def list_trashed_to_delete(conn: sqlite3.Connection, now: str) -> list[Doc]:
     sql = """\
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE state = 'trashed'
   AND delete_at IS NOT NULL
@@ -194,6 +208,30 @@ ORDER BY delete_at;
     params = {"now::text": now}
     cursor = conn.execute(sql, params)
     return [Doc(*row) for row in cursor.fetchall()]
+
+
+def set_doc_kind(conn: sqlite3.Connection, kind: str, doc_id: int) -> None:
+    sql = """\
+UPDATE _datasette_paper_doc
+SET kind = $kind::text,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE id = $doc_id::integer;
+"""
+    params = {"kind::text": kind, "doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def set_doc_locked(conn: sqlite3.Connection, locked: int, doc_id: int) -> None:
+    sql = """\
+UPDATE _datasette_paper_doc
+SET locked = $locked::integer,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE id = $doc_id::integer;
+"""
+    params = {"locked::integer": locked, "doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
 
 
 def delete_steps_for_doc(conn: sqlite3.Connection, doc_id: int) -> None:

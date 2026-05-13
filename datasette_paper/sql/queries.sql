@@ -29,24 +29,24 @@
 -- ============================================================================
 
 -- name: insertDoc :row -> Doc
-INSERT INTO _datasette_paper_doc (name, created_by, schema_name)
-VALUES ($name::text, $created_by::text::, $schema_name::text)
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;
+INSERT INTO _datasette_paper_doc (name, created_by, schema_name, kind)
+VALUES ($name::text, $created_by::text::, $schema_name::text, $kind::text)
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;
 
 -- name: updateDocName :row -> Doc
 UPDATE _datasette_paper_doc
 SET name = $name::text,
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id = $doc_id::integer
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;
 
 -- name: selectDocById :row -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE id = $doc_id::integer;
 
 -- name: listDocs :rows -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 ORDER BY created_at;
 
@@ -54,15 +54,21 @@ ORDER BY created_at;
 -- strings (db.py uses ``json.dumps(...)``); ``json_each`` unpacks them.
 -- Empty list collapses to no rows naturally — no special case needed.
 -- ``$states_json`` is a JSON array of strings drawn from the same set as
--- the CHECK constraint, e.g. ``["active"]`` or ``["archived","trashed"]``.
--- name: listDocsByIdsAndStates :rows -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+-- the state CHECK constraint, e.g. ``["active"]`` or
+-- ``["archived","trashed"]``. ``$kinds_json`` similarly filters by the
+-- kind CHECK set (e.g. ``["doc"]`` for the default index listing or
+-- ``["template"]`` for the templates tab).
+-- name: listDocsByIdsStatesAndKinds :rows -> Doc
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
 )
   AND state IN (
     SELECT value FROM json_each($states_json::text)
+)
+  AND kind IN (
+    SELECT value FROM json_each($kinds_json::text)
 )
 ORDER BY updated_at DESC;
 
@@ -114,12 +120,32 @@ WHERE id = $doc_id::integer;
 -- as an ISO-8601 UTC string in the same format strftime emits, so
 -- string comparison matches chronological order.
 -- name: listTrashedToDelete :rows -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE state = 'trashed'
   AND delete_at IS NOT NULL
   AND delete_at < $now::text
 ORDER BY delete_at;
+
+-- ============================================================================
+-- Template + lock toggles
+--
+-- Owner-only — enforced inline in the route handler, same pattern as
+-- archive/trash. Each is a single-row UPDATE keyed on id; the route
+-- refetches via selectDocById for the response and any SSE broadcast.
+-- ============================================================================
+
+-- name: setDocKind
+UPDATE _datasette_paper_doc
+SET kind = $kind::text,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE id = $doc_id::integer;
+
+-- name: setDocLocked
+UPDATE _datasette_paper_doc
+SET locked = $locked::integer,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+WHERE id = $doc_id::integer;
 
 -- ``hardDeleteDoc`` deletes from each child table explicitly because
 -- SQLite only honors ON DELETE CASCADE when ``PRAGMA foreign_keys = ON``
