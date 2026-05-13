@@ -71,10 +71,16 @@ async def sse_events(datasette, request, send, receive):
         await _send_status(send, 400, b"Invalid version")
         return
 
-    # Check if version is too old (will raise GoneError) before opening SSE.
-    # We only need to call get_events here for validation / backlog retrieval.
+    # Subscribe + snapshot the backlog atomically under the instance
+    # write lock. Doing this in one operation closes the race where an
+    # ``add_events`` could fire between a separate get_events / subscribe
+    # call and leave this client one version behind indefinitely.
     try:
-        backlog = instance.get_events(version)
+        queue, backlog = await instance.subscribe_with_backlog(
+            since_version=version,
+            client_id=client_id,
+            actor_id=actor_id(request),
+        )
     except (GoneError, BadVersionError) as exc:
         if isinstance(exc, GoneError):
             await _send_status(send, 410, b"History gone")
@@ -95,7 +101,11 @@ async def sse_events(datasette, request, send, receive):
         }
     )
 
-    # Flush any backlog immediately before subscribing so no events are lost.
+    # Flush any backlog before reading from the queue. The backlog
+    # covers versions up to instance.version as observed at subscribe
+    # time; any later ``add_events`` enqueued to ``queue`` for us, so
+    # the order on the wire is (backlog, then live broadcasts) with no
+    # overlap.
     if backlog is not None:
         await send(
             {
@@ -104,11 +114,6 @@ async def sse_events(datasette, request, send, receive):
                 "more_body": True,
             }
         )
-
-    queue = await instance.subscribe(
-        client_id=client_id,
-        actor_id=actor_id(request),
-    )
 
     # Send the current presence snapshot once so the new subscriber sees
     # everyone already on the doc.

@@ -1,10 +1,19 @@
-export type ReporterState = "ok" | "delay" | "fail";
+export type ReporterState = "ok" | "delay" | "fail" | "offline";
 
 export type ReporterListener = (state: ReporterState, message: string) => void;
 
 /**
  * Reporter tracks the connection status and notifies subscribers.
  * Framework-agnostic: no Svelte imports. The Svelte UI subscribes via `subscribe()`.
+ *
+ * State precedence (highest wins):
+ *   offline > fail > delay > ok
+ *
+ * ``offline`` is set by the connection layer when the browser fires
+ * the ``offline`` window event; cleared via ``success()`` on
+ * ``online`` *after* the SSE stream reopens. While offline, transient
+ * ``delay`` / ``fail`` from the inevitable POST/SSE failures don't
+ * flap the banner — the user already knows.
  */
 export class Reporter {
   state: ReporterState = "ok";
@@ -41,15 +50,26 @@ export class Reporter {
   }
 
   failure(err: Error | string) {
+    // Don't overwrite "offline" with a downstream fetch failure that's
+    // a consequence of being offline — the offline banner is more
+    // actionable than e.g. "Send failed: 0".
+    if (this.state === "offline") return;
     this.show("fail", err instanceof Error ? err.message : String(err));
   }
 
   delay(err: Error | string) {
-    if (this.state === "fail") return;
+    if (this.state === "fail" || this.state === "offline") return;
     this.show("delay", err instanceof Error ? err.message : String(err));
   }
 
-  private show(type: "fail" | "delay", message: string) {
+  offline() {
+    this.show(
+      "offline",
+      "You're offline. Your changes will sync when you reconnect.",
+    );
+  }
+
+  private show(type: "fail" | "delay" | "offline", message: string) {
     this.state = type;
     this.message = message;
     this.setAt = Date.now();

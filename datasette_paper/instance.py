@@ -6,13 +6,20 @@ Per-doc lifecycle:
       → select_latest_snapshot + select_steps_after  (steps_tail, MAX_TAIL=10000)
       → version = snapshot_version + len(steps_after)
     add_events(version, client_id, actor_id, steps)
+      → acquire ``_write_lock`` (serializes the whole pipeline against
+        concurrent add_events / subscribe-backlog on this instance)
       → validate version (BadVersion / Conflict)
       → json.dumps each step (TEXT column)
+      → validate steps against the live doc (raises InvalidStepError)
       → insert_step in one execute_write_fn txn (atomic)
       → append to steps_tail
       → broadcast {kind:"update", steps[parsed], clientIDs, users}
         (skips the originator's clientID — they self-confirmed via POST 200)
     get_events(since_version) — backlog slice for SSE replay; raises GoneError
+    subscribe_with_backlog(since_version, client_id, actor_id) —
+        atomically subscribes and snapshots the backlog under the same
+        lock as ``add_events``, so the SSE handler can't miss a
+        broadcast that fires between the two steps.
     subscribe(client_id, actor_id) → asyncio.Queue (key in self.subscribers)
     update_presence(...) → broadcasts {kind:"presence", users:[…]}
     record_client_doc(...) → snapshot row when (version - last) >= 100
@@ -94,6 +101,18 @@ class Instance:
         # repeating the materialization work. Cleared at the top of each
         # full re-materialization.
         self._materialization_error: Optional[tuple[int, str]] = None
+        # Serializes ``add_events`` and the subscribe+backlog snapshot in
+        # ``subscribe_with_backlog`` so the Python-level state transitions
+        # (version check → validate → write → tail append → broadcast)
+        # match the SQL write queue's atomicity. Without it two concurrent
+        # POSTs at the same version both pass the version check, both
+        # validate against the same pre-write doc, and the second one's
+        # step lands on top of the first one's — producing a tail with
+        # duplicate versions, double-broadcasts to other subscribers, and
+        # (when the two steps' positions interact) a step that fails to
+        # replay on hydrate and surfaces as "ask an admin to fix" in the
+        # client.
+        self._write_lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
     async def hydrate(cls, db: PaperDB, doc_id: int) -> "Instance":
@@ -248,84 +267,99 @@ class Instance:
         actor_id: Optional[str],
         steps: list[str],
     ) -> int:
-        """Persist steps, broadcast to subscribers, and return new version."""
-        if version < 0 or version > self.version:
-            raise BadVersionError(
-                f"Version {version} is invalid (server version: {self.version})"
-            )
-        if version != self.version:
-            raise ConflictError(f"Version {version} != server version {self.version}")
+        """Persist steps, broadcast to subscribers, and return new version.
 
-        if not steps:
-            return self.version
-
-        base_version = self.version
-        # The wire format delivers steps as parsed JSON (lists/dicts). The
-        # `step_json` column stores them as TEXT, so serialize each step
-        # back to a JSON string before binding. Strings come through as-is.
-        step_jsons = [s if isinstance(s, str) else json.dumps(s) for s in steps]
-
-        # Validate every step against the current live doc before writing
-        # any of them. The wire `Step.from_json` + `Step.apply` accepts
-        # malformed payloads silently — `apply` only catches `ReplaceError`,
-        # so a content-spec violation raises a bare `ValueError` from
-        # `Node.check_content` that escapes both apply and `StepResult`.
-        # Catch both shapes here and reject the batch with `InvalidStepError`
-        # so the client gets a structured 422 instead of a 200 that poisons
-        # the history.
-        self._validate_steps(step_jsons)
-
-        def write_all(conn):
-            new_ver = base_version
-            for step_json in step_jsons:
-                inserted = _queries.insert_step(
-                    conn,
-                    doc_id=self.doc_id,
-                    client_id=client_id,
-                    actor_id=actor_id,
-                    step_json=step_json,
+        The whole pipeline runs under ``self._write_lock`` so two
+        concurrent callers at the same version don't both pass the
+        version check and end up writing rebased-incorrectly steps. The
+        lock spans the DB write — Datasette's write queue is global, so
+        we're not adding new serialization beyond what the underlying
+        write already requires.
+        """
+        async with self._write_lock:
+            if version < 0 or version > self.version:
+                raise BadVersionError(
+                    f"Version {version} is invalid (server version: {self.version})"
                 )
-                assert inserted is not None
-                new_ver = inserted
-                _queries.bump_doc_version(conn, doc_id=self.doc_id, version=new_ver)
-            return new_ver
+            if version != self.version:
+                raise ConflictError(
+                    f"Version {version} != server version {self.version}"
+                )
 
-        new_version = await self.db.database.execute_write_fn(write_all)
+            if not steps:
+                return self.version
 
-        # Fetch the newly inserted steps to get their created_at values
-        new_steps = await self.db.select_steps_after(
-            doc_id=self.doc_id, after_version=base_version
-        )
+            base_version = self.version
+            # The wire format delivers steps as parsed JSON (lists/dicts).
+            # The `step_json` column stores them as TEXT, so serialize each
+            # step back to a JSON string before binding. Strings come
+            # through as-is.
+            step_jsons = [s if isinstance(s, str) else json.dumps(s) for s in steps]
 
-        # Append to tail
-        new_step_records = [_step_record(row) for row in new_steps]
-        for record in new_step_records:
-            self.steps_tail.append(record)
+            # Validate every step against the current live doc before
+            # writing any of them. The wire `Step.from_json` + `Step.apply`
+            # accepts malformed payloads silently — `apply` only catches
+            # `ReplaceError`, so a content-spec violation raises a bare
+            # `ValueError` from `Node.check_content` that escapes both
+            # apply and `StepResult`. Catch both shapes here and reject
+            # the batch with `InvalidStepError` so the client gets a
+            # structured 422 instead of a 200 that poisons the history.
+            self._validate_steps(step_jsons)
 
-        self.version = new_version
+            def write_all(conn):
+                new_ver = base_version
+                for step_json in step_jsons:
+                    inserted = _queries.insert_step(
+                        conn,
+                        doc_id=self.doc_id,
+                        client_id=client_id,
+                        actor_id=actor_id,
+                        step_json=step_json,
+                    )
+                    assert inserted is not None
+                    new_ver = inserted
+                    _queries.bump_doc_version(conn, doc_id=self.doc_id, version=new_ver)
+                return new_ver
 
-        # Broadcast to all subscribers. Steps are stored as JSON strings;
-        # parse them back to objects so the SSE payload is structured JSON,
-        # not strings inside a JSON array.
-        payload = {
-            "kind": "update",
-            "version": self.version,
-            "steps": [json.loads(r["step_json"]) for r in new_step_records],
-            "clientIDs": [r["client_id"] for r in new_step_records],
-            "users": len(self.subscribers),
-        }
-        # Skip the originator: their POST 200 already confirmed these steps
-        # locally via prosemirror-collab's receiveTransaction. Sending the
-        # echo would cause them to re-apply the step on top of the
-        # already-confirmed state (the unconfirmed queue is empty, so PM
-        # would treat it as a remote insertion and duplicate the change).
-        for q, (sub_client_id, _actor_id) in list(self.subscribers.items()):
-            if sub_client_id is not None and sub_client_id == client_id:
-                continue
-            q.put_nowait(payload)
+            new_version = await self.db.database.execute_write_fn(write_all)
 
-        self.last_active = time.monotonic()
-        return self.version
+            # Fetch the newly inserted steps to get their created_at
+            # values. Safe under the lock — no other ``add_events`` can
+            # have advanced the version while we awaited the write, so
+            # this returns exactly our batch.
+            new_steps = await self.db.select_steps_after(
+                doc_id=self.doc_id, after_version=base_version
+            )
+
+            new_step_records = [_step_record(row) for row in new_steps]
+            for record in new_step_records:
+                self.steps_tail.append(record)
+
+            self.version = new_version
+
+            # Broadcast to all subscribers. Steps are stored as JSON
+            # strings; parse them back to objects so the SSE payload is
+            # structured JSON, not strings inside a JSON array.
+            payload = {
+                "kind": "update",
+                "version": self.version,
+                "steps": [json.loads(r["step_json"]) for r in new_step_records],
+                "clientIDs": [r["client_id"] for r in new_step_records],
+                "users": len(self.subscribers),
+            }
+            # Skip the originator: their POST 200 already confirmed these
+            # steps locally via prosemirror-collab's receiveTransaction.
+            # Sending the echo would cause them to re-apply the step on
+            # top of the already-confirmed state (the unconfirmed queue
+            # is empty, so PM would treat it as a remote insertion and
+            # duplicate the change).
+            for q, (sub_client_id, _actor_id) in list(self.subscribers.items()):
+                if sub_client_id is not None and sub_client_id == client_id:
+                    continue
+                q.put_nowait(payload)
+
+            self.last_active = time.monotonic()
+            return self.version
 
     def get_events(self, since_version: int) -> Optional[dict]:
         """Return steps since since_version, or None if already up to date."""
@@ -371,10 +405,48 @@ class Instance:
         skip echoing a step batch back to its originator. ``actor_id``
         is used by :meth:`revoke_unauthorized` to drop subscribers whose
         access has been removed via the share-state endpoint.
+
+        Live SSE handlers should call :meth:`subscribe_with_backlog`
+        instead — it atomically pairs the subscribe with a backlog
+        snapshot so events broadcast between the two can't be lost.
         """
         q: asyncio.Queue = asyncio.Queue()
         self.subscribers[q] = (client_id, actor_id)
         return q
+
+    async def subscribe_with_backlog(
+        self,
+        since_version: int,
+        client_id: Optional[int] = None,
+        actor_id: Optional[str] = None,
+    ) -> tuple[asyncio.Queue, Optional[dict]]:
+        """Subscribe and snapshot the backlog atomically.
+
+        Returns ``(queue, backlog)`` where ``backlog`` is either ``None``
+        (caller is already up to date) or a payload identical in shape to
+        what :meth:`add_events` broadcasts, covering versions
+        ``(since_version, self.version]`` as observed under the lock.
+
+        Holding ``self._write_lock`` for the duration means no
+        ``add_events`` can fire between (a) the backlog snapshot and
+        (b) the queue being registered in ``self.subscribers``. Any
+        subsequent ``add_events`` either waits on the lock (and
+        therefore writes its broadcast into our queue) or already saw
+        the queue and pushed into it. Either way, no broadcast falls in
+        the gap that the old ``get_events`` → ``subscribe`` ordering had.
+
+        Raises :class:`GoneError` / :class:`BadVersionError` the same
+        way :meth:`get_events` does.
+        """
+        async with self._write_lock:
+            backlog = self.get_events(since_version)
+            # Compose with ``subscribe`` rather than inlining the queue
+            # creation so tests / hooks that monkey-patch
+            # ``instance.subscribe`` (e.g. to flag "the route has
+            # subscribed now") still trigger. The whole operation stays
+            # under the lock because ``subscribe`` doesn't await.
+            q = await self.subscribe(client_id=client_id, actor_id=actor_id)
+            return q, backlog
 
     def unsubscribe(self, q: asyncio.Queue) -> None:
         """Remove a subscriber queue and any presence entry for that client."""
@@ -406,8 +478,9 @@ class Instance:
 
         Called after a share mutation commits. Re-runs
         ``datasette.allowed("datasette-paper-view", ...)`` per subscriber;
-        any deny enqueues a sentinel ``None`` so the SSE loop exits and
-        the queue is unsubscribed.
+        any deny enqueues a ``{"kind": "closed"}`` sentinel so the SSE
+        loop sees ``event_name == "closed"`` and exits cleanly, and the
+        queue is removed from ``self.subscribers``.
 
         Returns the number of subscribers that were revoked.
         """
@@ -421,9 +494,9 @@ class Instance:
                 action="datasette-paper-view", resource=resource, actor=actor
             )
             if not allowed:
-                # Sentinel — the SSE loop's queue.get() returns None and the
-                # loop's `payload.get(...)` raises AttributeError; catch
-                # there and exit cleanly. Simpler than a separate channel.
+                # Sentinel — the SSE loop checks `event_name == "closed"`
+                # and breaks out of its forwarding loop cleanly. Simpler
+                # than a separate channel.
                 q.put_nowait({"kind": "closed"})
                 self.subscribers.pop(q, None)
                 revoked += 1

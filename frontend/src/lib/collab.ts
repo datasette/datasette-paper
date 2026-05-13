@@ -754,11 +754,70 @@ export class EditorConnection {
   // multiple snapshots; cleared on close.
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // navigator.onLine listeners — bound in start(), removed in close().
+  // Stored as fields so we can unregister without recreating the
+  // bound-fn identity. Off in non-browser tests (jsdom has `window` but
+  // no real network state, so the listeners are harmless there).
+  private onlineHandler: (() => void) | null = null;
+  private offlineHandler: (() => void) | null = null;
+
   constructor(opts: ConnectionOpts, report?: Reporter) {
     this.opts = opts;
     this.report = report ?? new Reporter();
     this.clientID = Math.floor(Math.random() * 0xffffffff);
+    this.installNetworkListeners();
     this.start();
+  }
+
+  // ── Online / offline ───────────────────────────────────────────────────────
+
+  /**
+   * Watch ``navigator.onLine`` transitions. On ``offline``, flip the
+   * reporter so the user sees a sticky banner (the SSE stream and
+   * subsequent POSTs will fail on their own; we just front-run the
+   * "why" so they don't see a generic "Send failed: 0"). On ``online``,
+   * reset backoff and tear down the (almost-certainly-dead) stream so
+   * ``openStream`` reconnects immediately — much faster than waiting
+   * out the exponential backoff that EventSource picked.
+   */
+  private installNetworkListeners(): void {
+    if (typeof window === "undefined") return;
+    this.offlineHandler = () => {
+      this.report.offline();
+    };
+    this.onlineHandler = () => {
+      // Reset and force a fresh stream open. If we're mid-recover the
+      // setTimeout fires later and openStream is idempotent at the
+      // closeStream/open level — extra reopen is harmless.
+      this.backOff = 0;
+      this.report.success();
+      this.closeStream();
+      if (this.comm !== "detached" && this.view) {
+        this.comm = "loaded";
+        this.openStream();
+        // Flush any unconfirmed steps queued during the offline period.
+        if (sendableSteps(this.view.state)) this._send();
+      }
+    };
+    window.addEventListener("offline", this.offlineHandler);
+    window.addEventListener("online", this.onlineHandler);
+    // Pick up the initial state — opened tabs that were offline at
+    // mount should show the banner immediately.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      this.report.offline();
+    }
+  }
+
+  private removeNetworkListeners(): void {
+    if (typeof window === "undefined") return;
+    if (this.offlineHandler) {
+      window.removeEventListener("offline", this.offlineHandler);
+      this.offlineHandler = null;
+    }
+    if (this.onlineHandler) {
+      window.removeEventListener("online", this.onlineHandler);
+      this.onlineHandler = null;
+    }
   }
 
   // ── URL helper ─────────────────────────────────────────────────────────────
@@ -1321,6 +1380,7 @@ export class EditorConnection {
   close(): void {
     this.comm = "detached";
     this.closeStream();
+    this.removeNetworkListeners();
     if (this.snapshotTimer !== null) {
       clearTimeout(this.snapshotTimer);
       this.snapshotTimer = null;

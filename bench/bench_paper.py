@@ -28,6 +28,7 @@ from datasette.app import Datasette
 
 from datasette_paper.db import PaperDB
 from datasette_paper.instance import Instance, SNAPSHOT_THRESHOLD
+from datasette_paper.migrations import ensure_migrations
 
 
 # ── Test fixtures ───────────────────────────────────────────────────────────
@@ -40,8 +41,9 @@ async def fresh_db() -> tuple[PaperDB, Datasette, str, str]:
     tmp.close()
     ds = Datasette([tmp.name])
     db_name = os.path.basename(tmp.name).replace(".db", "")
-    db = PaperDB(ds.get_database(db_name))
-    await db.ensure_migrations()
+    database = ds.get_database(db_name)
+    await ensure_migrations(database)
+    db = PaperDB(database)
     return db, ds, db_name, tmp.name
 
 
@@ -130,7 +132,6 @@ async def bench_edit_latency(steps: int = 2000) -> Sample:
                     client_id=42,
                     actor_id=None,
                     steps=[step],
-                    comment_events=[],
                 )
             )
             times.append(t)
@@ -154,7 +155,6 @@ async def bench_hydrate_cold(steps_count: int) -> Sample:
                 client_id=1,
                 actor_id=None,
                 steps=[typing_step(at=1 + i)],
-                comment_events=[],
             )
         # Now drop the in-memory state and time a fresh hydrate.
         times = []
@@ -179,7 +179,6 @@ async def bench_bootstrap_payload(steps_count: int) -> Sample:
                 client_id=1,
                 actor_id=None,
                 steps=[typing_step(at=1 + i)],
-                comment_events=[],
             )
         # Now simulate the route work (snapshot replay).
         times = []
@@ -228,7 +227,6 @@ async def bench_snapshot(doc_paragraphs: int) -> Sample:
                     client_id=1,
                     actor_id=None,
                     steps=[typing_step(at=1 + i)],
-                    comment_events=[],
                 )
             t = await time_one(
                 lambda: inst.record_client_doc(inst.version, body, actor_id=None)
@@ -256,7 +254,6 @@ async def bench_storage(steps_count: int = 1000) -> dict:
                 client_id=1,
                 actor_id=None,
                 steps=[typing_step(at=1 + i)],
-                comment_events=[],
             )
         # Sum step_json byte length (the payload PM cares about) vs. row count
         # vs. file size, to get a rough overhead estimate.

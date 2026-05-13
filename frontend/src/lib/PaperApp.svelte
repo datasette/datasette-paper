@@ -225,6 +225,13 @@
     background: #ffd6d6;
     color: #5a0000;
   }
+  /* Distinct from `fail` (which means "we tried and the server said
+   * no") — `offline` is informational and self-clearing on reconnect. */
+  .status-banner.status-offline {
+    background: #e0e7ee;
+    color: #2a3a4a;
+    border: 1px solid #b8c2cc;
+  }
   .status-banner.status-step-error {
     background: #ffd6d6;
     color: #5a0000;
