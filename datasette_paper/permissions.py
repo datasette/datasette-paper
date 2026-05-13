@@ -76,7 +76,17 @@ async def permission_resources_sql(datasette, actor, action):
         return None
 
     actor_id = actor.get("id") if actor else None
-    role_filter = "" if action == "datasette-paper-view" else "AND s.role = 'editor'"
+    is_edit = action == "datasette-paper-edit"
+    role_filter = "AND s.role = 'editor'" if is_edit else ""
+    # ``locked`` is the read-only flag. Owner row is unconditional so the
+    # owner can always unlock; share + visibility *edit* grants are
+    # filtered by ``locked = 0`` so a locked paper denies edit to
+    # everyone except the owner. View grants ignore ``locked``.
+    share_lock_join = (
+        "JOIN _datasette_paper_doc d ON d.id = s.doc_id" if is_edit else ""
+    )
+    share_lock_filter = "AND d.locked = 0" if is_edit else ""
+    visibility_lock_filter = "AND locked = 0" if is_edit else ""
 
     rules = [
         # Owner row — anonymous actors never own (NULL guard).
@@ -94,8 +104,9 @@ async def permission_resources_sql(datasette, actor, action):
             sql=(
                 "SELECT CAST(s.doc_id AS TEXT) AS parent, NULL AS child, "
                 "1 AS allow, 'shared' AS reason "
-                "FROM _datasette_paper_share s "
-                f"WHERE :_paper_aid IS NOT NULL AND s.actor_id = :_paper_aid {role_filter}"
+                f"FROM _datasette_paper_share s {share_lock_join} "
+                f"WHERE :_paper_aid IS NOT NULL AND s.actor_id = :_paper_aid "
+                f"{role_filter} {share_lock_filter}"
             ),
             params={"_paper_aid": actor_id},
         ),
@@ -114,7 +125,8 @@ async def permission_resources_sql(datasette, actor, action):
                 sql=(
                     "SELECT CAST(id AS TEXT) AS parent, NULL AS child, "
                     "1 AS allow, 'visibility' AS reason "
-                    f"FROM _datasette_paper_doc WHERE visibility IN {visibilities}"
+                    f"FROM _datasette_paper_doc WHERE visibility IN {visibilities} "
+                    f"{visibility_lock_filter}"
                 ),
             )
         )

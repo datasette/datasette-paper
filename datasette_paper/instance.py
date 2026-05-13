@@ -473,6 +473,35 @@ class Instance:
         for q in list(self.subscribers):
             q.put_nowait(msg)
 
+    async def broadcast_permissions_changed(self, datasette, locked: bool) -> None:
+        """Push a per-subscriber ``permissions-changed`` event after a lock flip.
+
+        Lock affects only the edit grant — owner keeps edit, share +
+        visibility editors lose it (or regain it on unlock). ``canEdit``
+        is recomputed per subscriber via
+        ``datasette.allowed("datasette-paper-edit", ...)`` so each
+        client sees the new capability with no reconnect.
+
+        The ``locked`` field is included as a convenience for any UI
+        that wants to show a "this doc is locked" banner regardless of
+        the subscriber's role.
+        """
+        from .permissions import PaperResource
+
+        resource = PaperResource(self.doc_id)
+        for q, (_client_id, actor_id) in list(self.subscribers.items()):
+            actor = {"id": actor_id} if actor_id else None
+            can_edit = await datasette.allowed(
+                action="datasette-paper-edit", resource=resource, actor=actor
+            )
+            q.put_nowait(
+                {
+                    "kind": "permissions-changed",
+                    "canEdit": can_edit,
+                    "locked": locked,
+                }
+            )
+
     async def revoke_unauthorized(self, datasette) -> int:
         """Close subscriber queues whose actor no longer passes view.
 

@@ -11,6 +11,7 @@
     canEdit = true,
     isOwner = false,
     docState = "active",
+    locked = false,
     copyMarkdown,
   }: {
     docId: string;
@@ -19,6 +20,7 @@
     canEdit?: boolean;
     isOwner?: boolean;
     docState?: "active" | "archived" | "trashed";
+    locked?: boolean;
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
@@ -46,6 +48,21 @@
   function openInNewTab(path: string) {
     closeMenu();
     window.open(`/-/paper/api/docs/${docId}${path}`, "_blank", "noopener");
+  }
+
+  async function postLockAction(path: "/lock" | "/unlock") {
+    closeMenu();
+    const url = `/-/paper/api/docs/${docId}${path}` as
+      | "/-/paper/api/docs/{doc_id}/lock"
+      | "/-/paper/api/docs/{doc_id}/unlock";
+    const { error: err } = await client.POST(url, {
+      params: { path: { doc_id: Number(docId) } },
+    });
+    if (err) {
+      window.alert(`Failed to ${path === "/lock" ? "lock" : "unlock"} this paper.`);
+    }
+    // On success the permissions-changed SSE refreshes canEdit + locked;
+    // no local override needed.
   }
 
   async function postStateAction(path: "/archive" | "/trash") {
@@ -186,6 +203,12 @@
         aria-label="Document title"
         disabled={saving}
       />
+      {#if locked}
+        <span class="locked-pill" title="Read-only — only the owner can unlock">
+          {@render icon("lock")}
+          <span>Locked</span>
+        </span>
+      {/if}
     </div>
     <div class="meta">
       <span class="created-by">
@@ -331,6 +354,30 @@
                 {/if}
               </div>
               {#if isOwner && docState !== "trashed"}
+                <hr class="mi-sep" />
+                {#if locked}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postLockAction("/unlock")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("unlock")}
+                    <span>Unlock (make editable)</span>
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postLockAction("/lock")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("lock")}
+                    <span>Lock (read-only)</span>
+                  </button>
+                {/if}
                 <hr class="mi-sep" />
                 <div class="mi-section" role="presentation">Danger zone</div>
                 {#if docState === "active"}
@@ -610,5 +657,22 @@
     padding: 6px;
     color: #888;
     font-size: 13px;
+  }
+  .locked-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    padding: 2px 9px 2px 7px;
+    background: #eef2f7;
+    color: #4a5568;
+    border: 1px solid #d0d7e0;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.5;
+    font-weight: 600;
+  }
+  .locked-pill :global(.mi-icon) {
+    color: inherit;
   }
 </style>

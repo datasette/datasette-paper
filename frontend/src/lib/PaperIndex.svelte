@@ -16,6 +16,8 @@
     archived_at: string | null;
     trashed_at: string | null;
     delete_at: string | null;
+    kind: "doc" | "template";
+    locked: boolean;
   };
 
   // Lazy per-tab caches. `null` means "not fetched yet"; switching tabs
@@ -92,7 +94,13 @@
 
   async function mutate(
     doc: DocRow,
-    path: "/archive" | "/unarchive" | "/trash" | "/restore",
+    path:
+      | "/archive"
+      | "/unarchive"
+      | "/trash"
+      | "/restore"
+      | "/lock"
+      | "/unlock",
     refetch: DocState[],
   ): Promise<void> {
     const key = `${doc.state}:${doc.id}`;
@@ -104,7 +112,9 @@
         | "/-/paper/api/docs/{doc_id}/archive"
         | "/-/paper/api/docs/{doc_id}/unarchive"
         | "/-/paper/api/docs/{doc_id}/trash"
-        | "/-/paper/api/docs/{doc_id}/restore";
+        | "/-/paper/api/docs/{doc_id}/restore"
+        | "/-/paper/api/docs/{doc_id}/lock"
+        | "/-/paper/api/docs/{doc_id}/unlock";
       const { error: err } = await client.POST(url, {
         params: { path: { doc_id: doc.id } },
       });
@@ -150,6 +160,16 @@
 
   function restoreRow(d: DocRow) {
     return mutate(d, "/restore", ["active", "trashed"]);
+  }
+
+  function lockRow(d: DocRow) {
+    // Lock/unlock only mutates the same row; refresh the current tab so
+    // the badge appears immediately.
+    return mutate(d, "/lock", [d.state]);
+  }
+
+  function unlockRow(d: DocRow) {
+    return mutate(d, "/unlock", [d.state]);
   }
 
   function deletesInLabel(deleteAt: string | null): string {
@@ -313,7 +333,12 @@
           {@const busy = busyKey === key}
           {@const menuOpen = openMenuKey === key}
           <tr class:busy>
-            <td><a href="/-/paper/doc/{doc.id}">{doc.name}</a></td>
+            <td>
+              <a href="/-/paper/doc/{doc.id}">{doc.name}</a>
+              {#if doc.locked}
+                <span class="badge badge-locked" title="Read-only">Locked</span>
+              {/if}
+            </td>
             <td>{doc.created_by ?? ""}</td>
             <td title={doc.updated_at}>{relativeTime(doc.updated_at)}</td>
             {#if tab === "trashed"}
@@ -347,6 +372,29 @@
                   {#if menuOpen}
                     <div class="menu" role="menu">
                       {#if tab === "active"}
+                        {#if doc.locked}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onclick={() => {
+                              closeMenu();
+                              void unlockRow(doc);
+                            }}
+                          >
+                            Unlock
+                          </button>
+                        {:else}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onclick={() => {
+                              closeMenu();
+                              void lockRow(doc);
+                            }}
+                          >
+                            Lock
+                          </button>
+                        {/if}
                         <button
                           type="button"
                           role="menuitem"
@@ -369,6 +417,29 @@
                           Trash
                         </button>
                       {:else if tab === "archived"}
+                        {#if doc.locked}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onclick={() => {
+                              closeMenu();
+                              void unlockRow(doc);
+                            }}
+                          >
+                            Unlock
+                          </button>
+                        {:else}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onclick={() => {
+                              closeMenu();
+                              void lockRow(doc);
+                            }}
+                          >
+                            Lock
+                          </button>
+                        {/if}
                         <button
                           type="button"
                           role="menuitem"
@@ -543,5 +614,19 @@
   }
   tr.busy {
     opacity: 0.6;
+  }
+  .badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 1px 7px;
+    font-size: 11px;
+    line-height: 1.4;
+    border-radius: 9px;
+    vertical-align: 1px;
+  }
+  .badge-locked {
+    background: #eef2f7;
+    color: #4a5568;
+    border: 1px solid #d0d7e0;
   }
 </style>

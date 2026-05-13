@@ -180,6 +180,128 @@ describe("doc state (archive/trash)", () => {
   });
 });
 
+// ─── Test: permissions-changed events (lock/unlock) ──────────────────────────
+
+describe("permissions-changed (lock/unlock)", () => {
+  it("re-fires onPermissions with the merged permissions block on SSE", async () => {
+    const el = makeEl();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...BOOTSTRAP,
+        permissions: {
+          canView: true,
+          canEdit: true,
+          canManage: false,
+          isOwner: false,
+          visibility: "private",
+          locked: false,
+        },
+      }),
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const calls: Array<{ canEdit: boolean; locked: boolean }> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onPermissions: (p) => {
+        calls.push({ canEdit: p.canEdit, locked: p.locked });
+      },
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    // Bootstrap callback.
+    expect(calls).toEqual([{ canEdit: true, locked: false }]);
+
+    // Owner locks the doc; server pushes only the changed fields.
+    const es = MockEventSource.instances[0];
+    es.dispatchEvent(
+      "permissions-changed",
+      JSON.stringify({ canEdit: false, locked: true }),
+    );
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual({ canEdit: false, locked: true });
+
+    // Owner unlocks — full pair again.
+    es.dispatchEvent(
+      "permissions-changed",
+      JSON.stringify({ canEdit: true, locked: false }),
+    );
+
+    expect(calls).toHaveLength(3);
+    expect(calls[2]).toEqual({ canEdit: true, locked: false });
+
+    conn.close();
+  });
+
+  it("ignores malformed permissions-changed payloads", async () => {
+    const el = makeEl();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...BOOTSTRAP,
+        permissions: {
+          canView: true,
+          canEdit: true,
+          canManage: false,
+          isOwner: false,
+          visibility: "private",
+          locked: false,
+        },
+      }),
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const calls: Array<{ canEdit: boolean }> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onPermissions: (p) => calls.push({ canEdit: p.canEdit }),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const es = MockEventSource.instances[0];
+    es.dispatchEvent("permissions-changed", "not-json");
+    // Single callback from bootstrap; junk did not refire.
+    expect(calls).toHaveLength(1);
+
+    conn.close();
+  });
+
+  it("ignores permissions-changed before bootstrap (no cached permissions)", async () => {
+    const el = makeEl();
+    // Bootstrap response omits the permissions block entirely.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...BOOTSTRAP }),
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const calls: Array<unknown> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onPermissions: (p) => calls.push(p),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const es = MockEventSource.instances[0];
+    es.dispatchEvent(
+      "permissions-changed",
+      JSON.stringify({ canEdit: false, locked: true }),
+    );
+
+    // No bootstrap permissions → handler bails — nothing was refired.
+    expect(calls).toEqual([]);
+
+    conn.close();
+  });
+});
+
 // ─── Test 1: start() happy path ───────────────────────────────────────────────
 
 describe("start() happy path", () => {

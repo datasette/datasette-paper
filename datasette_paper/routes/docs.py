@@ -47,6 +47,20 @@ def _doc_state_payload(doc) -> dict:
     }
 
 
+def _doc_flags_payload(doc) -> dict:
+    """Capability/category flags surfaced alongside state.
+
+    ``kind`` and ``locked`` are orthogonal to the lifecycle state but
+    every list/bootstrap response wants both. Kept in a separate helper
+    so SSE state-changed payloads (which intentionally don't include
+    these) stay narrow.
+    """
+    return {
+        "kind": doc.kind,
+        "locked": bool(doc.locked),
+    }
+
+
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
@@ -91,6 +105,7 @@ async def list_docs(datasette, request):
                 "visibility": r.visibility,
                 "is_owner": r.created_by is not None and r.created_by == me,
                 **_doc_state_payload(r),
+                **_doc_flags_payload(r),
             }
             for r in rows
         ]
@@ -154,11 +169,19 @@ async def get_doc_bootstrap(datasette, request, doc_id: int):
                 "canManage": is_owner,
                 "isOwner": is_owner,
                 "visibility": doc.visibility,
+                # ``locked`` lives inside permissions because it is a
+                # capability gate — flipping it changes canEdit for
+                # every non-owner. The same field appears flat on list
+                # rows (no permissions sub-object there).
+                "locked": bool(doc.locked),
             },
             # State seed for the open-doc UI. The same fields arrive over
             # SSE as ``state-changed`` whenever the owner flips state mid-
             # session, so the editor doesn't need to refetch.
             **_doc_state_payload(doc),
+            # ``kind`` is metadata (doc vs template), distinct from the
+            # state lifecycle and from the permission block.
+            "kind": doc.kind,
         }
     )
 
@@ -575,6 +598,53 @@ async def restore_doc_route(datasette, request, doc_id: int):
     db = paper_db(datasette)
     await db.restore_doc(doc_id=doc_id)
     return await _state_response(datasette, doc_id)
+
+
+async def _lock_response(datasette, doc_id: int):
+    """Refetch + broadcast a permissions-changed event after a lock flip.
+
+    Mirrors ``_state_response`` but uses the lock-aware broadcast that
+    recomputes ``canEdit`` per subscriber. Returns the post-update
+    ``{id, locked, kind}`` JSON for the caller.
+    """
+    db = paper_db(datasette)
+    doc = await db.select_doc_by_id(doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+
+    registry = get_registry(datasette)
+    instance = registry._instances.get(doc_id)
+    if instance is not None:
+        await instance.broadcast_permissions_changed(datasette, bool(doc.locked))
+
+    return Response.json({"id": doc.id, **_doc_flags_payload(doc)})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/lock$")
+async def lock_doc_route(datasette, request, doc_id: int):
+    """Mark a paper as read-only. Owner-only.
+
+    Affects only the edit grant — viewers/editors keep their SSE
+    connection and receive a ``permissions-changed`` event so the UI
+    flips into read-only mode without a reconnect.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.set_doc_locked(doc_id=doc_id, locked=True)
+    return await _lock_response(datasette, doc_id)
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/unlock$")
+async def unlock_doc_route(datasette, request, doc_id: int):
+    """Clear the read-only flag. Owner-only."""
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.set_doc_locked(doc_id=doc_id, locked=False)
+    return await _lock_response(datasette, doc_id)
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/snapshot$")

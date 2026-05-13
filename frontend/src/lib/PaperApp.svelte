@@ -35,6 +35,7 @@
   // also force mode='view' so the toggle reflects reality.
   let canEdit = $derived(permissions?.canEdit ?? true);
   let isOwner = $derived(permissions?.isOwner ?? false);
+  let locked = $derived(permissions?.locked ?? false);
 
   let conn: EditorConnection | undefined;
   let unsub: (() => void) | undefined;
@@ -172,6 +173,7 @@
     bind:mode
     {canEdit}
     {isOwner}
+    {locked}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />

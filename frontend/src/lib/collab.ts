@@ -54,6 +54,12 @@ export interface BootstrapPermissions {
   canManage: boolean;
   isOwner: boolean;
   visibility: "private" | "link-view" | "link-edit";
+  /** Read-only flag — when true, canEdit is false for everyone except
+   * the owner. Lives inside permissions because flipping it is what
+   * makes canEdit transition for non-owners; the SSE
+   * ``permissions-changed`` event delivers the updated pair mid-session
+   * with no reconnect. */
+  locked: boolean;
 }
 
 export type DocState = "active" | "archived" | "trashed";
@@ -745,6 +751,12 @@ export class EditorConnection {
   // short-circuits SSE step application until a refresh re-bootstraps.
   private stepError: StepApplyError | null = null;
 
+  // Last known permissions block, captured at bootstrap and merged
+  // with each ``permissions-changed`` SSE event so we can re-fire
+  // ``onPermissions`` with the full shape (the SSE payload only
+  // carries the fields that changed).
+  private lastPermissions: BootstrapPermissions | null = null;
+
   // Version at which we last saved a snapshot (seeded from the bootstrap;
   // updated after each successful POST /snapshot). Used by the
   // auto-snapshot timer to decide when the local doc has drifted far
@@ -1058,7 +1070,10 @@ export class EditorConnection {
 
     this.opts.onView?.(this.view);
     if (typeof boot.users === "number") this.opts.onUsers?.(boot.users);
-    if (boot.permissions) this.opts.onPermissions?.(boot.permissions);
+    if (boot.permissions) {
+      this.lastPermissions = boot.permissions;
+      this.opts.onPermissions?.(boot.permissions);
+    }
     if (boot.state) {
       this.opts.onDocState?.({
         state: boot.state,
@@ -1177,6 +1192,29 @@ export class EditorConnection {
       }
     };
     es.addEventListener("state-changed", handleStateChanged as EventListener);
+
+    const handlePermissionsChanged = (evt: MessageEvent) => {
+      // Server pushes ``{canEdit, locked}`` after a lock/unlock; merge
+      // into the cached full block and re-fire so PaperApp's
+      // ``onPermissions`` handler flips the editor into the right mode
+      // without a reconnect.
+      if (!this.lastPermissions) return;
+      try {
+        const data = JSON.parse(evt.data) as Partial<BootstrapPermissions>;
+        const merged: BootstrapPermissions = {
+          ...this.lastPermissions,
+          ...data,
+        };
+        this.lastPermissions = merged;
+        this.opts.onPermissions?.(merged);
+      } catch {
+        // ignore malformed
+      }
+    };
+    es.addEventListener(
+      "permissions-changed",
+      handlePermissionsChanged as EventListener,
+    );
 
     es.addEventListener("error", () => {
       this.closeStream();
