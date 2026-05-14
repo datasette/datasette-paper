@@ -56,6 +56,46 @@ class PaperDB:
         assert doc is not None
         return doc
 
+    async def insert_doc_with_snapshot(
+        self,
+        *,
+        name: str,
+        created_by: Optional[str] = None,
+        schema_name: str = "basic+list",
+        kind: str = "doc",
+        snapshot_doc_json: str,
+        snapshot_actor_id: Optional[str] = None,
+    ) -> _queries.Doc:
+        """Create a doc and seed it with a version-0 snapshot atomically.
+
+        Used by create-from-template: the new doc's first hydrate
+        reads the snapshot we plant here so the cloned content appears
+        as the starting state with version=0. Running both inserts in
+        one execute_write_fn closure keeps the doc from being briefly
+        visible without a snapshot (which would make Instance.hydrate
+        fall back to the empty-doc JSON).
+        """
+
+        def write(conn):
+            doc = _queries.insert_doc(
+                conn,
+                name=name,
+                created_by=created_by,
+                schema_name=schema_name,
+                kind=kind,
+            )
+            assert doc is not None
+            _queries.insert_snapshot(
+                conn,
+                doc_id=doc.id,
+                version=0,
+                doc_json=snapshot_doc_json,
+                actor_id=snapshot_actor_id,
+            )
+            return doc
+
+        return await self.database.execute_write_fn(write)
+
     async def update_doc_name(
         self, *, doc_id: int, name: str
     ) -> Optional[_queries.Doc]:

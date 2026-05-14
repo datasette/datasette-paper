@@ -302,6 +302,49 @@ describe("permissions-changed (lock/unlock)", () => {
   });
 });
 
+// ─── Test: onKind callback ──────────────────────────────────────────────────
+
+describe("onKind", () => {
+  it("fires once at bootstrap when the envelope carries `kind`", async () => {
+    const el = makeEl();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ...BOOTSTRAP, kind: "template" }),
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const kinds: Array<"doc" | "template"> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onKind: (k) => kinds.push(k),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    expect(kinds).toEqual(["template"]);
+
+    conn.close();
+  });
+
+  it("does not fire when the envelope omits `kind`", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const kinds: Array<"doc" | "template"> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onKind: (k) => kinds.push(k),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    expect(kinds).toEqual([]);
+
+    conn.close();
+  });
+});
+
 // ─── Test 1: start() happy path ───────────────────────────────────────────────
 
 describe("start() happy path", () => {

@@ -12,6 +12,7 @@
     isOwner = false,
     docState = "active",
     locked = false,
+    kind = "doc",
     copyMarkdown,
   }: {
     docId: string;
@@ -21,6 +22,7 @@
     isOwner?: boolean;
     docState?: "active" | "archived" | "trashed";
     locked?: boolean;
+    kind?: "doc" | "template";
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
@@ -48,6 +50,26 @@
   function openInNewTab(path: string) {
     closeMenu();
     window.open(`/-/paper/api/docs/${docId}${path}`, "_blank", "noopener");
+  }
+
+  async function postTemplateAction(path: "/make_template" | "/unmake_template") {
+    closeMenu();
+    const url = `/-/paper/api/docs/${docId}${path}` as
+      | "/-/paper/api/docs/{doc_id}/make_template"
+      | "/-/paper/api/docs/{doc_id}/unmake_template";
+    const { error: err, data } = await client.POST(url, {
+      params: { path: { doc_id: Number(docId) } },
+    });
+    if (err) {
+      window.alert(
+        `Failed to ${path === "/make_template" ? "promote" : "demote"} this paper.`,
+      );
+      return;
+    }
+    // No SSE broadcast for kind changes (it doesn't affect live editors
+    // — they keep editing as normal); reload so the badge picks up the
+    // new kind value.
+    if (data && (data as { kind?: string }).kind) window.location.reload();
   }
 
   async function postLockAction(path: "/lock" | "/unlock") {
@@ -203,6 +225,14 @@
         aria-label="Document title"
         disabled={saving}
       />
+      {#if kind === "template"}
+        <span
+          class="template-pill"
+          title="This paper is a template — placeholders are resolved when somebody creates from it"
+        >
+          Template
+        </span>
+      {/if}
       {#if locked}
         <span class="locked-pill" title="Read-only — only the owner can unlock">
           {@render icon("lock")}
@@ -354,6 +384,30 @@
                 {/if}
               </div>
               {#if isOwner && docState !== "trashed"}
+                <hr class="mi-sep" />
+                {#if kind === "template"}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postTemplateAction("/unmake_template")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("fileText")}
+                    <span>Demote to doc</span>
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postTemplateAction("/make_template")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("copy")}
+                    <span>Make template</span>
+                  </button>
+                {/if}
                 <hr class="mi-sep" />
                 {#if locked}
                   <button
@@ -674,5 +728,17 @@
   }
   .locked-pill :global(.mi-icon) {
     color: inherit;
+  }
+  .template-pill {
+    display: inline-flex;
+    margin-left: 6px;
+    padding: 2px 10px;
+    background: #e6f0ff;
+    color: #0b3b8a;
+    border: 1px solid #b9d0f5;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.5;
+    font-weight: 600;
   }
 </style>

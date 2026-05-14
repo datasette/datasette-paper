@@ -36,6 +36,7 @@
   let canEdit = $derived(permissions?.canEdit ?? true);
   let isOwner = $derived(permissions?.isOwner ?? false);
   let locked = $derived(permissions?.locked ?? false);
+  let kind = $state<"doc" | "template">("doc");
 
   let conn: EditorConnection | undefined;
   let unsub: (() => void) | undefined;
@@ -64,6 +65,9 @@
         },
         onDocState: (s) => {
           docState = s;
+        },
+        onKind: (k) => {
+          kind = k;
         },
         onStepError: (e) => {
           // Keep the first error — subsequent ones don't add information
@@ -174,6 +178,7 @@
     {canEdit}
     {isOwner}
     {locked}
+    {kind}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />

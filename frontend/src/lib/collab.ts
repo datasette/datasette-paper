@@ -123,6 +123,15 @@ export interface ConnectionOpts {
    */
   onDocState?: (payload: DocStatePayload) => void;
   /**
+   * Called once at bootstrap with the paper's ``kind``. Templates and
+   * docs share the editor surface but the UI differs: templates show a
+   * badge, surface the placeholder-insert affordance (slice 4), and
+   * skip the "create from template" picker on their own row. There is
+   * no live SSE for kind changes — the make/unmake routes are owner-
+   * only and the page reloads after the mutation.
+   */
+  onKind?: (kind: "doc" | "template") => void;
+  /**
    * Called when a step can't be applied during bootstrap replay or an
    * SSE update. Bootstrap stops at the first bad step and renders the
    * partial doc; SSE skips the bad batch and stays connected. The host
@@ -152,6 +161,7 @@ interface BootstrapData {
   archived_at?: string | null;
   trashed_at?: string | null;
   delete_at?: string | null;
+  kind?: "doc" | "template";
 }
 
 interface SendableResult {
@@ -1074,6 +1084,7 @@ export class EditorConnection {
       this.lastPermissions = boot.permissions;
       this.opts.onPermissions?.(boot.permissions);
     }
+    if (boot.kind) this.opts.onKind?.(boot.kind);
     if (boot.state) {
       this.opts.onDocState?.({
         state: boot.state,

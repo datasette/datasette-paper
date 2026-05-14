@@ -216,9 +216,7 @@ async def test_bootstrap_envelope_reflects_locked():
     await _grant_share(ds, doc_id, "bob", "editor")
 
     # Unlocked: bob sees canEdit=True, permissions.locked=False.
-    r = await ds.client.get(
-        f"/-/paper/api/docs/{doc_id}", cookies=_cookie(ds, "bob")
-    )
+    r = await ds.client.get(f"/-/paper/api/docs/{doc_id}", cookies=_cookie(ds, "bob"))
     assert r.status_code == 200
     body = r.json()
     assert body["permissions"]["locked"] is False
@@ -230,9 +228,7 @@ async def test_bootstrap_envelope_reflects_locked():
     )
 
     # Now bob sees permissions.locked=True and loses canEdit; canView stays.
-    r2 = await ds.client.get(
-        f"/-/paper/api/docs/{doc_id}", cookies=_cookie(ds, "bob")
-    )
+    r2 = await ds.client.get(f"/-/paper/api/docs/{doc_id}", cookies=_cookie(ds, "bob"))
     assert r2.status_code == 200
     body2 = r2.json()
     assert body2["permissions"]["locked"] is True

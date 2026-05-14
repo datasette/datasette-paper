@@ -20,6 +20,7 @@ from ..util import read_json_body, actor_id, paper_db
 
 
 VALID_STATES = ("active", "archived", "trashed")
+VALID_KINDS = ("doc", "template")
 TRASH_RETENTION_DAYS = 7
 
 
@@ -80,6 +81,19 @@ async def list_docs(datasette, request):
             {"error": f"state must be one of: {', '.join(VALID_STATES)}"},
             status=400,
         )
+    # ``kind=doc`` is the default — templates live in their own tab so
+    # they don't clutter the index. Pass ``kind=template`` explicitly
+    # to list templates, or ``kind=all`` for both.
+    kind = (request.args.get("kind") or "doc").lower()
+    if kind == "all":
+        kinds = list(VALID_KINDS)
+    elif kind in VALID_KINDS:
+        kinds = [kind]
+    else:
+        return Response.json(
+            {"error": f"kind must be one of: {', '.join(VALID_KINDS)}, all"},
+            status=400,
+        )
 
     # Pull every paper the actor can view in one shot (cap at 1000; if
     # somebody has 1000+ papers visible we'll add proper pagination).
@@ -90,7 +104,7 @@ async def list_docs(datasette, request):
     doc_ids = [int(r.parent) for r in page.resources]
     db = paper_db(datasette)
     rows = await db.list_docs_by_ids_states_and_kinds(
-        doc_ids=doc_ids, states=[state], kinds=["doc"]
+        doc_ids=doc_ids, states=[state], kinds=kinds
     )
     actor = request.actor
     me = actor.get("id") if actor else None
@@ -118,7 +132,57 @@ async def create_doc(datasette, request):
     db = paper_db(datasette)
     body = await read_json_body(request)
     name = body.get("name", "Untitled")
-    doc = await db.insert_doc(name=name, created_by=actor_id(request))
+    template_id_raw = body.get("template_id")
+    # Templates always materialize into a new ``kind='doc'`` row — you
+    # use a template, you don't become one. To create a brand-new
+    # template, the client sends ``{"kind": "template"}`` with no
+    # template_id (and writes content via the editor afterwards).
+    kind = body.get("kind", "doc")
+    if kind not in VALID_KINDS:
+        return Response.json(
+            {"error": f"kind must be one of: {', '.join(VALID_KINDS)}"},
+            status=400,
+        )
+    if template_id_raw is not None and kind != "doc":
+        return Response.json(
+            {"error": "template_id is only valid for kind='doc'"},
+            status=400,
+        )
+
+    if template_id_raw is not None:
+        try:
+            template_id = int(template_id_raw)
+        except (TypeError, ValueError):
+            return Response.json(
+                {"error": "template_id must be an integer"}, status=400
+            )
+        # Source-template view permission is sufficient to instantiate
+        # — the resulting doc is owned by the actor, decoupled from the
+        # template's share/visibility state.
+        await ensure_paper_view(datasette, request, template_id)
+        template = await db.select_doc_by_id(template_id)
+        if template is None:
+            return Response.json({"error": "Template not found"}, status=404)
+        if template.kind != "template":
+            return Response.json(
+                {"error": "Source paper is not a template"}, status=400
+            )
+        registry = get_registry(datasette)
+        instance = await registry.get(db, template_id)
+        live_doc = instance.materialize_live_doc()
+        doc = await db.insert_doc_with_snapshot(
+            name=name,
+            created_by=actor_id(request),
+            kind="doc",
+            snapshot_doc_json=json.dumps(live_doc),
+            snapshot_actor_id=actor_id(request),
+        )
+    else:
+        doc = await db.insert_doc(
+            name=name,
+            created_by=actor_id(request),
+            kind=kind,
+        )
     return Response.json(
         {
             "id": doc.id,
@@ -126,6 +190,7 @@ async def create_doc(datasette, request):
             "current_version": doc.current_version,
             "updated_at": doc.updated_at,
             "created_by": doc.created_by,
+            "kind": doc.kind,
         },
         status=201,
     )
@@ -598,6 +663,39 @@ async def restore_doc_route(datasette, request, doc_id: int):
     db = paper_db(datasette)
     await db.restore_doc(doc_id=doc_id)
     return await _state_response(datasette, doc_id)
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/make_template$")
+async def make_template_route(datasette, request, doc_id: int):
+    """Promote a doc to a template. Owner-only."""
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.set_doc_kind(doc_id=doc_id, kind="template")
+    refreshed = await db.select_doc_by_id(doc_id)
+    if refreshed is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    return Response.json({"id": refreshed.id, "kind": refreshed.kind})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/unmake_template$")
+async def unmake_template_route(datasette, request, doc_id: int):
+    """Demote a template back to a regular doc. Owner-only.
+
+    Any existing content (including placeholder nodes if slice 4 has
+    landed) stays in place; the doc just loses the template badge and
+    can no longer be selected from the "use as template" picker.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.set_doc_kind(doc_id=doc_id, kind="doc")
+    refreshed = await db.select_doc_by_id(doc_id)
+    if refreshed is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    return Response.json({"id": refreshed.id, "kind": refreshed.kind})
 
 
 async def _lock_response(datasette, doc_id: int):

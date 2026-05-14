@@ -26,12 +26,20 @@
   let active = $state<DocRow[] | null>(null);
   let archived = $state<DocRow[] | null>(null);
   let trashed = $state<DocRow[] | null>(null);
+  // Templates are a separate tab — kept in a flat cache keyed by tab
+  // name in addition to the lifecycle tabs. They use the same DocRow
+  // shape (templates are real papers with kind='template').
+  let templates = $state<DocRow[] | null>(null);
 
-  let tab = $state<DocState>("active");
+  type IndexTab = DocState | "templates";
+
+  let tab = $state<IndexTab>("active");
   let loading = $state(false);
   let error = $state<string | null>(null);
   let newName = $state("");
   let creating = $state(false);
+  // Template picker on the New paper form. Empty string means "blank".
+  let newTemplateId = $state<string>("");
   // Per-row mutation in flight (keyed by `${state}:${id}`) so we can
   // disable just that row's buttons rather than the whole tab.
   let busyKey = $state<string | null>(null);
@@ -44,23 +52,38 @@
   let nowTick = $state(Date.now());
   let nowTimer: ReturnType<typeof setInterval> | undefined;
 
-  function bucket(state: DocState): DocRow[] | null {
-    if (state === "active") return active;
-    if (state === "archived") return archived;
-    return trashed;
+  function bucket(t: IndexTab): DocRow[] | null {
+    if (t === "active") return active;
+    if (t === "archived") return archived;
+    if (t === "trashed") return trashed;
+    return templates;
   }
 
-  function setBucket(state: DocState, rows: DocRow[]): void {
-    if (state === "active") active = rows;
-    else if (state === "archived") archived = rows;
-    else trashed = rows;
+  function setBucket(t: IndexTab, rows: DocRow[]): void {
+    if (t === "active") active = rows;
+    else if (t === "archived") archived = rows;
+    else if (t === "trashed") trashed = rows;
+    else templates = rows;
   }
 
-  async function loadTab(target: DocState): Promise<void> {
+  function invalidateBucket(t: IndexTab): void {
+    if (t === "active") active = null;
+    else if (t === "archived") archived = null;
+    else if (t === "trashed") trashed = null;
+    else templates = null;
+  }
+
+  async function loadTab(target: IndexTab): Promise<void> {
     loading = true;
     error = null;
+    // Templates tab queries the kind=template variant; the other tabs
+    // filter by lifecycle state and stick with the default kind=doc.
+    const query =
+      target === "templates"
+        ? { kind: "template" }
+        : { state: target };
     const { data, error: err } = await client.GET("/-/paper/api/docs", {
-      params: { query: { state: target } as never },
+      params: { query: query as never },
     });
     loading = false;
     if (err || !data) {
@@ -70,7 +93,7 @@
     setBucket(target, data as unknown as DocRow[]);
   }
 
-  function selectTab(target: DocState): void {
+  function selectTab(target: IndexTab): void {
     tab = target;
     if (bucket(target) === null) void loadTab(target);
   }
@@ -80,8 +103,12 @@
     if (!newName.trim() || creating) return;
     creating = true;
     error = null;
+    // Default-blank: empty select → no template_id in the payload.
+    // Pick a template → server clones it as the seed snapshot.
+    const body: Record<string, unknown> = { name: newName.trim() };
+    if (newTemplateId !== "") body.template_id = Number(newTemplateId);
     const { data, error: err } = await client.POST("/-/paper/api/docs", {
-      body: { name: newName.trim() } as never,
+      body: body as never,
     });
     creating = false;
     if (err || !data) {
@@ -92,6 +119,14 @@
     window.location.href = `/-/paper/doc/${created.id}`;
   }
 
+  async function makeTemplate(doc: DocRow) {
+    return mutate(doc, "/make_template", ["active", "archived", "templates"]);
+  }
+
+  async function unmakeTemplate(doc: DocRow) {
+    return mutate(doc, "/unmake_template", ["active", "archived", "templates"]);
+  }
+
   async function mutate(
     doc: DocRow,
     path:
@@ -100,8 +135,10 @@
       | "/trash"
       | "/restore"
       | "/lock"
-      | "/unlock",
-    refetch: DocState[],
+      | "/unlock"
+      | "/make_template"
+      | "/unmake_template",
+    refetch: IndexTab[],
   ): Promise<void> {
     const key = `${doc.state}:${doc.id}`;
     if (busyKey) return;
@@ -114,7 +151,9 @@
         | "/-/paper/api/docs/{doc_id}/trash"
         | "/-/paper/api/docs/{doc_id}/restore"
         | "/-/paper/api/docs/{doc_id}/lock"
-        | "/-/paper/api/docs/{doc_id}/unlock";
+        | "/-/paper/api/docs/{doc_id}/unlock"
+        | "/-/paper/api/docs/{doc_id}/make_template"
+        | "/-/paper/api/docs/{doc_id}/unmake_template";
       const { error: err } = await client.POST(url, {
         params: { path: { doc_id: doc.id } },
       });
@@ -124,14 +163,11 @@
       }
       // Invalidate the affected tabs so they refetch on next view, and
       // refresh whichever one is currently visible immediately.
-      for (const state of refetch) {
-        if (state === tab) {
-          await loadTab(state);
+      for (const t of refetch) {
+        if (t === tab) {
+          await loadTab(t);
         } else {
-          setBucket(state, [] as DocRow[]);
-          if (state === "active") active = null;
-          else if (state === "archived") archived = null;
-          else trashed = null;
+          invalidateBucket(t);
         }
       }
     } finally {
@@ -162,14 +198,21 @@
     return mutate(d, "/restore", ["active", "trashed"]);
   }
 
+  // Tab the row is currently being shown in (templates show under their
+  // own tab regardless of state). Used by lock/unlock to refresh the
+  // visible row in place.
+  function rowTab(d: DocRow): IndexTab {
+    return d.kind === "template" ? "templates" : d.state;
+  }
+
   function lockRow(d: DocRow) {
     // Lock/unlock only mutates the same row; refresh the current tab so
     // the badge appears immediately.
-    return mutate(d, "/lock", [d.state]);
+    return mutate(d, "/lock", [rowTab(d)]);
   }
 
   function unlockRow(d: DocRow) {
-    return mutate(d, "/unlock", [d.state]);
+    return mutate(d, "/unlock", [rowTab(d)]);
   }
 
   function deletesInLabel(deleteAt: string | null): string {
@@ -241,8 +284,34 @@
     return rows === null ? label : `${label} (${rows.length})`;
   }
 
+  // Templates are loaded lazily into the dropdown so the index page
+  // doesn't pay for an extra round-trip until the user opens the
+  // "create from template" widget. After any make/unmake mutation we
+  // invalidate the cached list so the picker reflects the new state.
+  let pickerTemplates = $state<DocRow[] | null>(null);
+  let pickerLoading = $state(false);
+
+  async function ensurePickerTemplates(): Promise<void> {
+    if (pickerTemplates !== null || pickerLoading) return;
+    pickerLoading = true;
+    const { data } = await client.GET("/-/paper/api/docs", {
+      params: { query: { kind: "template" } as never },
+    });
+    pickerLoading = false;
+    pickerTemplates = ((data as unknown as DocRow[]) ?? []) as DocRow[];
+  }
+
+  // Refresh the picker list whenever the templates tab cache changes
+  // (make/unmake mutations invalidate it via the refetch list).
+  $effect(() => {
+    // Read templates so this effect re-runs on every reassignment.
+    if (templates === null) pickerTemplates = null;
+    else pickerTemplates = templates;
+  });
+
   onMount(() => {
     selectTab("active");
+    void ensurePickerTemplates();
     nowTimer = setInterval(() => {
       nowTick = Date.now();
     }, 60_000);
@@ -269,6 +338,18 @@
       disabled={creating}
       required
     />
+    <select
+      bind:value={newTemplateId}
+      disabled={creating}
+      title="Start from a template, or blank"
+    >
+      <option value="">Blank</option>
+      {#if pickerTemplates}
+        {#each pickerTemplates as t (t.id)}
+          <option value={String(t.id)}>From: {t.name}</option>
+        {/each}
+      {/if}
+    </select>
     <button type="submit" disabled={creating || !newName.trim()}>
       {creating ? "Creating…" : "New paper"}
     </button>
@@ -302,6 +383,15 @@
     >
       {tabLabel("Trash", trashed)}
     </button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={tab === "templates"}
+      class:active={tab === "templates"}
+      onclick={() => selectTab("templates")}
+    >
+      {tabLabel("Templates", templates)}
+    </button>
   </div>
 
   {#if loading && bucket(tab) === null}
@@ -311,8 +401,10 @@
       <p>No papers yet.</p>
     {:else if tab === "archived"}
       <p>No archived papers.</p>
-    {:else}
+    {:else if tab === "trashed"}
       <p>Trash is empty.</p>
+    {:else}
+      <p>No templates yet. Create one from the menu on any active paper.</p>
     {/if}
   {:else}
     <table>
@@ -371,7 +463,7 @@
                   </button>
                   {#if menuOpen}
                     <div class="menu" role="menu">
-                      {#if tab === "active"}
+                      {#if tab === "templates"}
                         {#if doc.locked}
                           <button
                             type="button"
@@ -395,6 +487,61 @@
                             Lock
                           </button>
                         {/if}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onclick={() => {
+                            closeMenu();
+                            void unmakeTemplate(doc);
+                          }}
+                        >
+                          Demote to doc
+                        </button>
+                        <button
+                          type="button"
+                          role="menuitem"
+                          class="danger"
+                          onclick={() => {
+                            closeMenu();
+                            void trashRow(doc);
+                          }}
+                        >
+                          Trash
+                        </button>
+                      {:else if tab === "active"}
+                        {#if doc.locked}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onclick={() => {
+                              closeMenu();
+                              void unlockRow(doc);
+                            }}
+                          >
+                            Unlock
+                          </button>
+                        {:else}
+                          <button
+                            type="button"
+                            role="menuitem"
+                            onclick={() => {
+                              closeMenu();
+                              void lockRow(doc);
+                            }}
+                          >
+                            Lock
+                          </button>
+                        {/if}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onclick={() => {
+                            closeMenu();
+                            void makeTemplate(doc);
+                          }}
+                        >
+                          Make template
+                        </button>
                         <button
                           type="button"
                           role="menuitem"
