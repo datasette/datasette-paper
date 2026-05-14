@@ -5,6 +5,8 @@ import {
   typeInEditor,
   expectEditorContains,
   waitForServerVersion,
+  setActorCookie,
+  cookieHeader,
 } from "./helpers";
 
 /**
@@ -225,6 +227,125 @@ test("template_params endpoint lists the built-ins with samples", async ({
   expect(keys).toEqual(
     expect.arrayContaining(["today", "now", "weekday", "actor", "year"]),
   );
+});
+
+// ─── Owner flow: lock as the actual owner ────────────────────────────────────
+//
+// These specs sign a real actor cookie so the doc is created with
+// created_by=alice — only then does isOwner=true and the Lock menu
+// item appear. Backend tests already cover the SQL-gate behavior;
+// these prove the user-reported symptom ("I locked it but I can
+// still edit") is fixed end-to-end through the editor surface.
+
+test("owner can lock their doc and the editor flips to read-only", async ({
+  page,
+}) => {
+  // Sign in as alice and create a paper she owns.
+  await page.goto("/-/paper/");
+  await setActorCookie(page, "alice");
+  const doc = await createPaper(page, { name: "Lock me", actorId: "alice" });
+  await gotoPaper(page, doc.url);
+
+  // Sanity: alice can type before locking. Capture the post-edit
+  // version so we can later assert no further steps landed while
+  // locked (without counting keystrokes by hand).
+  await typeInEditor(page, "before lock ");
+  await expectEditorContains(page, "before lock");
+  await waitForServerVersion(page, doc.id, 12);
+  const preLockResp = await page.request.get(
+    `/-/paper/api/docs/${doc.id}`,
+    { headers: { Cookie: cookieHeader("alice") } },
+  );
+  const versionBeforeLock = (await preLockResp.json()).version;
+
+  // The Locked pill is absent before locking.
+  await expect(page.locator(".locked-pill")).toHaveCount(0);
+
+  // Open the doc-header overflow menu and click Lock.
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page
+    .getByRole("menuitem", { name: /^Lock \(read-only\)$/ })
+    .click();
+
+
+  // The Locked pill appears, the toolbar disappears, and the editor
+  // becomes contenteditable=false. All three are driven by the
+  // permissions-changed SSE broadcast (no reload).
+  await expect(page.locator(".locked-pill")).toBeVisible();
+  await expect(page.locator(".paper-toolbar")).toHaveCount(0);
+  await expect(page.locator(".ProseMirror")).toHaveAttribute(
+    "contenteditable",
+    "false",
+  );
+
+  // Try to type — the contenteditable=false editor swallows input,
+  // and the server-side guard (POST /events 403 for the owner of a
+  // locked doc, see test_post_events_403_for_owner_of_locked_doc)
+  // would reject anything that did slip through.
+  await page.locator(".ProseMirror").click();
+  await page.keyboard.type("AFTER_LOCK");
+  await page.waitForTimeout(200);
+  await expect(page.locator(".ProseMirror")).not.toContainText("AFTER_LOCK");
+
+  // Server-side: the version did not advance past where it was when
+  // we locked. Without the bug fix, the keystrokes above would have
+  // been accepted and the version would have climbed.
+  const r = await page.request.get(`/-/paper/api/docs/${doc.id}`, {
+    headers: { Cookie: cookieHeader("alice") },
+  });
+  const body = await r.json();
+  expect(body.version).toBe(versionBeforeLock);
+  expect(body.permissions.canEdit).toBe(false);
+  expect(body.permissions.locked).toBe(true);
+});
+
+test("owner can unlock their locked doc and resume editing", async ({
+  page,
+}) => {
+  // The lock is meant to be a recoverable state — owner clicks
+  // Unlock, edits resume. If /unlock had been gated on edit, this
+  // would 403 (and the fix swaps it onto the view-based gate).
+  await page.goto("/-/paper/");
+  await setActorCookie(page, "alice");
+  const doc = await createPaper(page, { name: "Unlock me", actorId: "alice" });
+  await gotoPaper(page, doc.url);
+
+  // Lock via the API to skip the menu plumbing (covered above).
+  const lockResp = await page.request.post(
+    `/-/paper/api/docs/${doc.id}/lock`,
+    { headers: { Cookie: cookieHeader("alice") } },
+  );
+  expect(lockResp.status()).toBe(200);
+
+  // SSE broadcast flips the editor read-only.
+  await expect(page.locator(".locked-pill")).toBeVisible();
+  await expect(page.locator(".ProseMirror")).toHaveAttribute(
+    "contenteditable",
+    "false",
+  );
+
+  // Open the menu and click Unlock.
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page
+    .getByRole("menuitem", { name: /^Unlock \(make editable\)$/ })
+    .click();
+
+  // The pill goes away. ``mode`` stays "view" after canEdit comes
+  // back — that's deliberate UX (PaperApp only force-flips to view
+  // on lock; it doesn't auto-flip back to edit on unlock so people
+  // don't lose their View-mode reading state). User clicks Edit to
+  // resume.
+  await expect(page.locator(".locked-pill")).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.locator(".paper-toolbar")).toBeVisible();
+  await expect(page.locator(".ProseMirror")).toHaveAttribute(
+    "contenteditable",
+    "true",
+  );
+
+  // And typing actually lands again.
+  await typeInEditor(page, "after unlock");
+  await expectEditorContains(page, "after unlock");
 });
 
 test("kind=all listing returns both docs and templates", async ({ page }) => {

@@ -571,15 +571,24 @@ async def post_share(datasette, request, doc_id: int):
 
 
 async def _ensure_owner(datasette, request, doc_id: int):
-    """Edit-permission check, then escalate to owner-only.
+    """View-permission check, then escalate to owner-only.
+
+    Used by every owner-only manage route (archive / trash / restore /
+    lock / unlock / make_template / unmake_template). The gate is
+    deliberately ``view``, not ``edit``: a locked doc denies edit to
+    everyone including the owner, and gating manage on edit would
+    trap an owner with no way to unlock their own paper. The inline
+    owner check (``doc.created_by == me``) is what actually enforces
+    ownership — the view pre-check just standardises the 403 surface
+    and keeps random doc-id probing from disclosing existence.
 
     Returns the post-fetch ``Doc`` row (so the caller doesn't have to
-    refetch). Raises ``Forbidden('datasette-paper-manage')`` for editors
-    who aren't the owner — same surface as the share endpoint uses.
-    Returns ``None`` (caller should 404) if the doc has been hard-deleted
-    between the check and the read.
+    refetch). Raises ``Forbidden('datasette-paper-manage')`` for
+    viewers who aren't the owner. Returns ``None`` (caller should
+    404) if the doc has been hard-deleted between the check and the
+    read.
     """
-    await ensure_paper_edit(datasette, request, doc_id)
+    await ensure_paper_view(datasette, request, doc_id)
     db = paper_db(datasette)
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:

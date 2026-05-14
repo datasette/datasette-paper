@@ -2,6 +2,11 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 8485;
 const INTERNAL_DB = "/tmp/datasette-paper-e2e-internal.db";
+// Fixed signing secret so the helpers in `e2e/helpers.ts` can mint
+// signed actor cookies for owner-flow tests (lock-as-owner, etc.).
+// Must NOT be a real production value — this is hard-coded in the
+// harness on purpose.
+const E2E_SECRET = "e2e-test-secret-not-for-prod";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -28,7 +33,8 @@ export default defineConfig({
     // every browser session is "anonymous" but should still be able to
     // create + view + edit papers. Per-paper ownership / share gating is
     // covered by backend tests, not the playwright suite.
-    command: `rm -f ${INTERNAL_DB} && uv run --prerelease=allow datasette --internal ${INTERNAL_DB} -s permissions.datasette-paper-list true -s permissions.datasette-paper-create true -s permissions.datasette-paper-view true -s permissions.datasette-paper-edit true -p ${PORT}`,
+    command: `rm -f ${INTERNAL_DB} && uv run --prerelease=allow datasette --internal ${INTERNAL_DB} --secret '${E2E_SECRET}' -s permissions.datasette-paper-list true -s permissions.datasette-paper-create true -s permissions.datasette-paper-view true -s permissions.datasette-paper-edit true -p ${PORT}`,
+    env: { DATASETTE_PAPER_E2E_SECRET: E2E_SECRET },
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,
     timeout: 30000,

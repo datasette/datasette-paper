@@ -2,10 +2,14 @@
 
 Covers three layers:
 
-* Permissions hook — locked papers deny edit to shared editors and
-  link-edit visibility actors; owner always retains edit.
+* Permissions hook — locked papers deny edit to *everyone* including
+  the owner (via an explicit deny rule that overrides any broader
+  allow grant). The owner restores edit via the dedicated /unlock
+  route, which gates on view + an inline owner check so the lock
+  can't trap them.
 * Routes — /lock and /unlock are owner-only and surface ``locked`` /
-  ``canEdit`` in the bootstrap envelope.
+  ``canEdit`` in the bootstrap envelope. Other manage routes
+  (archive, trash, etc.) stay reachable on a locked doc.
 * SSE — flipping the lock broadcasts a ``permissions-changed`` event
   to every open subscriber with their newly-computed ``canEdit``.
 """
@@ -132,19 +136,160 @@ async def test_lock_denies_edit_to_link_edit_visibility():
 
 
 @pytest.mark.asyncio
-async def test_lock_keeps_owner_edit():
-    """Owner can always edit (and therefore unlock) a locked doc."""
+async def test_lock_denies_edit_to_owner_too():
+    """Lock means lock — even the owner loses edit. They use /unlock
+    (which goes through the view-based _ensure_owner gate) to restore
+    it. Without this, the lock is a no-op from the owner's perspective:
+    they can keep typing into a "locked" doc, which is the surprise
+    behavior the user reported.
+    """
+    ds = await _make_ds()
+    doc_id = await _alice_doc(ds)
+
+    # Baseline: alice can edit her own doc.
+    assert await ds.allowed(
+        action="datasette-paper-edit",
+        resource=PaperResource(doc_id),
+        actor={"id": "alice"},
+    )
+
+    # Lock.
+    await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/lock", cookies=_cookie(ds, "alice")
+    )
+
+    # Owner loses edit. View stays.
+    assert not await ds.allowed(
+        action="datasette-paper-edit",
+        resource=PaperResource(doc_id),
+        actor={"id": "alice"},
+    )
+    assert await ds.allowed(
+        action="datasette-paper-view",
+        resource=PaperResource(doc_id),
+        actor={"id": "alice"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_owner_can_unlock_their_own_locked_doc():
+    """The lock can't trap the owner — /unlock gates on view+owner,
+    not edit, so it stays reachable when canEdit is False."""
+    ds = await _make_ds()
+    doc_id = await _alice_doc(ds)
+    await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/lock", cookies=_cookie(ds, "alice")
+    )
+    # Sanity: alice cannot edit while locked.
+    assert not await ds.allowed(
+        action="datasette-paper-edit",
+        resource=PaperResource(doc_id),
+        actor={"id": "alice"},
+    )
+
+    # Unlock works even though alice has no edit.
+    r = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/unlock", cookies=_cookie(ds, "alice")
+    )
+    assert r.status_code == 200
+
+    # Edit restored.
+    assert await ds.allowed(
+        action="datasette-paper-edit",
+        resource=PaperResource(doc_id),
+        actor={"id": "alice"},
+    )
+
+
+@pytest.mark.asyncio
+async def test_owner_bootstrap_envelope_after_lock_has_canEdit_false():
+    """Same flow the live HTTP probe takes: owner creates doc, locks
+    it, GETs the bootstrap envelope. Pinned because a regression here
+    would surface as "I locked but I can still edit" in the editor
+    even if the lower-level ``ds.allowed`` returns False.
+    """
+    ds = await _make_ds()
+    doc_id = await _alice_doc(ds)
+    lock_resp = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/lock", cookies=_cookie(ds, "alice")
+    )
+    assert lock_resp.status_code == 200
+
+    r = await ds.client.get(f"/-/paper/api/docs/{doc_id}", cookies=_cookie(ds, "alice"))
+    assert r.status_code == 200
+    perms = r.json()["permissions"]
+    assert perms["locked"] is True
+    assert perms["isOwner"] is True
+    assert perms["canEdit"] is False
+
+
+@pytest.mark.asyncio
+async def test_owner_can_archive_locked_doc():
+    """Manage operations stay reachable for the owner of a locked doc."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
     await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/lock", cookies=_cookie(ds, "alice")
     )
 
-    assert await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
-        actor={"id": "alice"},
+    r = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/archive", cookies=_cookie(ds, "alice")
     )
+    assert r.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_post_events_403_for_owner_of_locked_doc():
+    """The actual edit pipeline (POST /events) refuses the owner's
+    steps when the doc is locked. This is the route the in-browser
+    editor uses for every keystroke batch — covered explicitly because
+    it's the user-visible "I locked it but I can still edit" symptom."""
+    ds = await _make_ds()
+    doc_id = await _alice_doc(ds)
+
+    # Sanity: alice can post events on her own unlocked doc.
+    r_unlocked = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/events",
+        json={
+            "version": 0,
+            "clientID": 1,
+            "steps": [
+                {
+                    "stepType": "replace",
+                    "from": 1,
+                    "to": 1,
+                    "slice": {"content": [{"type": "text", "text": "hi"}]},
+                }
+            ],
+        },
+        cookies=_cookie(ds, "alice"),
+    )
+    assert r_unlocked.status_code == 200
+
+    # Lock.
+    await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/lock", cookies=_cookie(ds, "alice")
+    )
+
+    # Now alice's step POST is rejected with 403 — locked doc is
+    # genuinely read-only for everyone including the owner.
+    r_locked = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/events",
+        json={
+            "version": 1,
+            "clientID": 1,
+            "steps": [
+                {
+                    "stepType": "replace",
+                    "from": 3,
+                    "to": 3,
+                    "slice": {"content": [{"type": "text", "text": "x"}]},
+                }
+            ],
+        },
+        cookies=_cookie(ds, "alice"),
+    )
+    assert r_locked.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -262,8 +407,10 @@ async def test_list_endpoint_surfaces_locked():
 async def test_lock_broadcasts_permissions_changed_to_subscribers():
     """Locking a doc pushes a permissions-changed event per subscriber.
 
-    Owner subscriber sees canEdit=True; editor-share subscriber sees
-    canEdit=False. Both stay subscribed.
+    Lock is universal — even the owner sees canEdit=False so the
+    editor flips into read-only mode. The owner restores edit via
+    the dedicated /unlock route (which doesn't go through the edit
+    gate). Both subscribers stay connected; lock never disconnects.
     """
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
@@ -286,7 +433,7 @@ async def test_lock_broadcasts_permissions_changed_to_subscribers():
 
     assert alice_payload == {
         "kind": "permissions-changed",
-        "canEdit": True,
+        "canEdit": False,
         "locked": True,
     }
     assert bob_payload == {

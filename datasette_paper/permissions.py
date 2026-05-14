@@ -88,6 +88,15 @@ async def permission_resources_sql(datasette, actor, action):
     share_lock_filter = "AND d.locked = 0" if is_edit else ""
     visibility_lock_filter = "AND locked = 0" if is_edit else ""
 
+    # Owner edit rule must also respect ``locked``: previously the owner
+    # branch was unconditional, which made the lock a no-op from the
+    # owner's perspective ("I locked the doc but I can still type" —
+    # surprising and contrary to user expectation). With the filter,
+    # ``locked = 1`` flips canEdit to False for everyone including the
+    # owner; the owner uses the dedicated /unlock route to restore it,
+    # which goes through ``_ensure_owner`` (view + inline owner check,
+    # no edit gate) so the lock can't trap them.
+    owner_lock_filter = "AND locked = 0" if is_edit else ""
     rules = [
         # Owner row — anonymous actors never own (NULL guard).
         PermissionSQL(
@@ -95,7 +104,8 @@ async def permission_resources_sql(datasette, actor, action):
                 "SELECT CAST(id AS TEXT) AS parent, NULL AS child, "
                 "1 AS allow, 'owner' AS reason "
                 "FROM _datasette_paper_doc "
-                "WHERE :_paper_aid IS NOT NULL AND created_by = :_paper_aid"
+                "WHERE :_paper_aid IS NOT NULL AND created_by = :_paper_aid "
+                f"{owner_lock_filter}"
             ),
             params={"_paper_aid": actor_id},
         ),
@@ -111,6 +121,28 @@ async def permission_resources_sql(datasette, actor, action):
             params={"_paper_aid": actor_id},
         ),
     ]
+
+    # Explicit per-resource deny when the doc is locked and we're
+    # resolving edit. Necessary because the cascading rule resolver
+    # picks the most specific (deepest) rule, and at the same depth
+    # deny beats allow. Without this, a configuration that statically
+    # grants ``datasette-paper-edit`` globally (depth 0) would override
+    # the absence of our per-resource allow and let everyone edit a
+    # locked doc anyway. Emitting the deny at parent-level (depth 1)
+    # guarantees the lock wins regardless of how broadly edit was
+    # granted elsewhere. The owner can still unlock because the
+    # /unlock route gates on view (+ inline owner check), bypassing
+    # the edit action entirely.
+    if is_edit:
+        rules.append(
+            PermissionSQL(
+                sql=(
+                    "SELECT CAST(id AS TEXT) AS parent, NULL AS child, "
+                    "0 AS allow, 'locked' AS reason "
+                    "FROM _datasette_paper_doc WHERE locked = 1"
+                ),
+            )
+        )
 
     # Visibility-based grants — gated by the global list permission so
     # admins can keep papers off the list-page while still allowing
