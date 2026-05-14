@@ -16,6 +16,7 @@ from ..permissions import (
     ensure_paper_list,
     ensure_paper_view,
 )
+from ..template_params import build_context, substitute_placeholders
 from ..util import read_json_body, actor_id, paper_db
 
 
@@ -170,11 +171,17 @@ async def create_doc(datasette, request):
         registry = get_registry(datasette)
         instance = await registry.get(db, template_id)
         live_doc = instance.materialize_live_doc()
+        # Substitute every placeholder node with text resolved against
+        # the creating actor's context (built-ins like {today} / {actor}
+        # land here). Result is a regular doc — kind='doc' — with no
+        # placeholder nodes left.
+        ctx = build_context(actor_id=actor_id(request))
+        materialized = substitute_placeholders(live_doc, ctx)
         doc = await db.insert_doc_with_snapshot(
             name=name,
             created_by=actor_id(request),
             kind="doc",
-            snapshot_doc_json=json.dumps(live_doc),
+            snapshot_doc_json=json.dumps(materialized),
             snapshot_actor_id=actor_id(request),
         )
     else:
@@ -663,6 +670,29 @@ async def restore_doc_route(datasette, request, doc_id: int):
     db = paper_db(datasette)
     await db.restore_doc(doc_id=doc_id)
     return await _state_response(datasette, doc_id)
+
+
+@router.GET(r"^/-/paper/api/template_params$")
+async def list_template_params(datasette, request):
+    """List built-in placeholder keys + resolved-now sample values.
+
+    Gated by ``datasette-paper-list`` because the response is data-
+    free (no per-doc info) and the toolbar fetches it once on
+    template load. Sample values let the toolbar render a preview
+    next to each key without re-fetching after each placeholder
+    insert.
+    """
+    await ensure_paper_list(datasette, request)
+    from ..template_params import builtin_keys, resolve_key
+
+    ctx = build_context(actor_id=actor_id(request))
+    return Response.json(
+        {
+            "builtins": [
+                {"key": k, "sample": resolve_key(k, ctx)} for k in builtin_keys()
+            ],
+        }
+    )
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/make_template$")

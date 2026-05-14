@@ -207,7 +207,7 @@
     <div class="status-banner status-{status.state}">{status.message}</div>
   {/if}
   {#if canEdit && mode === "edit"}
-    <Toolbar {view} />
+    <Toolbar {view} {kind} />
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
 </div>
