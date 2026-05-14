@@ -12,6 +12,7 @@ dist
 build
 uv.lock
 context/
+experiment/
 
 # Frontend
 node_modules/

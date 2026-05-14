@@ -5,20 +5,31 @@ const BASE = `/-/paper`;
 /**
  * Create a new paper via the JSON API and return both the URL and id.
  * Each call uses a unique name so tests don't collide.
+ *
+ * Pass ``kind: "template"`` to create a template instead of a regular
+ * doc. Pass ``templateId`` to seed the new doc from a template — the
+ * server clones the template's materialized content into the new
+ * doc's version-0 snapshot.
  */
 export async function createPaper(
   page: Page,
-  name?: string,
+  opts: {
+    name?: string;
+    kind?: "doc" | "template";
+    templateId?: number;
+  } = {},
 ): Promise<{ id: number; url: string; name: string }> {
   const paperName =
-    name ?? `E2E-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const resp = await page.request.post(`${BASE}/api/docs`, {
-    data: { name: paperName },
-  });
+    opts.name ?? `E2E-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  const data: Record<string, unknown> = { name: paperName };
+  if (opts.kind) data.kind = opts.kind;
+  if (opts.templateId !== undefined) data.template_id = opts.templateId;
+  const resp = await page.request.post(`${BASE}/api/docs`, { data });
   expect(resp.status()).toBe(201);
-  const data = await resp.json();
-  return { id: data.id, url: `${BASE}/doc/${data.id}`, name: paperName };
+  const body = await resp.json();
+  return { id: body.id, url: `${BASE}/doc/${body.id}`, name: paperName };
 }
+
 
 /**
  * Navigate to a paper URL and wait for the editor to be ready.

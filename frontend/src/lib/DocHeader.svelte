@@ -146,8 +146,13 @@
   async function load() {
     // The bootstrap envelope returns doc state; the doc row's metadata
     // (name, created_by, updated_at) lives on the per-doc API. We fetch
-    // it via the docs list, filtered by id.
-    const { data, error } = await client.GET("/-/paper/api/docs");
+    // via the docs list with kind=all so the row is reachable whether
+    // this paper is a regular doc or a template — the default kind=doc
+    // filter would silently exclude templates and leave the header
+    // stuck in "Loading…".
+    const { data, error } = await client.GET("/-/paper/api/docs", {
+      params: { query: { kind: "all" } as never },
+    });
     if (error || !data) return;
     const found = (data as unknown as Array<DocMeta & { id: number }>).find(
       (r) => String(r.id) === String(docId),
