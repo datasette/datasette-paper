@@ -16,10 +16,12 @@ from ..permissions import (
     ensure_paper_list,
     ensure_paper_view,
 )
+from ..template_params import build_context, substitute_placeholders
 from ..util import read_json_body, actor_id, paper_db
 
 
 VALID_STATES = ("active", "archived", "trashed")
+VALID_KINDS = ("doc", "template")
 TRASH_RETENTION_DAYS = 7
 
 
@@ -47,6 +49,20 @@ def _doc_state_payload(doc) -> dict:
     }
 
 
+def _doc_flags_payload(doc) -> dict:
+    """Capability/category flags surfaced alongside state.
+
+    ``kind`` and ``locked`` are orthogonal to the lifecycle state but
+    every list/bootstrap response wants both. Kept in a separate helper
+    so SSE state-changed payloads (which intentionally don't include
+    these) stay narrow.
+    """
+    return {
+        "kind": doc.kind,
+        "locked": bool(doc.locked),
+    }
+
+
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
@@ -66,6 +82,19 @@ async def list_docs(datasette, request):
             {"error": f"state must be one of: {', '.join(VALID_STATES)}"},
             status=400,
         )
+    # ``kind=doc`` is the default — templates live in their own tab so
+    # they don't clutter the index. Pass ``kind=template`` explicitly
+    # to list templates, or ``kind=all`` for both.
+    kind = (request.args.get("kind") or "doc").lower()
+    if kind == "all":
+        kinds = list(VALID_KINDS)
+    elif kind in VALID_KINDS:
+        kinds = [kind]
+    else:
+        return Response.json(
+            {"error": f"kind must be one of: {', '.join(VALID_KINDS)}, all"},
+            status=400,
+        )
 
     # Pull every paper the actor can view in one shot (cap at 1000; if
     # somebody has 1000+ papers visible we'll add proper pagination).
@@ -75,7 +104,9 @@ async def list_docs(datasette, request):
     # PaperResource is single-level — id lives in `parent`, child is None.
     doc_ids = [int(r.parent) for r in page.resources]
     db = paper_db(datasette)
-    rows = await db.list_docs_by_ids_and_states(doc_ids=doc_ids, states=[state])
+    rows = await db.list_docs_by_ids_states_and_kinds(
+        doc_ids=doc_ids, states=[state], kinds=kinds
+    )
     actor = request.actor
     me = actor.get("id") if actor else None
     return Response.json(
@@ -89,6 +120,7 @@ async def list_docs(datasette, request):
                 "visibility": r.visibility,
                 "is_owner": r.created_by is not None and r.created_by == me,
                 **_doc_state_payload(r),
+                **_doc_flags_payload(r),
             }
             for r in rows
         ]
@@ -101,7 +133,63 @@ async def create_doc(datasette, request):
     db = paper_db(datasette)
     body = await read_json_body(request)
     name = body.get("name", "Untitled")
-    doc = await db.insert_doc(name=name, created_by=actor_id(request))
+    template_id_raw = body.get("template_id")
+    # Templates always materialize into a new ``kind='doc'`` row — you
+    # use a template, you don't become one. To create a brand-new
+    # template, the client sends ``{"kind": "template"}`` with no
+    # template_id (and writes content via the editor afterwards).
+    kind = body.get("kind", "doc")
+    if kind not in VALID_KINDS:
+        return Response.json(
+            {"error": f"kind must be one of: {', '.join(VALID_KINDS)}"},
+            status=400,
+        )
+    if template_id_raw is not None and kind != "doc":
+        return Response.json(
+            {"error": "template_id is only valid for kind='doc'"},
+            status=400,
+        )
+
+    if template_id_raw is not None:
+        try:
+            template_id = int(template_id_raw)
+        except (TypeError, ValueError):
+            return Response.json(
+                {"error": "template_id must be an integer"}, status=400
+            )
+        # Source-template view permission is sufficient to instantiate
+        # — the resulting doc is owned by the actor, decoupled from the
+        # template's share/visibility state.
+        await ensure_paper_view(datasette, request, template_id)
+        template = await db.select_doc_by_id(template_id)
+        if template is None:
+            return Response.json({"error": "Template not found"}, status=404)
+        if template.kind != "template":
+            return Response.json(
+                {"error": "Source paper is not a template"}, status=400
+            )
+        registry = get_registry(datasette)
+        instance = await registry.get(db, template_id)
+        live_doc = instance.materialize_live_doc()
+        # Substitute every placeholder node with text resolved against
+        # the creating actor's context (built-ins like {today} / {actor}
+        # land here). Result is a regular doc — kind='doc' — with no
+        # placeholder nodes left.
+        ctx = build_context(actor_id=actor_id(request))
+        materialized = substitute_placeholders(live_doc, ctx)
+        doc = await db.insert_doc_with_snapshot(
+            name=name,
+            created_by=actor_id(request),
+            kind="doc",
+            snapshot_doc_json=json.dumps(materialized),
+            snapshot_actor_id=actor_id(request),
+        )
+    else:
+        doc = await db.insert_doc(
+            name=name,
+            created_by=actor_id(request),
+            kind=kind,
+        )
     return Response.json(
         {
             "id": doc.id,
@@ -109,6 +197,7 @@ async def create_doc(datasette, request):
             "current_version": doc.current_version,
             "updated_at": doc.updated_at,
             "created_by": doc.created_by,
+            "kind": doc.kind,
         },
         status=201,
     )
@@ -152,11 +241,19 @@ async def get_doc_bootstrap(datasette, request, doc_id: int):
                 "canManage": is_owner,
                 "isOwner": is_owner,
                 "visibility": doc.visibility,
+                # ``locked`` lives inside permissions because it is a
+                # capability gate — flipping it changes canEdit for
+                # every non-owner. The same field appears flat on list
+                # rows (no permissions sub-object there).
+                "locked": bool(doc.locked),
             },
             # State seed for the open-doc UI. The same fields arrive over
             # SSE as ``state-changed`` whenever the owner flips state mid-
             # session, so the editor doesn't need to refetch.
             **_doc_state_payload(doc),
+            # ``kind`` is metadata (doc vs template), distinct from the
+            # state lifecycle and from the permission block.
+            "kind": doc.kind,
         }
     )
 
@@ -474,15 +571,24 @@ async def post_share(datasette, request, doc_id: int):
 
 
 async def _ensure_owner(datasette, request, doc_id: int):
-    """Edit-permission check, then escalate to owner-only.
+    """View-permission check, then escalate to owner-only.
+
+    Used by every owner-only manage route (archive / trash / restore /
+    lock / unlock / make_template / unmake_template). The gate is
+    deliberately ``view``, not ``edit``: a locked doc denies edit to
+    everyone including the owner, and gating manage on edit would
+    trap an owner with no way to unlock their own paper. The inline
+    owner check (``doc.created_by == me``) is what actually enforces
+    ownership — the view pre-check just standardises the 403 surface
+    and keeps random doc-id probing from disclosing existence.
 
     Returns the post-fetch ``Doc`` row (so the caller doesn't have to
-    refetch). Raises ``Forbidden('datasette-paper-manage')`` for editors
-    who aren't the owner — same surface as the share endpoint uses.
-    Returns ``None`` (caller should 404) if the doc has been hard-deleted
-    between the check and the read.
+    refetch). Raises ``Forbidden('datasette-paper-manage')`` for
+    viewers who aren't the owner. Returns ``None`` (caller should
+    404) if the doc has been hard-deleted between the check and the
+    read.
     """
-    await ensure_paper_edit(datasette, request, doc_id)
+    await ensure_paper_view(datasette, request, doc_id)
     db = paper_db(datasette)
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:
@@ -573,6 +679,109 @@ async def restore_doc_route(datasette, request, doc_id: int):
     db = paper_db(datasette)
     await db.restore_doc(doc_id=doc_id)
     return await _state_response(datasette, doc_id)
+
+
+@router.GET(r"^/-/paper/api/template_params$")
+async def list_template_params(datasette, request):
+    """List built-in placeholder keys + resolved-now sample values.
+
+    Gated by ``datasette-paper-list`` because the response is data-
+    free (no per-doc info) and the toolbar fetches it once on
+    template load. Sample values let the toolbar render a preview
+    next to each key without re-fetching after each placeholder
+    insert.
+    """
+    await ensure_paper_list(datasette, request)
+    from ..template_params import builtin_keys, resolve_key
+
+    ctx = build_context(actor_id=actor_id(request))
+    return Response.json(
+        {
+            "builtins": [
+                {"key": k, "sample": resolve_key(k, ctx)} for k in builtin_keys()
+            ],
+        }
+    )
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/make_template$")
+async def make_template_route(datasette, request, doc_id: int):
+    """Promote a doc to a template. Owner-only."""
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.set_doc_kind(doc_id=doc_id, kind="template")
+    refreshed = await db.select_doc_by_id(doc_id)
+    if refreshed is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    return Response.json({"id": refreshed.id, "kind": refreshed.kind})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/unmake_template$")
+async def unmake_template_route(datasette, request, doc_id: int):
+    """Demote a template back to a regular doc. Owner-only.
+
+    Any existing content (including placeholder nodes if slice 4 has
+    landed) stays in place; the doc just loses the template badge and
+    can no longer be selected from the "use as template" picker.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.set_doc_kind(doc_id=doc_id, kind="doc")
+    refreshed = await db.select_doc_by_id(doc_id)
+    if refreshed is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    return Response.json({"id": refreshed.id, "kind": refreshed.kind})
+
+
+async def _lock_response(datasette, doc_id: int):
+    """Refetch + broadcast a permissions-changed event after a lock flip.
+
+    Mirrors ``_state_response`` but uses the lock-aware broadcast that
+    recomputes ``canEdit`` per subscriber. Returns the post-update
+    ``{id, locked, kind}`` JSON for the caller.
+    """
+    db = paper_db(datasette)
+    doc = await db.select_doc_by_id(doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+
+    registry = get_registry(datasette)
+    instance = registry._instances.get(doc_id)
+    if instance is not None:
+        await instance.broadcast_permissions_changed(datasette, bool(doc.locked))
+
+    return Response.json({"id": doc.id, **_doc_flags_payload(doc)})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/lock$")
+async def lock_doc_route(datasette, request, doc_id: int):
+    """Mark a paper as read-only. Owner-only.
+
+    Affects only the edit grant — viewers/editors keep their SSE
+    connection and receive a ``permissions-changed`` event so the UI
+    flips into read-only mode without a reconnect.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.set_doc_locked(doc_id=doc_id, locked=True)
+    return await _lock_response(datasette, doc_id)
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/unlock$")
+async def unlock_doc_route(datasette, request, doc_id: int):
+    """Clear the read-only flag. Owner-only."""
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    db = paper_db(datasette)
+    await db.set_doc_locked(doc_id=doc_id, locked=False)
+    return await _lock_response(datasette, doc_id)
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/snapshot$")

@@ -41,6 +41,7 @@ class PaperDB:
         name: str,
         created_by: Optional[str] = None,
         schema_name: str = "basic+list",
+        kind: str = "doc",
     ) -> _queries.Doc:
         def write(conn):
             return _queries.insert_doc(
@@ -48,11 +49,52 @@ class PaperDB:
                 name=name,
                 created_by=created_by,
                 schema_name=schema_name,
+                kind=kind,
             )
 
         doc = await self.database.execute_write_fn(write)
         assert doc is not None
         return doc
+
+    async def insert_doc_with_snapshot(
+        self,
+        *,
+        name: str,
+        created_by: Optional[str] = None,
+        schema_name: str = "basic+list",
+        kind: str = "doc",
+        snapshot_doc_json: str,
+        snapshot_actor_id: Optional[str] = None,
+    ) -> _queries.Doc:
+        """Create a doc and seed it with a version-0 snapshot atomically.
+
+        Used by create-from-template: the new doc's first hydrate
+        reads the snapshot we plant here so the cloned content appears
+        as the starting state with version=0. Running both inserts in
+        one execute_write_fn closure keeps the doc from being briefly
+        visible without a snapshot (which would make Instance.hydrate
+        fall back to the empty-doc JSON).
+        """
+
+        def write(conn):
+            doc = _queries.insert_doc(
+                conn,
+                name=name,
+                created_by=created_by,
+                schema_name=schema_name,
+                kind=kind,
+            )
+            assert doc is not None
+            _queries.insert_snapshot(
+                conn,
+                doc_id=doc.id,
+                version=0,
+                doc_json=snapshot_doc_json,
+                actor_id=snapshot_actor_id,
+            )
+            return doc
+
+        return await self.database.execute_write_fn(write)
 
     async def update_doc_name(
         self, *, doc_id: int, name: str
@@ -71,17 +113,25 @@ class PaperDB:
     async def list_docs(self) -> list[_queries.Doc]:
         return await self.database.execute_write_fn(_queries.list_docs)
 
-    async def list_docs_by_ids_and_states(
-        self, *, doc_ids: list[int], states: list[str]
+    async def list_docs_by_ids_states_and_kinds(
+        self,
+        *,
+        doc_ids: list[int],
+        states: list[str],
+        kinds: list[str],
     ) -> list[_queries.Doc]:
         # Variable-length IN goes through json_each on the SQL side; serialize
-        # here so the helper signature stays two string parameters.
+        # here so the helper signature stays three string parameters.
         doc_ids_json = json.dumps(doc_ids)
         states_json = json.dumps(states)
+        kinds_json = json.dumps(kinds)
 
         def read(conn):
-            return _queries.list_docs_by_ids_and_states(
-                conn, doc_ids_json=doc_ids_json, states_json=states_json
+            return _queries.list_docs_by_ids_states_and_kinds(
+                conn,
+                doc_ids_json=doc_ids_json,
+                states_json=states_json,
+                kinds_json=kinds_json,
             )
 
         return await self.database.execute_write_fn(read)
@@ -111,6 +161,18 @@ class PaperDB:
     async def restore_doc(self, *, doc_id: int) -> None:
         def write(conn):
             _queries.restore_doc(conn, doc_id=doc_id)
+
+        await self.database.execute_write_fn(write)
+
+    async def set_doc_kind(self, *, doc_id: int, kind: str) -> None:
+        def write(conn):
+            _queries.set_doc_kind(conn, doc_id=doc_id, kind=kind)
+
+        await self.database.execute_write_fn(write)
+
+    async def set_doc_locked(self, *, doc_id: int, locked: bool) -> None:
+        def write(conn):
+            _queries.set_doc_locked(conn, doc_id=doc_id, locked=1 if locked else 0)
 
         await self.database.execute_write_fn(write)
 

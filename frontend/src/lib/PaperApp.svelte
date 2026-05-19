@@ -35,6 +35,8 @@
   // also force mode='view' so the toggle reflects reality.
   let canEdit = $derived(permissions?.canEdit ?? true);
   let isOwner = $derived(permissions?.isOwner ?? false);
+  let locked = $derived(permissions?.locked ?? false);
+  let kind = $state<"doc" | "template">("doc");
 
   let conn: EditorConnection | undefined;
   let unsub: (() => void) | undefined;
@@ -63,6 +65,9 @@
         },
         onDocState: (s) => {
           docState = s;
+        },
+        onKind: (k) => {
+          kind = k;
         },
         onStepError: (e) => {
           // Keep the first error — subsequent ones don't add information
@@ -172,6 +177,8 @@
     bind:mode
     {canEdit}
     {isOwner}
+    {locked}
+    {kind}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />
@@ -200,7 +207,7 @@
     <div class="status-banner status-{status.state}">{status.message}</div>
   {/if}
   {#if canEdit && mode === "edit"}
-    <Toolbar {view} />
+    <Toolbar {view} {kind} />
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
 </div>
@@ -224,6 +231,13 @@
   .status-banner.status-fail {
     background: #ffd6d6;
     color: #5a0000;
+  }
+  /* Distinct from `fail` (which means "we tried and the server said
+   * no") — `offline` is informational and self-clearing on reconnect. */
+  .status-banner.status-offline {
+    background: #e0e7ee;
+    color: #2a3a4a;
+    border: 1px solid #b8c2cc;
   }
   .status-banner.status-step-error {
     background: #ffd6d6;

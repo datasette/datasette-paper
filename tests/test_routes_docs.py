@@ -71,6 +71,7 @@ async def test_bootstrap_includes_permissions_block(ds):
         "canManage": True,
         "isOwner": True,
         "visibility": "private",
+        "locked": False,
     }
 
 

@@ -11,7 +11,61 @@
   // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). Only the
   // initial Insert-table button lives in the toolbar.
 
-  let { view }: { view: EditorView | null } = $props();
+  let {
+    view,
+    kind = "doc",
+  }: { view: EditorView | null; kind?: "doc" | "template" } = $props();
+
+  // Lazy-loaded list of built-in placeholder keys with sample values.
+  // Fetched once on demand (when the dropdown opens for the first
+  // time on a template) and cached for the session.
+  type ParamInfo = { key: string; sample: string };
+  let placeholderParams = $state<ParamInfo[] | null>(null);
+  let placeholderLoading = $state(false);
+  let placeholderOpen = $state(false);
+  let placeholderRoot: HTMLDivElement | undefined = $state();
+
+  async function loadPlaceholderParams() {
+    if (placeholderParams !== null || placeholderLoading) return;
+    placeholderLoading = true;
+    try {
+      const resp = await fetch("/-/paper/api/template_params");
+      if (resp.ok) {
+        const body = (await resp.json()) as { builtins: ParamInfo[] };
+        placeholderParams = body.builtins;
+      }
+    } finally {
+      placeholderLoading = false;
+    }
+  }
+
+  function insertPlaceholder(key: string) {
+    if (!view) return;
+    placeholderOpen = false;
+    const node = schema.nodes.placeholder.create({ key });
+    const tr = view.state.tr.replaceSelectionWith(node).scrollIntoView();
+    view.dispatch(tr);
+    view.focus();
+  }
+
+  // Close the placeholder dropdown on outside-click / Escape, mirroring
+  // the same pattern DocHeader uses for its overflow menu.
+  $effect(() => {
+    if (!placeholderOpen) return;
+    const onClick = (evt: MouseEvent) => {
+      if (!placeholderRoot) return;
+      if (!placeholderRoot.contains(evt.target as Node)) placeholderOpen = false;
+    };
+    const onKey = (evt: KeyboardEvent) => {
+      if (evt.key === "Escape") placeholderOpen = false;
+    };
+    window.addEventListener("click", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  });
 
   // ─── helpers ──────────────────────────────────────────────────────────────
 
@@ -213,6 +267,46 @@
     undefined,
     !canTable,
   )}
+  {#if kind === "template"}
+    <span class="tb-sep" aria-hidden="true"></span>
+    <div class="tb-placeholder-wrap" bind:this={placeholderRoot}>
+      <button
+        type="button"
+        class="tb-btn tb-placeholder-trigger"
+        aria-haspopup="menu"
+        aria-expanded={placeholderOpen}
+        aria-label="Insert placeholder"
+        title={"Insert placeholder ({key})"}
+        onclick={() => {
+          placeholderOpen = !placeholderOpen;
+          if (placeholderOpen) void loadPlaceholderParams();
+        }}
+      >
+        <span class="tb-placeholder-label">{"{ }"}</span>
+      </button>
+      {#if placeholderOpen}
+        <div class="tb-placeholder-menu" role="menu">
+          {#if placeholderLoading && placeholderParams === null}
+            <div class="tb-placeholder-loading">Loading…</div>
+          {:else if placeholderParams && placeholderParams.length}
+            {#each placeholderParams as p (p.key)}
+              <button
+                type="button"
+                role="menuitem"
+                class="tb-placeholder-item"
+                onclick={() => insertPlaceholder(p.key)}
+              >
+                <span class="tb-placeholder-key">{p.key}</span>
+                <span class="tb-placeholder-sample">{p.sample}</span>
+              </button>
+            {/each}
+          {:else}
+            <div class="tb-placeholder-loading">No placeholders defined.</div>
+          {/if}
+        </div>
+      {/if}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -263,5 +357,83 @@
     height: 18px;
     background: #ccc;
     margin: 0 4px;
+  }
+  .tb-placeholder-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .tb-placeholder-trigger {
+    width: auto;
+    padding: 0 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #0b3b8a;
+  }
+  .tb-placeholder-label {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  .tb-placeholder-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 20;
+    min-width: 220px;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+  }
+  .tb-placeholder-loading {
+    padding: 8px 10px;
+    font-size: 12px;
+    color: #666;
+  }
+  .tb-placeholder-item {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    font: inherit;
+    text-align: left;
+    color: #222;
+    cursor: pointer;
+  }
+  .tb-placeholder-item:hover {
+    background: #f0f3f6;
+  }
+  .tb-placeholder-key {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12px;
+    color: #0b3b8a;
+  }
+  .tb-placeholder-sample {
+    font-size: 11px;
+    color: #888;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 130px;
+  }
+  /* Inline-atom placeholder visual — pill, monospace key, blue tint. */
+  :global(.pm-placeholder) {
+    display: inline;
+    padding: 1px 6px;
+    margin: 0 1px;
+    background: #e6f0ff;
+    color: #0b3b8a;
+    border: 1px solid #b9d0f5;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9em;
+    line-height: 1.4;
+    white-space: nowrap;
+    cursor: default;
   }
 </style>

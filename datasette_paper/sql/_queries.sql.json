@@ -4,7 +4,7 @@
     {
       "name": "insertDoc",
       "result_type": "Row",
-      "sql": "INSERT INTO _datasette_paper_doc (name, created_by, schema_name)\nVALUES ($name::text, $created_by::text::, $schema_name::text)\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;",
+      "sql": "INSERT INTO _datasette_paper_doc (name, created_by, schema_name, kind)\nVALUES ($name::text, $created_by::text::, $schema_name::text, $kind::text)\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;",
       "parameters": [
         {
           "full_name": "$name::text",
@@ -23,6 +23,12 @@
           "name": "schema_name",
           "annotated_type": "text",
           "nullable": false
+        },
+        {
+          "full_name": "$kind::text",
+          "name": "kind",
+          "annotated_type": "text",
+          "nullable": false
         }
       ],
       "columns": [
@@ -121,6 +127,22 @@
           "origin_column": "delete_at",
           "decltype": "TEXT",
           "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
         }
       ],
       "result_class": "Doc"
@@ -128,7 +150,7 @@
     {
       "name": "updateDocName",
       "result_type": "Row",
-      "sql": "UPDATE _datasette_paper_doc\nSET name = $name::text,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at;",
+      "sql": "UPDATE _datasette_paper_doc\nSET name = $name::text,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;",
       "parameters": [
         {
           "full_name": "$name::text",
@@ -239,6 +261,22 @@
           "origin_column": "delete_at",
           "decltype": "TEXT",
           "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
         }
       ],
       "result_class": "Doc"
@@ -246,7 +284,7 @@
     {
       "name": "selectDocById",
       "result_type": "Row",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at\nFROM _datasette_paper_doc\nWHERE id = $doc_id::integer;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id = $doc_id::integer;",
       "parameters": [
         {
           "full_name": "$doc_id::integer",
@@ -351,6 +389,22 @@
           "origin_column": "delete_at",
           "decltype": "TEXT",
           "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
         }
       ],
       "result_class": "Doc"
@@ -358,7 +412,7 @@
     {
       "name": "listDocs",
       "result_type": "Rows",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at\nFROM _datasette_paper_doc\nORDER BY created_at;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nORDER BY created_at;",
       "parameters": [],
       "columns": [
         {
@@ -456,14 +510,30 @@
           "origin_column": "delete_at",
           "decltype": "TEXT",
           "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
         }
       ],
       "result_class": "Doc"
     },
     {
-      "name": "listDocsByIdsAndStates",
+      "name": "listDocsByIdsStatesAndKinds",
       "result_type": "Rows",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\n  AND state IN (\n    SELECT value FROM json_each($states_json::text)\n)\nORDER BY updated_at DESC;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\n  AND state IN (\n    SELECT value FROM json_each($states_json::text)\n)\n  AND kind IN (\n    SELECT value FROM json_each($kinds_json::text)\n)\nORDER BY updated_at DESC;",
       "parameters": [
         {
           "full_name": "$doc_ids_json::text",
@@ -474,6 +544,12 @@
         {
           "full_name": "$states_json::text",
           "name": "states_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$kinds_json::text",
+          "name": "kinds_json",
           "annotated_type": "text",
           "nullable": false
         }
@@ -574,6 +650,22 @@
           "origin_column": "delete_at",
           "decltype": "TEXT",
           "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
         }
       ],
       "result_class": "Doc"
@@ -647,7 +739,7 @@
     {
       "name": "listTrashedToDelete",
       "result_type": "Rows",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at\nFROM _datasette_paper_doc\nWHERE state = 'trashed'\n  AND delete_at IS NOT NULL\n  AND delete_at < $now::text\nORDER BY delete_at;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE state = 'trashed'\n  AND delete_at IS NOT NULL\n  AND delete_at < $now::text\nORDER BY delete_at;",
       "parameters": [
         {
           "full_name": "$now::text",
@@ -752,9 +844,67 @@
           "origin_column": "delete_at",
           "decltype": "TEXT",
           "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
         }
       ],
       "result_class": "Doc"
+    },
+    {
+      "name": "setDocKind",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET kind = $kind::text,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$kind::text",
+          "name": "kind",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "setDocLocked",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET locked = $locked::integer,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$locked::integer",
+          "name": "locked",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
     },
     {
       "name": "deleteStepsForDoc",

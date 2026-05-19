@@ -275,4 +275,10 @@ def _render_inlines(nodes: list) -> str:
             parts.append(text)
         elif t == "hard_break":
             parts.append("\\\n")
+        elif t == "placeholder":
+            # Round-trip placeholders as `{{key}}` so the markdown
+            # export of a template is self-documenting: anyone reading
+            # the markdown can see where substitutions will land.
+            key = n.get("attrs", {}).get("key", "")
+            parts.append("{{" + str(key) + "}}")
     return "".join(parts)

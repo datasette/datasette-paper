@@ -13,6 +13,7 @@
  */
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import { sendableSteps } from "prosemirror-collab";
 
 const PALETTE = [
   "#e6194b", "#3cb44b", "#4363d8", "#f58231",
@@ -42,6 +43,24 @@ export function cursorReporterPlugin(opts: CursorReporterOpts): Plugin {
   let lastSent = "";
   const debounce = opts.debounceMs ?? 150;
 
+  // Send `(anchor, head)` to the server. Pulled out so the
+  // "sendable cleared, fire deferred report" path can call it without
+  // duplicating the fetch/headers boilerplate.
+  function postPresence(anchor: number, head: number) {
+    lastSent = `${anchor}:${head}`;
+    void fetch(opts.apiUrl("/presence"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientID: opts.clientID,
+        anchor,
+        head,
+      }),
+    }).catch(() => {
+      /* network blips are harmless — reporter retries on next move */
+    });
+  }
+
   return new Plugin({
     key: cursorReporterKey,
     view() {
@@ -50,24 +69,40 @@ export function cursorReporterPlugin(opts: CursorReporterOpts): Plugin {
           // Suppress presence broadcasts when the view is read-only —
           // view-mode users shouldn't show carets to active editors.
           if (!view.editable) return;
-          if (view.state.selection.eq(prevState.selection)) return;
+          const selectionChanged = !view.state.selection.eq(prevState.selection);
+          // When there are unconfirmed local steps, ``anchor`` / ``head``
+          // are positions in the local doc, which includes those
+          // pending steps. The server (and every other client) sees the
+          // CONFIRMED doc — those same integers point at different
+          // content. Reporting them here is what makes remote carets
+          // visibly drift / "swap" while two people are typing.
+          //
+          // Defer until the batch confirms: when ``sendableSteps``
+          // flips from non-null back to null (post-200 receiveTransaction),
+          // this `update` runs without a selection change, and we fire
+          // a single fresh report against the now-confirmed positions.
+          const pending = sendableSteps(view.state);
+          if (pending) {
+            if (selectionChanged && timer) {
+              clearTimeout(timer);
+              timer = null;
+            }
+            return;
+          }
+          if (!selectionChanged) {
+            // No selection change AND no pending steps — but if the
+            // previous tick had pending steps, our deferred report
+            // never went out. Fire it now so other clients catch up.
+            const prevPending = sendableSteps(prevState);
+            if (!prevPending) return;
+          }
           const { anchor, head } = view.state.selection;
           const sig = `${anchor}:${head}`;
           if (sig === lastSent) return;
           if (timer) clearTimeout(timer);
           timer = setTimeout(() => {
-            lastSent = sig;
-            void fetch(opts.apiUrl("/presence"), {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                clientID: opts.clientID,
-                anchor,
-                head,
-              }),
-            }).catch(() => {
-              /* network blips are harmless — reporter retries on next move */
-            });
+            timer = null;
+            postPresence(anchor, head);
           }, debounce);
         },
         destroy() {

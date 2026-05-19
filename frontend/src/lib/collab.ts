@@ -54,6 +54,12 @@ export interface BootstrapPermissions {
   canManage: boolean;
   isOwner: boolean;
   visibility: "private" | "link-view" | "link-edit";
+  /** Read-only flag — when true, canEdit is false for everyone except
+   * the owner. Lives inside permissions because flipping it is what
+   * makes canEdit transition for non-owners; the SSE
+   * ``permissions-changed`` event delivers the updated pair mid-session
+   * with no reconnect. */
+  locked: boolean;
 }
 
 export type DocState = "active" | "archived" | "trashed";
@@ -117,6 +123,15 @@ export interface ConnectionOpts {
    */
   onDocState?: (payload: DocStatePayload) => void;
   /**
+   * Called once at bootstrap with the paper's ``kind``. Templates and
+   * docs share the editor surface but the UI differs: templates show a
+   * badge, surface the placeholder-insert affordance (slice 4), and
+   * skip the "create from template" picker on their own row. There is
+   * no live SSE for kind changes — the make/unmake routes are owner-
+   * only and the page reloads after the mutation.
+   */
+  onKind?: (kind: "doc" | "template") => void;
+  /**
    * Called when a step can't be applied during bootstrap replay or an
    * SSE update. Bootstrap stops at the first bad step and renders the
    * partial doc; SSE skips the bad batch and stays connected. The host
@@ -146,6 +161,7 @@ interface BootstrapData {
   archived_at?: string | null;
   trashed_at?: string | null;
   delete_at?: string | null;
+  kind?: "doc" | "template";
 }
 
 interface SendableResult {
@@ -745,6 +761,12 @@ export class EditorConnection {
   // short-circuits SSE step application until a refresh re-bootstraps.
   private stepError: StepApplyError | null = null;
 
+  // Last known permissions block, captured at bootstrap and merged
+  // with each ``permissions-changed`` SSE event so we can re-fire
+  // ``onPermissions`` with the full shape (the SSE payload only
+  // carries the fields that changed).
+  private lastPermissions: BootstrapPermissions | null = null;
+
   // Version at which we last saved a snapshot (seeded from the bootstrap;
   // updated after each successful POST /snapshot). Used by the
   // auto-snapshot timer to decide when the local doc has drifted far
@@ -754,11 +776,70 @@ export class EditorConnection {
   // multiple snapshots; cleared on close.
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // navigator.onLine listeners — bound in start(), removed in close().
+  // Stored as fields so we can unregister without recreating the
+  // bound-fn identity. Off in non-browser tests (jsdom has `window` but
+  // no real network state, so the listeners are harmless there).
+  private onlineHandler: (() => void) | null = null;
+  private offlineHandler: (() => void) | null = null;
+
   constructor(opts: ConnectionOpts, report?: Reporter) {
     this.opts = opts;
     this.report = report ?? new Reporter();
     this.clientID = Math.floor(Math.random() * 0xffffffff);
+    this.installNetworkListeners();
     this.start();
+  }
+
+  // ── Online / offline ───────────────────────────────────────────────────────
+
+  /**
+   * Watch ``navigator.onLine`` transitions. On ``offline``, flip the
+   * reporter so the user sees a sticky banner (the SSE stream and
+   * subsequent POSTs will fail on their own; we just front-run the
+   * "why" so they don't see a generic "Send failed: 0"). On ``online``,
+   * reset backoff and tear down the (almost-certainly-dead) stream so
+   * ``openStream`` reconnects immediately — much faster than waiting
+   * out the exponential backoff that EventSource picked.
+   */
+  private installNetworkListeners(): void {
+    if (typeof window === "undefined") return;
+    this.offlineHandler = () => {
+      this.report.offline();
+    };
+    this.onlineHandler = () => {
+      // Reset and force a fresh stream open. If we're mid-recover the
+      // setTimeout fires later and openStream is idempotent at the
+      // closeStream/open level — extra reopen is harmless.
+      this.backOff = 0;
+      this.report.success();
+      this.closeStream();
+      if (this.comm !== "detached" && this.view) {
+        this.comm = "loaded";
+        this.openStream();
+        // Flush any unconfirmed steps queued during the offline period.
+        if (sendableSteps(this.view.state)) this._send();
+      }
+    };
+    window.addEventListener("offline", this.offlineHandler);
+    window.addEventListener("online", this.onlineHandler);
+    // Pick up the initial state — opened tabs that were offline at
+    // mount should show the banner immediately.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      this.report.offline();
+    }
+  }
+
+  private removeNetworkListeners(): void {
+    if (typeof window === "undefined") return;
+    if (this.offlineHandler) {
+      window.removeEventListener("offline", this.offlineHandler);
+      this.offlineHandler = null;
+    }
+    if (this.onlineHandler) {
+      window.removeEventListener("online", this.onlineHandler);
+      this.onlineHandler = null;
+    }
   }
 
   // ── URL helper ─────────────────────────────────────────────────────────────
@@ -999,7 +1080,11 @@ export class EditorConnection {
 
     this.opts.onView?.(this.view);
     if (typeof boot.users === "number") this.opts.onUsers?.(boot.users);
-    if (boot.permissions) this.opts.onPermissions?.(boot.permissions);
+    if (boot.permissions) {
+      this.lastPermissions = boot.permissions;
+      this.opts.onPermissions?.(boot.permissions);
+    }
+    if (boot.kind) this.opts.onKind?.(boot.kind);
     if (boot.state) {
       this.opts.onDocState?.({
         state: boot.state,
@@ -1118,6 +1203,29 @@ export class EditorConnection {
       }
     };
     es.addEventListener("state-changed", handleStateChanged as EventListener);
+
+    const handlePermissionsChanged = (evt: MessageEvent) => {
+      // Server pushes ``{canEdit, locked}`` after a lock/unlock; merge
+      // into the cached full block and re-fire so PaperApp's
+      // ``onPermissions`` handler flips the editor into the right mode
+      // without a reconnect.
+      if (!this.lastPermissions) return;
+      try {
+        const data = JSON.parse(evt.data) as Partial<BootstrapPermissions>;
+        const merged: BootstrapPermissions = {
+          ...this.lastPermissions,
+          ...data,
+        };
+        this.lastPermissions = merged;
+        this.opts.onPermissions?.(merged);
+      } catch {
+        // ignore malformed
+      }
+    };
+    es.addEventListener(
+      "permissions-changed",
+      handlePermissionsChanged as EventListener,
+    );
 
     es.addEventListener("error", () => {
       this.closeStream();
@@ -1321,6 +1429,7 @@ export class EditorConnection {
   close(): void {
     this.comm = "detached";
     this.closeStream();
+    this.removeNetworkListeners();
     if (this.snapshotTimer !== null) {
       clearTimeout(this.snapshotTimer);
       this.snapshotTimer = null;

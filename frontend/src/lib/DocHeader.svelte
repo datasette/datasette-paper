@@ -11,6 +11,8 @@
     canEdit = true,
     isOwner = false,
     docState = "active",
+    locked = false,
+    kind = "doc",
     copyMarkdown,
   }: {
     docId: string;
@@ -19,6 +21,8 @@
     canEdit?: boolean;
     isOwner?: boolean;
     docState?: "active" | "archived" | "trashed";
+    locked?: boolean;
+    kind?: "doc" | "template";
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
@@ -46,6 +50,41 @@
   function openInNewTab(path: string) {
     closeMenu();
     window.open(`/-/paper/api/docs/${docId}${path}`, "_blank", "noopener");
+  }
+
+  async function postTemplateAction(path: "/make_template" | "/unmake_template") {
+    closeMenu();
+    const url = `/-/paper/api/docs/${docId}${path}` as
+      | "/-/paper/api/docs/{doc_id}/make_template"
+      | "/-/paper/api/docs/{doc_id}/unmake_template";
+    const { error: err, data } = await client.POST(url, {
+      params: { path: { doc_id: Number(docId) } },
+    });
+    if (err) {
+      window.alert(
+        `Failed to ${path === "/make_template" ? "promote" : "demote"} this paper.`,
+      );
+      return;
+    }
+    // No SSE broadcast for kind changes (it doesn't affect live editors
+    // — they keep editing as normal); reload so the badge picks up the
+    // new kind value.
+    if (data && (data as { kind?: string }).kind) window.location.reload();
+  }
+
+  async function postLockAction(path: "/lock" | "/unlock") {
+    closeMenu();
+    const url = `/-/paper/api/docs/${docId}${path}` as
+      | "/-/paper/api/docs/{doc_id}/lock"
+      | "/-/paper/api/docs/{doc_id}/unlock";
+    const { error: err } = await client.POST(url, {
+      params: { path: { doc_id: Number(docId) } },
+    });
+    if (err) {
+      window.alert(`Failed to ${path === "/lock" ? "lock" : "unlock"} this paper.`);
+    }
+    // On success the permissions-changed SSE refreshes canEdit + locked;
+    // no local override needed.
   }
 
   async function postStateAction(path: "/archive" | "/trash") {
@@ -107,8 +146,13 @@
   async function load() {
     // The bootstrap envelope returns doc state; the doc row's metadata
     // (name, created_by, updated_at) lives on the per-doc API. We fetch
-    // it via the docs list, filtered by id.
-    const { data, error } = await client.GET("/-/paper/api/docs");
+    // via the docs list with kind=all so the row is reachable whether
+    // this paper is a regular doc or a template — the default kind=doc
+    // filter would silently exclude templates and leave the header
+    // stuck in "Loading…".
+    const { data, error } = await client.GET("/-/paper/api/docs", {
+      params: { query: { kind: "all" } as never },
+    });
     if (error || !data) return;
     const found = (data as unknown as Array<DocMeta & { id: number }>).find(
       (r) => String(r.id) === String(docId),
@@ -186,6 +230,20 @@
         aria-label="Document title"
         disabled={saving}
       />
+      {#if kind === "template"}
+        <span
+          class="template-pill"
+          title="This paper is a template — placeholders are resolved when somebody creates from it"
+        >
+          Template
+        </span>
+      {/if}
+      {#if locked}
+        <span class="locked-pill" title="Read-only — only the owner can unlock">
+          {@render icon("lock")}
+          <span>Locked</span>
+        </span>
+      {/if}
     </div>
     <div class="meta">
       <span class="created-by">
@@ -331,6 +389,54 @@
                 {/if}
               </div>
               {#if isOwner && docState !== "trashed"}
+                <hr class="mi-sep" />
+                {#if kind === "template"}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postTemplateAction("/unmake_template")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("fileText")}
+                    <span>Demote to doc</span>
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postTemplateAction("/make_template")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("copy")}
+                    <span>Make template</span>
+                  </button>
+                {/if}
+                <hr class="mi-sep" />
+                {#if locked}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postLockAction("/unlock")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("unlock")}
+                    <span>Unlock (make editable)</span>
+                  </button>
+                {:else}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    class="mi"
+                    onclick={() => postLockAction("/lock")}
+                    onmouseenter={() => (apiSubOpen = false)}
+                  >
+                    {@render icon("lock")}
+                    <span>Lock (read-only)</span>
+                  </button>
+                {/if}
                 <hr class="mi-sep" />
                 <div class="mi-section" role="presentation">Danger zone</div>
                 {#if docState === "active"}
@@ -610,5 +716,34 @@
     padding: 6px;
     color: #888;
     font-size: 13px;
+  }
+  .locked-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 6px;
+    padding: 2px 9px 2px 7px;
+    background: #eef2f7;
+    color: #4a5568;
+    border: 1px solid #d0d7e0;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.5;
+    font-weight: 600;
+  }
+  .locked-pill :global(.mi-icon) {
+    color: inherit;
+  }
+  .template-pill {
+    display: inline-flex;
+    margin-left: 6px;
+    padding: 2px 10px;
+    background: #e6f0ff;
+    color: #0b3b8a;
+    border: 1px solid #b9d0f5;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.5;
+    font-weight: 600;
   }
 </style>

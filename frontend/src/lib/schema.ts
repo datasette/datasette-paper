@@ -12,6 +12,39 @@ const baseNodes = addListNodes(basic.spec.nodes, "paragraph block*", "block");
 const codeBase = basic.spec.marks.get("code") as MarkSpec;
 const baseMarks = basic.spec.marks.update("code", { ...codeBase, inclusive: false });
 
+// Inline atom for template placeholders — e.g. {today}, {actor}. Only
+// authored inside templates; substituted server-side at
+// create-from-template time so resulting docs never contain a
+// `placeholder` node. Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as `{{key}}` literal.
+const placeholderNode: NodeSpec = {
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: { key: { default: "" }, label: { default: null } },
+  parseDOM: [
+    {
+      tag: "span[data-placeholder]",
+      getAttrs: (el) => {
+        const dom = el as HTMLElement;
+        const key = dom.getAttribute("data-placeholder") ?? "";
+        const label = dom.getAttribute("data-placeholder-label");
+        return { key, label: label && label.length ? label : null };
+      },
+    },
+  ],
+  toDOM: (node) => {
+    const attrs: Record<string, string> = {
+      "data-placeholder": String(node.attrs.key ?? ""),
+      class: "pm-placeholder",
+    };
+    if (node.attrs.label) attrs["data-placeholder-label"] = String(node.attrs.label);
+    return ["span", attrs, `{${node.attrs.label ?? node.attrs.key}}`];
+  },
+};
+
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
     group: "block",
@@ -71,6 +104,9 @@ const tableWithName: NodeSpec = {
 };
 
 export const schema = new Schema({
-  nodes: baseNodes.append(taskNodes).append({ ...tNodes, table: tableWithName }),
+  nodes: baseNodes
+    .append({ placeholder: placeholderNode })
+    .append(taskNodes)
+    .append({ ...tNodes, table: tableWithName }),
   marks: baseMarks,
 });

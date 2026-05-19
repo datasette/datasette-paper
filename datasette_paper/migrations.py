@@ -210,3 +210,39 @@ def m002_archive_trash(db: Database):
             ON _datasette_paper_doc(delete_at) WHERE delete_at IS NOT NULL;
         """
     )
+
+
+@migrations()
+def m003_templates_and_lock(db: Database):
+    # Two orthogonal capability flags on the doc row:
+    #
+    # * ``kind`` distinguishes user-authored docs from template docs.
+    #   Templates are still real papers (collab, snapshots, share, etc.
+    #   all work the same); they're filtered out of the default listing
+    #   and shown in their own tab. Create-from-template clones the
+    #   materialized template doc into a fresh version-0 snapshot of a
+    #   brand-new doc.
+    #
+    # * ``locked`` makes a paper read-only — owner can flip it back at
+    #   any time, but everyone else loses edit grants while it's set.
+    #   The permission_resources_sql hook (see permissions.py) ANDs
+    #   ``locked = 0`` into the edit-side rules so the same column gates
+    #   both share-row and visibility-based editors. Owner row stays
+    #   unconditional so the owner can always unlock.
+    #
+    # The two are orthogonal: a locked template still lets others create
+    # docs from it; an archived doc can still be locked or unlocked.
+    db.executescript(
+        """
+        ALTER TABLE _datasette_paper_doc
+            ADD COLUMN kind TEXT NOT NULL DEFAULT 'doc'
+                CHECK (kind IN ('doc','template'));
+
+        ALTER TABLE _datasette_paper_doc
+            ADD COLUMN locked INTEGER NOT NULL DEFAULT 0
+                CHECK (locked IN (0,1));
+
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_kind
+            ON _datasette_paper_doc(kind) WHERE kind = 'template';
+        """
+    )

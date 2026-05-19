@@ -87,8 +87,35 @@ _table_header_spec = {
     "toDOM": lambda _node: ["th", 0],
 }
 
+# Inline atom for template placeholders — mirrors the JS schema in
+# frontend/src/lib/schema.ts. Authored only inside templates; the
+# create-from-template route walks the materialized doc and replaces
+# each placeholder with a text node using the resolver registry in
+# datasette_paper/template_params.py. Docs that aren't templates
+# should never contain a placeholder node; the materializer tolerates
+# them either way (the node is a valid inline atom — it just won't be
+# substituted outside the template-clone flow).
+_placeholder_spec = {
+    "group": "inline",
+    "inline": True,
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {"key": {"default": ""}, "label": {"default": None}},
+    "parseDOM": [{"tag": "span[data-placeholder]"}],
+    "toDOM": lambda node: [
+        "span",
+        {
+            "data-placeholder": str(node.attrs.get("key", "")),
+            "class": "pm-placeholder",
+        },
+        "{" + str(node.attrs.get("label") or node.attrs.get("key", "")) + "}",
+    ],
+}
+
 _nodes = {
     **_list_nodes,
+    "placeholder": _placeholder_spec,
     "task_list": _task_list_spec,
     "task_item": _task_item_spec,
     "table": _table_spec,

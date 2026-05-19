@@ -22,7 +22,8 @@ per run. `playwright.config.ts` sits next to this directory in
 ## Helpers (`helpers.ts`)
 
 - `BASE = "/-/paper"` (no per-database segment).
-- `createPaper(page, name?)` → `{id, url, name}`.
+- `createPaper(page, {name?, kind?, templateId?})` → `{id, url, name}`.
+  `kind: "template"` creates a template; `templateId` clones from one.
 - `gotoPaper(page, url)` — navigates and awaits `.ProseMirror`.
 - `typeInEditor(page, text)`, `expectEditorContains(page, sub)`.
 - `waitForServerVersion(page, docId, minVersion)` — **use this
