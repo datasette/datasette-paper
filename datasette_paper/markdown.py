@@ -7,6 +7,7 @@ and a few corner cases (e.g. tight vs loose lists, exact bullet markers)
 may differ.
 """
 
+import re
 from typing import List
 
 
@@ -86,14 +87,19 @@ def _render_table(node: dict) -> str:
         return row.get("content") or []
 
     def cell_text(cell: dict) -> str:
-        # cell content is `block+`; flatten the inlines of every paragraph.
+        # cell content is `block+`; render the inlines of every paragraph
+        # (preserving marks) and join. Non-paragraph blocks are rare in a
+        # cell — render their inlines too rather than dropping them.
         parts: List[str] = []
         for block in cell.get("content") or []:
             if block.get("type") == "paragraph":
-                parts.append(_flatten_text(block.get("content") or []))
+                parts.append(_render_inlines(block.get("content") or []))
             else:
-                parts.append(_flatten_text([block]))
+                parts.append(_render_inlines(block.get("content") or []))
         text = " ".join(p for p in parts if p)
+        # Escape pipes last so the cell-rendered markup (which contains no
+        # bare pipes of its own) isn't disturbed; collapse newlines to spaces
+        # since a GFM table cell is single-line.
         return text.replace("|", r"\|").replace("\n", " ").strip()
 
     first_cells = cells(rows[0])
@@ -121,19 +127,27 @@ def _render_table(node: dict) -> str:
 
 
 def _render_task_list(node: dict) -> str:
-    """GFM-style task list: `- [ ] item` / `- [x] item`."""
+    """GFM-style task list: `- [ ] item` / `- [x] item`.
+
+    The list marker for indentation purposes is just ``- `` (2 cols) — the
+    ``[ ]`` checkbox is GFM *content*, not part of the marker. So
+    continuation lines (nested lists, extra blocks) indent by 2, the same as
+    a plain bullet. Indenting by the full ``- [ ] `` width (6) pushes nested
+    content 4 cols past the item's content column, where CommonMark reads it
+    as an indented code block instead of a child list.
+    """
     items = node.get("content") or []
     out: List[str] = []
     for item in items:
         checked = bool(item.get("attrs", {}).get("checked", False))
-        marker = "- [x] " if checked else "- [ ] "
+        prefix = "- [x] " if checked else "- [ ] "
         # task_item content shape matches list_item; reuse the renderer
         rendered = _render_block(
             {"type": "list_item", "content": item.get("content") or []}
         ).rstrip("\n")
         first, *rest = rendered.split("\n")
-        indent = " " * len(marker)
-        out.append(marker + first)
+        indent = "  "  # width of the "- " marker; checkbox is content
+        out.append(prefix + first)
         for line in rest:
             out.append((indent + line) if line else "")
     return "\n".join(out) + "\n"
@@ -255,30 +269,151 @@ def _flatten_text(nodes: list) -> str:
     return "".join(parts)
 
 
+# Characters that would otherwise be parsed as markdown markup inside a text
+# run. Backslash must be first in the class so it's escaped before the others
+# (re.sub does a single left-to-right pass, but listing it first is clearer).
+_ESCAPE_RE = re.compile(r"([\\`*_\[\]])")
+
+
+def _escape_text(text: str) -> str:
+    """Backslash-escape inline markup characters in a plain-text run.
+
+    Keeps `*`, `_`, backticks, and brackets from re-parsing as emphasis /
+    code / links when the serialized markdown is read back. Intentionally
+    minimal — block-level markers (`#`, `>`, `-`) at line start are handled
+    by the block renderers, not here.
+    """
+    return _ESCAPE_RE.sub(r"\\\1", text)
+
+
+def _same_mark(a: dict, b: dict) -> bool:
+    return a.get("type") == b.get("type") and a.get("attrs") == b.get("attrs")
+
+
+def _code_span(text: str) -> str:
+    """Wrap text as a CommonMark inline code span, fence sized to the content.
+
+    The fence is a run of backticks one longer than the longest backtick run
+    inside the text, so code content containing backticks (e.g. ``a `b` c``)
+    round-trips. When the content begins or ends with a backtick — or is all
+    spaces — a single space is padded on each side; a CommonMark reader strips
+    exactly that padding back off, restoring the original content.
+    """
+    longest = 0
+    cur = 0
+    for ch in text:
+        if ch == "`":
+            cur += 1
+            longest = max(longest, cur)
+        else:
+            cur = 0
+    fence = "`" * (longest + 1)
+    if text.startswith("`") or text.endswith("`") or text.strip(" ") == "":
+        text = f" {text} "
+    return f"{fence}{text}{fence}"
+
+
+def _mark_delims(mark: dict) -> tuple[str, str]:
+    """Return the (open, close) markdown delimiters for a range mark.
+
+    ``code`` is *not* handled here — code spans need content-dependent
+    fences (see :func:`_code_span`) so they're rendered inline at the text
+    node rather than tracked as an open/close range mark.
+    """
+    t = mark.get("type")
+    if t == "strong":
+        return "**", "**"
+    if t == "em":
+        return "*", "*"
+    if t == "link":
+        attrs = mark.get("attrs") or {}
+        href = attrs.get("href", "")
+        title = attrs.get("title")
+        close = f']({href} "{title}")' if title else f"]({href})"
+        return "[", close
+    return "", ""
+
+
 def _render_inlines(nodes: list) -> str:
-    parts: List[str] = []
+    """Serialize a list of inline nodes, tracking open marks across nodes.
+
+    Marks are opened/closed only when they change between adjacent nodes
+    (the prosemirror-markdown approach), so a run like
+    ``"bold "(strong) + "and em"(strong,em)`` renders as
+    ``**bold *and em***`` instead of the per-node
+    ``**bold ****and em***`` that double-counts the shared strong. Text
+    inside an active ``code`` mark is emitted raw (code spans are literal).
+
+    Marks are kept in the order the parser stored them (outer→inner); we
+    don't impose a fixed priority, because the stored order already encodes
+    the source nesting (e.g. em-outside-strong vs strong-outside-em). When a
+    shared mark sits at a different depth in the next node, ``active`` is
+    rotated to line it up so it can stay open rather than being closed and
+    immediately reopened (which produces ambiguous ``***`` delimiter runs).
+    """
+    out: List[str] = []
+    active: List[dict] = []  # marks currently open, outer→inner
+
+    def close_through(keep: int) -> None:
+        # Close active[keep:] innermost-first, then drop them.
+        for mark in reversed(active[keep:]):
+            out.append(_mark_delims(mark)[1])
+        del active[keep:]
+
     for n in nodes or []:
         t = n.get("type")
+        # `code` is rendered inline (content-sized fence), not tracked as an
+        # open/close range mark — strip it out of the transition set.
+        all_marks = n.get("marks") or []
+        is_code = any(m.get("type") == "code" for m in all_marks)
+        marks = [m for m in all_marks if m.get("type") != "code"]
+
+        # Rotate `active` so each mark this node shares with the open set
+        # lines up at the same index it occupies in `marks` — lets shared
+        # marks stay open across the boundary instead of churning.
+        for i, mark in enumerate(marks):
+            for j, other in enumerate(active):
+                if _same_mark(mark, other):
+                    if j > i:
+                        active[i : j + 1] = [other, *active[i:j]]
+                    elif j < i:
+                        active[j:i] = active[j + 1 : i] + [mark]
+                    break
+
+        # Keep the longest prefix of currently-open marks that still applies;
+        # close the rest, then open whatever this node newly needs.
+        common = 0
+        while (
+            common < len(active)
+            and common < len(marks)
+            and _same_mark(active[common], marks[common])
+        ):
+            common += 1
+        close_through(common)
+        for mark in marks[common:]:
+            out.append(_mark_delims(mark)[0])
+            active.append(mark)
+
         if t == "text":
             text = n.get("text", "")
-            for mark in n.get("marks") or []:
-                mt = mark.get("type")
-                if mt == "code":
-                    text = f"`{text}`"
-                elif mt == "strong":
-                    text = f"**{text}**"
-                elif mt == "em":
-                    text = f"*{text}*"
-                elif mt == "link":
-                    href = mark.get("attrs", {}).get("href", "")
-                    text = f"[{text}]({href})"
-            parts.append(text)
+            if is_code:
+                out.append(_code_span(text))  # literal, content-sized fence
+            else:
+                out.append(_escape_text(text))
         elif t == "hard_break":
-            parts.append("\\\n")
+            out.append("\\\n")
+        elif t == "image":
+            attrs = n.get("attrs") or {}
+            alt = attrs.get("alt") or ""
+            src = attrs.get("src") or ""
+            title = attrs.get("title")
+            out.append(f'![{alt}]({src} "{title}")' if title else f"![{alt}]({src})")
         elif t == "placeholder":
-            # Round-trip placeholders as `{{key}}` so the markdown
-            # export of a template is self-documenting: anyone reading
-            # the markdown can see where substitutions will land.
+            # Round-trip placeholders as `{{key}}` so the markdown export of
+            # a template is self-documenting: anyone reading the markdown can
+            # see where substitutions will land.
             key = n.get("attrs", {}).get("key", "")
-            parts.append("{{" + str(key) + "}}")
-    return "".join(parts)
+            out.append("{{" + str(key) + "}}")
+
+    close_through(0)
+    return "".join(out)

@@ -420,6 +420,24 @@ ROUNDTRIP_STABLE = [
     "[link](https://example.com)\n",
     "[text]()\n",
     "para with **adj** **acent** bold\n",
+    # --- regression cases for the serializer round-trip fixes ---
+    # marks inside table cells (were flattened to plain text)
+    "| col | val |\n| --- | --- |\n| **bold** | `code` |\n",
+    # images (were dropped on serialize)
+    "![alt](https://example.com/x.png)\n",
+    '![alt](https://example.com/x.png "a title")\n',
+    # markdown-significant chars in plain text (re-parsed as markup unescaped)
+    "literal star \\* and underscore \\_ and bracket \\[x\\]\n",
+    "a backslash \\\\ in text\n",
+    # overlapping marks: em outside strong, and strong outside em
+    "*em **and strong***\n",
+    "**bold *and em***\n",
+    # inline code whose content contains backticks (needs a longer fence)
+    "a code span with `` ` `` a backtick\n",
+    # deep task-list nesting (indented past the code-block threshold before)
+    "- [ ] a\n  - [ ] b\n    - [x] c\n",
+    # nested mixed lists deeper than two levels
+    "- a\n  - b\n    - c\n      - d\n",
 ]
 
 
@@ -432,18 +450,6 @@ def test_md_doc_md_doc_converges(src):
     assert doc1 == doc2
 
 
-# ---------------------------------------------------------------------------
-# Known lossy round-trips — pinned as xfails so we notice if they change.
-#
-# These are gaps in the *serializer* (``doc_to_markdown``), not the parser.
-# Tracked so that fixing the serializer flips them to an unexpected pass.
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.xfail(
-    reason="doc_to_markdown drops image nodes silently — serializer gap, not parser gap.",
-    strict=True,
-)
 def test_image_roundtrips_through_serializer():
     src = "![alt](https://example.com/x.png)\n"
     doc1 = parse_and_validate(src)

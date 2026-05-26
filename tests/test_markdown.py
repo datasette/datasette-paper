@@ -347,3 +347,100 @@ def test_group_tasks_by_section_repeated_heading_text_makes_two_groups():
         ["in B"],
         ["second A"],
     ]
+
+
+# ---------------------------------------------------------------------------
+# Serializer fixes: images, escaping, code-span fences, table-cell marks,
+# overlapping inline marks. These pair with the round-trip coverage in
+# test_markdown_parser.py.
+# ---------------------------------------------------------------------------
+
+
+def _img(src, alt="", title=None):
+    attrs = {"src": src, "alt": alt, "title": title}
+    return {"type": "image", "attrs": attrs}
+
+
+def test_image_renders_inline():
+    assert (
+        doc_to_markdown(_doc(_para(_img("https://x/y.png", alt="a"))))
+        == "![a](https://x/y.png)\n"
+    )
+
+
+def test_image_with_title():
+    assert (
+        doc_to_markdown(_doc(_para(_img("https://x/y.png", alt="a", title="t"))))
+        == '![a](https://x/y.png "t")\n'
+    )
+
+
+def test_markup_chars_in_text_are_escaped():
+    # A literal asterisk / underscore / bracket must not re-parse as markup.
+    md = doc_to_markdown(_doc(_para(_text("a * b _ c [d]"))))
+    assert md == "a \\* b \\_ c \\[d\\]\n"
+
+
+def test_backslash_in_text_is_escaped():
+    assert doc_to_markdown(_doc(_para(_text("a \\ b")))) == "a \\\\ b\n"
+
+
+def test_code_span_content_with_backticks_uses_longer_fence():
+    # A single inner backtick needs a 2-backtick fence. No space padding here
+    # since the content neither starts nor ends with a backtick.
+    md = doc_to_markdown(_doc(_para(_text("a `b` c", "code"))))
+    assert md == "``a `b` c``\n"
+
+
+def test_code_span_content_starting_with_backtick_is_padded():
+    # Leading backtick → pad with a space so the fence isn't miscounted.
+    md = doc_to_markdown(_doc(_para(_text("`x", "code"))))
+    assert md == "`` `x ``\n"
+
+
+def test_code_span_content_is_not_escaped():
+    # Inside a code span, `*` is literal — must not be backslash-escaped.
+    md = doc_to_markdown(_doc(_para(_text("a*b", "code"))))
+    assert md == "`a*b`\n"
+
+
+def test_overlapping_marks_em_outside_strong():
+    # em on "foo ", em+strong on "bar" → strong opens *inside* the open em.
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                _text("foo ", "em"),
+                _text("bar", "em", "strong"),
+            )
+        )
+    )
+    assert md == "*foo **bar***\n"
+
+
+def test_table_cell_marks_are_preserved():
+    table = {
+        "type": "table",
+        "attrs": {"name": None},
+        "content": [
+            {
+                "type": "table_row",
+                "content": [
+                    {
+                        "type": "table_header",
+                        "content": [_para(_text("Col"))],
+                    }
+                ],
+            },
+            {
+                "type": "table_row",
+                "content": [
+                    {
+                        "type": "table_cell",
+                        "content": [_para(_text("bold", "strong"))],
+                    }
+                ],
+            },
+        ],
+    }
+    md = doc_to_markdown(_doc(table))
+    assert "| **bold** |" in md
