@@ -172,6 +172,36 @@ async def test_append_broadcasts_to_live_subscribers(ds):
 
 
 @pytest.mark.asyncio
+async def test_append_auto_snapshots_past_threshold(ds, monkeypatch):
+    """API-only docs (no browser to POST /snapshot) must still snapshot, or
+    their step tail grows without bound. Drop the threshold and confirm a
+    snapshot lands and the tail is trimmed."""
+    import datasette_paper.instance as inst_mod
+    from datasette_paper.util import paper_db
+
+    monkeypatch.setattr(inst_mod, "SNAPSHOT_THRESHOLD", 2)
+
+    doc_id = await _make_doc(ds)
+    db = paper_db(ds)
+    instance = await get_registry(ds).get(db, doc_id)
+    assert instance.snapshot_version == 0
+
+    for i in range(3):
+        resp = await ds.client.post(
+            f"/-/paper/api/docs/{doc_id}/append", json={"content": f"line {i}\n"}
+        )
+        assert resp.status_code == 200
+
+    # A snapshot row was written server-side, with no POST /snapshot involved.
+    assert instance.snapshot_version >= 2
+    snap = await db.select_latest_snapshot(doc_id=doc_id)
+    assert snap is not None
+    assert snap.version == instance.snapshot_version
+    # Steps at/below the snapshot are evicted from the in-memory tail.
+    assert all(s["version"] > instance.snapshot_version for s in instance.steps_tail)
+
+
+@pytest.mark.asyncio
 async def test_append_denied_without_edit_permission():
     """A viewer-only actor (link-view doc they don't own) can't append."""
     from datasette.app import Datasette

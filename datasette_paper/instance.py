@@ -30,7 +30,10 @@ Per-doc lifecycle:
         broadcast that fires between the two steps.
     subscribe(client_id, actor_id) → asyncio.Queue (key in self.subscribers)
     update_presence(...) → broadcasts {kind:"presence", users:[…]}
-    record_client_doc(...) → snapshot row when (version - last) >= 100
+    record_client_doc(...) → snapshot row when (version - last) >= 100;
+        also driven automatically by ``_maybe_auto_snapshot`` at the end of
+        every write, so API-only docs (no browser to POST /snapshot) still
+        snapshot and don't grow an unbounded step tail.
     revoke_unauthorized(datasette) → re-checks "datasette-paper-view" per
         subscriber; enqueues {"kind":"closed"} for any who lost access;
         the SSE loop sees the sentinel and exits cleanly.
@@ -392,7 +395,29 @@ class Instance:
             q.put_nowait(payload)
 
         self.last_active = time.monotonic()
+        await self._maybe_auto_snapshot(actor_id)
         return self.version
+
+    async def _maybe_auto_snapshot(self, actor_id: Optional[str]) -> None:
+        """Snapshot when the step tail has drifted past the threshold.
+
+        Browsers drive snapshots via ``POST /snapshot``, but API-only docs
+        (markdown append / agent edits) have no browser, so without this their
+        step tail would grow without bound and every hydrate would replay from
+        version 0. Called at the end of every write under ``_write_lock``, so
+        the snapshot reflects exactly the version we just committed. Skips a
+        poisoned history rather than persisting a doc we can't cleanly rebuild;
+        ``record_client_doc`` re-checks the threshold so this is a no-op until
+        the drift is actually reached.
+        """
+        if (self.version - self.snapshot_version) < SNAPSHOT_THRESHOLD:
+            return
+        materialized = self.materialize_live_doc()
+        if self._materialization_error is not None:
+            return
+        await self.record_client_doc(
+            self.version, json.dumps(materialized), actor_id=actor_id
+        )
 
     async def append_fragment(
         self,
