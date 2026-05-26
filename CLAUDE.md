@@ -30,7 +30,10 @@ comments at the relevant code site.
    or mark on one side without the other breaks `Step.apply` in the
    server-side materializer. The markdown serializer
    (`datasette_paper/markdown.py`) and `extract_tasks` NESTING set are
-   the third member of that lock-step group. The schema spans four
+   the third member of that lock-step group; the markdown *parser*
+   (`datasette_paper/markdown_parser.py`, md → PM JSON, used by the
+   append/create-from-markdown API) is the fourth — it can only emit
+   nodes/marks the schema accepts. The schema spans four
    node groups: `prosemirror-schema-basic`, lists, the custom
    `task_list` / `task_item` pair, and the table family
    (`table` / `table_row` / `table_cell` / `table_header`). The JS

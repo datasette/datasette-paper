@@ -1,0 +1,452 @@
+"""Unit tests for the markdown → ProseMirror parser (``markdown_parser.py``).
+
+Every produced doc is validated against the real ``pm_schema`` so schema
+drift surfaces here. Round-trip tests pair the parser with the existing
+``doc_to_markdown`` serializer — see ``test_markdown.py`` for the reverse
+direction's own coverage.
+
+The parser was prototyped under ``experiment/`` against a large fixture
+corpus (realistic LLM output + adversarial edge cases); these unit tests
+pin the behaviour that corpus established. Known serializer-side
+round-trip gaps are tracked as ``xfail`` below.
+"""
+
+import pytest
+
+from datasette_paper.markdown import doc_to_markdown
+from datasette_paper.markdown_parser import markdown_to_doc, markdown_to_fragment
+from datasette_paper.pm_schema import schema
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def parse_and_validate(md: str) -> dict:
+    """Parse + validate the result against the real ProseMirror schema."""
+    doc = markdown_to_doc(md)
+    schema.node_from_json(doc).check()
+    return doc
+
+
+def types_only(node: dict) -> str:
+    """Compact `type[child, child]` shape for assert messages."""
+    t = node.get("type", "?")
+    content = node.get("content") or []
+    if not content:
+        return t
+    return f"{t}[{', '.join(types_only(c) for c in content)}]"
+
+
+# ---------------------------------------------------------------------------
+# Block elements
+# ---------------------------------------------------------------------------
+
+
+class TestBlocks:
+    def test_empty_input_produces_blank_paragraph(self):
+        doc = parse_and_validate("")
+        assert doc == {"type": "doc", "content": [{"type": "paragraph"}]}
+
+    def test_whitespace_only_input(self):
+        doc = parse_and_validate("   \n\n   \n")
+        assert doc == {"type": "doc", "content": [{"type": "paragraph"}]}
+
+    def test_paragraph(self):
+        doc = parse_and_validate("hello world\n")
+        assert doc["content"] == [
+            {"type": "paragraph", "content": [{"type": "text", "text": "hello world"}]}
+        ]
+
+    @pytest.mark.parametrize("level", [1, 2, 3, 4, 5, 6])
+    def test_heading_levels(self, level):
+        doc = parse_and_validate("#" * level + " title\n")
+        h = doc["content"][0]
+        assert h["type"] == "heading"
+        assert h["attrs"]["level"] == level
+        assert h["content"] == [{"type": "text", "text": "title"}]
+
+    def test_horizontal_rule(self):
+        doc = parse_and_validate("before\n\n---\n\nafter\n")
+        assert (
+            types_only(doc) == "doc[paragraph[text], horizontal_rule, paragraph[text]]"
+        )
+
+    def test_code_block_fenced(self):
+        doc = parse_and_validate("```\nprint('x')\n```\n")
+        cb = doc["content"][0]
+        assert cb["type"] == "code_block"
+        assert cb["content"] == [{"type": "text", "text": "print('x')"}]
+
+    def test_code_block_fenced_with_language_drops_info(self):
+        # The schema has no language attr today; verify we silently drop it
+        # without producing an invalid doc.
+        doc = parse_and_validate("```python\nx = 1\n```\n")
+        cb = doc["content"][0]
+        assert cb["type"] == "code_block"
+        assert "attrs" not in cb or "language" not in (cb.get("attrs") or {})
+
+    def test_code_block_indented(self):
+        doc = parse_and_validate("    indented code\n")
+        cb = doc["content"][0]
+        assert cb["type"] == "code_block"
+        assert cb["content"] == [{"type": "text", "text": "indented code"}]
+
+    def test_blockquote(self):
+        doc = parse_and_validate("> quote\n")
+        assert types_only(doc) == "doc[blockquote[paragraph[text]]]"
+
+    def test_blockquote_nested(self):
+        doc = parse_and_validate("> outer\n>\n> > inner\n")
+        outer = doc["content"][0]
+        assert outer["type"] == "blockquote"
+        inner = outer["content"][-1]
+        assert inner["type"] == "blockquote"
+        assert types_only(inner) == "blockquote[paragraph[text]]"
+
+    def test_html_block_becomes_code_block(self):
+        doc = parse_and_validate("<div>raw</div>\n")
+        # With html=False the html_block path isn't taken — md-it falls back
+        # to plain text rendering. Verify the content survives as text.
+        text = doc_to_markdown(doc)
+        assert "<div>raw</div>" in text
+
+
+# ---------------------------------------------------------------------------
+# Inline marks
+# ---------------------------------------------------------------------------
+
+
+class TestMarks:
+    def test_strong(self):
+        doc = parse_and_validate("**bold**\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["text"] == "bold"
+        assert text_node["marks"] == [{"type": "strong"}]
+
+    def test_em(self):
+        doc = parse_and_validate("*em*\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["marks"] == [{"type": "em"}]
+
+    def test_code_inline(self):
+        doc = parse_and_validate("`x`\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["text"] == "x"
+        assert text_node["marks"] == [{"type": "code"}]
+
+    def test_link(self):
+        doc = parse_and_validate("[label](https://example.com)\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["text"] == "label"
+        assert text_node["marks"] == [
+            {"type": "link", "attrs": {"href": "https://example.com"}}
+        ]
+
+    def test_link_with_title(self):
+        doc = parse_and_validate('[x](https://example.com "t")\n')
+        text_node = doc["content"][0]["content"][0]
+        attrs = text_node["marks"][0]["attrs"]
+        assert attrs["href"] == "https://example.com"
+        assert attrs["title"] == "t"
+
+    def test_link_empty_href_drops_mark(self):
+        """`[text]()` would crash the schema if we kept a link mark with no href.
+
+        The mark drops cleanly and the text comes through unmarked.
+        """
+        doc = parse_and_validate("[text]()\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["text"] == "text"
+        assert "marks" not in text_node
+
+    def test_nested_marks(self):
+        doc = parse_and_validate("**bold *and em***\n")
+        # Two text nodes: 'bold ' (strong) and 'and em' (strong+em).
+        para = doc["content"][0]
+        assert len(para["content"]) == 2
+        assert para["content"][0]["text"] == "bold "
+        assert para["content"][0]["marks"] == [{"type": "strong"}]
+        assert para["content"][1]["text"] == "and em"
+        assert {m["type"] for m in para["content"][1]["marks"]} == {"strong", "em"}
+
+    def test_mark_inside_link(self):
+        doc = parse_and_validate("[**bold**](https://example.com)\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["text"] == "bold"
+        types = {m["type"] for m in text_node["marks"]}
+        assert types == {"strong", "link"}
+
+
+# ---------------------------------------------------------------------------
+# Inline non-mark nodes
+# ---------------------------------------------------------------------------
+
+
+class TestInlineNodes:
+    def test_softbreak_renders_as_space(self):
+        doc = parse_and_validate("line1\nline2\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["text"] == "line1 line2"
+
+    def test_hardbreak(self):
+        doc = parse_and_validate("a\\\nb\n")
+        nodes = doc["content"][0]["content"]
+        assert [n["type"] for n in nodes] == ["text", "hard_break", "text"]
+
+    def test_image(self):
+        doc = parse_and_validate('![alt](https://example.com/x.png "title")\n')
+        img = doc["content"][0]["content"][0]
+        assert img["type"] == "image"
+        assert img["attrs"] == {
+            "src": "https://example.com/x.png",
+            "alt": "alt",
+            "title": "title",
+        }
+
+    def test_image_no_title(self):
+        doc = parse_and_validate("![alt](https://example.com/x.png)\n")
+        img = doc["content"][0]["content"][0]
+        assert img["attrs"]["title"] is None
+
+    def test_text_coalescing(self):
+        """Adjacent text nodes with identical marks should be merged."""
+        # Soft break produces three tokens (text, softbreak-as-space, text)
+        # which should coalesce into a single text node.
+        doc = parse_and_validate("a\nb\n")
+        para = doc["content"][0]
+        assert len(para["content"]) == 1
+        assert para["content"][0]["text"] == "a b"
+
+
+# ---------------------------------------------------------------------------
+# Lists
+# ---------------------------------------------------------------------------
+
+
+class TestLists:
+    def test_bullet_list(self):
+        doc = parse_and_validate("- a\n- b\n- c\n")
+        assert types_only(doc).startswith("doc[bullet_list[")
+
+    def test_ordered_list(self):
+        doc = parse_and_validate("1. one\n2. two\n")
+        ol = doc["content"][0]
+        assert ol["type"] == "ordered_list"
+
+    def test_ordered_list_start_attr(self):
+        doc = parse_and_validate("3. three\n4. four\n")
+        ol = doc["content"][0]
+        assert ol.get("attrs", {}).get("order") == 3
+
+    def test_nested_bullet_list(self):
+        doc = parse_and_validate("- a\n  - a.1\n  - a.2\n- b\n")
+        ul = doc["content"][0]
+        first_item = ul["content"][0]
+        # list_item content: paragraph + nested bullet_list
+        assert any(c["type"] == "bullet_list" for c in first_item["content"])
+
+    def test_deeply_nested_lists(self):
+        doc = parse_and_validate("- a\n  - b\n    - c\n      - d\n        - e\n")
+        # Just assert it parses + validates.
+        assert doc["content"][0]["type"] == "bullet_list"
+
+
+class TestTaskLists:
+    def test_task_list_open_and_closed(self):
+        doc = parse_and_validate("- [ ] open\n- [x] done\n")
+        tl = doc["content"][0]
+        assert tl["type"] == "task_list"
+        items = tl["content"]
+        assert items[0]["attrs"]["checked"] is False
+        assert items[1]["attrs"]["checked"] is True
+
+    def test_task_item_text_strips_checkbox_marker(self):
+        doc = parse_and_validate("- [ ] hello\n")
+        item = doc["content"][0]["content"][0]
+        para = item["content"][0]
+        assert para["content"][0]["text"] == "hello"
+
+    def test_nested_task_lists(self):
+        md = "- [ ] parent\n  - [ ] child open\n  - [x] child done\n"
+        doc = parse_and_validate(md)
+        parent_item = doc["content"][0]["content"][0]
+        # parent contains a paragraph + a nested task_list
+        nested = [c for c in parent_item["content"] if c["type"] == "task_list"]
+        assert len(nested) == 1
+        assert nested[0]["content"][0]["attrs"]["checked"] is False
+        assert nested[0]["content"][1]["attrs"]["checked"] is True
+
+    def test_mixed_items_in_one_list_become_all_task_items(self):
+        """When md-it groups a checkbox item and a plain item into one <ul>,
+        we have to commit to one shape (pm_schema's task_list rejects
+        list_item children). Policy: promote everything to task_item with
+        the plain ones unchecked."""
+        doc = parse_and_validate("- [ ] task\n- plain\n")
+        tl = doc["content"][0]
+        assert tl["type"] == "task_list"
+        # Both children should be task_items
+        kinds = {c["type"] for c in tl["content"]}
+        assert kinds == {"task_item"}
+        assert tl["content"][0]["attrs"]["checked"] is False  # explicit unchecked
+        assert tl["content"][1]["attrs"]["checked"] is False  # implicit (no checkbox)
+
+    def test_task_list_and_bullet_list_in_same_doc(self):
+        """A heading between two lists keeps them distinct."""
+        doc = parse_and_validate("- [ ] task\n\n## sep\n\n- bullet\n")
+        kinds = [c["type"] for c in doc["content"]]
+        assert kinds == ["task_list", "heading", "bullet_list"]
+
+
+# ---------------------------------------------------------------------------
+# Tables
+# ---------------------------------------------------------------------------
+
+
+class TestTables:
+    def test_simple_table(self):
+        md = "| h1 | h2 |\n| --- | --- |\n| a | b |\n"
+        doc = parse_and_validate(md)
+        table = doc["content"][0]
+        assert table["type"] == "table"
+        rows = table["content"]
+        assert len(rows) == 2
+        header_cells = rows[0]["content"]
+        body_cells = rows[1]["content"]
+        assert all(c["type"] == "table_header" for c in header_cells)
+        assert all(c["type"] == "table_cell" for c in body_cells)
+
+    def test_table_cell_wraps_content_in_paragraph(self):
+        doc = parse_and_validate("| a |\n| --- |\n| body |\n")
+        table = doc["content"][0]
+        body_cell = table["content"][1]["content"][0]
+        # Content spec for table_cell is `block+` — text must be wrapped.
+        inner = body_cell["content"][0]
+        assert inner["type"] == "paragraph"
+        assert inner["content"] == [{"type": "text", "text": "body"}]
+
+    def test_table_name_attr_defaults_to_none(self):
+        doc = parse_and_validate("| h |\n| --- |\n| x |\n")
+        table = doc["content"][0]
+        assert table["attrs"]["name"] is None
+
+    def test_table_with_marks_inside_cells(self):
+        md = "| h |\n| --- |\n| **bold** |\n"
+        doc = parse_and_validate(md)
+        cell = doc["content"][0]["content"][1]["content"][0]
+        text = cell["content"][0]["content"][0]
+        assert text["text"] == "bold"
+        assert text["marks"] == [{"type": "strong"}]
+
+
+# ---------------------------------------------------------------------------
+# Robustness on ugly / hostile input
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "label,src",
+    [
+        ("unbalanced strong", "this **never closes\n"),
+        ("unbalanced fence", "```\nno close\n"),
+        ("missing href", "[text]()\n"),
+        ("very long line", "x" * 10_000),
+        ("unicode", "café — résumé 😀\n"),
+        ("script tag", "<script>alert(1)</script>\n"),
+        ("only heading marker", "##\n"),
+        ("table missing cells", "| a | b |\n| --- | --- |\n| only |\n"),
+        ("just heading marker no space", "#nospace\n"),
+    ],
+)
+def test_ugly_inputs_validate(label, src):
+    """Every ugly input still produces a schema-valid PM doc."""
+    doc = parse_and_validate(src)
+    assert doc["type"] == "doc"
+
+
+# ---------------------------------------------------------------------------
+# Fragment helper
+# ---------------------------------------------------------------------------
+
+
+class TestFragment:
+    def test_fragment_returns_block_list(self):
+        blocks = markdown_to_fragment("# Heading\n\nparagraph\n")
+        assert [b["type"] for b in blocks] == ["heading", "paragraph"]
+
+    def test_fragment_empty_input_returns_empty_list(self):
+        """Append helpers don't want a placeholder paragraph injected."""
+        assert markdown_to_fragment("") == []
+        assert markdown_to_fragment("   \n\n") == []
+
+    def test_fragment_is_pm_fragment_compatible(self):
+        """The list should round-trip through PM's Fragment API + Step.apply."""
+        from prosemirror.model import Fragment, Node, Slice
+        from prosemirror.transform import ReplaceStep
+
+        start_doc = Node.from_json(schema, markdown_to_doc("# Existing\n"))
+        blocks = markdown_to_fragment("- one\n- two\n")
+        pm_nodes = [Node.from_json(schema, b) for b in blocks]
+        fragment = Fragment.from_array(pm_nodes)
+        step = ReplaceStep(
+            start_doc.content.size,
+            start_doc.content.size,
+            Slice(fragment, 0, 0),
+        )
+        result = step.apply(start_doc)
+        assert not result.failed
+        result.doc.check()
+        types = [c["type"] for c in result.doc.to_json()["content"]]
+        assert types == ["heading", "bullet_list"]
+
+
+# ---------------------------------------------------------------------------
+# Round-trip: md → doc → md → doc converges in one pass.
+# ---------------------------------------------------------------------------
+
+
+ROUNDTRIP_STABLE = [
+    "# H1\n\npara with **bold** and *em*.\n",
+    "- a\n- b\n  - b.1\n- c\n",
+    "1. one\n2. two\n",
+    "- [ ] open\n- [x] done\n",
+    "> quote\n>\n> > nested\n",
+    "```\ncode\n```\n",
+    "| h | h |\n| --- | --- |\n| a | b |\n",
+    "para 1\n\n---\n\npara 2\n",
+    "soft\nbreak\n",
+    "hard\\\nbreak\n",
+    "[link](https://example.com)\n",
+    "[text]()\n",
+    "para with **adj** **acent** bold\n",
+]
+
+
+@pytest.mark.parametrize("src", ROUNDTRIP_STABLE)
+def test_md_doc_md_doc_converges(src):
+    doc1 = parse_and_validate(src)
+    md1 = doc_to_markdown(doc1)
+    doc2 = markdown_to_doc(md1)
+    schema.node_from_json(doc2).check()
+    assert doc1 == doc2
+
+
+# ---------------------------------------------------------------------------
+# Known lossy round-trips — pinned as xfails so we notice if they change.
+#
+# These are gaps in the *serializer* (``doc_to_markdown``), not the parser.
+# Tracked so that fixing the serializer flips them to an unexpected pass.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.xfail(
+    reason="doc_to_markdown drops image nodes silently — serializer gap, not parser gap.",
+    strict=True,
+)
+def test_image_roundtrips_through_serializer():
+    src = "![alt](https://example.com/x.png)\n"
+    doc1 = parse_and_validate(src)
+    md1 = doc_to_markdown(doc1)
+    doc2 = markdown_to_doc(md1)
+    assert doc1 == doc2
