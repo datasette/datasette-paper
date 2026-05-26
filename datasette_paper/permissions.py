@@ -30,6 +30,11 @@ from __future__ import annotations
 from datasette import hookimpl
 from datasette.permissions import PermissionSQL, Resource
 
+try:  # acl is a soft dependency — the roles hook is a no-op when absent.
+    from datasette_acl.roles import AclRole
+except ImportError:  # pragma: no cover
+    AclRole = None
+
 
 ACTIONS = (
     "datasette-paper-list",
@@ -37,6 +42,24 @@ ACTIONS = (
     "datasette-paper-view",
     "datasette-paper-edit",
 )
+
+# Resource type name for the new acl-backed model (task phase-05/01).
+PAPER_DOC_RESOURCE_TYPE = "paper-doc"
+
+# New resource-scoped actions, registered alongside the legacy string actions
+# during the migration (legacy ones are removed in task 02).
+PAPER_DOC_ACTIONS = (
+    "paper-view",
+    "paper-edit",
+    "paper-manage",
+)
+
+# Papers all live in a single internal database, so the resource hierarchy's
+# ``parent`` is a fixed sentinel rather than a real database name. The doc id
+# is the ``child``. Keeping a real parent level (vs. a flat parent-only
+# resource) lets acl model "all paper docs" with a single parent row and means
+# general-access grants can later target the parent if desired.
+PAPER_DOCS_PARENT = "_paper"
 
 
 class PaperResource(Resource):
@@ -60,6 +83,61 @@ class PaperResource(Resource):
     async def resources_sql(cls, datasette, actor=None) -> str:
         return (
             "SELECT CAST(id AS TEXT) AS parent, NULL AS child FROM _datasette_paper_doc"
+        )
+
+
+class PaperDocsParent(Resource):
+    """Parent level for :class:`PaperDocResource`.
+
+    All paper docs live in a single internal database, so there is exactly one
+    parent: the fixed sentinel :data:`PAPER_DOCS_PARENT`. This class exists only
+    to give ``PaperDocResource`` a ``parent_class`` (Datasette requires the
+    two-level hierarchy be expressed via ``parent_class``); it is not granted on
+    directly today.
+    """
+
+    name = "paper-docs-parent"
+    parent_class = None
+
+    @classmethod
+    async def resources_sql(cls, datasette, actor=None) -> str:
+        return f"SELECT '{PAPER_DOCS_PARENT}' AS parent, NULL AS child"
+
+
+class PaperDocResource(Resource):
+    """A single paper doc, acl-backed (resource type ``paper-doc``).
+
+    Two-level resource: ``parent`` is the fixed sentinel
+    :data:`PAPER_DOCS_PARENT`, ``child`` is the doc id. This is the model the
+    new ``paper-view`` / ``paper-edit`` / ``paper-manage`` actions resolve
+    against via datasette-acl's ``permission_resources_sql`` and grant helpers.
+
+    The constructor accepts ``(parent, child)`` positionally to satisfy acl's
+    ``build_resource`` convention, but callers normally pass just the doc id::
+
+        PaperDocResource(doc_id)              # parent defaults to the sentinel
+        PaperDocResource(PAPER_DOCS_PARENT, doc_id)  # explicit (build_resource)
+    """
+
+    name = PAPER_DOC_RESOURCE_TYPE
+    parent_class = PaperDocsParent
+
+    def __init__(self, parent=None, child=None):
+        # Single-arg call ``PaperDocResource(doc_id)`` is the common path: the
+        # lone positional is the doc id, parent falls back to the sentinel.
+        # Two-arg ``PaperDocResource(parent, child)`` is what acl.build_resource
+        # uses (parent, child) — honoured as-is.
+        if child is None and parent is not None:
+            parent, child = PAPER_DOCS_PARENT, parent
+        elif parent is None:
+            parent = PAPER_DOCS_PARENT
+        super().__init__(parent=str(parent), child=str(child) if child is not None else None)
+
+    @classmethod
+    async def resources_sql(cls, datasette, actor=None) -> str:
+        return (
+            f"SELECT '{PAPER_DOCS_PARENT}' AS parent, "
+            "CAST(id AS TEXT) AS child FROM _datasette_paper_doc"
         )
 
 

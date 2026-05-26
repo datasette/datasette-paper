@@ -2,7 +2,13 @@ from datasette import hookimpl, Response
 from datasette.permissions import Action
 from datasette_vite import vite_entry
 from .router import router
-from .permissions import PaperResource, permission_resources_sql  # noqa: F401
+from .permissions import (  # noqa: F401
+    AclRole,
+    PaperResource,
+    PaperDocResource,
+    permission_resources_sql,
+    PAPER_DOC_RESOURCE_TYPE,
+)
 from . import routes  # noqa: F401 — triggers decorator registration
 from .routes.events import sse_events
 import logging
@@ -127,6 +133,7 @@ def register_routes():
 @hookimpl
 def register_actions(datasette):
     return [
+        # --- Global actions (unchanged) -------------------------------------
         Action(
             name="datasette-paper-list",
             description="Can list papers (see the index page + list endpoint)",
@@ -136,6 +143,7 @@ def register_actions(datasette):
             description="Can create new papers",
             also_requires="datasette-paper-list",
         ),
+        # --- Legacy resource actions (removed in task 02) -------------------
         Action(
             name="datasette-paper-view",
             description="Can view a specific paper",
@@ -146,6 +154,62 @@ def register_actions(datasette):
             description="Can edit a specific paper",
             resource_class=PaperResource,
             also_requires="datasette-paper-view",
+        ),
+        # --- New acl-backed resource actions (phase-05/01) ------------------
+        # These resolve against datasette-acl grants on PaperDocResource. Call
+        # sites are migrated onto them in task 02; registered now so grants and
+        # roles work mid-migration.
+        Action(
+            name="paper-view",
+            description="View a paper doc",
+            resource_class=PaperDocResource,
+        ),
+        Action(
+            name="paper-edit",
+            description="Edit a paper doc",
+            resource_class=PaperDocResource,
+            also_requires="paper-view",
+        ),
+        Action(
+            name="paper-manage",
+            description="Manage sharing for a paper doc",
+            resource_class=PaperDocResource,
+            also_requires="paper-view",
+        ),
+    ]
+
+
+@hookimpl
+def datasette_acl_roles(datasette):
+    """Friendly Viewer / Editor / Manager roles for the ``paper-doc`` type.
+
+    Consumed by datasette-acl's role registry (see ``build_roles_registry``).
+    No-op when acl is not installed (``AclRole is None``).
+    """
+    if AclRole is None:
+        return []
+    return [
+        AclRole(
+            resource_type=PAPER_DOC_RESOURCE_TYPE,
+            name="Viewer",
+            actions=["paper-view"],
+            rank=1,
+            description="Can view the doc",
+        ),
+        AclRole(
+            resource_type=PAPER_DOC_RESOURCE_TYPE,
+            name="Editor",
+            actions=["paper-view", "paper-edit"],
+            rank=2,
+            description="Can view and edit the doc",
+        ),
+        AclRole(
+            resource_type=PAPER_DOC_RESOURCE_TYPE,
+            name="Manager",
+            actions=["paper-view", "paper-edit", "paper-manage"],
+            rank=3,
+            manage=True,
+            description="Can view, edit, and manage sharing",
         ),
     ]
 
