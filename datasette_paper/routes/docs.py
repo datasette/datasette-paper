@@ -9,7 +9,7 @@ from ..router import router
 from ..errors import InvalidStepError
 from ..instance import get_registry
 from ..markdown import doc_to_markdown, extract_tasks, group_tasks_by_section
-from ..markdown_parser import markdown_to_fragment
+from ..markdown_parser import markdown_to_doc, markdown_to_fragment
 from ..tables import count_tables_with_name, extract_tables, find_table_by_name
 from ..permissions import (
     PaperResource,
@@ -152,6 +152,25 @@ async def create_doc(datasette, request):
             status=400,
         )
 
+    # ``content`` seeds the new doc from markdown (parsed to the initial
+    # version-0 snapshot). It's an alternative seed source to ``template_id``
+    # — supplying both is ambiguous. Unlike template_id, content works for
+    # either kind, so you can seed a brand-new template from markdown too.
+    content = body.get("content")
+    if content is not None:
+        if template_id_raw is not None:
+            return Response.json(
+                {"error": "provide either template_id or content, not both"},
+                status=400,
+            )
+        if not isinstance(content, str):
+            return Response.json({"error": "content must be a string"}, status=400)
+        content_type = (body.get("content_type") or "markdown").lower()
+        if content_type != "markdown":
+            return Response.json(
+                {"error": "content_type must be 'markdown'"}, status=400
+            )
+
     if template_id_raw is not None:
         try:
             template_id = int(template_id_raw)
@@ -184,6 +203,18 @@ async def create_doc(datasette, request):
             created_by=actor_id(request),
             kind="doc",
             snapshot_doc_json=json.dumps(materialized),
+            snapshot_actor_id=actor_id(request),
+        )
+    elif content is not None:
+        # markdown_to_doc always returns a schema-valid doc (an empty/
+        # whitespace body becomes a single blank paragraph), so we store it
+        # as the version-0 snapshot the same way template instantiation does.
+        doc_json = markdown_to_doc(content)
+        doc = await db.insert_doc_with_snapshot(
+            name=name,
+            created_by=actor_id(request),
+            kind=kind,
+            snapshot_doc_json=json.dumps(doc_json),
             snapshot_actor_id=actor_id(request),
         )
     else:
