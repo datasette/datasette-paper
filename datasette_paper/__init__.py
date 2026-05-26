@@ -218,7 +218,7 @@ def menu_links(datasette, actor, request=None):
 
 @hookimpl
 async def startup(datasette):
-    from .migrations import ensure_migrations
+    from .migrations import ensure_migrations, migrate_shares_to_acl
 
     internal = datasette.get_internal_database()
     if getattr(internal, "is_temp_disk", False):
@@ -232,6 +232,11 @@ async def startup(datasette):
             "persist across restarts. Pass --internal <path> to retain papers."
         )
     await ensure_migrations(internal)
+    # One-time backfill of legacy visibility/share rows into acl grants. Runs
+    # after the schema migrations (it reads _datasette_paper_doc /
+    # _datasette_paper_share) and is guarded by its own marker so it's a no-op
+    # on every startup after the first. Safe when acl isn't installed.
+    await migrate_shares_to_acl(datasette)
 
 
 # bootstrap-icons / file-text-fill — kept in sync with the icon used in

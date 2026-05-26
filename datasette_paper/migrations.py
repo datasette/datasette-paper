@@ -1,7 +1,53 @@
+import logging
+
 from sqlite_utils import Database
 from sqlite_migrate import Migrations
 
+from .permissions import (
+    PAPER_DOC_RESOURCE_TYPE,
+    PAPER_DOCS_PARENT,
+)
+
+try:  # acl is a soft dependency — the data migration no-ops when it is absent.
+    from datasette_acl.grants import grant as _acl_grant
+except ImportError:  # pragma: no cover
+    _acl_grant = None
+
+try:
+    from datasette_acl.roles import build_roles_registry as _build_roles_registry
+except ImportError:  # pragma: no cover
+    _build_roles_registry = None
+
+logger = logging.getLogger("datasette_paper.migrations")
+
 migrations = Migrations("datasette-paper")
+
+# Marker table recording that the one-time visibility/share → acl-grant data
+# migration has completed. Distinct from the sqlite-migrate schema migrations
+# above: those create/alter tables, this backfills acl grants and must not run
+# before acl's startup has built the roles registry.
+_ACL_MIGRATION_TABLE = "_datasette_paper_acl_migration"
+_ACL_MIGRATION_KEY = "shares_to_acl_grants"
+
+# Default general-access principal for ``link-*`` visibility. ``_signed_in``
+# means "anyone signed in"; deployments wanting truly public (incl. anonymous)
+# docs can set the ``share-general-principal`` plugin setting to ``*``.
+DEFAULT_GENERAL_PRINCIPAL = "_signed_in"
+
+# Old per-doc visibility enum → (general-access principal role) for the
+# wildcard grant. ``private`` grants nothing extra (owner + explicit shares
+# only). Per DECISIONS.md, upgrade default is CLOSED: we migrate *explicit*
+# link-* visibility faithfully but never auto-open private docs.
+_VISIBILITY_ROLE = {
+    "link-view": "Viewer",
+    "link-edit": "Editor",
+}
+
+# Old per-actor share role → new acl role.
+_SHARE_ROLE = {
+    "viewer": "Viewer",
+    "editor": "Editor",
+}
 
 
 async def ensure_migrations(database) -> None:
@@ -17,6 +63,185 @@ async def ensure_migrations(database) -> None:
         migrations.apply(Database(connection))
 
     await database.execute_write_fn(_apply)
+
+
+def _general_principal(datasette) -> str:
+    """Resolve the wildcard principal for ``link-*`` visibility.
+
+    Configurable via the ``share-general-principal`` plugin setting
+    (``datasette-paper`` block); defaults to ``_signed_in``. Only ``*`` and
+    ``_signed_in`` are honoured — anything else falls back to the default.
+    """
+    config = datasette.plugin_config("datasette-paper") or {}
+    principal = config.get("share-general-principal", DEFAULT_GENERAL_PRINCIPAL)
+    if principal not in ("*", "_signed_in"):
+        logger.warning(
+            "datasette-paper: ignoring invalid share-general-principal %r; "
+            "using %r",
+            principal,
+            DEFAULT_GENERAL_PRINCIPAL,
+        )
+        return DEFAULT_GENERAL_PRINCIPAL
+    return principal
+
+
+async def _acl_migration_done(db) -> bool:
+    """True if the shares→grants migration marker has been recorded."""
+    rows = (
+        await db.execute(
+            f"SELECT 1 FROM {_ACL_MIGRATION_TABLE} WHERE key = ?",
+            [_ACL_MIGRATION_KEY],
+        )
+    ).rows
+    return bool(rows)
+
+
+async def _mark_acl_migration_done(db) -> None:
+    await db.execute_write(
+        f"INSERT OR IGNORE INTO {_ACL_MIGRATION_TABLE} (key, migrated_at) "
+        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [_ACL_MIGRATION_KEY],
+    )
+
+
+async def _ensure_paper_roles_registry(datasette) -> bool:
+    """Make sure acl's roles registry knows the ``paper-doc`` roles.
+
+    The data migration runs from paper's ``startup`` hook and calls acl's
+    ``grant(role=...)`` helper, which resolves role names against
+    ``datasette._acl_roles_registry``. That registry is populated by *acl's*
+    own startup hook, and the relative ordering of two plugins' startup hooks
+    is not contractually guaranteed. If paper's hook happened to run first the
+    registry would be missing ``paper-doc`` and every grant would raise
+    ``Unknown role``. Rather than depend on hook ordering, (re)build the
+    registry here if our roles aren't present yet — it is cheap and idempotent.
+
+    Returns False when acl isn't installed (registry helper unavailable), so
+    the caller can skip the migration entirely.
+    """
+    if _build_roles_registry is None:
+        return False
+    registry = getattr(datasette, "_acl_roles_registry", None)
+    if not registry or PAPER_DOC_RESOURCE_TYPE not in registry:
+        datasette._acl_roles_registry = await _build_roles_registry(datasette)
+    return PAPER_DOC_RESOURCE_TYPE in (
+        getattr(datasette, "_acl_roles_registry", None) or {}
+    )
+
+
+async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
+    """One-time backfill of legacy share/visibility data into acl grants.
+
+    Converts every existing doc's ``created_by`` + ``visibility`` and every
+    ``_datasette_paper_share`` row into acl grants on the ``paper-doc``
+    resource, using acl's ``grant`` helper (no raw writes into acl's schema):
+
+        owner (created_by)      -> Manager grant for that actor
+        share row 'viewer'      -> Viewer grant for that actor
+        share row 'editor'      -> Editor grant for that actor
+        visibility 'private'    -> nothing
+        visibility 'link-view'  -> Viewer grant for the general principal
+        visibility 'link-edit'  -> Editor grant for the general principal
+
+    Idempotent on two levels: a marker row in ``_datasette_paper_acl_migration``
+    short-circuits repeat runs, and acl's ``grant`` only inserts actions a
+    principal doesn't already hold (so even a forced re-run produces no
+    duplicate grants or audit rows). ``force=True`` bypasses the marker for
+    tests / a deliberate re-run. No-ops (returning zero counts) when acl is not
+    installed. Returns a small stats dict for logging / assertions.
+    """
+    stats = {"owners": 0, "shares": 0, "visibility": 0, "skipped": False}
+
+    if _acl_grant is None or not await _ensure_paper_roles_registry(datasette):
+        # acl absent — nothing to migrate into. Still record the marker so we
+        # don't re-scan on every startup; if acl is later installed the share
+        # UI / create path seed grants going forward.
+        stats["skipped"] = True
+        return stats
+
+    db = datasette.get_internal_database()
+    await db.execute_write(
+        f"CREATE TABLE IF NOT EXISTS {_ACL_MIGRATION_TABLE} ("
+        "key TEXT PRIMARY KEY, migrated_at TEXT NOT NULL)"
+    )
+
+    if not force and await _acl_migration_done(db):
+        stats["skipped"] = True
+        return stats
+
+    general_principal = _general_principal(datasette)
+
+    # Owner + visibility live on the doc row.
+    docs = (
+        await db.execute(
+            "SELECT id, created_by, visibility FROM _datasette_paper_doc"
+        )
+    ).rows
+    for row in docs:
+        doc_id = str(row["id"])
+        created_by = row["created_by"]
+        visibility = row["visibility"]
+
+        # Owner → Manager (skip anonymous-created docs: NULL/empty created_by).
+        if created_by:
+            await _acl_grant(
+                datasette,
+                PAPER_DOC_RESOURCE_TYPE,
+                PAPER_DOCS_PARENT,
+                doc_id,
+                actor_id=str(created_by),
+                role="Manager",
+                by_actor=str(created_by),
+            )
+            stats["owners"] += 1
+
+        # Visibility → general-access (wildcard) grant.
+        vis_role = _VISIBILITY_ROLE.get(visibility)
+        if vis_role is not None:
+            await _acl_grant(
+                datasette,
+                PAPER_DOC_RESOURCE_TYPE,
+                PAPER_DOCS_PARENT,
+                doc_id,
+                actor_id=general_principal,
+                role=vis_role,
+                by_actor=None,
+            )
+            stats["visibility"] += 1
+
+    # Explicit per-actor share rows.
+    shares = (
+        await db.execute(
+            "SELECT doc_id, actor_id, role, granted_by FROM _datasette_paper_share"
+        )
+    ).rows
+    for row in shares:
+        share_role = _SHARE_ROLE.get(row["role"])
+        if share_role is None:  # pragma: no cover - CHECK constraint guards this
+            logger.warning(
+                "datasette-paper: skipping share with unknown role %r (doc %s)",
+                row["role"],
+                row["doc_id"],
+            )
+            continue
+        await _acl_grant(
+            datasette,
+            PAPER_DOC_RESOURCE_TYPE,
+            PAPER_DOCS_PARENT,
+            str(row["doc_id"]),
+            actor_id=str(row["actor_id"]),
+            role=share_role,
+            by_actor=str(row["granted_by"]) if row["granted_by"] else None,
+        )
+        stats["shares"] += 1
+
+    await _mark_acl_migration_done(db)
+    logger.info(
+        "datasette-paper: migrated shares to acl grants "
+        "(owners=%(owners)s shares=%(shares)s visibility=%(visibility)s)",
+        stats,
+    )
+    return stats
 
 
 @migrations()
