@@ -21,6 +21,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "datasette-agent",
     "pytest",
     "pytest-asyncio",
     "ruff>=0.15.12",

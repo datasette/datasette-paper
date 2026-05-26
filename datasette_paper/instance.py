@@ -19,6 +19,10 @@ Per-doc lifecycle:
       ingest: builds one ReplaceStep at end-of-doc against the live doc under
       ``_write_lock`` and runs the same persist+broadcast tail as add_events,
       stamped with the ``_API_CLIENT_ID`` sentinel (no originator to skip).
+    apply_markdown_edit(edit_fn, actor_id) — atomic markdown read-modify-write
+      for the agent edit/insert tools: under ``_write_lock``, serialize the
+      live doc to markdown, run ``edit_fn`` over it, reparse, and replace the
+      whole doc with one ReplaceStep.
     get_events(since_version) — backlog slice for SSE replay; raises GoneError
     subscribe_with_backlog(since_version, client_id, actor_id) —
         atomically subscribes and snapshots the backlog under the same
@@ -433,6 +437,62 @@ class Instance:
             end = doc.content.size
             step = ReplaceStep(end, end, Slice(Fragment.from_array(nodes), 0, 0))
             result = step.apply(doc)
+            if result.failed:
+                raise InvalidStepError(0, result.failed)
+
+            step_json = json.dumps(step.to_json())
+            return await self._persist_and_broadcast(
+                [step_json], _API_CLIENT_ID, actor_id
+            )
+
+    async def apply_markdown_edit(self, edit_fn, actor_id: Optional[str] = None) -> int:
+        """Atomically read the doc as markdown, transform it, and replace it.
+
+        ``edit_fn(markdown: str) -> str`` produces the new full-document
+        markdown from the current one (e.g. a str-replace or an insert). The
+        whole read → transform → reparse → replace sequence runs under
+        ``self._write_lock``, so ``edit_fn`` sees — and the resulting step is
+        positioned against — the same live doc the step lands on, even if a
+        collab client is editing concurrently. The doc is replaced wholesale
+        with one ``ReplaceStep`` over the reparsed markdown.
+
+        Returns the new version, or the current version if ``edit_fn`` is a
+        no-op (returns identical markdown). ``edit_fn`` may raise to signal a
+        failed edit (e.g. an ambiguous match); the exception propagates to
+        the caller. Raises :class:`InvalidStepError` if history is poisoned
+        or the reparsed doc can't replace the current one under the schema.
+        """
+        from prosemirror.model import Fragment, Node, Slice
+        from prosemirror.transform import ReplaceStep
+
+        from .markdown import doc_to_markdown
+        from .markdown_parser import markdown_to_doc
+        from .pm_schema import schema
+
+        async with self._write_lock:
+            live_json = self.materialize_live_doc()
+            if self._materialization_error is not None:
+                bad_version, bad_msg = self._materialization_error
+                raise InvalidStepError(
+                    0, f"history corrupted at version {bad_version}: {bad_msg}"
+                )
+
+            current_md = doc_to_markdown(live_json)
+            new_md = edit_fn(current_md)
+            if new_md == current_md:
+                return self.version  # no-op edit
+
+            new_blocks = markdown_to_doc(new_md).get("content") or []
+            try:
+                old_doc = schema.node_from_json(live_json)
+                new_nodes = [Node.from_json(schema, b) for b in new_blocks]
+            except Exception as exc:
+                raise InvalidStepError(0, f"reparsed doc invalid: {exc}") from exc
+
+            step = ReplaceStep(
+                0, old_doc.content.size, Slice(Fragment.from_array(new_nodes), 0, 0)
+            )
+            result = step.apply(old_doc)
             if result.failed:
                 raise InvalidStepError(0, result.failed)
 
