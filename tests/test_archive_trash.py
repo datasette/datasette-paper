@@ -160,11 +160,21 @@ async def test_editor_share_cannot_archive_or_trash():
     )
     doc_id = create.json()["id"]
 
-    # Hand-grant bob the editor role.
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
+    # Hand-grant bob the editor role via acl.
+    from datasette_acl.grants import grant
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id="bob",
+        role="Editor",
+        by_actor="alice",
     )
 
     # Bob can edit (existing behavior) but neither archive nor trash.
@@ -230,19 +240,19 @@ async def test_state_changed_broadcast_to_subscribers(ds):
 
 @pytest.mark.asyncio
 async def test_sweep_trashed_deletes_past_due_and_cascades(ds_paper):
-    """delete_at < now → row + steps + snapshots + shares cascade away."""
+    """delete_at < now → row + steps + snapshots cascade away.
+
+    (Sharing moved to acl, so there is no ``_datasette_paper_share`` table to
+    cascade anymore — the hard delete only spans the doc + its step/snapshot
+    history.)
+    """
     ds, db = ds_paper
     create = await ds.client.post("/-/paper/api/docs", json={"name": "Sweep"})
     doc_id = create.json()["id"]
 
-    # Plant a snapshot + share so cascade has something to remove.
+    # Plant a snapshot so cascade has something to remove.
     await db.insert_snapshot(
         doc_id=doc_id, version=0, doc_json=json.dumps({"type": "doc"}), actor_id=None
-    )
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'viewer', 'alice')",
-        [doc_id, "bob"],
     )
 
     # Trash with a backdated delete_at so the sweep picks it up.
@@ -264,10 +274,6 @@ async def test_sweep_trashed_deletes_past_due_and_cascades(ds_paper):
     assert rows.first()[0] == 0
     rows = await internal.execute(
         "SELECT COUNT(*) FROM _datasette_paper_snapshot WHERE doc_id = ?", [doc_id]
-    )
-    assert rows.first()[0] == 0
-    rows = await internal.execute(
-        "SELECT COUNT(*) FROM _datasette_paper_share WHERE doc_id = ?", [doc_id]
     )
     assert rows.first()[0] == 0
 

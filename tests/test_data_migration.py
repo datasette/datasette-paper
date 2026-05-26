@@ -6,6 +6,13 @@ A real upgrade has *pre-existing* docs whose access lived in
 rows, with no acl grants yet. ``migrate_shares_to_acl`` backfills those into acl
 grants via acl's ``grant`` helper.
 
+NOTE (phase-05/04): the legacy ``visibility`` column + ``_datasette_paper_share``
+table are now dropped by schema migration m004 once the backfill has run, so a
+fresh test DB no longer carries them. To exercise the backfill in isolation,
+these tests reconstruct the pre-m004 legacy schema (``_recreate_legacy_schema``)
+and clear the backfill marker before seeding — reproducing the on-disk state of
+a deployment mid-upgrade (legacy rows present, no grants yet).
+
 These tests seed that legacy state directly (raw inserts, *not* the create API,
 which would already seed an owner grant), run the migration, then assert both
 the resulting grants and the effective ``datasette.allowed`` outcomes, plus
@@ -43,8 +50,42 @@ async def _make_ds(config=None):
     return ds
 
 
+async def _recreate_legacy_schema(ds):
+    """Reconstruct the pre-m004 legacy share schema for backfill tests.
+
+    m004 dropped ``_datasette_paper_doc.visibility`` and the
+    ``_datasette_paper_share`` table. The backfill (``migrate_shares_to_acl``)
+    reads them, so to test it in isolation we re-add the column + table (mirror
+    of the original m001/m002/m003 shape) and clear the backfill marker, putting
+    the DB in the state a real deployment had on the upgrade boot where the
+    backfill ran. Idempotent: safe to call once per seeded doc.
+    """
+    db = ds.get_internal_database()
+    cols = (await db.execute("PRAGMA table_info(_datasette_paper_doc)")).rows
+    if not any(row["name"] == "visibility" for row in cols):
+        await db.execute_write(
+            "ALTER TABLE _datasette_paper_doc ADD COLUMN visibility TEXT "
+            "NOT NULL DEFAULT 'private' "
+            "CHECK (visibility IN ('private','link-view','link-edit'))"
+        )
+    await db.execute_write(
+        "CREATE TABLE IF NOT EXISTS _datasette_paper_share ("
+        "doc_id INTEGER NOT NULL, actor_id TEXT NOT NULL, "
+        "role TEXT NOT NULL CHECK (role IN ('viewer','editor')), "
+        "granted_by TEXT, "
+        "granted_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), "
+        "PRIMARY KEY (doc_id, actor_id))"
+    )
+    # Clear the marker that startup's backfill recorded on the empty DB, so the
+    # tests' own (forced) backfill runs against the legacy rows they seed.
+    from datasette_paper.migrations import _ACL_MIGRATION_TABLE
+
+    await db.execute_write(f"DELETE FROM {_ACL_MIGRATION_TABLE}")
+
+
 async def _seed_doc(ds, *, doc_id, created_by, visibility="private", name="P"):
     """Insert a legacy doc row directly (bypassing the grant-seeding create path)."""
+    await _recreate_legacy_schema(ds)
     db = ds.get_internal_database()
     await db.execute_write(
         "INSERT INTO _datasette_paper_doc (id, name, created_by, visibility) "
@@ -68,9 +109,7 @@ async def _grant_map(ds, doc_id):
         ds, PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, str(doc_id)
     )
     return {
-        g["actor_id"]: set(g["actions"])
-        for g in grants
-        if g["principal"] == "actor"
+        g["actor_id"]: set(g["actions"]) for g in grants if g["principal"] == "actor"
     }
 
 
@@ -96,9 +135,7 @@ async def test_owner_migrated_to_manager():
     for action in ("paper-view", "paper-edit", "paper-manage"):
         assert await ds.allowed(action=action, resource=res, actor={"id": "alice"})
     # A stranger sees nothing on a private doc.
-    assert not await ds.allowed(
-        action="paper-view", resource=res, actor={"id": "bob"}
-    )
+    assert not await ds.allowed(action="paper-view", resource=res, actor={"id": "bob"})
 
 
 @pytest.mark.asyncio
@@ -137,13 +174,9 @@ async def test_share_rows_migrated_to_viewer_and_editor():
     res = PaperDocResource(1)
     # viewer can view, not edit
     assert await ds.allowed(action="paper-view", resource=res, actor={"id": "bob"})
-    assert not await ds.allowed(
-        action="paper-edit", resource=res, actor={"id": "bob"}
-    )
+    assert not await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})
     # editor can view + edit, not manage
-    assert await ds.allowed(
-        action="paper-edit", resource=res, actor={"id": "carol"}
-    )
+    assert await ds.allowed(action="paper-edit", resource=res, actor={"id": "carol"})
     assert not await ds.allowed(
         action="paper-manage", resource=res, actor={"id": "carol"}
     )
@@ -168,9 +201,7 @@ async def test_visibility_link_view_grants_signed_in_viewer():
     res = PaperDocResource(1)
     # Any signed-in actor can view, but not edit.
     assert await ds.allowed(action="paper-view", resource=res, actor={"id": "zed"})
-    assert not await ds.allowed(
-        action="paper-edit", resource=res, actor={"id": "zed"}
-    )
+    assert not await ds.allowed(action="paper-edit", resource=res, actor={"id": "zed"})
     # Anonymous (no id) does NOT match _signed_in.
     assert not await ds.allowed(action="paper-view", resource=res, actor=None)
 
@@ -234,9 +265,7 @@ async def test_general_principal_configurable_to_wildcard():
 @pytest.mark.asyncio
 async def test_invalid_general_principal_falls_back_to_default():
     ds = await _make_ds(
-        config={
-            "plugins": {"datasette-paper": {"share-general-principal": "nonsense"}}
-        }
+        config={"plugins": {"datasette-paper": {"share-general-principal": "nonsense"}}}
     )
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="link-view")
 
@@ -280,18 +309,14 @@ async def test_forced_rerun_no_duplicate_grants_or_audit():
 
     db = ds.get_internal_database()
     acl_count_1 = (await db.execute("SELECT count(*) FROM acl")).single_value()
-    audit_count_1 = (
-        await db.execute("SELECT count(*) FROM acl_audit")
-    ).single_value()
+    audit_count_1 = (await db.execute("SELECT count(*) FROM acl_audit")).single_value()
     grants_1 = await _grant_map(ds, 1)
 
     # Run again, forcing past the marker.
     await migrate_shares_to_acl(ds, force=True)
 
     acl_count_2 = (await db.execute("SELECT count(*) FROM acl")).single_value()
-    audit_count_2 = (
-        await db.execute("SELECT count(*) FROM acl_audit")
-    ).single_value()
+    audit_count_2 = (await db.execute("SELECT count(*) FROM acl_audit")).single_value()
     grants_2 = await _grant_map(ds, 1)
 
     assert acl_count_2 == acl_count_1
@@ -331,18 +356,14 @@ async def test_mixed_corpus_migrates_correctly():
     # doc2: carol manages, any signed-in views (not edits)
     r2 = PaperDocResource(2)
     assert await ds.allowed(action="paper-manage", resource=r2, actor={"id": "carol"})
-    assert await ds.allowed(
-        action="paper-view", resource=r2, actor={"id": "stranger"}
-    )
+    assert await ds.allowed(action="paper-view", resource=r2, actor={"id": "stranger"})
     assert not await ds.allowed(
         action="paper-edit", resource=r2, actor={"id": "stranger"}
     )
 
     # doc3: no owner, any signed-in edits
     r3 = PaperDocResource(3)
-    assert await ds.allowed(
-        action="paper-edit", resource=r3, actor={"id": "stranger"}
-    )
+    assert await ds.allowed(action="paper-edit", resource=r3, actor={"id": "stranger"})
     assert len(await _grant_map(ds, 3)) == 1  # only the _signed_in principal
 
 

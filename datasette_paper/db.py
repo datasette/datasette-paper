@@ -7,9 +7,13 @@ tables and are configured via ``datasette --internal <path>``.
 The SQL itself lives in ``sql/queries.sql`` and is compiled into
 ``sql/_queries.py`` by ``just codegen-queries``. PaperDB is orchestration
 only — multi-statement operations (``insert_step`` bumping the doc's
-``current_version``, ``replace_shares`` rewriting visibility + share
-rows) chain the generated helpers inside a single ``execute_write_fn``
-closure so the transaction stays atomic.
+``current_version``) chain the generated helpers inside a single
+``execute_write_fn`` closure so the transaction stays atomic.
+
+Sharing is owned by datasette-acl now; paper keeps no share table or
+``visibility`` column (both dropped in migration m004), so there are no
+share read/write helpers here — the ``<datasette-share-dialog>`` component
+talks to the acl JSON API directly.
 """
 
 from __future__ import annotations
@@ -194,7 +198,6 @@ class PaperDB:
         def write(conn):
             _queries.delete_steps_for_doc(conn, doc_id=doc_id)
             _queries.delete_snapshots_for_doc(conn, doc_id=doc_id)
-            _queries.delete_shares_for_doc(conn, doc_id=doc_id)
             _queries.hard_delete_doc(conn, doc_id=doc_id)
 
         await self.database.execute_write_fn(write)
@@ -273,42 +276,3 @@ class PaperDB:
             return _queries.select_latest_snapshot(conn, doc_id=doc_id)
 
         return await self.database.execute_write_fn(read)
-
-    # ------------------------------------------------------------------
-    # Shares
-    # ------------------------------------------------------------------
-
-    async def select_shares(self, *, doc_id: int) -> list[_queries.Share]:
-        def read(conn):
-            return _queries.select_shares(conn, doc_id=doc_id)
-
-        return await self.database.execute_write_fn(read)
-
-    async def replace_shares(
-        self,
-        *,
-        doc_id: int,
-        visibility: str,
-        shares: list[tuple[str, str]],
-        granted_by: Optional[str],
-    ) -> None:
-        """Replace the share state for *doc_id* atomically.
-
-        *shares* is a list of ``(actor_id, role)`` tuples. Caller has
-        already validated each role is in ``('viewer','editor')``.
-        Visibility is validated against the doc table's CHECK constraint.
-        """
-
-        def write(conn):
-            _queries.update_doc_visibility(conn, doc_id=doc_id, visibility=visibility)
-            _queries.delete_shares_for_doc(conn, doc_id=doc_id)
-            for actor_id, role in shares:
-                _queries.insert_share(
-                    conn,
-                    doc_id=doc_id,
-                    actor_id=actor_id,
-                    role=role,
-                    granted_by=granted_by,
-                )
-
-        await self.database.execute_write_fn(write)

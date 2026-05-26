@@ -4,7 +4,7 @@
     {
       "name": "insertDoc",
       "result_type": "Row",
-      "sql": "INSERT INTO _datasette_paper_doc (name, created_by, schema_name, kind)\nVALUES ($name::text, $created_by::text::, $schema_name::text, $kind::text)\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;",
+      "sql": "INSERT INTO _datasette_paper_doc (name, created_by, schema_name, kind)\nVALUES ($name::text, $created_by::text::, $schema_name::text, $kind::text)\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked;",
       "parameters": [
         {
           "full_name": "$name::text",
@@ -89,14 +89,6 @@
           "nullable": false
         },
         {
-          "name": "visibility",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "visibility",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
           "name": "state",
           "origin_database": "main",
           "origin_table": "_datasette_paper_doc",
@@ -150,7 +142,7 @@
     {
       "name": "updateDocName",
       "result_type": "Row",
-      "sql": "UPDATE _datasette_paper_doc\nSET name = $name::text,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;",
+      "sql": "UPDATE _datasette_paper_doc\nSET name = $name::text,\n    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')\nWHERE id = $doc_id::integer\nRETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked;",
       "parameters": [
         {
           "full_name": "$name::text",
@@ -223,14 +215,6 @@
           "nullable": false
         },
         {
-          "name": "visibility",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "visibility",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
           "name": "state",
           "origin_database": "main",
           "origin_table": "_datasette_paper_doc",
@@ -284,7 +268,7 @@
     {
       "name": "selectDocById",
       "result_type": "Row",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id = $doc_id::integer;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id = $doc_id::integer;",
       "parameters": [
         {
           "full_name": "$doc_id::integer",
@@ -351,14 +335,6 @@
           "nullable": false
         },
         {
-          "name": "visibility",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "visibility",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
           "name": "state",
           "origin_database": "main",
           "origin_table": "_datasette_paper_doc",
@@ -412,7 +388,7 @@
     {
       "name": "listDocs",
       "result_type": "Rows",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nORDER BY created_at;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nORDER BY created_at;",
       "parameters": [],
       "columns": [
         {
@@ -472,14 +448,6 @@
           "nullable": false
         },
         {
-          "name": "visibility",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "visibility",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
           "name": "state",
           "origin_database": "main",
           "origin_table": "_datasette_paper_doc",
@@ -533,7 +501,7 @@
     {
       "name": "listDocsByIdsStatesAndKinds",
       "result_type": "Rows",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\n  AND state IN (\n    SELECT value FROM json_each($states_json::text)\n)\n  AND kind IN (\n    SELECT value FROM json_each($kinds_json::text)\n)\nORDER BY updated_at DESC;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\n  AND state IN (\n    SELECT value FROM json_each($states_json::text)\n)\n  AND kind IN (\n    SELECT value FROM json_each($kinds_json::text)\n)\nORDER BY updated_at DESC;",
       "parameters": [
         {
           "full_name": "$doc_ids_json::text",
@@ -609,14 +577,6 @@
           "origin_table": "_datasette_paper_doc",
           "origin_column": "current_version",
           "decltype": "INTEGER",
-          "nullable": false
-        },
-        {
-          "name": "visibility",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "visibility",
-          "decltype": "TEXT",
           "nullable": false
         },
         {
@@ -739,7 +699,7 @@
     {
       "name": "listTrashedToDelete",
       "result_type": "Rows",
-      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE state = 'trashed'\n  AND delete_at IS NOT NULL\n  AND delete_at < $now::text\nORDER BY delete_at;",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE state = 'trashed'\n  AND delete_at IS NOT NULL\n  AND delete_at < $now::text\nORDER BY delete_at;",
       "parameters": [
         {
           "full_name": "$now::text",
@@ -803,14 +763,6 @@
           "origin_table": "_datasette_paper_doc",
           "origin_column": "current_version",
           "decltype": "INTEGER",
-          "nullable": false
-        },
-        {
-          "name": "visibility",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "visibility",
-          "decltype": "TEXT",
           "nullable": false
         },
         {
@@ -1188,123 +1140,6 @@
         }
       ],
       "result_class": "Snapshot"
-    },
-    {
-      "name": "selectShares",
-      "result_type": "Rows",
-      "sql": "SELECT actor_id, role, granted_by, granted_at\nFROM _datasette_paper_share\nWHERE doc_id = $doc_id::integer\nORDER BY actor_id;",
-      "parameters": [
-        {
-          "full_name": "$doc_id::integer",
-          "name": "doc_id",
-          "annotated_type": "integer",
-          "nullable": false
-        }
-      ],
-      "columns": [
-        {
-          "name": "actor_id",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_share",
-          "origin_column": "actor_id",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
-          "name": "role",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_share",
-          "origin_column": "role",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
-          "name": "granted_by",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_share",
-          "origin_column": "granted_by",
-          "decltype": "TEXT",
-          "nullable": true
-        },
-        {
-          "name": "granted_at",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_share",
-          "origin_column": "granted_at",
-          "decltype": "TEXT",
-          "nullable": false
-        }
-      ],
-      "result_class": "Share"
-    },
-    {
-      "name": "updateDocVisibility",
-      "result_type": "Void",
-      "sql": "UPDATE _datasette_paper_doc\nSET visibility = $visibility::text\nWHERE id = $doc_id::integer;",
-      "parameters": [
-        {
-          "full_name": "$visibility::text",
-          "name": "visibility",
-          "annotated_type": "text",
-          "nullable": false
-        },
-        {
-          "full_name": "$doc_id::integer",
-          "name": "doc_id",
-          "annotated_type": "integer",
-          "nullable": false
-        }
-      ],
-      "columns": [],
-      "result_class": null
-    },
-    {
-      "name": "deleteSharesForDoc",
-      "result_type": "Void",
-      "sql": "DELETE FROM _datasette_paper_share WHERE doc_id = $doc_id::integer;",
-      "parameters": [
-        {
-          "full_name": "$doc_id::integer",
-          "name": "doc_id",
-          "annotated_type": "integer",
-          "nullable": false
-        }
-      ],
-      "columns": [],
-      "result_class": null
-    },
-    {
-      "name": "insertShare",
-      "result_type": "Void",
-      "sql": "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by)\nVALUES ($doc_id::integer, $actor_id::text, $role::text, $granted_by::text::);",
-      "parameters": [
-        {
-          "full_name": "$doc_id::integer",
-          "name": "doc_id",
-          "annotated_type": "integer",
-          "nullable": false
-        },
-        {
-          "full_name": "$actor_id::text",
-          "name": "actor_id",
-          "annotated_type": "text",
-          "nullable": false
-        },
-        {
-          "full_name": "$role::text",
-          "name": "role",
-          "annotated_type": "text",
-          "nullable": false
-        },
-        {
-          "full_name": "$granted_by::text::",
-          "name": "granted_by",
-          "annotated_type": "text",
-          "nullable": true
-        }
-      ],
-      "columns": [],
-      "result_class": null
     }
   ]
 }
