@@ -34,9 +34,12 @@
   // Read-only when the server says canEdit=false. When this flips on we
   // also force mode='view' so the toggle reflects reality.
   let canEdit = $derived(permissions?.canEdit ?? true);
+  let canManage = $derived(permissions?.canManage ?? false);
   let isOwner = $derived(permissions?.isOwner ?? false);
   let locked = $derived(permissions?.locked ?? false);
   let kind = $state<"doc" | "template">("doc");
+  // Current actor id from the bootstrap, forwarded to the share dialog.
+  let selfActor = $state<string | null>(null);
 
   let conn: EditorConnection | undefined;
   let unsub: (() => void) | undefined;
@@ -68,6 +71,9 @@
         },
         onKind: (k) => {
           kind = k;
+        },
+        onSelfActor: (a) => {
+          selfActor = a;
         },
         onStepError: (e) => {
           // Keep the first error — subsequent ones don't add information
@@ -176,9 +182,11 @@
     {users}
     bind:mode
     {canEdit}
+    {canManage}
     {isOwner}
     {locked}
     {kind}
+    {selfActor}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />

@@ -140,9 +140,9 @@ async def test_append_unsupported_content_type_is_400(ds):
 @pytest.mark.asyncio
 async def test_append_to_missing_doc_is_forbidden(ds):
     # The per-paper edit gate fires before the existence check, so a doc the
-    # actor can't prove edit rights on (here: one that doesn't exist, so no
-    # owner/share/visibility rule matches) is denied with 403 — same as every
-    # other per-paper endpoint, and it avoids leaking which doc ids exist.
+    # actor can't prove edit rights on (here: one that doesn't exist, so no acl
+    # grant matches) is denied with 403 — same as every other per-paper
+    # endpoint, and it avoids leaking which doc ids exist.
     resp = await ds.client.post(
         "/-/paper/api/docs/99999/append", json={"content": "x\n"}
     )
@@ -203,8 +203,13 @@ async def test_append_auto_snapshots_past_threshold(ds, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_append_denied_without_edit_permission():
-    """A viewer-only actor (link-view doc they don't own) can't append."""
+    """A viewer-only actor (acl Viewer grant) can't append."""
     from datasette.app import Datasette
+    from datasette_acl.grants import grant
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
     from datasette_paper.util import paper_db
 
     ds = Datasette(
@@ -220,15 +225,19 @@ async def test_append_denied_without_edit_permission():
     alice = {"ds_actor": ds.sign({"a": {"id": "alice"}}, "actor")}
     bob = {"ds_actor": ds.sign({"a": {"id": "bob"}}, "actor")}
 
-    # Alice creates a doc and makes it link-view (read-only for others).
+    # Alice creates a doc and grants bob view-only via acl.
     created = await ds.client.post(
         "/-/paper/api/docs", json={"name": "Alice"}, cookies=alice
     )
     doc_id = created.json()["id"]
-    await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={"visibility": "link-view", "shares": []},
-        cookies=alice,
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id="bob",
+        role="Viewer",
+        by_actor="alice",
     )
 
     # Bob can view but not append.

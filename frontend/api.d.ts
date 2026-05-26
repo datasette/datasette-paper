@@ -300,33 +300,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/-/paper/api/docs/{doc_id}/share": {
+    "/-/paper/api/docs/{doc_id}/sweep-subscribers": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    doc_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description OK */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
+        get?: never;
         put?: never;
         post: {
             parameters: {

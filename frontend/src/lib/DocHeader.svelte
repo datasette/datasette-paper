@@ -1,32 +1,77 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { client } from "./client";
-  import ShareDialog from "./ShareDialog.svelte";
+  // Importing the bundle is unnecessary here: datasette-share's JS is included
+  // on the doc page by paper's extra_js_urls hook, which registers the
+  // <datasette-share-dialog> custom element before this component mounts.
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+
+  // acl resource identity for a paper doc: type "paper-doc", a fixed parent
+  // sentinel ("_paper", == PAPER_DOCS_PARENT in permissions.py), child = doc id.
+  const SHARE_RESOURCE_TYPE = "paper-doc";
+  const SHARE_PARENT = "_paper";
 
   let {
     docId,
     users,
     mode = $bindable("edit"),
     canEdit = true,
+    canManage = false,
     isOwner = false,
     docState = "active",
     locked = false,
     kind = "doc",
+    selfActor = null,
     copyMarkdown,
   }: {
     docId: string;
     users: number;
     mode?: "edit" | "view";
     canEdit?: boolean;
+    canManage?: boolean;
     isOwner?: boolean;
     docState?: "active" | "archived" | "trashed";
     locked?: boolean;
     kind?: "doc" | "template";
+    selfActor?: string | null;
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
   let shareOpen = $state(false);
+
+  // actor-json the dialog reads to mark the current user's row "(you)".
+  let actorJson = $derived(selfActor ? JSON.stringify({ id: selfActor }) : "");
+
+  function closeShare() {
+    shareOpen = false;
+  }
+
+  // A revoke/grant in the dialog mutates acl directly; ask paper to sweep any
+  // open SSE subscribers whose access just changed so a demoted/removed editor
+  // gets disconnected (revoke_unauthorized on the server). Fire-and-forget —
+  // the sweep is best-effort and the dialog has already persisted the change.
+  async function sweepSubscribers() {
+    try {
+      await fetch(`/-/paper/api/docs/${docId}/sweep-subscribers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch {
+      // best-effort; subscribers re-check on their next bootstrap anyway.
+    }
+  }
+
+  // Attachment: wire the share dialog's bubbling CustomEvents. `share-revoked`
+  // drives the SSE sweep (a removed/demoted editor must be disconnected).
+  // The events bubble + are composed, so listening on the modal wrapper
+  // catches them from the nested custom element.
+  function shareEvents(node: HTMLElement) {
+    const onRevoked = () => void sweepSubscribers();
+    node.addEventListener("share-revoked", onRevoked);
+    return () => {
+      node.removeEventListener("share-revoked", onRevoked);
+    };
+  }
 
   type CopyFeedback = "idle" | "copied" | "failed";
   let copyState: CopyFeedback = $state("idle");
@@ -265,7 +310,7 @@
         <span class="saved" aria-live="polite">✓ saved</span>
       {/if}
       <span class="meta-actions">
-        {#if canEdit}
+        {#if canManage}
           <button
             type="button"
             class="share-btn"
@@ -487,7 +532,45 @@
   </svg>
 {/snippet}
 
-<ShareDialog {docId} bind:open={shareOpen} />
+{#if shareOpen}
+  <!-- The <datasette-share-dialog> custom element renders an inline panel
+       (people-with-access list + general access + add-box). paper wraps it in
+       its own modal so the existing "Share" button → dialog UX is preserved.
+       The element talks to the acl JSON API directly; we only listen for its
+       events to run paper's SSE subscriber sweep. -->
+  <div
+    class="share-modal-backdrop"
+    role="presentation"
+    onclick={closeShare}
+    onkeydown={(e) => {
+      if (e.key === "Escape") closeShare();
+    }}
+  >
+    <div
+      class="share-modal"
+      role="dialog"
+      aria-label="Share dialog"
+      tabindex="-1"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
+      {@attach shareEvents}
+    >
+      <datasette-share-dialog
+        resource-type={SHARE_RESOURCE_TYPE}
+        parent={SHARE_PARENT}
+        child={docId}
+        resource-label={meta?.name ?? ""}
+        actor-json={actorJson}
+        features="people,groups,agents,public"
+      ></datasette-share-dialog>
+      <div class="share-modal-footer">
+        <button type="button" class="share-modal-close" onclick={closeShare}>
+          Done
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .doc-header {
@@ -580,6 +663,47 @@
     cursor: pointer;
   }
   .share-btn:hover {
+    background: #094a8b;
+    border-color: #094a8b;
+  }
+
+  /* Modal wrapper around the <datasette-share-dialog> custom element. The
+     element itself renders the inline panel; paper supplies the backdrop +
+     box so the Share button keeps its Google-Docs-style modal UX. */
+  .share-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+  }
+  .share-modal {
+    background: #fff;
+    border-radius: 8px;
+    padding: 16px 18px;
+    width: 520px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
+  }
+  .share-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 12px;
+  }
+  .share-modal-close {
+    padding: 6px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    background: #0b5cad;
+    color: #fff;
+    border: 1px solid #0b5cad;
+  }
+  .share-modal-close:hover {
     background: #094a8b;
     border-color: #094a8b;
   }

@@ -132,6 +132,13 @@ export interface ConnectionOpts {
    */
   onKind?: (kind: "doc" | "template") => void;
   /**
+   * Called once at bootstrap with the current actor id (``selfActor``),
+   * or null when anonymous. The doc header forwards this to the
+   * <datasette-share-dialog> as ``actor-json`` so the dialog can mark the
+   * current user's grant row "(you)".
+   */
+  onSelfActor?: (actorId: string | null) => void;
+  /**
    * Called when a step can't be applied during bootstrap replay or an
    * SSE update. Bootstrap stops at the first bad step and renders the
    * partial doc; SSE skips the bad batch and stays connected. The host
@@ -887,6 +894,7 @@ export class EditorConnection {
 
   private _loaded(boot: BootstrapData): void {
     this.selfActor = boot.selfActor ?? null;
+    this.opts.onSelfActor?.(this.selfActor);
     // Seed the snapshot-version baseline from the server's last
     // persisted snapshot. If the bootstrap has no snapshot field
     // (server is at version 0 or the field is missing), default to 0

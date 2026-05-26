@@ -27,9 +27,9 @@ def make_datasette(*, granted: bool = True) -> Datasette:
     """Construct an in-memory Datasette with the paper permissions flagged.
 
     *granted=True* grants ``datasette-paper-list`` + ``datasette-paper-create``
-    to everyone (matching the dev / e2e setup). Per-paper ``view`` /
-    ``edit`` are still gated by the SQL hook against
-    ``_datasette_paper_doc.created_by`` and ``_datasette_paper_share``.
+    to everyone (matching the dev / e2e setup). Per-paper ``view`` / ``edit`` /
+    ``manage`` are resolved by datasette-acl grants on the ``paper-doc``
+    resource (the owner gets a Manager grant seeded on create).
 
     *granted=False* leaves all paper permissions unset.
     """

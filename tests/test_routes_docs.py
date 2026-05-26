@@ -20,8 +20,8 @@ async def test_create_doc_then_list(ds):
     docs = response.json()
     assert len(docs) == 1
     assert docs[0]["name"] == "My Paper"
-    # The list now includes per-row visibility + is_owner.
-    assert docs[0]["visibility"] == "private"
+    # The list includes per-row is_owner (sharing itself is now acl-owned, so
+    # there is no per-doc visibility enum on the row anymore).
     assert docs[0]["is_owner"] is True
 
 
@@ -70,7 +70,6 @@ async def test_bootstrap_includes_permissions_block(ds):
         "canEdit": True,
         "canManage": True,
         "isOwner": True,
-        "visibility": "private",
         "locked": False,
     }
 
@@ -121,7 +120,7 @@ async def test_bootstrap_permissions_for_shared_viewer():
     assert perms["canEdit"] is False
     assert perms["canManage"] is False
     assert perms["isOwner"] is False
-    assert perms["visibility"] == "private"
+    assert "visibility" not in perms
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,7 @@ from ..markdown import doc_to_markdown, extract_tasks, group_tasks_by_section
 from ..markdown_parser import markdown_to_doc, markdown_to_fragment
 from ..tables import count_tables_with_name, extract_tables, find_table_by_name
 from ..permissions import (
+    PAPER_DOCS_PARENT,
     PaperDocResource,
     can_paper_manage,
     ensure_paper_create,
@@ -122,7 +123,6 @@ async def list_docs(datasette, request):
                 "current_version": r.current_version,
                 "updated_at": r.updated_at,
                 "created_by": r.created_by,
-                "visibility": r.visibility,
                 "is_owner": r.created_by is not None and r.created_by == me,
                 **_doc_state_payload(r),
                 **_doc_flags_payload(r),
@@ -280,7 +280,6 @@ async def get_doc_bootstrap(datasette, request, doc_id: int):
                 "canEdit": can_edit,
                 "canManage": can_manage,
                 "isOwner": is_owner,
-                "visibility": doc.visibility,
                 # ``locked`` lives inside permissions because it is a
                 # capability gate — flipping it changes canEdit for
                 # every non-owner. The same field appears flat on list
@@ -539,41 +538,22 @@ async def append_doc(datasette, request, doc_id: int):
     return Response.json({"version": new_version, "appended_blocks": len(fragment)})
 
 
-VALID_VISIBILITIES = ("private", "link-view", "link-edit")
-VALID_ROLES = ("viewer", "editor")
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/sweep-subscribers$")
+async def sweep_subscribers(datasette, request, doc_id: int):
+    """Disconnect any open SSE subscribers whose access was just revoked.
 
+    Sharing itself is now owned by datasette-acl: the ``<datasette-share-dialog>``
+    component grants / updates / revokes acl grants directly against the acl
+    JSON API. paper no longer stores share state. But a revoke can't reach into
+    paper's in-memory ``Instance`` to drop a live editor's SSE queue, so the
+    dialog fires a ``share-revoked`` event and the frontend calls this endpoint
+    to run the revocation sweep (``Instance.revoke_unauthorized``), which
+    re-checks ``paper-view`` per subscriber and closes the queues that now fail.
 
-@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/share$")
-async def get_share(datasette, request, doc_id: int):
-    """Return the share state — managers only (acl Manager grant)."""
-    await ensure_paper_view(datasette, request, doc_id)
-    if not await can_paper_manage(datasette, request.actor, doc_id):
-        raise Forbidden("paper-manage")
-    db = paper_db(datasette)
-    doc = await db.select_doc_by_id(doc_id)
-    if doc is None:
-        return Response.json({"error": "Document not found"}, status=404)
-    shares = await db.select_shares(doc_id=doc_id)
-    return Response.json(
-        {
-            "visibility": doc.visibility,
-            "owner": doc.created_by,
-            "shares": [
-                {
-                    "actorID": s.actor_id,
-                    "role": s.role,
-                    "grantedAt": s.granted_at,
-                }
-                for s in shares
-            ],
-            "canManage": True,
-        }
-    )
-
-
-@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/share$")
-async def post_share(datasette, request, doc_id: int):
-    """Replace the share state atomically. Manager-only (acl paper-manage)."""
+    Manager-only — gated on ``paper-manage`` (the actor must be able to manage
+    sharing to trigger a sweep). View-gated first so probing a doc id the actor
+    can't see returns the standard 403 surface.
+    """
     await ensure_paper_view(datasette, request, doc_id)
     if not await can_paper_manage(datasette, request.actor, doc_id):
         raise Forbidden("paper-manage")
@@ -582,78 +562,12 @@ async def post_share(datasette, request, doc_id: int):
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
 
-    me = actor_id(request)
-
-    body = await read_json_body(request)
-    visibility = body.get("visibility")
-    if visibility not in VALID_VISIBILITIES:
-        return Response.json(
-            {"error": f"visibility must be one of: {', '.join(VALID_VISIBILITIES)}"},
-            status=400,
-        )
-
-    raw_shares = body.get("shares", [])
-    if not isinstance(raw_shares, list):
-        return Response.json({"error": "shares must be a list"}, status=400)
-
-    seen: set[str] = set()
-    parsed: list[tuple[str, str]] = []
-    for entry in raw_shares:
-        if not isinstance(entry, dict):
-            return Response.json({"error": "each share must be an object"}, status=400)
-        actor_value = entry.get("actorID")
-        role = entry.get("role")
-        if not isinstance(actor_value, str) or not actor_value.strip():
-            return Response.json(
-                {"error": "actorID must be a non-empty string"}, status=400
-            )
-        if role not in VALID_ROLES:
-            return Response.json(
-                {"error": f"role must be one of: {', '.join(VALID_ROLES)}"},
-                status=400,
-            )
-        actor_value = actor_value.strip()
-        if actor_value == doc.created_by:
-            return Response.json({"error": "owner cannot appear in shares"}, status=400)
-        if actor_value in seen:
-            return Response.json(
-                {"error": f"duplicate actor in shares: {actor_value}"},
-                status=400,
-            )
-        seen.add(actor_value)
-        parsed.append((actor_value, role))
-
-    await db.replace_shares(
-        doc_id=doc_id,
-        visibility=visibility,
-        shares=parsed,
-        granted_by=me,
-    )
-
-    # Sweep any open SSE subscribers whose access has been revoked.
+    revoked = 0
     registry = get_registry(datasette)
-    if doc_id in registry._instances:
-        instance = registry._instances[doc_id]
-        await instance.revoke_unauthorized(datasette)
-
-    # Return the new state in the same shape as GET.
-    refreshed = await db.select_doc_by_id(doc_id)
-    shares_after = await db.select_shares(doc_id=doc_id)
-    return Response.json(
-        {
-            "visibility": refreshed.visibility,
-            "owner": refreshed.created_by,
-            "shares": [
-                {
-                    "actorID": s.actor_id,
-                    "role": s.role,
-                    "grantedAt": s.granted_at,
-                }
-                for s in shares_after
-            ],
-            "canManage": True,
-        }
-    )
+    instance = registry._instances.get(doc_id)
+    if instance is not None:
+        revoked = await instance.revoke_unauthorized(datasette)
+    return Response.json({"revoked": revoked})
 
 
 async def _ensure_owner(datasette, request, doc_id: int):
@@ -930,6 +844,12 @@ async def paper_doc_page(datasette, request, doc_id: int):
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:
         return Response.html("Document not found", status=404)
+    # Seed the page with the bits <datasette-share-dialog> needs: the acl
+    # resource identity (parent/child) and the current actor (so the dialog
+    # can mark "(you)"). The dialog talks to the acl JSON API directly; under
+    # datasette 1.0a30 same-origin writes need no CSRF token, so we don't
+    # thread one through.
+    me = actor_id(request)
     return Response.html(
         await datasette.render_template(
             "paper_base.html",
@@ -937,7 +857,11 @@ async def paper_doc_page(datasette, request, doc_id: int):
                 "page_title": doc.name or f"Paper {doc_id}",
                 "body_class": "paper-fullscreen",
                 "entrypoint": "src/pages/doc/main.ts",
-                "page_data": {"doc_id": doc_id},
+                "page_data": {
+                    "doc_id": doc_id,
+                    "share_parent": PAPER_DOCS_PARENT,
+                    "actor": {"id": me} if me else None,
+                },
             },
             request=request,
         )

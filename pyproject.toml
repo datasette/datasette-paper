@@ -23,17 +23,20 @@ dependencies = [
 dev = [
     "datasette-acl",
     "datasette-agent",
+    "datasette-share",
     "pytest",
     "pytest-asyncio",
     "ruff>=0.15.12",
     "solite>=0.0.1a36",
 ]
 
-# Local-only: the sharing-v2 acl engine is a sibling checkout, not yet
-# published. Referenced from the dev group so paper's new paper-doc grants
-# resolve through acl in tests.
+# Local-only: the sharing-v2 acl engine + reusable share dialog are sibling
+# checkouts, not yet published. Referenced from the dev group so paper's new
+# paper-doc grants resolve through acl in tests and the <datasette-share-dialog>
+# bundle is served via datasette-share's asset helper.
 [tool.uv.sources]
 datasette-acl = { path = "../datasette-acl", editable = true }
+datasette-share = { path = "../datasette-share", editable = true }
 
 [build-system]
 requires = ["setuptools"]
