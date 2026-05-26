@@ -6,8 +6,10 @@ import json
 from datasette import Forbidden, Response
 
 from ..router import router
+from ..errors import InvalidStepError
 from ..instance import get_registry
 from ..markdown import doc_to_markdown, extract_tasks, group_tasks_by_section
+from ..markdown_parser import markdown_to_doc, markdown_to_fragment
 from ..tables import count_tables_with_name, extract_tables, find_table_by_name
 from ..permissions import (
     PaperResource,
@@ -150,6 +152,25 @@ async def create_doc(datasette, request):
             status=400,
         )
 
+    # ``content`` seeds the new doc from markdown (parsed to the initial
+    # version-0 snapshot). It's an alternative seed source to ``template_id``
+    # — supplying both is ambiguous. Unlike template_id, content works for
+    # either kind, so you can seed a brand-new template from markdown too.
+    content = body.get("content")
+    if content is not None:
+        if template_id_raw is not None:
+            return Response.json(
+                {"error": "provide either template_id or content, not both"},
+                status=400,
+            )
+        if not isinstance(content, str):
+            return Response.json({"error": "content must be a string"}, status=400)
+        content_type = (body.get("content_type") or "markdown").lower()
+        if content_type != "markdown":
+            return Response.json(
+                {"error": "content_type must be 'markdown'"}, status=400
+            )
+
     if template_id_raw is not None:
         try:
             template_id = int(template_id_raw)
@@ -182,6 +203,18 @@ async def create_doc(datasette, request):
             created_by=actor_id(request),
             kind="doc",
             snapshot_doc_json=json.dumps(materialized),
+            snapshot_actor_id=actor_id(request),
+        )
+    elif content is not None:
+        # markdown_to_doc always returns a schema-valid doc (an empty/
+        # whitespace body becomes a single blank paragraph), so we store it
+        # as the version-0 snapshot the same way template instantiation does.
+        doc_json = markdown_to_doc(content)
+        doc = await db.insert_doc_with_snapshot(
+            name=name,
+            created_by=actor_id(request),
+            kind=kind,
+            snapshot_doc_json=json.dumps(doc_json),
             snapshot_actor_id=actor_id(request),
         )
     else:
@@ -450,6 +483,53 @@ async def rename_doc(datasette, request, doc_id: int):
             "created_by": doc.created_by,
         }
     )
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/append$")
+async def append_doc(datasette, request, doc_id: int):
+    """Append markdown content to the end of a doc as a single collab step.
+
+    Body: ``{"content": "<markdown>", "content_type": "markdown"}``
+    (``content_type`` is optional and currently only ``markdown``).
+
+    The content is parsed to a ProseMirror fragment and inserted at
+    end-of-doc via ``Instance.append_fragment`` — the same persist +
+    broadcast pipeline as a collab edit, so any live editors see the new
+    blocks appear over SSE without a reconnect. ``edit`` permission is
+    required, so the lock + share model apply automatically.
+    """
+    await ensure_paper_edit(datasette, request, doc_id)
+    db = paper_db(datasette)
+    doc = await db.select_doc_by_id(doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+
+    body = await read_json_body(request)
+    content = body.get("content")
+    if not isinstance(content, str):
+        return Response.json({"error": "content (string) is required"}, status=400)
+    content_type = (body.get("content_type") or "markdown").lower()
+    if content_type != "markdown":
+        return Response.json({"error": "content_type must be 'markdown'"}, status=400)
+
+    registry = get_registry(datasette)
+    instance = await registry.get(db, doc_id)
+
+    fragment = markdown_to_fragment(content)
+    if not fragment:
+        # Empty / whitespace-only markdown — nothing to append. Report the
+        # current version so callers don't treat it as an error.
+        return Response.json({"version": instance.version, "appended_blocks": 0})
+
+    try:
+        new_version = await instance.append_fragment(
+            fragment, actor_id=actor_id(request)
+        )
+    except InvalidStepError as exc:
+        return Response.json(
+            {"error": "invalid_content", "message": exc.message}, status=422
+        )
+    return Response.json({"version": new_version, "appended_blocks": len(fragment)})
 
 
 VALID_VISIBILITIES = ("private", "link-view", "link-edit")

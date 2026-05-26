@@ -13,6 +13,7 @@ dependencies = [
     "datasette>1a",
     "datasette-plugin-router>=0.0.1a3",
     "datasette-vite>=0.0.1a4",
+    "markdown-it-py[plugins]>=3.0",
     "prosemirror>=0.6.1",
     "sqlite-migrate>=0.1b0",
     "sqlite-utils>=3.38",
@@ -20,6 +21,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "datasette-agent",
     "pytest",
     "pytest-asyncio",
     "ruff>=0.15.12",
@@ -43,6 +45,10 @@ paper = "datasette_paper"
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
+# Only collect the real suite. `experiment/` is gitignored scratch that
+# ships its own copy of some test module names (e.g. test_markdown_parser);
+# without this, bare `pytest` recurses into it and hits import-file-mismatch.
+testpaths = ["tests"]
 
 [tool.setuptools.packages.find]
 include = ["datasette_paper*"]

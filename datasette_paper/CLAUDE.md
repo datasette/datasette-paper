@@ -27,6 +27,13 @@ won't find by reading any single file.
   `execute_write_fn` closure — see file docstring. Routes use the
   `paper_db(datasette)` shortcut; `ensure_migrations()` runs once at
   startup, not per-request.
+- `markdown_parser.py` — md → PM JSON converter (markdown-it-py +
+  GFM tables + tasklists), the inverse of `markdown.py`. Public entry
+  points: `markdown_to_doc` (full doc node) and `markdown_to_fragment`
+  (top-level block list, for splicing into a `ReplaceStep` on append).
+  Intentionally lossy for content outside the schema — raw HTML renders
+  as plain text, unknown inline kinds drop. Fourth member of the schema
+  lock-step group; it can only emit nodes the schema accepts.
 - `markdown.py` / `pm_schema.py` — server-side ProseMirror schema +
   CommonMark serializer. Both must stay in lock-step with
   `frontend/src/lib/schema.ts` (see file docstrings). Table specs
@@ -87,7 +94,7 @@ node's `name` attr after `.strip()` — empty strips → 400.
 - Don't statically grant `datasette-paper-view`/`-edit` in test configs;
   they're resolved per-paper and granting them globally masks share-model
   bugs.
-- Don't extend the JS schema without mirroring `pm_schema.py` and
-  `markdown.py` in the same commit.
+- Don't extend the JS schema without mirroring `pm_schema.py`,
+  `markdown.py`, and `markdown_parser.py` in the same commit.
 - Don't use `execute_write_fn` for read-only queries (open ticket
   `si4oztnq`).

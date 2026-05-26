@@ -15,6 +15,14 @@ Per-doc lifecycle:
       → append to steps_tail
       → broadcast {kind:"update", steps[parsed], clientIDs, users}
         (skips the originator's clientID — they self-confirmed via POST 200)
+    append_fragment(fragment_json, actor_id) — server-side markdown/content
+      ingest: builds one ReplaceStep at end-of-doc against the live doc under
+      ``_write_lock`` and runs the same persist+broadcast tail as add_events,
+      stamped with the ``_API_CLIENT_ID`` sentinel (no originator to skip).
+    apply_markdown_edit(edit_fn, actor_id) — atomic markdown read-modify-write
+      for the agent edit/insert tools: under ``_write_lock``, serialize the
+      live doc to markdown, run ``edit_fn`` over it, reparse, and replace the
+      whole doc with one ReplaceStep.
     get_events(since_version) — backlog slice for SSE replay; raises GoneError
     subscribe_with_backlog(since_version, client_id, actor_id) —
         atomically subscribes and snapshots the backlog under the same
@@ -22,7 +30,10 @@ Per-doc lifecycle:
         broadcast that fires between the two steps.
     subscribe(client_id, actor_id) → asyncio.Queue (key in self.subscribers)
     update_presence(...) → broadcasts {kind:"presence", users:[…]}
-    record_client_doc(...) → snapshot row when (version - last) >= 100
+    record_client_doc(...) → snapshot row when (version - last) >= 100;
+        also driven automatically by ``_maybe_auto_snapshot`` at the end of
+        every write, so API-only docs (no browser to POST /snapshot) still
+        snapshot and don't grow an unbounded step tail.
     revoke_unauthorized(datasette) → re-checks "datasette-paper-view" per
         subscriber; enqueues {"kind":"closed"} for any who lost access;
         the SSE loop sees the sentinel and exits cleanly.
@@ -46,6 +57,14 @@ logger = logging.getLogger("datasette_paper.instance")
 MAX_INSTANCES = 20
 MAX_TAIL = 10000
 SNAPSHOT_THRESHOLD = 100
+
+# Sentinel client_id stamped on steps produced by the server itself (the
+# markdown append/ingest API), as opposed to a prosemirror-collab client.
+# Collab clientIDs are random non-negative 32-bit ints, so a negative value
+# can never collide with a real subscriber — meaning the broadcast loop's
+# "skip the originator" check never skips anyone for an API-originated step,
+# and every live editor receives it.
+_API_CLIENT_ID = -1
 
 
 def empty_doc_json() -> str:
@@ -289,7 +308,6 @@ class Instance:
             if not steps:
                 return self.version
 
-            base_version = self.version
             # The wire format delivers steps as parsed JSON (lists/dicts).
             # The `step_json` column stores them as TEXT, so serialize each
             # step back to a JSON string before binding. Strings come
@@ -306,60 +324,207 @@ class Instance:
             # structured 422 instead of a 200 that poisons the history.
             self._validate_steps(step_jsons)
 
-            def write_all(conn):
-                new_ver = base_version
-                for step_json in step_jsons:
-                    inserted = _queries.insert_step(
-                        conn,
-                        doc_id=self.doc_id,
-                        client_id=client_id,
-                        actor_id=actor_id,
-                        step_json=step_json,
-                    )
-                    assert inserted is not None
-                    new_ver = inserted
-                    _queries.bump_doc_version(conn, doc_id=self.doc_id, version=new_ver)
-                return new_ver
+            return await self._persist_and_broadcast(step_jsons, client_id, actor_id)
 
-            new_version = await self.db.database.execute_write_fn(write_all)
+    async def _persist_and_broadcast(
+        self,
+        step_jsons: list[str],
+        client_id: int,
+        actor_id: Optional[str],
+    ) -> int:
+        """Write a validated, correctly-positioned step batch and broadcast it.
 
-            # Fetch the newly inserted steps to get their created_at
-            # values. Safe under the lock — no other ``add_events`` can
-            # have advanced the version while we awaited the write, so
-            # this returns exactly our batch.
-            new_steps = await self.db.select_steps_after(
-                doc_id=self.doc_id, after_version=base_version
+        **Caller must hold ``self._write_lock``** and must have already
+        validated ``step_jsons`` against the current live doc — this method
+        does no version or content checking. It's the shared tail of
+        ``add_events`` (collab POSTs) and ``append_fragment`` (API ingest);
+        the two differ only in how they produce + position the steps.
+        """
+        base_version = self.version
+
+        def write_all(conn):
+            new_ver = base_version
+            for step_json in step_jsons:
+                inserted = _queries.insert_step(
+                    conn,
+                    doc_id=self.doc_id,
+                    client_id=client_id,
+                    actor_id=actor_id,
+                    step_json=step_json,
+                )
+                assert inserted is not None
+                new_ver = inserted
+                _queries.bump_doc_version(conn, doc_id=self.doc_id, version=new_ver)
+            return new_ver
+
+        new_version = await self.db.database.execute_write_fn(write_all)
+
+        # Fetch the newly inserted steps to get their created_at values. Safe
+        # under the lock — no other writer can have advanced the version while
+        # we awaited the write, so this returns exactly our batch.
+        new_steps = await self.db.select_steps_after(
+            doc_id=self.doc_id, after_version=base_version
+        )
+
+        new_step_records = [_step_record(row) for row in new_steps]
+        for record in new_step_records:
+            self.steps_tail.append(record)
+
+        self.version = new_version
+
+        # Broadcast to all subscribers. Steps are stored as JSON strings;
+        # parse them back to objects so the SSE payload is structured JSON,
+        # not strings inside a JSON array.
+        payload = {
+            "kind": "update",
+            "version": self.version,
+            "steps": [json.loads(r["step_json"]) for r in new_step_records],
+            "clientIDs": [r["client_id"] for r in new_step_records],
+            "users": len(self.subscribers),
+        }
+        # Skip the originator: their POST 200 already confirmed these steps
+        # locally via prosemirror-collab's receiveTransaction. Sending the
+        # echo would cause them to re-apply the step on top of the already-
+        # confirmed state (the unconfirmed queue is empty, so PM would treat
+        # it as a remote insertion and duplicate the change). API-originated
+        # appends use a sentinel client_id (``_API_CLIENT_ID``) that matches
+        # no real subscriber, so every live editor receives them.
+        for q, (sub_client_id, _actor_id) in list(self.subscribers.items()):
+            if sub_client_id is not None and sub_client_id == client_id:
+                continue
+            q.put_nowait(payload)
+
+        self.last_active = time.monotonic()
+        await self._maybe_auto_snapshot(actor_id)
+        return self.version
+
+    async def _maybe_auto_snapshot(self, actor_id: Optional[str]) -> None:
+        """Snapshot when the step tail has drifted past the threshold.
+
+        Browsers drive snapshots via ``POST /snapshot``, but API-only docs
+        (markdown append / agent edits) have no browser, so without this their
+        step tail would grow without bound and every hydrate would replay from
+        version 0. Called at the end of every write under ``_write_lock``, so
+        the snapshot reflects exactly the version we just committed. Skips a
+        poisoned history rather than persisting a doc we can't cleanly rebuild;
+        ``record_client_doc`` re-checks the threshold so this is a no-op until
+        the drift is actually reached.
+        """
+        if (self.version - self.snapshot_version) < SNAPSHOT_THRESHOLD:
+            return
+        materialized = self.materialize_live_doc()
+        if self._materialization_error is not None:
+            return
+        await self.record_client_doc(
+            self.version, json.dumps(materialized), actor_id=actor_id
+        )
+
+    async def append_fragment(
+        self,
+        fragment_json: list[dict],
+        actor_id: Optional[str] = None,
+    ) -> int:
+        """Append top-level block nodes to the end of the doc as one step.
+
+        ``fragment_json`` is a list of ProseMirror block-node dicts (e.g. the
+        output of ``markdown_parser.markdown_to_fragment``). The step is built
+        against the *current* live doc under ``self._write_lock`` so it can't
+        race a concurrent collab write — the insertion position and the
+        validation both see the same doc state the write will land on. Returns
+        the new version; a no-op (empty fragment) returns the current version.
+
+        Raises :class:`InvalidStepError` if history is poisoned or the
+        fragment can't be inserted at the end of the doc under the schema.
+        """
+        if not fragment_json:
+            return self.version
+
+        # Late imports keep prosemirror off the cold module-import path.
+        from prosemirror.model import Fragment, Node, Slice
+        from prosemirror.transform import ReplaceStep
+
+        from .pm_schema import schema
+
+        async with self._write_lock:
+            live_json = self.materialize_live_doc()
+            if self._materialization_error is not None:
+                bad_version, bad_msg = self._materialization_error
+                raise InvalidStepError(
+                    0, f"history corrupted at version {bad_version}: {bad_msg}"
+                )
+
+            try:
+                doc = schema.node_from_json(live_json)
+                nodes = [Node.from_json(schema, block) for block in fragment_json]
+            except Exception as exc:
+                raise InvalidStepError(0, f"invalid fragment: {exc}") from exc
+
+            end = doc.content.size
+            step = ReplaceStep(end, end, Slice(Fragment.from_array(nodes), 0, 0))
+            result = step.apply(doc)
+            if result.failed:
+                raise InvalidStepError(0, result.failed)
+
+            step_json = json.dumps(step.to_json())
+            return await self._persist_and_broadcast(
+                [step_json], _API_CLIENT_ID, actor_id
             )
 
-            new_step_records = [_step_record(row) for row in new_steps]
-            for record in new_step_records:
-                self.steps_tail.append(record)
+    async def apply_markdown_edit(self, edit_fn, actor_id: Optional[str] = None) -> int:
+        """Atomically read the doc as markdown, transform it, and replace it.
 
-            self.version = new_version
+        ``edit_fn(markdown: str) -> str`` produces the new full-document
+        markdown from the current one (e.g. a str-replace or an insert). The
+        whole read → transform → reparse → replace sequence runs under
+        ``self._write_lock``, so ``edit_fn`` sees — and the resulting step is
+        positioned against — the same live doc the step lands on, even if a
+        collab client is editing concurrently. The doc is replaced wholesale
+        with one ``ReplaceStep`` over the reparsed markdown.
 
-            # Broadcast to all subscribers. Steps are stored as JSON
-            # strings; parse them back to objects so the SSE payload is
-            # structured JSON, not strings inside a JSON array.
-            payload = {
-                "kind": "update",
-                "version": self.version,
-                "steps": [json.loads(r["step_json"]) for r in new_step_records],
-                "clientIDs": [r["client_id"] for r in new_step_records],
-                "users": len(self.subscribers),
-            }
-            # Skip the originator: their POST 200 already confirmed these
-            # steps locally via prosemirror-collab's receiveTransaction.
-            # Sending the echo would cause them to re-apply the step on
-            # top of the already-confirmed state (the unconfirmed queue
-            # is empty, so PM would treat it as a remote insertion and
-            # duplicate the change).
-            for q, (sub_client_id, _actor_id) in list(self.subscribers.items()):
-                if sub_client_id is not None and sub_client_id == client_id:
-                    continue
-                q.put_nowait(payload)
+        Returns the new version, or the current version if ``edit_fn`` is a
+        no-op (returns identical markdown). ``edit_fn`` may raise to signal a
+        failed edit (e.g. an ambiguous match); the exception propagates to
+        the caller. Raises :class:`InvalidStepError` if history is poisoned
+        or the reparsed doc can't replace the current one under the schema.
+        """
+        from prosemirror.model import Fragment, Node, Slice
+        from prosemirror.transform import ReplaceStep
 
-            self.last_active = time.monotonic()
-            return self.version
+        from .markdown import doc_to_markdown
+        from .markdown_parser import markdown_to_doc
+        from .pm_schema import schema
+
+        async with self._write_lock:
+            live_json = self.materialize_live_doc()
+            if self._materialization_error is not None:
+                bad_version, bad_msg = self._materialization_error
+                raise InvalidStepError(
+                    0, f"history corrupted at version {bad_version}: {bad_msg}"
+                )
+
+            current_md = doc_to_markdown(live_json)
+            new_md = edit_fn(current_md)
+            if new_md == current_md:
+                return self.version  # no-op edit
+
+            new_blocks = markdown_to_doc(new_md).get("content") or []
+            try:
+                old_doc = schema.node_from_json(live_json)
+                new_nodes = [Node.from_json(schema, b) for b in new_blocks]
+            except Exception as exc:
+                raise InvalidStepError(0, f"reparsed doc invalid: {exc}") from exc
+
+            step = ReplaceStep(
+                0, old_doc.content.size, Slice(Fragment.from_array(new_nodes), 0, 0)
+            )
+            result = step.apply(old_doc)
+            if result.failed:
+                raise InvalidStepError(0, result.failed)
+
+            step_json = json.dumps(step.to_json())
+            return await self._persist_and_broadcast(
+                [step_json], _API_CLIENT_ID, actor_id
+            )
 
     def get_events(self, since_version: int) -> Optional[dict]:
         """Return steps since since_version, or None if already up to date."""

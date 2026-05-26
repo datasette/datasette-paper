@@ -210,3 +210,16 @@ async def can_paper_view(datasette, actor, doc_id) -> bool:
         resource=PaperResource(doc_id),
         actor=actor,
     )
+
+
+async def can_paper_edit(datasette, actor, doc_id) -> bool:
+    """Like ensure_paper_edit but returns True/False without raising.
+
+    Used by the agent tools, which receive an ``actor`` (not a request) and
+    surface denial as a tool-result error rather than an HTTP Forbidden.
+    """
+    return await datasette.allowed(
+        action="datasette-paper-edit",
+        resource=PaperResource(doc_id),
+        actor=actor,
+    )

@@ -215,3 +215,18 @@ try:
         ]
 except ImportError:
     pass
+
+
+# Optional integration with `datasette-agent` — expose create/read/append/
+# edit/insert tools to the LLM agent. Importing `AgentTool` is the guard:
+# when datasette-agent isn't installed, the hook simply isn't registered.
+try:
+    from datasette_agent.tools import AgentTool  # type: ignore[import-not-found]  # noqa: F401
+
+    @hookimpl
+    def register_agent_tools(datasette):
+        from .agent_tools import get_paper_agent_tools
+
+        return get_paper_agent_tools()
+except ImportError:
+    pass
