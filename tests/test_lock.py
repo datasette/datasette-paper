@@ -23,7 +23,7 @@ from datasette.app import Datasette
 
 from datasette_paper.db import PaperDB
 from datasette_paper.instance import get_registry
-from datasette_paper.permissions import PaperResource
+from datasette_paper.permissions import PaperDocResource
 
 
 def _cookie(ds, actor_id):
@@ -53,10 +53,26 @@ async def _alice_doc(ds, name="P"):
 
 
 async def _grant_share(ds, doc_id, actor_id, role):
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, ?, 'alice')",
-        [doc_id, actor_id, role],
+    """Grant ``actor_id`` an acl role on the doc.
+
+    ``role`` is the lowercase share-role name kept for call-site
+    compatibility ('editor' / 'viewer'); it maps to the acl role.
+    """
+    from datasette_acl.grants import grant
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    acl_role = {"editor": "Editor", "viewer": "Viewer"}[role]
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id=actor_id,
+        role=acl_role,
+        by_actor="alice",
     )
 
 
@@ -74,8 +90,8 @@ async def test_lock_denies_edit_to_editor_share():
 
     # Baseline: bob can edit.
     assert await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "bob"},
     )
 
@@ -87,32 +103,28 @@ async def test_lock_denies_edit_to_editor_share():
 
     # Bob loses edit but keeps view.
     assert not await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "bob"},
     )
     assert await ds.allowed(
-        action="datasette-paper-view",
-        resource=PaperResource(doc_id),
+        action="paper-view",
+        resource=PaperDocResource(doc_id),
         actor={"id": "bob"},
     )
 
 
 @pytest.mark.asyncio
-async def test_lock_denies_edit_to_link_edit_visibility():
-    """Locked doc with link-edit visibility denies edit to listed actors."""
+async def test_lock_deny_composes_over_grant():
+    """The locked deny wins over any acl edit grant; view is unaffected."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
-    await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={"visibility": "link-edit", "shares": []},
-        cookies=_cookie(ds, "alice"),
-    )
+    await _grant_share(ds, doc_id, "carol", "editor")
 
-    # Stranger can edit via link-edit visibility before lock.
+    # Editor grant gives carol edit before the lock.
     assert await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "carol"},
     )
 
@@ -122,15 +134,15 @@ async def test_lock_denies_edit_to_link_edit_visibility():
     )
     assert r.status_code == 200
 
-    # Strangers still view but can't edit.
+    # The deny composes over the grant: carol still views but can't edit.
     assert await ds.allowed(
-        action="datasette-paper-view",
-        resource=PaperResource(doc_id),
+        action="paper-view",
+        resource=PaperDocResource(doc_id),
         actor={"id": "carol"},
     )
     assert not await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "carol"},
     )
 
@@ -148,8 +160,8 @@ async def test_lock_denies_edit_to_owner_too():
 
     # Baseline: alice can edit her own doc.
     assert await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "alice"},
     )
 
@@ -160,13 +172,13 @@ async def test_lock_denies_edit_to_owner_too():
 
     # Owner loses edit. View stays.
     assert not await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "alice"},
     )
     assert await ds.allowed(
-        action="datasette-paper-view",
-        resource=PaperResource(doc_id),
+        action="paper-view",
+        resource=PaperDocResource(doc_id),
         actor={"id": "alice"},
     )
 
@@ -182,8 +194,8 @@ async def test_owner_can_unlock_their_own_locked_doc():
     )
     # Sanity: alice cannot edit while locked.
     assert not await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "alice"},
     )
 
@@ -195,8 +207,8 @@ async def test_owner_can_unlock_their_own_locked_doc():
 
     # Edit restored.
     assert await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "alice"},
     )
 
@@ -303,8 +315,8 @@ async def test_unlock_restores_edit():
         f"/-/paper/api/docs/{doc_id}/lock", cookies=_cookie(ds, "alice")
     )
     assert not await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "bob"},
     )
 
@@ -313,8 +325,8 @@ async def test_unlock_restores_edit():
     )
     assert r.status_code == 200
     assert await ds.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor={"id": "bob"},
     )
 

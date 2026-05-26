@@ -1,4 +1,11 @@
-"""Tests for the datasette-paper permission model (4-action split + SQL hook)."""
+"""Tests for the datasette-paper permission model.
+
+Global ``datasette-paper-list`` / ``datasette-paper-create`` come from the
+config-permissions plugin; per-doc ``paper-view`` / ``paper-edit`` /
+``paper-manage`` resolve against datasette-acl grants on ``PaperDocResource``.
+The creator gets a Manager grant seeded on create; further access is granted
+through acl. The only bespoke rule paper still owns is the ``locked`` deny.
+"""
 
 import pytest
 from datasette.app import Datasette
@@ -13,6 +20,42 @@ async def _make_ds(permissions_config):
 
 def _actor_cookie(ds, actor_id):
     return ds.sign({"a": {"id": actor_id}}, "actor")
+
+
+async def _grant_acl(ds, doc_id, actor_id, role):
+    """Grant ``actor_id`` an acl role (Viewer/Editor/Manager) on the doc."""
+    from datasette_acl.grants import grant
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id=actor_id,
+        role=role,
+        by_actor="alice",
+    )
+
+
+async def _revoke_acl(ds, doc_id, actor_id):
+    from datasette_acl.grants import revoke
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    await revoke(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id=actor_id,
+        by_actor="alice",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -108,207 +151,105 @@ async def test_full_grant_unblocks_full_owner_path():
 
 
 # ---------------------------------------------------------------------------
-# Resource-level permissions (the SQL hook)
+# Resource-level permissions (acl-resolved paper-doc actions)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_owner_can_view_and_edit_own_paper():
-    from datasette_paper.permissions import PaperResource
+async def test_owner_can_view_edit_manage_own_paper():
+    """Creator gets a Manager grant on create — full access, no lockout."""
+    from datasette_paper.permissions import PaperDocResource
 
     ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
 
-    # Alice creates a paper
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
 
-    res = PaperResource(doc_id)
-    assert await ds.allowed(
-        action="datasette-paper-view", resource=res, actor={"id": "alice"}
-    )
-    assert await ds.allowed(
-        action="datasette-paper-edit", resource=res, actor={"id": "alice"}
-    )
+    res = PaperDocResource(doc_id)
+    for action in ("paper-view", "paper-edit", "paper-manage"):
+        assert await ds.allowed(action=action, resource=res, actor={"id": "alice"}), action
 
 
 @pytest.mark.asyncio
 async def test_stranger_denied_on_private_paper():
-    from datasette_paper.permissions import PaperResource
+    from datasette_paper.permissions import PaperDocResource
 
     ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
 
-    res = PaperResource(doc_id)
-    # Bob has list+create but is not in shares and is not the owner.
-    assert not await ds.allowed(
-        action="datasette-paper-view", resource=res, actor={"id": "bob"}
-    )
-    assert not await ds.allowed(
-        action="datasette-paper-edit", resource=res, actor={"id": "bob"}
-    )
+    res = PaperDocResource(doc_id)
+    # Bob has list+create but no acl grant on the doc — deny by default.
+    assert not await ds.allowed(action="paper-view", resource=res, actor={"id": "bob"})
+    assert not await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})
 
 
 @pytest.mark.asyncio
-async def test_shared_viewer_can_view_not_edit():
-    from datasette_paper.db import PaperDB
-    from datasette_paper.permissions import PaperResource
+async def test_viewer_grant_can_view_not_edit():
+    from datasette_paper.permissions import PaperDocResource
 
     ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
 
-    # Manually grant bob the viewer role.
-    paper = PaperDB(ds.get_internal_database())
-    await paper.database.execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'viewer', 'alice')",
-        [doc_id, "bob"],
-    )
+    await _grant_acl(ds, doc_id, "bob", "Viewer")
 
-    res = PaperResource(doc_id)
-    assert await ds.allowed(
-        action="datasette-paper-view", resource=res, actor={"id": "bob"}
-    )
-    assert not await ds.allowed(
-        action="datasette-paper-edit", resource=res, actor={"id": "bob"}
-    )
+    res = PaperDocResource(doc_id)
+    assert await ds.allowed(action="paper-view", resource=res, actor={"id": "bob"})
+    assert not await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})
 
 
 @pytest.mark.asyncio
-async def test_shared_editor_can_view_and_edit():
-    from datasette_paper.permissions import PaperResource
+async def test_editor_grant_can_view_and_edit_revoke_denies():
+    """With an Editor grant, edit is allowed; revoking it denies again."""
+    from datasette_paper.permissions import PaperDocResource
 
     ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
 
-    internal = ds.get_internal_database()
-    await internal.execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
-    )
+    await _grant_acl(ds, doc_id, "bob", "Editor")
 
-    res = PaperResource(doc_id)
-    assert await ds.allowed(
-        action="datasette-paper-view", resource=res, actor={"id": "bob"}
-    )
-    assert await ds.allowed(
-        action="datasette-paper-edit", resource=res, actor={"id": "bob"}
-    )
+    res = PaperDocResource(doc_id)
+    assert await ds.allowed(action="paper-view", resource=res, actor={"id": "bob"})
+    assert await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})
 
-
-@pytest.mark.asyncio
-async def test_visibility_link_view_grants_view_to_listers():
-    from datasette_paper.permissions import PaperResource
-
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
-    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
-    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
-    doc_id = r.json()["id"]
-
-    internal = ds.get_internal_database()
-    await internal.execute_write(
-        "UPDATE _datasette_paper_doc SET visibility = 'link-view' WHERE id = ?",
-        [doc_id],
-    )
-
-    res = PaperResource(doc_id)
-    # Bob (with paper-list) can view but not edit.
-    assert await ds.allowed(
-        action="datasette-paper-view", resource=res, actor={"id": "bob"}
-    )
-    assert not await ds.allowed(
-        action="datasette-paper-edit", resource=res, actor={"id": "bob"}
-    )
-
-
-@pytest.mark.asyncio
-async def test_visibility_link_edit_grants_both_to_listers():
-    from datasette_paper.permissions import PaperResource
-
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
-    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
-    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
-    doc_id = r.json()["id"]
-
-    internal = ds.get_internal_database()
-    await internal.execute_write(
-        "UPDATE _datasette_paper_doc SET visibility = 'link-edit' WHERE id = ?",
-        [doc_id],
-    )
-
-    res = PaperResource(doc_id)
-    assert await ds.allowed(
-        action="datasette-paper-view", resource=res, actor={"id": "bob"}
-    )
-    assert await ds.allowed(
-        action="datasette-paper-edit", resource=res, actor={"id": "bob"}
-    )
-
-
-@pytest.mark.asyncio
-async def test_visibility_link_edit_does_not_grant_to_non_listers():
-    """An actor without datasette-paper-list cannot use visibility-link grants."""
-    from datasette_paper.permissions import PaperResource
-
-    # Only alice has list permission.
-    ds = await _make_ds(
-        {
-            "datasette-paper-list": {"id": "alice"},
-            "datasette-paper-create": {"id": "alice"},
-        }
-    )
-    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
-    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
-    doc_id = r.json()["id"]
-
-    internal = ds.get_internal_database()
-    await internal.execute_write(
-        "UPDATE _datasette_paper_doc SET visibility = 'link-edit' WHERE id = ?",
-        [doc_id],
-    )
-
-    res = PaperResource(doc_id)
-    # Bob doesn't have list, so visibility doesn't help him.
-    assert not await ds.allowed(
-        action="datasette-paper-view", resource=res, actor={"id": "bob"}
-    )
+    # Revoke → deny by default.
+    await _revoke_acl(ds, doc_id, "bob")
+    assert not await ds.allowed(action="paper-view", resource=res, actor={"id": "bob"})
+    assert not await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})
 
 
 @pytest.mark.asyncio
 async def test_anonymous_never_owns_even_with_null_created_by():
-    """Anonymous (actor=None) must never match created_by IS NULL rows."""
+    """Anonymous (actor=None) gets no per-doc access without a grant."""
     from datasette_paper.db import PaperDB
-    from datasette_paper.permissions import PaperResource
+    from datasette_paper.permissions import PaperDocResource
 
     ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
     paper = PaperDB(ds.get_internal_database())
     # Anonymous-created doc (created_by IS NULL).
     doc = await paper.insert_doc(name="Orphan", created_by=None)
 
-    res = PaperResource(doc.id)
-    assert not await ds.allowed(action="datasette-paper-view", resource=res, actor=None)
-    assert not await ds.allowed(action="datasette-paper-edit", resource=res, actor=None)
+    res = PaperDocResource(doc.id)
+    assert not await ds.allowed(action="paper-view", resource=res, actor=None)
+    assert not await ds.allowed(action="paper-edit", resource=res, actor=None)
 
 
 @pytest.mark.asyncio
 async def test_also_requires_chain_blocks_edit_when_view_denied():
-    """edit also-requires view; a config that grants only edit must still deny."""
-    from datasette_paper.permissions import PaperResource
+    """edit also-requires view; an actor with no grant is denied edit."""
+    from datasette_paper.permissions import PaperDocResource
 
     ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
 
-    res = PaperResource(doc_id)
-    # Bob has no view rule — edit's also_requires=view kicks in.
-    assert not await ds.allowed(
-        action="datasette-paper-edit", resource=res, actor={"id": "bob"}
-    )
+    res = PaperDocResource(doc_id)
+    # Bob has no view grant — edit's also_requires=view kicks in.
+    assert not await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})

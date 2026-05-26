@@ -35,6 +35,25 @@ async def _alice_doc(ds, name="P"):
     return r.json()["id"]
 
 
+async def _grant_acl(ds, doc_id, actor_id, role):
+    """Grant ``actor_id`` an acl role on the doc (Viewer/Editor/Manager)."""
+    from datasette_acl.grants import grant
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id=actor_id,
+        role=role,
+        by_actor="alice",
+    )
+
+
 # ---------------------------------------------------------------------------
 # GET /share
 # ---------------------------------------------------------------------------
@@ -58,15 +77,11 @@ async def test_share_get_owner_sees_can_manage_true():
 
 @pytest.mark.asyncio
 async def test_share_get_viewer_403():
-    """Viewer-share-recipient cannot read share state — editors+owner only."""
+    """Viewer cannot read share state — managers only."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
 
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'viewer', 'alice')",
-        [doc_id, "bob"],
-    )
+    await _grant_acl(ds, doc_id, "bob", "Viewer")
 
     r = await ds.client.get(
         f"/-/paper/api/docs/{doc_id}/share", cookies=_cookie(ds, "bob")
@@ -75,23 +90,18 @@ async def test_share_get_viewer_403():
 
 
 @pytest.mark.asyncio
-async def test_share_get_editor_sees_can_manage_false():
+async def test_share_get_editor_403():
+    """An acl Editor can view + edit but not manage — share state is
+    manager-only, so reading it is forbidden."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
 
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
-    )
+    await _grant_acl(ds, doc_id, "bob", "Editor")
 
     r = await ds.client.get(
         f"/-/paper/api/docs/{doc_id}/share", cookies=_cookie(ds, "bob")
     )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["canManage"] is False
-    assert [s["actorID"] for s in body["shares"]] == ["bob"]
+    assert r.status_code == 403
 
 
 @pytest.mark.asyncio
@@ -144,15 +154,11 @@ async def test_share_post_owner_replaces_state():
 
 @pytest.mark.asyncio
 async def test_share_post_editor_403():
-    """Editor (granted via share) cannot mutate the share state — owner-only."""
+    """An acl Editor cannot mutate the share state — manager-only."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
 
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
-    )
+    await _grant_acl(ds, doc_id, "bob", "Editor")
 
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/share",
@@ -229,19 +235,20 @@ async def test_share_post_duplicate_actor_400():
 
 @pytest.mark.asyncio
 async def test_revocation_closes_open_subscribers():
-    """After bob is removed from shares, his subscribed queue receives a closed sentinel."""
+    """After bob loses acl access, the revocation sweep closes his queue."""
+    from datasette_acl.grants import revoke
     from datasette_paper.db import PaperDB
     from datasette_paper.instance import get_registry
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
 
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
 
-    # Grant bob editor access.
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
-    )
+    # Grant bob view access via acl.
+    await _grant_acl(ds, doc_id, "bob", "Editor")
 
     # Bob subscribes (simulating an open SSE stream).
     paper = PaperDB(ds.get_internal_database())
@@ -252,13 +259,17 @@ async def test_revocation_closes_open_subscribers():
 
     assert len(instance.subscribers) == 2
 
-    # Alice removes bob from shares.
-    r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={"visibility": "private", "shares": []},
-        cookies=_cookie(ds, "alice"),
+    # Bob's acl grant is revoked; the sweep then closes his queue.
+    await revoke(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id="bob",
+        by_actor="alice",
     )
-    assert r.status_code == 200
+    revoked = await instance.revoke_unauthorized(ds)
+    assert revoked == 1
 
     # Bob's queue gets a 'closed' sentinel and is removed; alice's queue stays.
     payload = await asyncio.wait_for(bob_q.get(), timeout=1.0)

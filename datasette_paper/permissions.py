@@ -1,28 +1,27 @@
 """Permission model for datasette-paper.
 
-Four actions:
+Per-document access is answered by **datasette-acl**: the
+``paper-view`` / ``paper-edit`` / ``paper-manage`` actions resolve against
+acl grants on the :class:`PaperDocResource` resource (type ``paper-doc``).
+Paper no longer ships owner/shared/visibility permission SQL — owner
+semantics come from a Manager grant seeded for ``created_by`` on create
+(see :func:`seed_owner_manager_grant`); shares and general access are acl
+grants written through the share UI / data migration.
 
-    - ``datasette-paper-list``    (global)         — see the index page + list endpoint
-    - ``datasette-paper-create``  (global)         — POST /-/paper/api/docs
-    - ``datasette-paper-view``    (PaperResource)    — read a specific paper
-    - ``datasette-paper-edit``    (PaperResource)    — modify a specific paper
+The one piece of bespoke permission SQL paper keeps is the ``locked``
+read-only flag (:func:`permission_resources_sql`): when a doc has
+``locked = 1`` it emits a child-level **deny** for ``paper-edit``. Deny
+beats allow at the same depth in core's rule resolver, so the lock
+composes over any acl grant (owner, editor, or general access). View is
+unaffected; the owner restores edit via the dedicated /unlock route,
+which gates on view (+ an inline owner check) rather than edit, so the
+lock can never trap them.
 
-The two paper-level actions are gated by :func:`permission_resources_sql`,
-which returns SQL run against Datasette's internal database (where papers
-live). The hook emits three rule sets:
+Two global actions remain config-driven (handled by Datasette's standard
+config-permissions plugin from the ``permissions:`` block):
 
-    1. Owner — actor's id matches ``_datasette_paper_doc.created_by``.
-    2. Shared — actor has a row in ``_datasette_paper_share`` for this doc.
-       Filtered by ``role='editor'`` for the edit action.
-    3. Visibility — when the actor passes ``datasette-paper-list``,
-       ``visibility = 'link-view'`` grants view, ``'link-edit'`` grants both.
-
-Manage (visibility flips, share mutations) is owner-only and enforced
-inline in the share route handler.
-
-Anonymous actors (``actor=None``) never own anything: the SQL guard
-``:_paper_aid IS NOT NULL`` keeps NULL=NULL from being interpreted as a
-match.
+    - ``datasette-paper-list``    — see the index page + list endpoint
+    - ``datasette-paper-create``  — POST /-/paper/api/docs
 """
 
 from __future__ import annotations
@@ -30,24 +29,22 @@ from __future__ import annotations
 from datasette import hookimpl
 from datasette.permissions import PermissionSQL, Resource
 
-try:  # acl is a soft dependency — the roles hook is a no-op when absent.
+try:  # acl is a soft dependency — the roles hook + grant seeding no-op when absent.
     from datasette_acl.roles import AclRole
 except ImportError:  # pragma: no cover
     AclRole = None
 
+try:
+    from datasette_acl.grants import grant as _acl_grant
+except ImportError:  # pragma: no cover
+    _acl_grant = None
 
-ACTIONS = (
-    "datasette-paper-list",
-    "datasette-paper-create",
-    "datasette-paper-view",
-    "datasette-paper-edit",
-)
 
-# Resource type name for the new acl-backed model (task phase-05/01).
+# Resource type name for the acl-backed model.
 PAPER_DOC_RESOURCE_TYPE = "paper-doc"
 
-# New resource-scoped actions, registered alongside the legacy string actions
-# during the migration (legacy ones are removed in task 02).
+# Resource-scoped actions, resolved by datasette-acl against grants on
+# PaperDocResource.
 PAPER_DOC_ACTIONS = (
     "paper-view",
     "paper-edit",
@@ -60,30 +57,6 @@ PAPER_DOC_ACTIONS = (
 # resource) lets acl model "all paper docs" with a single parent row and means
 # general-access grants can later target the parent if desired.
 PAPER_DOCS_PARENT = "_paper"
-
-
-class PaperResource(Resource):
-    """A single paper. Single-level resource: doc_id lives in ``parent``.
-
-    Datasette's resource hierarchy treats the *outermost* identifier as
-    ``parent`` and the *inner* one as ``child``. ``DatabaseResource``
-    follows the same convention (database name in ``parent``,
-    ``child=None``). Putting the id in ``child`` instead breaks the
-    permission-rule join at ``child_lvl`` because SQLite's
-    ``NULL = NULL`` is NULL, not true.
-    """
-
-    name = "paper"
-    parent_class = None
-
-    def __init__(self, doc_id):
-        super().__init__(parent=str(doc_id), child=None)
-
-    @classmethod
-    async def resources_sql(cls, datasette, actor=None) -> str:
-        return (
-            "SELECT CAST(id AS TEXT) AS parent, NULL AS child FROM _datasette_paper_doc"
-        )
 
 
 class PaperDocsParent(Resource):
@@ -109,8 +82,8 @@ class PaperDocResource(Resource):
 
     Two-level resource: ``parent`` is the fixed sentinel
     :data:`PAPER_DOCS_PARENT`, ``child`` is the doc id. This is the model the
-    new ``paper-view`` / ``paper-edit`` / ``paper-manage`` actions resolve
-    against via datasette-acl's ``permission_resources_sql`` and grant helpers.
+    ``paper-view`` / ``paper-edit`` / ``paper-manage`` actions resolve against
+    via datasette-acl's ``permission_resources_sql`` and grant helpers.
 
     The constructor accepts ``(parent, child)`` positionally to satisfy acl's
     ``build_resource`` convention, but callers normally pass just the doc id::
@@ -143,105 +116,50 @@ class PaperDocResource(Resource):
 
 @hookimpl
 async def permission_resources_sql(datasette, actor, action):
-    """Emit SQL rules for the two paper-level actions.
+    """Emit the ``locked`` deny for ``paper-edit``; delegate everything else.
 
-    The hook returns ``None`` for actions we don't own — Datasette's
-    standard config-permissions plugin handles ``datasette-paper-list``
-    and ``datasette-paper-create`` from the ``permissions:`` block in
-    ``datasette.yaml`` / startup ``-s`` flags.
+    The only rule paper still owns is the read-only ``locked`` flag, which has
+    no acl equivalent. For every locked doc we emit a **child-level deny** of
+    ``paper-edit``: ``(parent=sentinel, child=doc_id, allow=0)``. acl grants
+    land at the same (child) depth, and deny beats allow at the same depth, so
+    the lock wins over any owner / editor / general-access grant. View grants
+    and the two global actions are untouched (we return ``None`` for them, so
+    acl and the config-permissions plugin answer them).
     """
-    if action not in ("datasette-paper-view", "datasette-paper-edit"):
+    if action != "paper-edit":
         return None
 
-    actor_id = actor.get("id") if actor else None
-    is_edit = action == "datasette-paper-edit"
-    role_filter = "AND s.role = 'editor'" if is_edit else ""
-    # ``locked`` is the read-only flag. Owner row is unconditional so the
-    # owner can always unlock; share + visibility *edit* grants are
-    # filtered by ``locked = 0`` so a locked paper denies edit to
-    # everyone except the owner. View grants ignore ``locked``.
-    share_lock_join = (
-        "JOIN _datasette_paper_doc d ON d.id = s.doc_id" if is_edit else ""
-    )
-    share_lock_filter = "AND d.locked = 0" if is_edit else ""
-    visibility_lock_filter = "AND locked = 0" if is_edit else ""
-
-    # Owner edit rule must also respect ``locked``: previously the owner
-    # branch was unconditional, which made the lock a no-op from the
-    # owner's perspective ("I locked the doc but I can still type" —
-    # surprising and contrary to user expectation). With the filter,
-    # ``locked = 1`` flips canEdit to False for everyone including the
-    # owner; the owner uses the dedicated /unlock route to restore it,
-    # which goes through ``_ensure_owner`` (view + inline owner check,
-    # no edit gate) so the lock can't trap them.
-    owner_lock_filter = "AND locked = 0" if is_edit else ""
-    rules = [
-        # Owner row — anonymous actors never own (NULL guard).
+    return [
         PermissionSQL(
             sql=(
-                "SELECT CAST(id AS TEXT) AS parent, NULL AS child, "
-                "1 AS allow, 'owner' AS reason "
-                "FROM _datasette_paper_doc "
-                "WHERE :_paper_aid IS NOT NULL AND created_by = :_paper_aid "
-                f"{owner_lock_filter}"
+                f"SELECT '{PAPER_DOCS_PARENT}' AS parent, "
+                "CAST(id AS TEXT) AS child, "
+                "0 AS allow, 'locked' AS reason "
+                "FROM _datasette_paper_doc WHERE locked = 1"
             ),
-            params={"_paper_aid": actor_id},
-        ),
-        # Explicit per-actor shares.
-        PermissionSQL(
-            sql=(
-                "SELECT CAST(s.doc_id AS TEXT) AS parent, NULL AS child, "
-                "1 AS allow, 'shared' AS reason "
-                f"FROM _datasette_paper_share s {share_lock_join} "
-                f"WHERE :_paper_aid IS NOT NULL AND s.actor_id = :_paper_aid "
-                f"{role_filter} {share_lock_filter}"
-            ),
-            params={"_paper_aid": actor_id},
-        ),
+        )
     ]
 
-    # Explicit per-resource deny when the doc is locked and we're
-    # resolving edit. Necessary because the cascading rule resolver
-    # picks the most specific (deepest) rule, and at the same depth
-    # deny beats allow. Without this, a configuration that statically
-    # grants ``datasette-paper-edit`` globally (depth 0) would override
-    # the absence of our per-resource allow and let everyone edit a
-    # locked doc anyway. Emitting the deny at parent-level (depth 1)
-    # guarantees the lock wins regardless of how broadly edit was
-    # granted elsewhere. The owner can still unlock because the
-    # /unlock route gates on view (+ inline owner check), bypassing
-    # the edit action entirely.
-    if is_edit:
-        rules.append(
-            PermissionSQL(
-                sql=(
-                    "SELECT CAST(id AS TEXT) AS parent, NULL AS child, "
-                    "0 AS allow, 'locked' AS reason "
-                    "FROM _datasette_paper_doc WHERE locked = 1"
-                ),
-            )
-        )
 
-    # Visibility-based grants — gated by the global list permission so
-    # admins can keep papers off the list-page while still allowing
-    # owners + share-recipients in.
-    if await datasette.allowed(action="datasette-paper-list", actor=actor):
-        if action == "datasette-paper-view":
-            visibilities = "('link-view','link-edit')"
-        else:
-            visibilities = "('link-edit')"
-        rules.append(
-            PermissionSQL(
-                sql=(
-                    "SELECT CAST(id AS TEXT) AS parent, NULL AS child, "
-                    "1 AS allow, 'visibility' AS reason "
-                    f"FROM _datasette_paper_doc WHERE visibility IN {visibilities} "
-                    f"{visibility_lock_filter}"
-                ),
-            )
-        )
+async def seed_owner_manager_grant(datasette, doc_id, created_by) -> None:
+    """Grant the doc creator the Manager role on the new doc.
 
-    return rules
+    Replaces the old ``created_by``-based owner SQL: ownership is now an acl
+    Manager grant on the ``paper-doc`` resource. No-op for anonymous creates
+    (``created_by`` falsy — anonymous actors never own) and when acl isn't
+    installed.
+    """
+    if not created_by or _acl_grant is None:
+        return
+    await _acl_grant(
+        datasette,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id=str(created_by),
+        role="Manager",
+        by_actor=str(created_by),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -263,16 +181,16 @@ async def ensure_paper_create(datasette, request) -> None:
 
 async def ensure_paper_view(datasette, request, doc_id) -> None:
     await datasette.ensure_permission(
-        action="datasette-paper-view",
-        resource=PaperResource(doc_id),
+        action="paper-view",
+        resource=PaperDocResource(doc_id),
         actor=request.actor,
     )
 
 
 async def ensure_paper_edit(datasette, request, doc_id) -> None:
     await datasette.ensure_permission(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
         actor=request.actor,
     )
 
@@ -284,8 +202,8 @@ async def can_paper_view(datasette, actor, doc_id) -> bool:
     the share/list endpoints where we need to inspect rather than gate.
     """
     return await datasette.allowed(
-        action="datasette-paper-view",
-        resource=PaperResource(doc_id),
+        action="paper-view",
+        resource=PaperDocResource(doc_id),
         actor=actor,
     )
 
@@ -297,7 +215,21 @@ async def can_paper_edit(datasette, actor, doc_id) -> bool:
     surface denial as a tool-result error rather than an HTTP Forbidden.
     """
     return await datasette.allowed(
-        action="datasette-paper-edit",
-        resource=PaperResource(doc_id),
+        action="paper-edit",
+        resource=PaperDocResource(doc_id),
+        actor=actor,
+    )
+
+
+async def can_paper_manage(datasette, actor, doc_id) -> bool:
+    """True when ``actor`` may manage sharing for ``doc_id``.
+
+    Manage is the acl Manager-only capability (the owner gets it via the
+    seeded Manager grant). Used by the share endpoints in place of the old
+    inline ``created_by``-equality owner check.
+    """
+    return await datasette.allowed(
+        action="paper-manage",
+        resource=PaperDocResource(doc_id),
         actor=actor,
     )

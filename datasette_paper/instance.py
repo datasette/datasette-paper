@@ -34,7 +34,7 @@ Per-doc lifecycle:
         also driven automatically by ``_maybe_auto_snapshot`` at the end of
         every write, so API-only docs (no browser to POST /snapshot) still
         snapshot and don't grow an unbounded step tail.
-    revoke_unauthorized(datasette) → re-checks "datasette-paper-view" per
+    revoke_unauthorized(datasette) → re-checks "paper-view" per
         subscriber; enqueues {"kind":"closed"} for any who lost access;
         the SSE loop sees the sentinel and exits cleanly.
 """
@@ -644,20 +644,20 @@ class Instance:
         Lock affects only the edit grant — owner keeps edit, share +
         visibility editors lose it (or regain it on unlock). ``canEdit``
         is recomputed per subscriber via
-        ``datasette.allowed("datasette-paper-edit", ...)`` so each
+        ``datasette.allowed("paper-edit", ...)`` so each
         client sees the new capability with no reconnect.
 
         The ``locked`` field is included as a convenience for any UI
         that wants to show a "this doc is locked" banner regardless of
         the subscriber's role.
         """
-        from .permissions import PaperResource
+        from .permissions import PaperDocResource
 
-        resource = PaperResource(self.doc_id)
+        resource = PaperDocResource(self.doc_id)
         for q, (_client_id, actor_id) in list(self.subscribers.items()):
             actor = {"id": actor_id} if actor_id else None
             can_edit = await datasette.allowed(
-                action="datasette-paper-edit", resource=resource, actor=actor
+                action="paper-edit", resource=resource, actor=actor
             )
             q.put_nowait(
                 {
@@ -671,21 +671,21 @@ class Instance:
         """Close subscriber queues whose actor no longer passes view.
 
         Called after a share mutation commits. Re-runs
-        ``datasette.allowed("datasette-paper-view", ...)`` per subscriber;
+        ``datasette.allowed("paper-view", ...)`` per subscriber;
         any deny enqueues a ``{"kind": "closed"}`` sentinel so the SSE
         loop sees ``event_name == "closed"`` and exits cleanly, and the
         queue is removed from ``self.subscribers``.
 
         Returns the number of subscribers that were revoked.
         """
-        from .permissions import PaperResource
+        from .permissions import PaperDocResource
 
         revoked = 0
-        resource = PaperResource(self.doc_id)
+        resource = PaperDocResource(self.doc_id)
         for q, (_client_id, actor_id) in list(self.subscribers.items()):
             actor = {"id": actor_id} if actor_id else None
             allowed = await datasette.allowed(
-                action="datasette-paper-view", resource=resource, actor=actor
+                action="paper-view", resource=resource, actor=actor
             )
             if not allowed:
                 # Sentinel — the SSE loop checks `event_name == "closed"`

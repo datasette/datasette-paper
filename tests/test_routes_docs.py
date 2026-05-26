@@ -99,11 +99,21 @@ async def test_bootstrap_permissions_for_shared_viewer():
     )
     doc_id = create.json()["id"]
 
-    # Hand-grant bob the viewer role.
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'viewer', 'alice')",
-        [doc_id, "bob"],
+    # Hand-grant bob the viewer role via an acl grant.
+    from datasette_acl.grants import grant
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        actor_id="bob",
+        role="Viewer",
+        by_actor="alice",
     )
 
     boot = await ds.client.get(f"/-/paper/api/docs/{doc_id}", cookies=bob)

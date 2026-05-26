@@ -59,9 +59,9 @@ async def test_new_actions_registered():
         assert action in ds.actions, f"{action} not registered"
         assert ds.actions[action].resource_class is PaperDocResource
 
-    # Legacy actions still registered (removed in task 02).
+    # Legacy string actions are gone — everything resolves through acl now.
     for legacy in ("datasette-paper-view", "datasette-paper-edit"):
-        assert legacy in ds.actions
+        assert legacy not in ds.actions
 
 
 @pytest.mark.asyncio

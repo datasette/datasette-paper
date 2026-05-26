@@ -27,7 +27,7 @@ from .errors import InvalidStepError
 from .instance import get_registry
 from .markdown import doc_to_markdown
 from .markdown_parser import markdown_to_doc, markdown_to_fragment
-from .permissions import can_paper_edit, can_paper_view
+from .permissions import can_paper_edit, can_paper_view, seed_owner_manager_grant
 from .util import paper_db
 
 
@@ -75,6 +75,9 @@ async def _create_paper(datasette, actor, name=None, content=None):
         )
     else:
         doc = await db.insert_doc(name=doc_name, created_by=aid, kind="doc")
+    # Seed the owner's acl Manager grant so the creating actor can
+    # subsequently read/edit/manage the doc through these tools.
+    await seed_owner_manager_grant(datasette, doc.id, aid)
     return json.dumps(
         {"doc_id": doc.id, "name": doc.name, "url": _doc_url(datasette, doc.id)}
     )

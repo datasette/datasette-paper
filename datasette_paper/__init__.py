@@ -4,7 +4,6 @@ from datasette_vite import vite_entry
 from .router import router
 from .permissions import (  # noqa: F401
     AclRole,
-    PaperResource,
     PaperDocResource,
     permission_resources_sql,
     PAPER_DOC_RESOURCE_TYPE,
@@ -143,22 +142,10 @@ def register_actions(datasette):
             description="Can create new papers",
             also_requires="datasette-paper-list",
         ),
-        # --- Legacy resource actions (removed in task 02) -------------------
-        Action(
-            name="datasette-paper-view",
-            description="Can view a specific paper",
-            resource_class=PaperResource,
-        ),
-        Action(
-            name="datasette-paper-edit",
-            description="Can edit a specific paper",
-            resource_class=PaperResource,
-            also_requires="datasette-paper-view",
-        ),
-        # --- New acl-backed resource actions (phase-05/01) ------------------
-        # These resolve against datasette-acl grants on PaperDocResource. Call
-        # sites are migrated onto them in task 02; registered now so grants and
-        # roles work mid-migration.
+        # --- acl-backed resource actions ------------------------------------
+        # These resolve against datasette-acl grants on PaperDocResource. Every
+        # per-doc permission check goes through these; paper no longer ships
+        # owner/shared/visibility SQL (only the `locked` deny in permissions.py).
         Action(
             name="paper-view",
             description="View a paper doc",
