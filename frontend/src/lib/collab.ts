@@ -134,7 +134,7 @@ export interface ConnectionOpts {
   /**
    * Called once at bootstrap with the current actor id (``selfActor``),
    * or null when anonymous. The doc header forwards this to the
-   * <datasette-share-dialog> as ``actor-json`` so the dialog can mark the
+   * <datasette-acl-share-dialog> as ``actor-json`` so the dialog can mark the
    * current user's grant row "(you)".
    */
   onSelfActor?: (actorId: string | null) => void;

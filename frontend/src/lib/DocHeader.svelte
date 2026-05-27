@@ -1,9 +1,9 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { client } from "./client";
-  // Importing the bundle is unnecessary here: datasette-share's JS is included
+  // Importing the bundle is unnecessary here: datasette-acl-share's JS is included
   // on the doc page by paper's extra_js_urls hook, which registers the
-  // <datasette-share-dialog> custom element before this component mounts.
+  // <datasette-acl-share-dialog> custom element before this component mounts.
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
 
   // acl resource identity for a paper doc: type "paper-doc", a fixed parent
@@ -533,7 +533,7 @@
 {/snippet}
 
 {#if shareOpen}
-  <!-- The <datasette-share-dialog> custom element renders an inline panel
+  <!-- The <datasette-acl-share-dialog> custom element renders an inline panel
        (people-with-access list + general access + add-box). paper wraps it in
        its own modal so the existing "Share" button → dialog UX is preserved.
        The element talks to the acl JSON API directly; we only listen for its
@@ -555,14 +555,14 @@
       onkeydown={(e) => e.stopPropagation()}
       {@attach shareEvents}
     >
-      <datasette-share-dialog
+      <datasette-acl-share-dialog
         resource-type={SHARE_RESOURCE_TYPE}
         parent={SHARE_PARENT}
         child={docId}
         resource-label={meta?.name ?? ""}
         actor-json={actorJson}
         features="people,groups,agents,public"
-      ></datasette-share-dialog>
+      ></datasette-acl-share-dialog>
       <div class="share-modal-footer">
         <button type="button" class="share-modal-close" onclick={closeShare}>
           Done
@@ -667,7 +667,7 @@
     border-color: #094a8b;
   }
 
-  /* Modal wrapper around the <datasette-share-dialog> custom element. The
+  /* Modal wrapper around the <datasette-acl-share-dialog> custom element. The
      element itself renders the inline panel; paper supplies the backdrop +
      box so the Share button keeps its Google-Docs-style modal UX. */
   .share-modal-backdrop {

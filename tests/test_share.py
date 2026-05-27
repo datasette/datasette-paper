@@ -1,6 +1,6 @@
 """Tests for the SSE subscriber-revocation sweep (phase-05/04).
 
-Sharing itself now lives in datasette-acl: the ``<datasette-share-dialog>``
+Sharing itself now lives in datasette-acl: the ``<datasette-acl-share-dialog>``
 component grants / updates / revokes acl grants directly against the acl JSON
 API, and paper no longer ships its own ``GET/POST /share`` routes or a share
 table. What paper keeps is the *SSE subscriber sweep*: when a grant is revoked

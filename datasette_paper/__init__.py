@@ -92,7 +92,7 @@ def extra_template_vars(datasette):
     }
 
 
-# The doc page is the only paper page that hosts <datasette-share-dialog>, so
+# The doc page is the only paper page that hosts <datasette-acl-share-dialog>, so
 # the share bundle is included there (opt-in) rather than site-wide. Matches
 # ``/-/paper/doc/<id>`` exactly — not the index or any API route.
 _DOC_PAGE_RE = re.compile(r"^/-/paper/doc/\d+$")
@@ -102,18 +102,18 @@ def _is_doc_page(request) -> bool:
     return bool(request and _DOC_PAGE_RE.match(request.path or ""))
 
 
-# datasette-share is an optional sibling plugin (local editable dev dep). When
+# datasette-acl-share is an optional sibling plugin (local editable dev dep). When
 # it isn't installed the asset helper is unavailable, so the doc page simply
 # renders without the share dialog rather than erroring.
 try:
-    from datasette_share import datasette_share_assets as _share_assets
+    from datasette_acl_share import datasette_share_assets as _share_assets
 except ImportError:  # pragma: no cover
     _share_assets = None
 
 
 @hookimpl
 def extra_js_urls(datasette, request):
-    """Include the <datasette-share-dialog> JS bundle on the doc page only."""
+    """Include the <datasette-acl-share-dialog> JS bundle on the doc page only."""
     if _share_assets is None or not _is_doc_page(request):
         return []
     return _share_assets(datasette)["js"]
@@ -121,7 +121,7 @@ def extra_js_urls(datasette, request):
 
 @hookimpl
 def extra_css_urls(datasette, request):
-    """Include the <datasette-share-dialog> CSS on the doc page only."""
+    """Include the <datasette-acl-share-dialog> CSS on the doc page only."""
     if _share_assets is None or not _is_doc_page(request):
         return []
     return _share_assets(datasette)["css"]

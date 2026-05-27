@@ -12,7 +12,7 @@ only — multi-statement operations (``insert_step`` bumping the doc's
 
 Sharing is owned by datasette-acl now; paper keeps no share table or
 ``visibility`` column (both dropped in migration m004), so there are no
-share read/write helpers here — the ``<datasette-share-dialog>`` component
+share read/write helpers here — the ``<datasette-acl-share-dialog>`` component
 talks to the acl JSON API directly.
 """
 

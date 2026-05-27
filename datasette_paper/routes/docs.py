@@ -542,7 +542,7 @@ async def append_doc(datasette, request, doc_id: int):
 async def sweep_subscribers(datasette, request, doc_id: int):
     """Disconnect any open SSE subscribers whose access was just revoked.
 
-    Sharing itself is now owned by datasette-acl: the ``<datasette-share-dialog>``
+    Sharing itself is now owned by datasette-acl: the ``<datasette-acl-share-dialog>``
     component grants / updates / revokes acl grants directly against the acl
     JSON API. paper no longer stores share state. But a revoke can't reach into
     paper's in-memory ``Instance`` to drop a live editor's SSE queue, so the
@@ -844,7 +844,7 @@ async def paper_doc_page(datasette, request, doc_id: int):
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:
         return Response.html("Document not found", status=404)
-    # Seed the page with the bits <datasette-share-dialog> needs: the acl
+    # Seed the page with the bits <datasette-acl-share-dialog> needs: the acl
     # resource identity (parent/child) and the current actor (so the dialog
     # can mark "(you)"). The dialog talks to the acl JSON API directly; under
     # datasette 1.0a30 same-origin writes need no CSRF token, so we don't
