@@ -432,6 +432,51 @@
     color: #888;
   }
 
+  /* paper_link inline atom — rendered by PaperLinkView, resolved live via
+   * the LinkResolver. Base looks like a link; modifier classes mute /
+   * decorate by resolution state. */
+  .editor-host :global(.pm-paper-link) {
+    display: inline;
+    white-space: nowrap;
+    cursor: pointer;
+    color: #0b5cad;
+    text-decoration: none;
+    padding: 0 2px;
+    border-radius: 3px;
+    background: rgba(11, 92, 173, 0.08);
+  }
+  .editor-host :global(.pm-paper-link:hover) {
+    text-decoration: underline;
+  }
+  .editor-host :global(.pm-paper-link .pm-paper-link-icon) {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    margin-right: 0.25em;
+  }
+  .editor-host :global(.pm-paper-link .pm-paper-link-icon svg) {
+    width: 0.9em;
+    height: 0.9em;
+  }
+  .editor-host :global(.pm-paper-link--loading),
+  .editor-host :global(.pm-paper-link--archived),
+  .editor-host :global(.pm-paper-link--trashed) {
+    color: #888;
+    background: rgba(0, 0, 0, 0.05);
+  }
+  .editor-host :global(.pm-paper-link--denied) {
+    color: #888;
+    background: rgba(0, 0, 0, 0.05);
+    cursor: default;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-paper-link--missing) {
+    color: #888;
+    background: rgba(0, 0, 0, 0.05);
+    cursor: default;
+    text-decoration: line-through;
+  }
+
   /* Tables — prosemirror-tables ships layout but no cell borders. We
    * draw a light grid + a header background. `--default-cell-min-width`
    * stops empty cells from collapsing to 0px wide. */

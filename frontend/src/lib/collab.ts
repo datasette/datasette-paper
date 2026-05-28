@@ -39,6 +39,8 @@ import { schema } from "./schema";
 import { foldHeadingsPlugin } from "./foldHeadings";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
+import { LinkResolver } from "./linkResolver";
+import { PaperLinkView } from "./paperLinkView";
 import {
   cursorReporterPlugin,
   remoteCursorsPlugin,
@@ -754,6 +756,9 @@ export class EditorConnection {
   // Unique client ID for this session (random integer)
   private clientID: number;
 
+  // One link resolver per connection (NOT a module singleton — multi-doc tabs + tests).
+  private linkResolver: LinkResolver;
+
   // Current viewer's actor id, captured from the bootstrap response.
   // Used to suppress this user's own presence cursor across other tabs.
   private selfActor: string | null = null;
@@ -794,6 +799,7 @@ export class EditorConnection {
     this.opts = opts;
     this.report = report ?? new Reporter();
     this.clientID = Math.floor(Math.random() * 0xffffffff);
+    this.linkResolver = new LinkResolver();
     this.installNetworkListeners();
     this.start();
   }
@@ -1065,6 +1071,13 @@ export class EditorConnection {
       nodeViews: {
         task_item: (node, view, getPos) =>
           new TaskItemView(node, view, getPos as () => number | undefined),
+        paper_link: (node, view, getPos) =>
+          new PaperLinkView(
+            node,
+            view,
+            getPos as () => number | undefined,
+            this.linkResolver,
+          ),
       },
       // Returning null falls through to ProseMirror's default; the cast
       // exists because the upstream type insists on `Slice`.
@@ -1442,6 +1455,7 @@ export class EditorConnection {
       clearTimeout(this.snapshotTimer);
       this.snapshotTimer = null;
     }
+    this.linkResolver.dispose();
     if (this.view) {
       this.view.destroy();
       this.view = null;
