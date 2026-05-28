@@ -169,6 +169,38 @@ async def link_search(datasette, request):
     )
 
 
+@router.POST(r"^/-/paper/api/links/resolve$")
+async def resolve_links(datasette, request):
+    await ensure_paper_list(datasette, request)
+    body = await read_json_body(request)
+    raw = body.get("ids") or []
+    ids = []
+    for i in raw[:200]:
+        try:
+            ids.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    viewable = set(await viewable_doc_ids(datasette, request.actor))
+    db = paper_db(datasette)
+    rows = {r.id: r for r in await db.list_docs_by_ids(doc_ids=ids)}
+    out = {}
+    for i in ids:
+        row = rows.get(i)
+        if row is None:
+            out[i] = {"status": "not_found"}
+        elif i not in viewable:
+            out[i] = {"status": "denied"}  # NO title — must not leak name
+        else:
+            out[i] = {
+                "status": "ok",
+                "title": row.name,
+                "state": row.state,  # active|archived|trashed
+                "kind": row.kind,
+                "href": f"/-/paper/doc/{i}",
+            }
+    return Response.json({"links": out})
+
+
 @router.POST(r"^/-/paper/api/docs$")
 async def create_doc(datasette, request):
     await ensure_paper_create(datasette, request)
