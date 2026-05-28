@@ -162,8 +162,11 @@ test-all *flags:
 # edit anyone's paper. (The e2e config grants view+edit because playwright runs
 # as anonymous and exercises only the read-only path.)
 dev *flags:
-    uv run --prerelease=allow \
+    DATASETTE_SECRET=abc123 uv run --prerelease=allow \
         --with ../datasette-sidebar \
+        --with ../datasette-user-profiles \
+        --with ../datasette-debug-gotham \
+        --with llm-openrouter \
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
             -s permissions.datasette-paper-create true \
