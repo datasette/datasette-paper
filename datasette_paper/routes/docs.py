@@ -22,6 +22,7 @@ from ..permissions import (
     ensure_paper_edit,
     ensure_paper_view,
     seed_owner_manager_grant,
+    viewable_doc_ids,
 )
 from ..template_params import build_context, substitute_placeholders
 from ..util import read_json_body, actor_id, paper_db, resolve_actor_profiles
@@ -142,6 +143,29 @@ async def list_docs(datasette, request):
             }
             for r in rows
         ]
+    )
+
+
+@router.GET(r"^/-/paper/api/link-search$")
+async def link_search(datasette, request):
+    await ensure_paper_list(datasette, request)
+    q = (request.args.get("q") or "").strip()
+    try:
+        limit = min(int(request.args.get("limit") or 20), 50)
+    except ValueError:
+        limit = 20
+    doc_ids = await viewable_doc_ids(datasette, request.actor)
+    if not doc_ids:
+        return Response.json({"results": []})
+    db = paper_db(datasette)
+    rows = await db.search_docs_by_title(doc_ids=doc_ids, q=q, limit=limit)
+    return Response.json(
+        {
+            "results": [
+                {"id": r.id, "name": r.name, "state": r.state, "kind": r.kind}
+                for r in rows
+            ]
+        }
     )
 
 

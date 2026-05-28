@@ -140,6 +140,34 @@ class PaperDB:
 
         return await self.database.execute_write_fn(read)
 
+    async def search_docs_by_title(
+        self,
+        *,
+        doc_ids: list[int],
+        q: str,
+        limit: int,
+    ) -> list[_queries.Doc]:
+        # Variable-length IN via json_each; q is pre-wrapped into LIKE patterns
+        # here so the SQL stays parameter-shaped. `like` matches anywhere,
+        # `prefix` powers the prefix-hits-first ORDER BY. Empty q → both
+        # collapse to "%"/"" which match everything (recent-ish fallback).
+        # NOTE: LIKE metachars (% _) in q aren't escaped — acceptable for v1;
+        # FTS is a later TODO.
+        doc_ids_json = json.dumps(doc_ids)
+        like = f"%{q}%"
+        prefix = f"{q}%"
+
+        def read(conn):
+            return _queries.search_docs_by_title(
+                conn,
+                doc_ids_json=doc_ids_json,
+                like=like,
+                prefix=prefix,
+                limit=limit,
+            )
+
+        return await self.database.execute_write_fn(read)
+
     # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------

@@ -72,6 +72,21 @@ WHERE id IN (
 )
 ORDER BY updated_at DESC;
 
+-- name: searchDocsByTitle :rows -> Doc
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+)
+  AND state = 'active'
+  AND kind = 'doc'
+  AND name LIKE $like::text
+ORDER BY
+  CASE WHEN name LIKE $prefix::text THEN 0 ELSE 1 END,
+  length(name),
+  updated_at DESC
+LIMIT $limit::integer;
+
 -- ============================================================================
 -- State transitions (archive / trash)
 --
