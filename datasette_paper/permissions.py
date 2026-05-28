@@ -187,6 +187,20 @@ async def can_paper_edit(datasette, actor, doc_id) -> bool:
     )
 
 
+async def viewable_doc_ids(datasette, actor) -> list[int]:
+    """Every doc id ``actor`` can view (drains pagination).
+
+    ``allowed_resources`` is keyset-paginated (default ``limit=100``);
+    ``PaginatedResources.all()`` is an async generator that walks every
+    page, so we iterate it rather than ``await`` it — a bare ``limit=`` or
+    ``.resources`` would silently cap large grant sets. PaperDocResource is
+    two-level: the doc id is the resource ``child`` (parent is the fixed
+    sentinel).
+    """
+    page = await datasette.allowed_resources(action="paper-view", actor=actor)
+    return [int(r.child) async for r in page.all()]
+
+
 async def can_paper_manage(datasette, actor, doc_id) -> bool:
     """True when ``actor`` may manage sharing for ``doc_id``.
 
