@@ -414,6 +414,9 @@ def _render_inlines(nodes: list) -> str:
             # see where substitutions will land.
             key = n.get("attrs", {}).get("key", "")
             out.append("{{" + str(key) + "}}")
+        elif t == "paper_link":
+            doc_id = (n.get("attrs") or {}).get("docId")
+            out.append(f"[[{doc_id}]]")
 
     close_through(0)
     return "".join(out)

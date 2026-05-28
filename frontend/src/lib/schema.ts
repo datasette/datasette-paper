@@ -45,6 +45,37 @@ const placeholderNode: NodeSpec = {
   },
 };
 
+// Inline atom for cross-document links — id-only (`docId`), authored via the
+// `[[` autocomplete (later task) and rendered by a NodeView (TASK-04). The
+// toDOM here is a static fallback. Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as `[[id]]`.
+const paperLinkNode: NodeSpec = {
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: { docId: { default: null } },
+  parseDOM: [
+    {
+      tag: "a[data-paper-link]",
+      getAttrs: (el) => {
+        const docId = (el as HTMLElement).getAttribute("data-paper-link");
+        return { docId: docId ? Number(docId) : null };
+      },
+    },
+  ],
+  toDOM: (node) => [
+    "a",
+    {
+      "data-paper-link": String(node.attrs.docId ?? ""),
+      class: "pm-paper-link",
+      href: node.attrs.docId ? `/-/paper/doc/${node.attrs.docId}` : "#",
+    },
+    `Paper ${node.attrs.docId ?? "?"}`,
+  ],
+};
+
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
     group: "block",
@@ -106,6 +137,7 @@ const tableWithName: NodeSpec = {
 export const schema = new Schema({
   nodes: baseNodes
     .append({ placeholder: placeholderNode })
+    .append({ paper_link: paperLinkNode })
     .append(taskNodes)
     .append({ ...tNodes, table: tableWithName }),
   marks: baseMarks,
