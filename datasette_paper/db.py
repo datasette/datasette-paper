@@ -168,6 +168,17 @@ class PaperDB:
 
         return await self.database.execute_write_fn(read)
 
+    async def list_docs_by_ids(self, *, doc_ids: list[int]) -> list[_queries.Doc]:
+        # Any state, any kind — the resolve endpoint needs trashed/archived
+        # rows too (a row that exists is "ok"; only a missing row is
+        # "not_found"). Variable-length IN via json_each, like the siblings.
+        doc_ids_json = json.dumps(doc_ids)
+
+        def read(conn):
+            return _queries.list_docs_by_ids(conn, doc_ids_json=doc_ids_json)
+
+        return await self.database.execute_write_fn(read)
+
     # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------

@@ -214,3 +214,35 @@ async def test_snapshot_round_trip():
     assert snap is not None
     assert snap.version == 5
     assert snap.doc_json == '{"v":5}'
+
+
+@pytest.mark.asyncio
+async def test_list_docs_by_ids_returns_requested():
+    """list_docs_by_ids returns exactly the rows whose ids were asked for."""
+    paper = await make_paper_db()
+    a = await paper.insert_doc(name="A")
+    b = await paper.insert_doc(name="B")
+    await paper.insert_doc(name="C")  # not requested
+
+    rows = await paper.list_docs_by_ids(doc_ids=[a.id, b.id])
+    assert {r.id for r in rows} == {a.id, b.id}
+
+
+@pytest.mark.asyncio
+async def test_list_docs_by_ids_skips_nonexistent():
+    """A missing id is silently absent (no row, no error)."""
+    paper = await make_paper_db()
+    a = await paper.insert_doc(name="A")
+
+    rows = await paper.list_docs_by_ids(doc_ids=[a.id, 9999])
+    assert {r.id for r in rows} == {a.id}
+
+
+@pytest.mark.asyncio
+async def test_list_docs_by_ids_empty_list():
+    """Empty id list → empty result (no SQL error on empty json_each)."""
+    paper = await make_paper_db()
+    await paper.insert_doc(name="A")
+
+    rows = await paper.list_docs_by_ids(doc_ids=[])
+    assert rows == []

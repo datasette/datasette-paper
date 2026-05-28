@@ -160,6 +160,19 @@ LIMIT $limit::integer;
     return [Doc(*row) for row in cursor.fetchall()]
 
 
+def list_docs_by_ids(conn: sqlite3.Connection, doc_ids_json: str) -> list[Doc]:
+    sql = """\
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+);
+"""
+    params = {"doc_ids_json::text": doc_ids_json}
+    cursor = conn.execute(sql, params)
+    return [Doc(*row) for row in cursor.fetchall()]
+
+
 def archive_doc(conn: sqlite3.Connection, doc_id: int) -> None:
     sql = """\
 UPDATE _datasette_paper_doc

@@ -87,6 +87,13 @@ ORDER BY
   updated_at DESC
 LIMIT $limit::integer;
 
+-- name: listDocsByIds :rows -> Doc
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+);
+
 -- ============================================================================
 -- State transitions (archive / trash)
 --
