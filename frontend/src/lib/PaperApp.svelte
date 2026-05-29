@@ -708,4 +708,42 @@
   .editor-host :global(.pm-link-tooltip-btn:hover) {
     background: #e6ebf0;
   }
+
+  /* `[[`-triggered wiki-link autocomplete. */
+  .editor-host :global(.pm-wikilink-typing) {
+    background: rgba(11, 92, 173, 0.08);
+    border-bottom: 1px solid rgba(11, 92, 173, 0.4);
+    border-radius: 2px;
+  }
+  .editor-host :global(.pm-wikilink-popup) {
+    position: absolute;
+    z-index: 11;
+    min-width: 220px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    font-size: 13px;
+    padding: 4px 0;
+  }
+  .editor-host :global(.pm-wikilink-item) {
+    padding: 4px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .editor-host :global(.pm-wikilink-item:hover) {
+    background: #f1f4f7;
+  }
+  .editor-host :global(.pm-wikilink-item--active) {
+    background: #e1ebf7;
+  }
+  .editor-host :global(.pm-wikilink-empty) {
+    padding: 4px 10px;
+    color: #888;
+    font-style: italic;
+  }
 </style>

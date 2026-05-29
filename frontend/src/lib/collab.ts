@@ -16,6 +16,11 @@ import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { tableRowDragPlugin } from "./tableRowDrag";
 import { linkTooltipPlugin } from "./linkTooltip";
+import {
+  wikiLinkSuggestPlugin,
+  wikiLinkSuggestPopupPlugin,
+  wikiLinkKeymap,
+} from "./wikiLinkSuggest";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap } from "prosemirror-example-setup";
@@ -1026,6 +1031,11 @@ export class EditorConnection {
           Delete: deleteRowOrColSelection(),
         }),
         keymap(buildKeymap(schema)),
+        // The `[[` autocomplete keymap must precede baseKeymap so
+        // Enter/Arrow/Escape are intercepted while the popup is open.
+        // Each command returns false when inactive, so normal editing
+        // keystrokes fall through unaffected.
+        keymap(wikiLinkKeymap()),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({
@@ -1044,6 +1054,11 @@ export class EditorConnection {
         // URL and Open/Copy actions since ProseMirror eats anchor clicks
         // while editing.
         linkTooltipPlugin(),
+        // `[[`-triggered wiki-link autocomplete: the state plugin tracks
+        // the in-progress `[[query` span, the popup plugin renders the
+        // floating result list and runs the debounced link-search fetch.
+        wikiLinkSuggestPlugin,
+        wikiLinkSuggestPopupPlugin(),
         // gap cursor — gives ArrowDown/Right past the last block (and
         // ArrowUp/Left before the first) a place to land when no normal
         // text position exists, e.g. between two adjacent tables or after

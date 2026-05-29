@@ -221,3 +221,205 @@ export function commitWikiSelection(): Command {
     return true;
   };
 }
+
+/**
+ * Keymap consumed while the `[[` popup is open. Each command returns
+ * false when the popup is inactive, so normal editing keystrokes fall
+ * through to the rest of the keymap chain. This MUST be registered
+ * before `baseKeymap` so Enter/Arrow/Escape are intercepted while the
+ * popup is up.
+ */
+export function wikiLinkKeymap(): Record<string, Command> {
+  return {
+    ArrowDown: moveWikiSelection(1),
+    ArrowUp: moveWikiSelection(-1),
+    Enter: commitWikiSelection(),
+    Escape: cancelWikiSuggest(),
+  };
+}
+
+const LINK_SEARCH_PATH = "/-/paper/api/link-search";
+const FETCH_DEBOUNCE_MS = 150;
+
+interface LinkSearchResponse {
+  results: WikiResult[];
+}
+
+/**
+ * Floating result list for the `[[` autocomplete. Mirrors the
+ * `Plugin.view` structure of `linkTooltip.ts`: appends a div to the
+ * `.editor-host` (the `view.dom.parentElement`, which is
+ * `position: relative`), positions it via `view.coordsAtPos`, and
+ * tears everything (timer, listeners, DOM) down in `destroy()`.
+ *
+ * The list is rendered purely from plugin state (`ws.results` /
+ * `ws.index`) so the highlight stays in lock-step with the keymap's
+ * move/commit commands. The fetch is debounced and guarded by a
+ * monotonic request seq: a response is dropped if it isn't the latest
+ * request, if the popup went inactive, or if the query moved on.
+ */
+class WikiLinkPopupView {
+  private host: HTMLElement | null;
+  private root: HTMLDivElement | null;
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastFetchedQuery: string | null = null;
+  private requestSeq = 0;
+
+  constructor(private view: EditorView) {
+    const host = view.dom.parentElement;
+    if (!host) {
+      // Detached EditorView — nothing to anchor to. destroy() is a no-op.
+      this.host = null;
+      this.root = null;
+      return;
+    }
+    this.host = host;
+    this.root = document.createElement("div");
+    this.root.className = "pm-wikilink-popup";
+    this.root.style.display = "none";
+    host.appendChild(this.root);
+    this.update(view);
+  }
+
+  update(view: EditorView): void {
+    this.view = view;
+    const root = this.root;
+    const host = this.host;
+    if (!root || !host) return;
+
+    const ws = wikiLinkKey.getState(view.state);
+    if (!ws || !ws.active) {
+      root.style.display = "none";
+      this.cancelDebounce();
+      this.lastFetchedQuery = null;
+      return;
+    }
+
+    this.position(view, ws.from);
+    root.style.display = "block";
+
+    // Kick off a (debounced) fetch when the query changed since the last
+    // one we issued. Index-only changes (move) keep lastFetchedQuery, so
+    // they don't refetch — they just re-render the highlight below.
+    if (ws.query !== this.lastFetchedQuery) {
+      this.scheduleFetch(ws.query);
+    }
+
+    this.renderResults(ws);
+  }
+
+  private position(view: EditorView, from: number): void {
+    const root = this.root;
+    const host = this.host;
+    if (!root || !host) return;
+    let coords: { left: number; bottom: number };
+    try {
+      coords = view.coordsAtPos(from);
+    } catch {
+      // coordsAtPos relies on getClientRects, which jsdom doesn't
+      // implement — skip positioning under test. Visibility/state still
+      // behave correctly.
+      return;
+    }
+    const hostRect = host.getBoundingClientRect();
+    const top = coords.bottom - hostRect.top + 2;
+    let left = coords.left - hostRect.left;
+    const maxLeft = Math.max(0, host.clientWidth - root.offsetWidth);
+    if (left > maxLeft) left = maxLeft;
+    if (left < 0) left = 0;
+    root.style.top = `${top}px`;
+    root.style.left = `${left}px`;
+  }
+
+  private scheduleFetch(query: string): void {
+    this.cancelDebounce();
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      void this.runFetch(query);
+    }, FETCH_DEBOUNCE_MS);
+  }
+
+  private async runFetch(query: string): Promise<void> {
+    const seq = ++this.requestSeq;
+    this.lastFetchedQuery = query;
+    const url = `${LINK_SEARCH_PATH}?q=${encodeURIComponent(query)}&limit=20`;
+    let results: WikiResult[] = [];
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return;
+      const json = (await resp.json()) as LinkSearchResponse;
+      results = json.results ?? [];
+    } catch {
+      // Network/parse error — leave the (possibly empty) list alone.
+      return;
+    }
+    // Staleness guards: a newer request superseded us, the popup closed,
+    // or the user typed past the query this response was for.
+    if (seq !== this.requestSeq) return;
+    const ws = wikiLinkKey.getState(this.view.state);
+    if (!ws || !ws.active || ws.query !== query) return;
+    setWikiResults(this.view, results);
+  }
+
+  private renderResults(ws: WikiState): void {
+    const root = this.root;
+    if (!root) return;
+    root.textContent = "";
+    if (ws.results.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "pm-wikilink-empty";
+      empty.textContent = "No matches";
+      root.appendChild(empty);
+      return;
+    }
+    ws.results.forEach((result, i) => {
+      const item = document.createElement("div");
+      item.className = "pm-wikilink-item";
+      if (i === ws.index) item.classList.add("pm-wikilink-item--active");
+      item.textContent = result.name;
+      item.addEventListener("mousedown", (e) => {
+        // Keep editor focus so the commit transaction applies cleanly.
+        e.preventDefault();
+        this.commitResult(result);
+      });
+      root.appendChild(item);
+    });
+  }
+
+  private commitResult(result: WikiResult): void {
+    const view = this.view;
+    const ws = wikiLinkKey.getState(view.state);
+    if (!ws || !ws.active) return;
+    const node = schema.nodes.paper_link.create({ docId: result.id });
+    view.dispatch(
+      view.state.tr
+        .replaceWith(ws.from, view.state.selection.from, node)
+        .setMeta(wikiLinkKey, { type: "commit" }),
+    );
+    view.focus();
+  }
+
+  private cancelDebounce(): void {
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+  }
+
+  destroy(): void {
+    this.cancelDebounce();
+    // Bump the seq so any in-flight fetch resolves into a no-op.
+    this.requestSeq++;
+    this.root?.remove();
+    this.root = null;
+  }
+}
+
+/** The `Plugin.view` popup that renders the `[[` autocomplete list. */
+export function wikiLinkSuggestPopupPlugin(): Plugin {
+  return new Plugin({
+    view(view) {
+      return new WikiLinkPopupView(view);
+    },
+  });
+}

@@ -1,9 +1,20 @@
-import { describe, it, expect } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+} from "vitest";
 import { EditorState } from "prosemirror-state";
+import { EditorView } from "prosemirror-view";
+import { keymap } from "prosemirror-keymap";
 import { schema } from "../schema";
 import {
   wikiLinkKey,
   wikiLinkSuggestPlugin,
+  wikiLinkSuggestPopupPlugin,
+  wikiLinkKeymap,
   moveWikiSelection,
   setWikiResults,
   cancelWikiSuggest,
@@ -180,5 +191,107 @@ describe("wikiLinkSuggest plugin state", () => {
     const state = freshState();
     const acted = cancelWikiSuggest()(state, () => {});
     expect(acted).toBe(false);
+  });
+});
+
+describe("wikiLinkSuggest popup + keymap (real EditorView)", () => {
+  let view: EditorView;
+  let host: HTMLDivElement;
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  function searchPayload(results: WikiResult[]) {
+    return {
+      ok: true,
+      json: async () => ({ results }),
+    } as unknown as Response;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fetchMock = vi.fn(async () => searchPayload(RESULTS));
+    vi.stubGlobal("fetch", fetchMock);
+
+    host = document.createElement("div");
+    document.body.appendChild(host);
+    const place = document.createElement("div");
+    host.appendChild(place);
+
+    const state = EditorState.create({
+      schema,
+      plugins: [
+        wikiLinkSuggestPlugin,
+        wikiLinkSuggestPopupPlugin(),
+        keymap(wikiLinkKeymap()),
+      ],
+    });
+    view = new EditorView(place, { state });
+  });
+
+  afterEach(() => {
+    // Always destroy — the popup's debounce timer is a leaked-timer hazard.
+    view.destroy();
+    host.remove();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  function curWs(): WikiState {
+    return wikiLinkKey.getState(view.state)!;
+  }
+
+  function popup(): HTMLElement | null {
+    return host.querySelector(".pm-wikilink-popup");
+  }
+
+  it("typing `[[fo` debounced-fetches results and shows the popup", async () => {
+    view.dispatch(view.state.tr.insertText("[[fo"));
+    expect(curWs().active).toBe(true);
+
+    // Advance past the debounce and flush the fetch promise chain.
+    await vi.runAllTimersAsync();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = fetchMock.mock.calls[0][0] as string;
+    expect(url).toContain("/-/paper/api/link-search?q=fo");
+    expect(url).toContain("limit=20");
+
+    expect(curWs().results).toHaveLength(3);
+    const el = popup();
+    expect(el).not.toBeNull();
+    expect(el!.style.display).toBe("block");
+    // The rendered list reflects plugin state.
+    expect(el!.querySelectorAll(".pm-wikilink-item")).toHaveLength(3);
+  });
+
+  it("ArrowDown then Enter commits the highlighted paper_link", async () => {
+    view.dispatch(view.state.tr.insertText("[[fo"));
+    await vi.runAllTimersAsync();
+    expect(curWs().results).toHaveLength(3);
+
+    // Move to the second result (id 20), then commit.
+    moveWikiSelection(1)(view.state, view.dispatch.bind(view));
+    expect(curWs().index).toBe(1);
+    commitWikiSelection()(view.state, view.dispatch.bind(view));
+
+    // The `[[fo` text became a paper_link with the chosen id.
+    let found: { docId: unknown } | null = null;
+    view.state.doc.descendants((node) => {
+      if (node.type.name === "paper_link") found = { docId: node.attrs.docId };
+    });
+    expect(found).not.toBeNull();
+    expect(found!.docId).toBe(20);
+    expect(view.state.doc.textContent).not.toContain("[[");
+    expect(curWs().active).toBe(false);
+  });
+
+  it("Escape cancels: state inactive and popup hidden", async () => {
+    view.dispatch(view.state.tr.insertText("[[fo"));
+    await vi.runAllTimersAsync();
+    expect(curWs().active).toBe(true);
+    expect(popup()!.style.display).toBe("block");
+
+    cancelWikiSuggest()(view.state, view.dispatch.bind(view));
+    expect(curWs().active).toBe(false);
+    expect(popup()!.style.display).toBe("none");
   });
 });
