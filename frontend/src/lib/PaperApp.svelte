@@ -12,6 +12,7 @@
   import type { ReporterState } from "./reporter";
   import Toolbar from "./Toolbar.svelte";
   import DocHeader from "./DocHeader.svelte";
+  import LinksPanel from "./LinksPanel.svelte";
 
   let { docId }: { docId: string } = $props();
 
@@ -216,6 +217,7 @@
     <Toolbar {view} {kind} />
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
+  <LinksPanel {docId} />
 </div>
 
 <style>
