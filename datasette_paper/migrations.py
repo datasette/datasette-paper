@@ -552,3 +552,27 @@ def m004_drop_legacy_share_model(db: Database):
             ON _datasette_paper_doc(kind) WHERE kind = 'template';
         """
     )
+
+
+@migrations()
+def m005_links(db: Database):
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _datasette_paper_link (
+            --! Directed link edges between papers, extracted from
+            --! paper_link nodes in the materialized doc. Rebuilt wholesale
+            --! for a src_doc_id whenever that doc is re-extracted.
+            src_doc_id  INTEGER NOT NULL REFERENCES _datasette_paper_doc(id) ON DELETE CASCADE,
+            --- Linked-to paper id. NOT a FK: the target may be hard-deleted
+            --- yet we keep the edge until src is re-extracted (resolve-time
+            --- decides 'not found').
+            dst_doc_id  INTEGER NOT NULL,
+            occurrences INTEGER NOT NULL DEFAULT 1,
+            src_version INTEGER NOT NULL,
+            updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            PRIMARY KEY (src_doc_id, dst_doc_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_link_dst
+            ON _datasette_paper_link(dst_doc_id);
+        """
+    )
