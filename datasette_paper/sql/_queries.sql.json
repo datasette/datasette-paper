@@ -889,6 +889,54 @@
       "result_class": "Doc"
     },
     {
+      "name": "deleteLinksForSrc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_link WHERE src_doc_id = $src_doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$src_doc_id::integer",
+          "name": "src_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "insertLink",
+      "result_type": "Void",
+      "sql": "INSERT INTO _datasette_paper_link (src_doc_id, dst_doc_id, occurrences, src_version)\nVALUES ($src_doc_id::integer, $dst_doc_id::integer, $occurrences::integer, $src_version::integer);",
+      "parameters": [
+        {
+          "full_name": "$src_doc_id::integer",
+          "name": "src_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$dst_doc_id::integer",
+          "name": "dst_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$occurrences::integer",
+          "name": "occurrences",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$src_version::integer",
+          "name": "src_version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
       "name": "archiveDoc",
       "result_type": "Void",
       "sql": "UPDATE _datasette_paper_doc\nSET state = 'archived',\n    archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),\n    trashed_at = NULL,\n    delete_at = NULL\nWHERE id = $doc_id::integer;",

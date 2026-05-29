@@ -173,6 +173,34 @@ WHERE id IN (
     return [Doc(*row) for row in cursor.fetchall()]
 
 
+def delete_links_for_src(conn: sqlite3.Connection, src_doc_id: int) -> None:
+    sql = "DELETE FROM _datasette_paper_link WHERE src_doc_id = $src_doc_id::integer;"
+    params = {"src_doc_id::integer": src_doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def insert_link(
+    conn: sqlite3.Connection,
+    src_doc_id: int,
+    dst_doc_id: int,
+    occurrences: int,
+    src_version: int,
+) -> None:
+    sql = """\
+INSERT INTO _datasette_paper_link (src_doc_id, dst_doc_id, occurrences, src_version)
+VALUES ($src_doc_id::integer, $dst_doc_id::integer, $occurrences::integer, $src_version::integer);
+"""
+    params = {
+        "src_doc_id::integer": src_doc_id,
+        "dst_doc_id::integer": dst_doc_id,
+        "occurrences::integer": occurrences,
+        "src_version::integer": src_version,
+    }
+    conn.execute(sql, params)
+    return None
+
+
 def archive_doc(conn: sqlite3.Connection, doc_id: int) -> None:
     sql = """\
 UPDATE _datasette_paper_doc

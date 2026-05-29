@@ -120,6 +120,11 @@ class Instance:
         # repeating the materialization work. Cleared at the top of each
         # full re-materialization.
         self._materialization_error: Optional[tuple[int, str]] = None
+        # Doc version at which link edges were last reindexed. Lets the write
+        # tail skip a redundant reindex when nothing advanced the version.
+        # In-memory: lost on eviction/rehydrate, which just means one cheap
+        # idempotent reindex on the next write — fine.
+        self._links_indexed_version: Optional[int] = None
         # Serializes ``add_events`` and the subscribe+backlog snapshot in
         # ``subscribe_with_backlog`` so the Python-level state transitions
         # (version check → validate → write → tail append → broadcast)
@@ -396,7 +401,38 @@ class Instance:
 
         self.last_active = time.monotonic()
         await self._maybe_auto_snapshot(actor_id)
+        await self.reindex_links()
         return self.version
+
+    async def reindex_links(self) -> None:
+        """Rebuild this doc's outgoing link edges from the live doc.
+
+        Called from the write tail. Guarded so it never raises into the write
+        path: skips a poisoned history and a redundant re-run, and swallows +
+        logs any persistence error (an edge-index failure must not fail the
+        user's edit).
+        """
+        if self._materialization_error is not None:
+            return
+        if self._links_indexed_version == self.version:
+            return
+        try:
+            live_json = self.materialize_live_doc()
+            if self._materialization_error is not None:
+                return
+            from .links import extract_links
+
+            edges: dict[int, int] = {}
+            for dst in extract_links(live_json):
+                edges[dst] = edges.get(dst, 0) + 1
+            await self.db.replace_links(
+                src_doc_id=self.doc_id,
+                src_version=self.version,
+                edges=edges,
+            )
+            self._links_indexed_version = self.version
+        except Exception:
+            logger.exception("link reindex failed for doc %s", self.doc_id)
 
     async def _maybe_auto_snapshot(self, actor_id: Optional[str]) -> None:
         """Snapshot when the step tail has drifted past the threshold.

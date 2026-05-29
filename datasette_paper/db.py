@@ -180,6 +180,33 @@ class PaperDB:
         return await self.database.execute_write_fn(read)
 
     # ------------------------------------------------------------------
+    # Links
+    # ------------------------------------------------------------------
+
+    async def replace_links(
+        self,
+        *,
+        src_doc_id: int,
+        src_version: int,
+        edges: dict[int, int],
+    ) -> None:
+        # Rebuild the edge set for one src in a single transaction (mirror the
+        # multi-statement insert_step pattern): delete all of src's edges, then
+        # re-insert the current set. dst_doc_id is intentionally not a FK.
+        def write(conn):
+            _queries.delete_links_for_src(conn, src_doc_id=src_doc_id)
+            for dst_doc_id, occurrences in edges.items():
+                _queries.insert_link(
+                    conn,
+                    src_doc_id=src_doc_id,
+                    dst_doc_id=dst_doc_id,
+                    occurrences=occurrences,
+                    src_version=src_version,
+                )
+
+        await self.database.execute_write_fn(write)
+
+    # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------
 

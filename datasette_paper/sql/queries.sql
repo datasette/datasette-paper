@@ -95,6 +95,21 @@ WHERE id IN (
 );
 
 -- ============================================================================
+-- Links
+--
+-- Outgoing paper_link edges for a doc, rebuilt wholesale per src by the
+-- write-tail reindex (delete-all + re-insert in one transaction). dst_doc_id
+-- is intentionally not a FK; src_doc_id cascades on doc hard-delete.
+-- ============================================================================
+
+-- name: deleteLinksForSrc
+DELETE FROM _datasette_paper_link WHERE src_doc_id = $src_doc_id::integer;
+
+-- name: insertLink
+INSERT INTO _datasette_paper_link (src_doc_id, dst_doc_id, occurrences, src_version)
+VALUES ($src_doc_id::integer, $dst_doc_id::integer, $occurrences::integer, $src_version::integer);
+
+-- ============================================================================
 -- State transitions (archive / trash)
 --
 -- Owner-only — enforced inline in the route handler. Each query is a
