@@ -169,6 +169,32 @@ async def link_search(datasette, request):
     )
 
 
+async def _resolve_map(datasette, actor, ids):
+    """Resolve a list of doc ids to per-id {status, ...} (the link-resolve
+    contract, 08 Q4). denied/not_found carry no title — they must not leak the
+    existence/name of papers the actor can't see. Shared by POST /links/resolve
+    and the forward/backlink endpoints."""
+    viewable = set(await viewable_doc_ids(datasette, actor))
+    db = paper_db(datasette)
+    rows = {r.id: r for r in await db.list_docs_by_ids(doc_ids=ids)}
+    out = {}
+    for i in ids:
+        row = rows.get(i)
+        if row is None:
+            out[i] = {"status": "not_found"}
+        elif i not in viewable:
+            out[i] = {"status": "denied"}
+        else:
+            out[i] = {
+                "status": "ok",
+                "title": row.name,
+                "state": row.state,
+                "kind": row.kind,
+                "href": f"/-/paper/doc/{i}",
+            }
+    return out
+
+
 @router.POST(r"^/-/paper/api/links/resolve$")
 async def resolve_links(datasette, request):
     await ensure_paper_list(datasette, request)
@@ -180,25 +206,53 @@ async def resolve_links(datasette, request):
             ids.append(int(i))
         except (TypeError, ValueError):
             continue
-    viewable = set(await viewable_doc_ids(datasette, request.actor))
-    db = paper_db(datasette)
-    rows = {r.id: r for r in await db.list_docs_by_ids(doc_ids=ids)}
-    out = {}
-    for i in ids:
-        row = rows.get(i)
-        if row is None:
-            out[i] = {"status": "not_found"}
-        elif i not in viewable:
-            out[i] = {"status": "denied"}  # NO title — must not leak name
-        else:
-            out[i] = {
-                "status": "ok",
-                "title": row.name,
-                "state": row.state,  # active|archived|trashed
-                "kind": row.kind,
-                "href": f"/-/paper/doc/{i}",
-            }
+    out = await _resolve_map(datasette, request.actor, ids)
     return Response.json({"links": out})
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/links$")
+async def forward_links(datasette, request, doc_id: int):
+    await ensure_paper_view(datasette, request, doc_id)
+    db = paper_db(datasette)
+    edges = await db.links_by_src(src_doc_id=doc_id)
+    resolved = await _resolve_map(
+        datasette, request.actor, [e.dst_doc_id for e in edges]
+    )
+    return Response.json(
+        {
+            "links": [
+                {
+                    "id": e.dst_doc_id,
+                    "occurrences": e.occurrences,
+                    **resolved[e.dst_doc_id],
+                }
+                for e in edges
+            ]
+        }
+    )
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/backlinks$")
+async def backlinks(datasette, request, doc_id: int):
+    await ensure_paper_view(datasette, request, doc_id)
+    viewable = await viewable_doc_ids(datasette, request.actor)
+    db = paper_db(datasette)
+    edges = await db.backlinks_by_dst(dst_doc_id=doc_id, viewable_ids=viewable)
+    resolved = await _resolve_map(
+        datasette, request.actor, [e.src_doc_id for e in edges]
+    )
+    return Response.json(
+        {
+            "backlinks": [
+                {
+                    "id": e.src_doc_id,
+                    "occurrences": e.occurrences,
+                    **resolved[e.src_doc_id],
+                }
+                for e in edges
+            ]
+        }
+    )
 
 
 @router.POST(r"^/-/paper/api/docs$")
