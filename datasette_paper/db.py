@@ -226,6 +226,17 @@ class PaperDB:
 
         return await self.database.execute_write_fn(read)
 
+    async def edges_within(
+        self, *, viewable_ids: list[int]
+    ) -> list[_queries.GraphEdge]:
+        # Edges whose src AND dst are both viewable. JSON-encode the set.
+        viewable_json = json.dumps(viewable_ids)
+
+        def read(conn):
+            return _queries.select_edges_within(conn, viewable_json=viewable_json)
+
+        return await self.database.execute_write_fn(read)
+
     # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------

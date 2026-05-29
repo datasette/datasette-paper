@@ -128,6 +128,15 @@ WHERE dst_doc_id = $dst_doc_id::integer
   )
 ORDER BY src_doc_id;
 
+-- Edges where BOTH endpoints are viewable — the permitted subgraph. Caller
+-- passes the viewable id set as a JSON array of integers.
+-- name: selectEdgesWithin :rows -> GraphEdge
+SELECT src_doc_id, dst_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE src_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))
+  AND dst_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))
+ORDER BY src_doc_id, dst_doc_id;
+
 -- ============================================================================
 -- State transitions (archive / trash)
 --

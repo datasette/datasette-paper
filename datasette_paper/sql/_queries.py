@@ -41,6 +41,13 @@ class Backlink:
 
 
 @dataclass
+class GraphEdge:
+    src_doc_id: int
+    dst_doc_id: int
+    occurrences: int
+
+
+@dataclass
 class Step:
     doc_id: int
     version: int
@@ -240,6 +247,21 @@ ORDER BY src_doc_id;
     params = {"dst_doc_id::integer": dst_doc_id, "viewable_json::text": viewable_json}
     cursor = conn.execute(sql, params)
     return [Backlink(*row) for row in cursor.fetchall()]
+
+
+def select_edges_within(
+    conn: sqlite3.Connection, viewable_json: str
+) -> list[GraphEdge]:
+    sql = """\
+SELECT src_doc_id, dst_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE src_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))
+  AND dst_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))
+ORDER BY src_doc_id, dst_doc_id;
+"""
+    params = {"viewable_json::text": viewable_json}
+    cursor = conn.execute(sql, params)
+    return [GraphEdge(*row) for row in cursor.fetchall()]
 
 
 def archive_doc(conn: sqlite3.Connection, doc_id: int) -> None:

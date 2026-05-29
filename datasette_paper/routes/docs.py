@@ -255,6 +255,33 @@ async def backlinks(datasette, request, doc_id: int):
     )
 
 
+@router.GET(r"^/-/paper/api/links/graph$")
+async def links_graph(datasette, request):
+    await ensure_paper_list(datasette, request)
+    viewable = await viewable_doc_ids(datasette, request.actor)
+    db = paper_db(datasette)
+    edges = await db.edges_within(viewable_ids=viewable)
+    node_ids = sorted({e.src_doc_id for e in edges} | {e.dst_doc_id for e in edges})
+    rows = {r.id: r for r in await db.list_docs_by_ids(doc_ids=node_ids)}
+    return Response.json(
+        {
+            "nodes": [
+                {"id": i, "title": rows[i].name, "state": rows[i].state}
+                for i in node_ids
+                if i in rows
+            ],
+            "edges": [
+                {
+                    "source": e.src_doc_id,
+                    "target": e.dst_doc_id,
+                    "occurrences": e.occurrences,
+                }
+                for e in edges
+            ],
+        }
+    )
+
+
 @router.POST(r"^/-/paper/api/docs$")
 async def create_doc(datasette, request):
     await ensure_paper_create(datasette, request)

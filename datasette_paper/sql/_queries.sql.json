@@ -1007,6 +1007,46 @@
       "result_class": "Backlink"
     },
     {
+      "name": "selectEdgesWithin",
+      "result_type": "Rows",
+      "sql": "SELECT src_doc_id, dst_doc_id, occurrences\nFROM _datasette_paper_link\nWHERE src_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))\n  AND dst_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))\nORDER BY src_doc_id, dst_doc_id;",
+      "parameters": [
+        {
+          "full_name": "$viewable_json::text",
+          "name": "viewable_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "src_doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "src_doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "dst_doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "dst_doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "occurrences",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "occurrences",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "GraphEdge"
+    },
+    {
       "name": "archiveDoc",
       "result_type": "Void",
       "sql": "UPDATE _datasette_paper_doc\nSET state = 'archived',\n    archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),\n    trashed_at = NULL,\n    delete_at = NULL\nWHERE id = $doc_id::integer;",
