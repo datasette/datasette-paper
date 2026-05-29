@@ -835,3 +835,56 @@ def get_registry(datasette) -> InstanceRegistry:
     if not hasattr(datasette, "_paper_registry"):
         datasette._paper_registry = InstanceRegistry()
     return datasette._paper_registry
+
+
+# Marker table + key recording that the one-time link-edge backfill has run.
+# Mirrors the share→acl migration marker idiom (see migrations.py) but with a
+# dedicated table so the two markers are independent. Created at runtime — no
+# schema migration, because the backfill only reindexes derived data.
+_LINK_BACKFILL_TABLE = "_datasette_paper_link_backfill"
+_LINK_BACKFILL_KEY = "links_v1"
+
+
+async def backfill_links(datasette, *, force: bool = False) -> dict:
+    """Reindex link edges for every existing doc, once.
+
+    Pre-feature docs (created before the write-tail reindex existed) have no
+    rows in ``_datasette_paper_link``. This walks every doc, hydrates it, and
+    runs the same idempotent reindex the write tail uses. Guarded by a marker
+    row so it only scans once; ``force=True`` bypasses the marker (tests /
+    re-run). Returns a small stats dict for logging / assertions.
+    """
+    from .util import paper_db
+
+    db = paper_db(datasette)
+    internal = datasette.get_internal_database()
+    await internal.execute_write(
+        f"CREATE TABLE IF NOT EXISTS {_LINK_BACKFILL_TABLE} "
+        "(key TEXT PRIMARY KEY, migrated_at TEXT NOT NULL)"
+    )
+    if not force:
+        done = (
+            await internal.execute(
+                f"SELECT 1 FROM {_LINK_BACKFILL_TABLE} WHERE key = ?",
+                [_LINK_BACKFILL_KEY],
+            )
+        ).rows
+        if done:
+            return {"docs": 0, "skipped": True}
+
+    rows = (await internal.execute("SELECT id FROM _datasette_paper_doc")).rows
+    count = 0
+    for row in rows:
+        doc_id = row["id"]
+        try:
+            inst = await Instance.hydrate(db, doc_id)
+            await inst.reindex_links()
+            count += 1
+        except Exception:
+            logger.exception("link backfill failed for doc %s", doc_id)
+    await internal.execute_write(
+        f"INSERT OR IGNORE INTO {_LINK_BACKFILL_TABLE} (key, migrated_at) "
+        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [_LINK_BACKFILL_KEY],
+    )
+    return {"docs": count, "skipped": False}
