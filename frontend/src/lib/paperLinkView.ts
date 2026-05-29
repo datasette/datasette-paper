@@ -19,23 +19,34 @@ import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
 import { TOOLBAR_ICONS } from "./icons";
 import type { LinkResolver, LinkStatus } from "./linkResolver";
+import type { AccessChecker } from "./linkAccessCheck";
 
 export class PaperLinkView implements NodeView {
   dom: HTMLAnchorElement;
   private docId: number | null;
   private resolver: LinkResolver;
+  private accessChecker?: AccessChecker;
   private unsubscribe: (() => void) | null = null;
+  private accessUnsub: (() => void) | null = null;
+  // Last status we rendered, so the access-check subscriber can re-render the
+  // badge without re-resolving the title through the LinkResolver.
+  private lastStatus: LinkStatus = { status: "loading" };
 
   constructor(
     node: PMNode,
     _view: EditorView,
     _getPos: () => number | undefined,
     resolver: LinkResolver,
+    accessChecker?: AccessChecker,
   ) {
     this.resolver = resolver;
+    this.accessChecker = accessChecker;
     this.dom = document.createElement("a");
     this.dom.className = "pm-paper-link";
     this.docId = node.attrs.docId ?? null;
+    this.accessUnsub =
+      accessChecker?.subscribe(() => this.renderStatus(this.lastStatus)) ??
+      null;
     this.subscribe();
   }
 
@@ -64,6 +75,7 @@ export class PaperLinkView implements NodeView {
   }
 
   private renderStatus(status: LinkStatus): void {
+    this.lastStatus = status;
     // Reset modifier classes each render.
     this.dom.className = "pm-paper-link";
     const id = this.docId;
@@ -92,6 +104,43 @@ export class PaperLinkView implements NodeView {
         this.setBody(null, status.title);
       }
     }
+    this.renderBadge();
+  }
+
+  /**
+   * Append a cross-access affordance based on the AccessChecker report for
+   * this target. `gap` → amber warning badge listing who can't see it;
+   * `open_audience` → softer muted hint (the target may be more private than
+   * this doc's audience). The actor list goes in a `title` attribute via
+   * textContent — never innerHTML — since the ids are user-controlled.
+   *
+   * This is always an extra sibling element appended after the body; the link
+   * text itself is untouched, so the denied / not_found "no title" guarantees
+   * are preserved.
+   */
+  private renderBadge(): void {
+    if (this.docId == null) return;
+    const gap = this.accessChecker?.get(this.docId);
+    if (!gap) return;
+    if (gap.gap) {
+      const badge = document.createElement("span");
+      badge.className = "pm-paper-link-warn";
+      badge.setAttribute(
+        "title",
+        `Not visible to: ${gap.missing.join(", ")}`,
+      );
+      badge.textContent = "⚠"; // ⚠
+      this.dom.appendChild(badge);
+    } else if (gap.open_audience) {
+      const badge = document.createElement("span");
+      badge.className = "pm-paper-link-hint";
+      badge.setAttribute(
+        "title",
+        "This doc's audience can't be fully verified; the link target may be more private.",
+      );
+      badge.textContent = "·"; // ·
+      this.dom.appendChild(badge);
+    }
   }
 
   update(node: PMNode): boolean {
@@ -116,5 +165,7 @@ export class PaperLinkView implements NodeView {
   destroy(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.accessUnsub?.();
+    this.accessUnsub = null;
   }
 }

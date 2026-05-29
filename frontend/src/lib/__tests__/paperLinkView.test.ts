@@ -15,6 +15,7 @@ import type { EditorView } from "prosemirror-view";
 import { schema } from "../schema";
 import { PaperLinkView } from "../paperLinkView";
 import type { LinkResolver, LinkStatus } from "../linkResolver";
+import type { AccessChecker, AccessGap } from "../linkAccessCheck";
 
 function fakeResolver(status: LinkStatus): LinkResolver {
   return {
@@ -26,15 +27,36 @@ function fakeResolver(status: LinkStatus): LinkResolver {
   } as unknown as LinkResolver;
 }
 
-function buildView(docId: number | null, status: LinkStatus): PaperLinkView {
+function fakeChecker(gap: AccessGap | undefined): AccessChecker {
+  return {
+    get: () => gap,
+    subscribe: () => () => {},
+    dispose() {},
+  } as unknown as AccessChecker;
+}
+
+function buildView(
+  docId: number | null,
+  status: LinkStatus,
+  accessChecker?: AccessChecker,
+): PaperLinkView {
   const node = schema.nodes.paper_link.create({ docId });
   return new PaperLinkView(
     node,
     {} as unknown as EditorView,
     () => 0,
     fakeResolver(status),
+    accessChecker,
   );
 }
+
+const OK_STATUS: LinkStatus = {
+  status: "ok",
+  title: "My Title",
+  state: "active",
+  kind: "doc",
+  href: "/-/paper/doc/7",
+};
 
 describe("PaperLinkView", () => {
   it("ok/active: renders the title with an href and no modifier class", () => {
@@ -96,6 +118,55 @@ describe("PaperLinkView", () => {
     expect(view.dom.className).toContain("pm-paper-link--missing");
     expect(view.dom.hasAttribute("href")).toBe(false);
     expect(view.dom.textContent).toContain("Paper #7");
+  });
+
+  it("access gap: appends a warning badge whose title lists missing actors", () => {
+    const view = buildView(
+      7,
+      OK_STATUS,
+      fakeChecker({ gap: true, missing: ["bob", "carol"], open_audience: false }),
+    );
+    const warn = view.dom.querySelector(".pm-paper-link-warn");
+    expect(warn).not.toBeNull();
+    expect(warn?.getAttribute("title")).toContain("bob");
+    expect(warn?.getAttribute("title")).toContain("carol");
+    // The link text itself is unchanged.
+    expect(view.dom.textContent).toContain("My Title");
+    expect(view.dom.querySelector(".pm-paper-link-hint")).toBeNull();
+  });
+
+  it("open_audience only: soft hint badge, no warning badge", () => {
+    const view = buildView(
+      7,
+      OK_STATUS,
+      fakeChecker({ gap: false, missing: [], open_audience: true }),
+    );
+    expect(view.dom.querySelector(".pm-paper-link-hint")).not.toBeNull();
+    expect(view.dom.querySelector(".pm-paper-link-warn")).toBeNull();
+  });
+
+  it("no gap: neither badge is rendered", () => {
+    const noGap = buildView(
+      7,
+      OK_STATUS,
+      fakeChecker({ gap: false, missing: [], open_audience: false }),
+    );
+    expect(noGap.dom.querySelector(".pm-paper-link-warn")).toBeNull();
+    expect(noGap.dom.querySelector(".pm-paper-link-hint")).toBeNull();
+
+    const absent = buildView(7, OK_STATUS, fakeChecker(undefined));
+    expect(absent.dom.querySelector(".pm-paper-link-warn")).toBeNull();
+    expect(absent.dom.querySelector(".pm-paper-link-hint")).toBeNull();
+  });
+
+  it("denied with an access gap: badge appended, still never a title", () => {
+    const view = buildView(
+      7,
+      { status: "denied" },
+      fakeChecker({ gap: true, missing: ["bob"], open_audience: false }),
+    );
+    expect(view.dom.querySelector(".pm-paper-link-warn")).not.toBeNull();
+    expect(view.dom.textContent).toContain("Permission denied");
   });
 
   it("Backspace deletes the paper_link node as a unit", () => {

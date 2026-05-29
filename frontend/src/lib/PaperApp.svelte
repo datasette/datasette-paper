@@ -478,6 +478,25 @@
     cursor: default;
     text-decoration: line-through;
   }
+  /* Cross-access affordances: an amber warning when a named collaborator of
+   * this doc can't see the target, and a muted dot hint when the doc's
+   * audience can't be fully enumerated. */
+  .editor-host :global(.pm-paper-link .pm-paper-link-warn) {
+    display: inline;
+    margin-left: 0.25em;
+    color: #b45309;
+    font-size: 0.85em;
+    cursor: help;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-paper-link .pm-paper-link-hint) {
+    display: inline;
+    margin-left: 0.25em;
+    color: #999;
+    font-size: 0.85em;
+    cursor: help;
+    text-decoration: none;
+  }
 
   /* Tables — prosemirror-tables ships layout but no cell borders. We
    * draw a light grid + a header background. `--default-cell-min-width`

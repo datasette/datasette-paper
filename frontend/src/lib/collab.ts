@@ -45,6 +45,7 @@ import { foldHeadingsPlugin } from "./foldHeadings";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
 import { LinkResolver } from "./linkResolver";
+import { AccessChecker } from "./linkAccessCheck";
 import { PaperLinkView } from "./paperLinkView";
 import {
   cursorReporterPlugin,
@@ -763,6 +764,7 @@ export class EditorConnection {
 
   // One link resolver per connection (NOT a module singleton — multi-doc tabs + tests).
   private linkResolver: LinkResolver;
+  private accessChecker: AccessChecker;
 
   // Current viewer's actor id, captured from the bootstrap response.
   // Used to suppress this user's own presence cursor across other tabs.
@@ -805,6 +807,10 @@ export class EditorConnection {
     this.report = report ?? new Reporter();
     this.clientID = Math.floor(Math.random() * 0xffffffff);
     this.linkResolver = new LinkResolver();
+    // Self-gates via 403 for non-editors. Loaded lazily the first time a
+    // paper_link NodeView subscribes — like LinkResolver, no fetch fires for
+    // a doc with no links to check.
+    this.accessChecker = new AccessChecker(opts.docId);
     this.installNetworkListeners();
     this.start();
   }
@@ -1092,6 +1098,7 @@ export class EditorConnection {
             view,
             getPos as () => number | undefined,
             this.linkResolver,
+            this.accessChecker,
           ),
       },
       // Returning null falls through to ProseMirror's default; the cast
@@ -1471,6 +1478,7 @@ export class EditorConnection {
       this.snapshotTimer = null;
     }
     this.linkResolver.dispose();
+    this.accessChecker.dispose();
     if (this.view) {
       this.view.destroy();
       this.view = null;
