@@ -29,6 +29,18 @@ class Doc:
 
 
 @dataclass
+class LinkEdge:
+    dst_doc_id: int
+    occurrences: int
+
+
+@dataclass
+class Backlink:
+    src_doc_id: int
+    occurrences: int
+
+
+@dataclass
 class Step:
     doc_id: int
     version: int
@@ -199,6 +211,35 @@ VALUES ($src_doc_id::integer, $dst_doc_id::integer, $occurrences::integer, $src_
     }
     conn.execute(sql, params)
     return None
+
+
+def select_links_by_src(conn: sqlite3.Connection, src_doc_id: int) -> list[LinkEdge]:
+    sql = """\
+SELECT dst_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE src_doc_id = $src_doc_id::integer
+ORDER BY dst_doc_id;
+"""
+    params = {"src_doc_id::integer": src_doc_id}
+    cursor = conn.execute(sql, params)
+    return [LinkEdge(*row) for row in cursor.fetchall()]
+
+
+def select_backlinks_by_dst_scoped(
+    conn: sqlite3.Connection, dst_doc_id: int, viewable_json: str
+) -> list[Backlink]:
+    sql = """\
+SELECT src_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE dst_doc_id = $dst_doc_id::integer
+  AND src_doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
+  )
+ORDER BY src_doc_id;
+"""
+    params = {"dst_doc_id::integer": dst_doc_id, "viewable_json::text": viewable_json}
+    cursor = conn.execute(sql, params)
+    return [Backlink(*row) for row in cursor.fetchall()]
 
 
 def archive_doc(conn: sqlite3.Connection, doc_id: int) -> None:

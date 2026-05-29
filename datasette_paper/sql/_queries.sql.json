@@ -937,6 +937,76 @@
       "result_class": null
     },
     {
+      "name": "selectLinksBySrc",
+      "result_type": "Rows",
+      "sql": "SELECT dst_doc_id, occurrences\nFROM _datasette_paper_link\nWHERE src_doc_id = $src_doc_id::integer\nORDER BY dst_doc_id;",
+      "parameters": [
+        {
+          "full_name": "$src_doc_id::integer",
+          "name": "src_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "dst_doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "dst_doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "occurrences",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "occurrences",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "LinkEdge"
+    },
+    {
+      "name": "selectBacklinksByDstScoped",
+      "result_type": "Rows",
+      "sql": "SELECT src_doc_id, occurrences\nFROM _datasette_paper_link\nWHERE dst_doc_id = $dst_doc_id::integer\n  AND src_doc_id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)\n  )\nORDER BY src_doc_id;",
+      "parameters": [
+        {
+          "full_name": "$dst_doc_id::integer",
+          "name": "dst_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$viewable_json::text",
+          "name": "viewable_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "src_doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "src_doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "occurrences",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "occurrences",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "Backlink"
+    },
+    {
       "name": "archiveDoc",
       "result_type": "Void",
       "sql": "UPDATE _datasette_paper_doc\nSET state = 'archived',\n    archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),\n    trashed_at = NULL,\n    delete_at = NULL\nWHERE id = $doc_id::integer;",

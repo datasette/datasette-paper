@@ -109,6 +109,25 @@ DELETE FROM _datasette_paper_link WHERE src_doc_id = $src_doc_id::integer;
 INSERT INTO _datasette_paper_link (src_doc_id, dst_doc_id, occurrences, src_version)
 VALUES ($src_doc_id::integer, $dst_doc_id::integer, $occurrences::integer, $src_version::integer);
 
+-- Forward links: every dst this src points at, with how many times.
+-- name: selectLinksBySrc :rows -> LinkEdge
+SELECT dst_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE src_doc_id = $src_doc_id::integer
+ORDER BY dst_doc_id;
+
+-- Backlinks restricted to sources the requester can view (no existence
+-- disclosure of private papers that link this one). Caller passes the
+-- viewable id set as a JSON array of integers.
+-- name: selectBacklinksByDstScoped :rows -> Backlink
+SELECT src_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE dst_doc_id = $dst_doc_id::integer
+  AND src_doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
+  )
+ORDER BY src_doc_id;
+
 -- ============================================================================
 -- State transitions (archive / trash)
 --

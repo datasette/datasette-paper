@@ -206,6 +206,26 @@ class PaperDB:
 
         await self.database.execute_write_fn(write)
 
+    async def links_by_src(self, *, src_doc_id: int) -> list[_queries.LinkEdge]:
+        def read(conn):
+            return _queries.select_links_by_src(conn, src_doc_id=src_doc_id)
+
+        return await self.database.execute_write_fn(read)
+
+    async def backlinks_by_dst(
+        self, *, dst_doc_id: int, viewable_ids: list[int]
+    ) -> list[_queries.Backlink]:
+        # Scoped to the requester's viewable set so private papers that link
+        # this one aren't disclosed. JSON-encode the set for the IN clause.
+        viewable_json = json.dumps(viewable_ids)
+
+        def read(conn):
+            return _queries.select_backlinks_by_dst_scoped(
+                conn, dst_doc_id=dst_doc_id, viewable_json=viewable_json
+            )
+
+        return await self.database.execute_write_fn(read)
+
     # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------
