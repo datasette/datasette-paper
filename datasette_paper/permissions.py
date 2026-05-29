@@ -201,6 +201,50 @@ async def viewable_doc_ids(datasette, actor) -> list[int]:
     return [int(r.child) async for r in page.all()]
 
 
+async def named_viewers(datasette, doc_id) -> tuple[set, bool]:
+    """Return (named_actor_ids, has_open_audience) for a doc's paper-view audience.
+
+    Named = explicit actor grants + materialized members of groups that hold
+    paper-view. Open audience = wildcard grants ('*','_signed_in','_anonymous')
+    or dynamic groups whose membership is config-driven and not fully
+    enumerable. Best-effort authoring aid (06 §#8) — never a security control.
+    """
+    from datasette_acl.grants import list_grants
+
+    grants = await list_grants(
+        datasette, PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, str(doc_id)
+    )
+    acl_config = datasette.plugin_config("datasette-acl") or {}
+    dynamic_group_names = set((acl_config.get("dynamic-groups") or {}).keys())
+    wildcards = {"*", "_signed_in", "_anonymous"}
+
+    named: set = set()
+    open_audience = False
+    db = datasette.get_internal_database()
+    for g in grants:
+        if "paper-view" not in g["actions"]:
+            continue
+        if g["principal"] == "actor":
+            aid = g["actor_id"]
+            if aid in wildcards:
+                open_audience = True
+            elif aid is not None:
+                named.add(aid)
+        elif g["principal"] == "group":
+            # Dynamic groups: membership computed from allow-blocks, only
+            # materialized for already-seen actors → treat as open audience.
+            if g["group_name"] in dynamic_group_names:
+                open_audience = True
+            # Expand the known (materialized) members either way.
+            rows = await db.execute(
+                "SELECT actor_id FROM acl_actor_groups WHERE group_id = ?",
+                [g["group_id"]],
+            )
+            for r in rows.rows:
+                named.add(r["actor_id"])
+    return named, open_audience
+
+
 async def can_paper_manage(datasette, actor, doc_id) -> bool:
     """True when ``actor`` may manage sharing for ``doc_id``.
 

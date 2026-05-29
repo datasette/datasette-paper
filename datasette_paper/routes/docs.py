@@ -21,6 +21,7 @@ from ..permissions import (
     ensure_paper_create,
     ensure_paper_edit,
     ensure_paper_view,
+    named_viewers,
     seed_owner_manager_grant,
     viewable_doc_ids,
 )
@@ -253,6 +254,34 @@ async def backlinks(datasette, request, doc_id: int):
             ]
         }
     )
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/link-access-check$")
+async def link_access_check(datasette, request, doc_id: int):
+    """Per outgoing link, which named collaborators of this doc can't view the
+    target (best-effort authoring aid, 06 §#8 — never a security control).
+
+    Edit-gated: only editors of the source doc care. Response ``links`` keys
+    are STRING dst doc ids. ``open_audience`` is True when the source doc's
+    paper-view audience can't be fully enumerated (wildcard grant or dynamic
+    group).
+    """
+    await ensure_paper_edit(datasette, request, doc_id)
+    named, open_audience = await named_viewers(datasette, doc_id)
+    # One viewable-set enumeration per named collaborator (C), then membership
+    # tests — not L×C permission checks.
+    per_actor = {a: set(await viewable_doc_ids(datasette, {"id": a})) for a in named}
+    db = paper_db(datasette)
+    edges = await db.links_by_src(src_doc_id=doc_id)
+    out = {}
+    for e in edges:
+        missing = sorted(a for a, v in per_actor.items() if e.dst_doc_id not in v)
+        out[str(e.dst_doc_id)] = {
+            "gap": bool(missing),
+            "missing": missing,
+            "open_audience": open_audience,
+        }
+    return Response.json({"links": out})
 
 
 @router.GET(r"^/-/paper/api/links/graph$")
