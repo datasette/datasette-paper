@@ -104,7 +104,9 @@ class PaperDocResource(Resource):
             parent, child = PAPER_DOCS_PARENT, parent
         elif parent is None:
             parent = PAPER_DOCS_PARENT
-        super().__init__(parent=str(parent), child=str(child) if child is not None else None)
+        super().__init__(
+            parent=str(parent), child=str(child) if child is not None else None
+        )
 
     @classmethod
     async def resources_sql(cls, datasette, actor=None) -> str:

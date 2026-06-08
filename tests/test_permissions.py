@@ -168,7 +168,9 @@ async def test_owner_can_view_edit_manage_own_paper():
 
     res = PaperDocResource(doc_id)
     for action in ("paper-view", "paper-edit", "paper-manage"):
-        assert await ds.allowed(action=action, resource=res, actor={"id": "alice"}), action
+        assert await ds.allowed(action=action, resource=res, actor={"id": "alice"}), (
+            action
+        )
 
 
 @pytest.mark.asyncio

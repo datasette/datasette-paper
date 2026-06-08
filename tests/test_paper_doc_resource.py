@@ -40,9 +40,7 @@ def _actor_cookie(ds, actor_id):
 
 async def _create_doc(ds, actor_id="alice"):
     cookies = {"ds_actor": _actor_cookie(ds, actor_id)}
-    r = await ds.client.post(
-        "/-/paper/api/docs", json={"name": "P"}, cookies=cookies
-    )
+    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     assert r.status_code == 201, r.text
     return r.json()["id"]
 
@@ -79,7 +77,11 @@ async def test_roles_registered():
         "paper-edit",
         "paper-manage",
     ]
-    assert (by_name["Viewer"].rank, by_name["Editor"].rank, by_name["Manager"].rank) == (
+    assert (
+        by_name["Viewer"].rank,
+        by_name["Editor"].rank,
+        by_name["Manager"].rank,
+    ) == (
         1,
         2,
         3,
@@ -145,12 +147,8 @@ async def test_editor_grant_allows_view_and_edit():
     res = PaperDocResource(doc_id)
 
     # Before any grant, bob has nothing.
-    assert not await ds.allowed(
-        action="paper-view", resource=res, actor={"id": "bob"}
-    )
-    assert not await ds.allowed(
-        action="paper-edit", resource=res, actor={"id": "bob"}
-    )
+    assert not await ds.allowed(action="paper-view", resource=res, actor={"id": "bob"})
+    assert not await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})
 
     await grant(
         ds,
@@ -162,12 +160,8 @@ async def test_editor_grant_allows_view_and_edit():
         by_actor="alice",
     )
 
-    assert await ds.allowed(
-        action="paper-view", resource=res, actor={"id": "bob"}
-    )
-    assert await ds.allowed(
-        action="paper-edit", resource=res, actor={"id": "bob"}
-    )
+    assert await ds.allowed(action="paper-view", resource=res, actor={"id": "bob"})
+    assert await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})
     # Editor does not grant manage.
     assert not await ds.allowed(
         action="paper-manage", resource=res, actor={"id": "bob"}
@@ -192,9 +186,7 @@ async def test_viewer_grant_allows_view_not_edit():
         by_actor="alice",
     )
 
-    assert await ds.allowed(
-        action="paper-view", resource=res, actor={"id": "carol"}
-    )
+    assert await ds.allowed(action="paper-view", resource=res, actor={"id": "carol"})
     assert not await ds.allowed(
         action="paper-edit", resource=res, actor={"id": "carol"}
     )
@@ -219,9 +211,9 @@ async def test_manager_grant_allows_all_three():
     )
 
     for action in ("paper-view", "paper-edit", "paper-manage"):
-        assert await ds.allowed(
-            action=action, resource=res, actor={"id": "dave"}
-        ), action
+        assert await ds.allowed(action=action, resource=res, actor={"id": "dave"}), (
+            action
+        )
 
 
 @pytest.mark.asyncio
