@@ -16,7 +16,6 @@
     users,
     mode = $bindable("edit"),
     canEdit = true,
-    canManage = false,
     isOwner = false,
     docState = "active",
     locked = false,
@@ -28,7 +27,6 @@
     users: number;
     mode?: "edit" | "view";
     canEdit?: boolean;
-    canManage?: boolean;
     isOwner?: boolean;
     docState?: "active" | "archived" | "trashed";
     locked?: boolean;
@@ -37,14 +35,8 @@
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
-  let shareOpen = $state(false);
-
   // actor-json the dialog reads to mark the current user's row "(you)".
   let actorJson = $derived(selfActor ? JSON.stringify({ id: selfActor }) : "");
-
-  function closeShare() {
-    shareOpen = false;
-  }
 
   // A revoke/grant in the dialog mutates acl directly; ask paper to sweep any
   // open SSE subscribers whose access just changed so a demoted/removed editor
@@ -61,15 +53,17 @@
     }
   }
 
-  // Attachment: wire the share dialog's bubbling CustomEvents. `share-revoked`
-  // drives the SSE sweep (a removed/demoted editor must be disconnected).
-  // The events bubble + are composed, so listening on the modal wrapper
-  // catches them from the nested custom element.
+  // Attachment: wire the share dialog's bubbling `share-changed` event, which
+  // the element fires after any grant/update/revoke. It drives the SSE sweep so
+  // a removed or demoted editor gets disconnected: a plain revoke and an
+  // Editor→Viewer downgrade both reduce access, and `share-changed` covers both
+  // (the narrower `share-revoked` would miss the downgrade). The event bubbles +
+  // is composed, so listening on the element catches it.
   function shareEvents(node: HTMLElement) {
-    const onRevoked = () => void sweepSubscribers();
-    node.addEventListener("share-revoked", onRevoked);
+    const onChanged = () => void sweepSubscribers();
+    node.addEventListener("share-changed", onChanged);
     return () => {
-      node.removeEventListener("share-revoked", onRevoked);
+      node.removeEventListener("share-changed", onChanged);
     };
   }
 
@@ -310,15 +304,21 @@
         <span class="saved" aria-live="polite">✓ saved</span>
       {/if}
       <span class="meta-actions">
-        {#if canManage}
-          <button
-            type="button"
-            class="share-btn"
-            onclick={() => (shareOpen = true)}
-          >
-            Share
-          </button>
-        {/if}
+        <!-- The <datasette-acl-share-dialog> custom element renders its own
+             share-icon trigger button and a native <dialog> modal; paper only
+             feeds it the acl resource identity + current actor and listens for
+             `share-changed` to run its SSE subscriber sweep. The element
+             degrades to a read-only "who has access" view when the actor can't
+             manage, so it is shown to every viewer (not gated on canManage). -->
+        <datasette-acl-share-dialog
+          resource-type={SHARE_RESOURCE_TYPE}
+          parent={SHARE_PARENT}
+          child={docId}
+          resource-label={meta?.name ?? ""}
+          actor-json={actorJson}
+          trigger-label="Share"
+          {@attach shareEvents}
+        ></datasette-acl-share-dialog>
         {#if copyState !== "idle"}
           <span
             class="copy-feedback"
@@ -532,46 +532,6 @@
   </svg>
 {/snippet}
 
-{#if shareOpen}
-  <!-- The <datasette-acl-share-dialog> custom element renders an inline panel
-       (people-with-access list + general access + add-box). paper wraps it in
-       its own modal so the existing "Share" button → dialog UX is preserved.
-       The element talks to the acl JSON API directly; we only listen for its
-       events to run paper's SSE subscriber sweep. -->
-  <div
-    class="share-modal-backdrop"
-    role="presentation"
-    onclick={closeShare}
-    onkeydown={(e) => {
-      if (e.key === "Escape") closeShare();
-    }}
-  >
-    <div
-      class="share-modal"
-      role="dialog"
-      aria-label="Share dialog"
-      tabindex="-1"
-      onclick={(e) => e.stopPropagation()}
-      onkeydown={(e) => e.stopPropagation()}
-      {@attach shareEvents}
-    >
-      <datasette-acl-share-dialog
-        resource-type={SHARE_RESOURCE_TYPE}
-        parent={SHARE_PARENT}
-        child={docId}
-        resource-label={meta?.name ?? ""}
-        actor-json={actorJson}
-        features="people,groups,agents,public"
-      ></datasette-acl-share-dialog>
-      <div class="share-modal-footer">
-        <button type="button" class="share-modal-close" onclick={closeShare}>
-          Done
-        </button>
-      </div>
-    </div>
-  </div>
-{/if}
-
 <style>
   .doc-header {
     padding: 12px 4px;
@@ -652,7 +612,11 @@
     color: #5a0000;
   }
 
-  .share-btn {
+  /* Restyle the <datasette-acl-share-dialog> trigger button (light DOM, so its
+     class is reachable) into paper's blue toolbar pill. The descendant selector
+     under .meta-actions outranks acl-share's own bundled trigger CSS regardless
+     of stylesheet order. The dialog/modal itself keeps acl-share's styling. */
+  .meta-actions :global(.datasette-acl-share__trigger.has-label) {
     padding: 3px 12px;
     font-size: 12px;
     line-height: 1.4;
@@ -662,50 +626,12 @@
     border-radius: 999px;
     cursor: pointer;
   }
-  .share-btn:hover {
+  .meta-actions :global(.datasette-acl-share__trigger.has-label:hover) {
     background: #094a8b;
     border-color: #094a8b;
   }
-
-  /* Modal wrapper around the <datasette-acl-share-dialog> custom element. The
-     element itself renders the inline panel; paper supplies the backdrop +
-     box so the Share button keeps its Google-Docs-style modal UX. */
-  .share-modal-backdrop {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.4);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 100;
-  }
-  .share-modal {
-    background: #fff;
-    border-radius: 8px;
-    padding: 16px 18px;
-    width: 520px;
-    max-width: calc(100vw - 32px);
-    max-height: calc(100vh - 32px);
-    overflow-y: auto;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.18);
-  }
-  .share-modal-footer {
-    display: flex;
-    justify-content: flex-end;
-    margin-top: 12px;
-  }
-  .share-modal-close {
-    padding: 6px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    background: #0b5cad;
-    color: #fff;
-    border: 1px solid #0b5cad;
-  }
-  .share-modal-close:hover {
-    background: #094a8b;
-    border-color: #094a8b;
+  .meta-actions :global(.datasette-acl-share__trigger-text) {
+    font-size: 12px;
   }
 
   /* Segmented Edit/View slider */

@@ -34,7 +34,6 @@
   // Read-only when the server says canEdit=false. When this flips on we
   // also force mode='view' so the toggle reflects reality.
   let canEdit = $derived(permissions?.canEdit ?? true);
-  let canManage = $derived(permissions?.canManage ?? false);
   let isOwner = $derived(permissions?.isOwner ?? false);
   let locked = $derived(permissions?.locked ?? false);
   let kind = $state<"doc" | "template">("doc");
@@ -182,7 +181,6 @@
     {users}
     bind:mode
     {canEdit}
-    {canManage}
     {isOwner}
     {locked}
     {kind}

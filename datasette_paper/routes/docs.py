@@ -546,9 +546,10 @@ async def sweep_subscribers(datasette, request, doc_id: int):
     component grants / updates / revokes acl grants directly against the acl
     JSON API. paper no longer stores share state. But a revoke can't reach into
     paper's in-memory ``Instance`` to drop a live editor's SSE queue, so the
-    dialog fires a ``share-revoked`` event and the frontend calls this endpoint
-    to run the revocation sweep (``Instance.revoke_unauthorized``), which
-    re-checks ``paper-view`` per subscriber and closes the queues that now fail.
+    dialog fires a ``share-changed`` event (after any grant/update/revoke) and
+    the frontend calls this endpoint to run the revocation sweep
+    (``Instance.revoke_unauthorized``), which re-checks ``paper-view`` per
+    subscriber and closes the queues that now fail.
 
     Manager-only — gated on ``paper-manage`` (the actor must be able to manage
     sharing to trigger a sweep). View-gated first so probing a doc id the actor

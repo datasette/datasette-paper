@@ -30,12 +30,12 @@ dev = [
     "solite>=0.0.1a36",
 ]
 
-# Local-only: the sharing-v2 acl engine + reusable share dialog are sibling
-# checkouts, not yet published. Referenced from the dev group so paper's new
-# paper-doc grants resolve through acl in tests and the <datasette-acl-share-dialog>
-# bundle is served via datasette-acl-share's asset helper.
+# datasette-acl-share is a sibling checkout, not yet published: paper serves the
+# <datasette-acl-share-dialog> bundle via its asset helper and resolves paper-doc
+# grants through acl in tests. It pins `datasette-acl @ git+...@main` (the acl
+# JSON API has merged), so datasette-acl flows in transitively from there — no
+# separate source for it here (a local path source would conflict with that URL).
 [tool.uv.sources]
-datasette-acl = { path = "../datasette-acl", editable = true }
 datasette-acl-share = { path = "../datasette-acl-share", editable = true }
 
 [build-system]

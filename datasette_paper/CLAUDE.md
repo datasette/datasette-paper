@@ -58,17 +58,20 @@ Use POST with verb-style URLs (`/rename`) — there's no PATCH/PUT today.
 
 ## Permissions / actors
 
-Four actions; two are per-paper (resource type `PaperResource(doc_id)`).
-Per-paper rules are emitted by the `permission_resources_sql` hook
-against the internal DB. Routes call the
-`ensure_paper_{list,create,view,edit}` helpers from `permissions.py`.
-Owner-only operations (visibility / share mutation) are gated inline
-in the handler. See `docs/PERMISSIONS.md` for the full model.
+Five actions: two global (config-driven) and three per-doc
+(`paper-view`/`-edit`/`-manage`, resource type `PaperDocResource(doc_id)`).
+Per-doc access is **owned by datasette-acl** — the actions resolve
+against acl grants, not paper SQL. The only rule paper still emits via
+`permission_resources_sql` is the `locked` read-only deny for
+`paper-edit`. Routes call the `ensure_paper_{list,create,view,edit}` /
+`can_paper_{view,edit,manage}` helpers from `permissions.py`;
+Manager-only operations (lock, archive, …) gate on `paper-manage` (via
+`_ensure_owner`). See `docs/PERMISSIONS.md` for the full model.
 
 `actor_id(request)` returns `request.actor.get("id")` or `None` —
-persisted on `_datasette_paper_doc.created_by` and the `actor_id`
-column of `_datasette_paper_step`, `_datasette_paper_snapshot`,
-`_datasette_paper_share`.
+persisted on `_datasette_paper_doc.created_by` (seeds the owner's acl
+Manager grant) and the `actor_id` column of `_datasette_paper_step` and
+`_datasette_paper_snapshot`.
 
 ## Read-only doc endpoints (`/document`, `/tasks`, `/tables`, `/tables/{name}`)
 
@@ -89,11 +92,13 @@ node's `name` attr after `.strip()` — empty strips → 400.
 ## Don't
 
 - Don't `from __future__ import annotations` in `routes/*.py`.
-- Don't put the doc id in `PaperResource(child=…)`. It's `parent`,
-  `child=None` — the SQL hook's join depends on it (NULL=NULL).
-- Don't statically grant `datasette-paper-view`/`-edit` in test configs;
-  they're resolved per-paper and granting them globally masks share-model
-  bugs.
+- Don't put the doc id in `PaperDocResource(parent=…)`. It's the `child`;
+  the `parent` is the fixed sentinel `_paper`. (The pre-acl
+  single-level `PaperResource` put the id in `parent` — that's gone.)
+- Don't statically grant `paper-view`/`-edit`/`-manage` in production;
+  they resolve per-doc through acl grants and granting them globally
+  masks share-model bugs. (The e2e config grants view+edit on purpose —
+  it runs anonymously with no seeded grants.)
 - Don't extend the JS schema without mirroring `pm_schema.py`,
   `markdown.py`, and `markdown_parser.py` in the same commit.
 - Don't use `execute_write_fn` for read-only queries (open ticket
