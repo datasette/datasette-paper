@@ -205,9 +205,10 @@ async def named_viewers(datasette, doc_id) -> tuple[set, bool]:
     """Return (named_actor_ids, has_open_audience) for a doc's paper-view audience.
 
     Named = explicit actor grants + materialized members of groups that hold
-    paper-view. Open audience = wildcard grants ('*','_signed_in','_anonymous')
-    or dynamic groups whose membership is config-driven and not fully
-    enumerable. Best-effort authoring aid (06 §#8) — never a security control.
+    paper-view. Open audience = a public-audience grant (acl's first-class
+    ``everyone`` / ``authenticated`` / ``anonymous`` principals) or a dynamic
+    group whose membership is config-driven and not fully enumerable.
+    Best-effort authoring aid (06 §#8) — never a security control.
     """
     from datasette_acl.grants import list_grants
 
@@ -216,7 +217,6 @@ async def named_viewers(datasette, doc_id) -> tuple[set, bool]:
     )
     acl_config = datasette.plugin_config("datasette-acl") or {}
     dynamic_group_names = set((acl_config.get("dynamic-groups") or {}).keys())
-    wildcards = {"*", "_signed_in", "_anonymous"}
 
     named: set = set()
     open_audience = False
@@ -225,11 +225,8 @@ async def named_viewers(datasette, doc_id) -> tuple[set, bool]:
         if "paper-view" not in g["actions"]:
             continue
         if g["principal"] == "actor":
-            aid = g["actor_id"]
-            if aid in wildcards:
-                open_audience = True
-            elif aid is not None:
-                named.add(aid)
+            if g["actor_id"] is not None:
+                named.add(g["actor_id"])
         elif g["principal"] == "group":
             # Dynamic groups: membership computed from allow-blocks, only
             # materialized for already-seen actors → treat as open audience.
@@ -242,6 +239,10 @@ async def named_viewers(datasette, doc_id) -> tuple[set, bool]:
             )
             for r in rows.rows:
                 named.add(r["actor_id"])
+        else:
+            # Public audience (everyone / authenticated / anonymous): the
+            # paper-view set is not enumerable as named actors.
+            open_audience = True
     return named, open_audience
 
 

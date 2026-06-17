@@ -17,7 +17,7 @@ The JSON ``links`` object is keyed by STRING dst doc ids — assert with str(P).
 import pytest
 
 from conftest import setup_paper_datasette
-from datasette_acl.grants import grant
+from datasette_acl.grants import grant, Principal
 from datasette_paper.db import PaperDB
 from datasette_paper.permissions import PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT
 
@@ -40,7 +40,7 @@ async def _grant_viewer(ds, doc_id, actor_id):
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id=actor_id,
+        principal=Principal.actor(actor_id),
         role="Viewer",
         by_actor="alice",
     )
@@ -94,13 +94,13 @@ async def test_open_audience_flag_on_wildcard_grant():
 
     d = await _create_doc(ds, "Doc D", "alice")
     p = await _create_doc(ds, "Paper P", "alice")
-    # Wildcard viewer on D: audience can't be enumerated → open_audience.
+    # Public-audience viewer on D: audience can't be enumerated → open_audience.
     await grant(
         ds,
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(d),
-        actor_id="_signed_in",
+        principal=Principal.authenticated(),
         role="Viewer",
         by_actor="alice",
     )

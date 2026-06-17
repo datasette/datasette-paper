@@ -6,7 +6,7 @@ active, non-template docs. See routes/docs.py::link_search.
 
 import pytest
 
-from datasette_acl.grants import grant
+from datasette_acl.grants import grant, Principal
 from datasette_paper.permissions import (
     PAPER_DOC_RESOURCE_TYPE,
     PAPER_DOCS_PARENT,
@@ -33,7 +33,7 @@ async def _grant_viewer(ds, doc_id, actor_id):
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id=actor_id,
+        principal=Principal.actor(actor_id),
         role="Viewer",
         by_actor="alice",
     )
