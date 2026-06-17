@@ -103,6 +103,12 @@ async def _seed_share(ds, *, doc_id, actor_id, role, granted_by="alice"):
     )
 
 
+# The ``share-general-principal`` config strings map onto acl's first-class
+# public audiences (a grant now carries a ``principal_type`` rather than a
+# magic ``actor_id`` like ``_signed_in`` / ``*``).
+_PUBLIC_AUDIENCE = {"_signed_in": "authenticated", "*": "everyone"}
+
+
 async def _grant_map(ds, doc_id):
     """Return {actor_id: set(actions)} for actor grants on a doc."""
     grants = await list_grants(
@@ -110,6 +116,23 @@ async def _grant_map(ds, doc_id):
     )
     return {
         g["actor_id"]: set(g["actions"]) for g in grants if g["principal"] == "actor"
+    }
+
+
+async def _public_grant_map(ds, doc_id):
+    """Return {principal_type: set(actions)} for public-audience grants on a doc.
+
+    Public audiences (``everyone`` / ``authenticated`` / ``anonymous``) carry no
+    actor_id, so the general-access ``link-*`` grants land here rather than in
+    :func:`_grant_map`.
+    """
+    grants = await list_grants(
+        ds, PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, str(doc_id)
+    )
+    return {
+        g["principal"]: set(g["actions"])
+        for g in grants
+        if g["principal"] in _PUBLIC_AUDIENCE.values()
     }
 
 
@@ -195,8 +218,8 @@ async def test_visibility_link_view_grants_signed_in_viewer():
     stats = await migrate_shares_to_acl(ds, force=True)
     assert stats["visibility"] == 1
 
-    grants = await _grant_map(ds, 1)
-    assert grants[DEFAULT_GENERAL_PRINCIPAL] == {"paper-view"}
+    pub = await _public_grant_map(ds, 1)
+    assert pub[_PUBLIC_AUDIENCE[DEFAULT_GENERAL_PRINCIPAL]] == {"paper-view"}
 
     res = PaperDocResource(1)
     # Any signed-in actor can view, but not edit.
@@ -214,8 +237,11 @@ async def test_visibility_link_edit_grants_signed_in_editor():
     stats = await migrate_shares_to_acl(ds, force=True)
     assert stats["visibility"] == 1
 
-    grants = await _grant_map(ds, 1)
-    assert grants[DEFAULT_GENERAL_PRINCIPAL] == {"paper-view", "paper-edit"}
+    pub = await _public_grant_map(ds, 1)
+    assert pub[_PUBLIC_AUDIENCE[DEFAULT_GENERAL_PRINCIPAL]] == {
+        "paper-view",
+        "paper-edit",
+    }
 
     res = PaperDocResource(1)
     assert await ds.allowed(action="paper-edit", resource=res, actor={"id": "zed"})
@@ -253,12 +279,11 @@ async def test_general_principal_configurable_to_wildcard():
 
     await migrate_shares_to_acl(ds, force=True)
 
-    grants = await _grant_map(ds, 1)
-    assert "*" in grants
-    assert grants["*"] == {"paper-view"}
+    pub = await _public_grant_map(ds, 1)
+    assert pub == {"everyone": {"paper-view"}}
 
     res = PaperDocResource(1)
-    # '*' includes anonymous callers.
+    # 'everyone' includes anonymous callers.
     assert await ds.allowed(action="paper-view", resource=res, actor=None)
 
 
@@ -271,9 +296,9 @@ async def test_invalid_general_principal_falls_back_to_default():
 
     await migrate_shares_to_acl(ds, force=True)
 
-    grants = await _grant_map(ds, 1)
-    assert DEFAULT_GENERAL_PRINCIPAL in grants
-    assert "nonsense" not in grants
+    # Invalid setting falls back to the default audience (authenticated).
+    pub = await _public_grant_map(ds, 1)
+    assert pub == {_PUBLIC_AUDIENCE[DEFAULT_GENERAL_PRINCIPAL]: {"paper-view"}}
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +389,10 @@ async def test_mixed_corpus_migrates_correctly():
     # doc3: no owner, any signed-in edits
     r3 = PaperDocResource(3)
     assert await ds.allowed(action="paper-edit", resource=r3, actor={"id": "stranger"})
-    assert len(await _grant_map(ds, 3)) == 1  # only the _signed_in principal
+    assert await _grant_map(ds, 3) == {}  # anonymous owner → no actor grant
+    assert await _public_grant_map(ds, 3) == {  # only the authenticated audience
+        "authenticated": {"paper-view", "paper-edit"}
+    }
 
 
 # ---------------------------------------------------------------------------

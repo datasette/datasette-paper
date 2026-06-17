@@ -35,9 +35,10 @@ except ImportError:  # pragma: no cover
     AclRole = None
 
 try:
-    from datasette_acl.grants import grant as _acl_grant
+    from datasette_acl.grants import grant as _acl_grant, Principal
 except ImportError:  # pragma: no cover
     _acl_grant = None
+    Principal = None
 
 
 # Resource type name for the acl-backed model.
@@ -158,7 +159,7 @@ async def seed_owner_manager_grant(datasette, doc_id, created_by) -> None:
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id=str(created_by),
+        principal=Principal.actor(str(created_by)),
         role="Manager",
         by_actor=str(created_by),
     )

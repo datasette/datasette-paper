@@ -161,7 +161,7 @@ async def test_editor_share_cannot_archive_or_trash():
     doc_id = create.json()["id"]
 
     # Hand-grant bob the editor role via acl.
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
     from datasette_paper.permissions import (
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
@@ -172,7 +172,7 @@ async def test_editor_share_cannot_archive_or_trash():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id="bob",
+        principal=Principal.actor("bob"),
         role="Editor",
         by_actor="alice",
     )

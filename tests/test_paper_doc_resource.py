@@ -64,8 +64,13 @@ async def test_new_actions_registered():
 
 @pytest.mark.asyncio
 async def test_roles_registered():
+    # acl now gathers roles on demand (the _acl_roles_registry cache was
+    # dropped); paper's datasette_acl_roles hook should still surface its
+    # three paper-doc roles via the registry builder.
+    from datasette_acl.roles import build_roles_registry
+
     ds = await _make_ds()
-    registry = getattr(ds, "_acl_roles_registry", {})
+    registry = build_roles_registry(ds)
     roles = registry.get(PAPER_DOC_RESOURCE_TYPE)
     assert roles, "paper-doc roles not in acl registry"
     by_name = {r.name: r for r in roles}
@@ -140,7 +145,7 @@ async def test_build_resource_roundtrips_via_acl():
 
 @pytest.mark.asyncio
 async def test_editor_grant_allows_view_and_edit():
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
 
     ds = await _make_ds()
     doc_id = await _create_doc(ds)
@@ -155,7 +160,7 @@ async def test_editor_grant_allows_view_and_edit():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id="bob",
+        principal=Principal.actor("bob"),
         role="Editor",
         by_actor="alice",
     )
@@ -170,7 +175,7 @@ async def test_editor_grant_allows_view_and_edit():
 
 @pytest.mark.asyncio
 async def test_viewer_grant_allows_view_not_edit():
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
 
     ds = await _make_ds()
     doc_id = await _create_doc(ds)
@@ -181,7 +186,7 @@ async def test_viewer_grant_allows_view_not_edit():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id="carol",
+        principal=Principal.actor("carol"),
         role="Viewer",
         by_actor="alice",
     )
@@ -194,7 +199,7 @@ async def test_viewer_grant_allows_view_not_edit():
 
 @pytest.mark.asyncio
 async def test_manager_grant_allows_all_three():
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
 
     ds = await _make_ds()
     doc_id = await _create_doc(ds)
@@ -205,7 +210,7 @@ async def test_manager_grant_allows_all_three():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id="dave",
+        principal=Principal.actor("dave"),
         role="Manager",
         by_actor="alice",
     )
@@ -219,7 +224,7 @@ async def test_manager_grant_allows_all_three():
 @pytest.mark.asyncio
 async def test_grant_scoped_to_specific_doc():
     """A grant on one doc must not leak to another doc."""
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
 
     ds = await _make_ds()
     doc_a = await _create_doc(ds)
@@ -230,7 +235,7 @@ async def test_grant_scoped_to_specific_doc():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_a),
-        actor_id="bob",
+        principal=Principal.actor("bob"),
         role="Editor",
         by_actor="alice",
     )

@@ -250,7 +250,7 @@ async def test_create_from_template_substitutes_placeholders():
     # Open the template to bob via an acl Viewer grant so we can
     # demonstrate the resolver pulls from the *creator's* context,
     # not the template owner's.
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
     from datasette_paper.permissions import (
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
@@ -261,7 +261,7 @@ async def test_create_from_template_substitutes_placeholders():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(template_id),
-        actor_id="bob",
+        principal=Principal.actor("bob"),
         role="Viewer",
         by_actor="alice",
     )

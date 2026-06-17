@@ -58,7 +58,7 @@ async def _grant_share(ds, doc_id, actor_id, role):
     ``role`` is the lowercase share-role name kept for call-site
     compatibility ('editor' / 'viewer'); it maps to the acl role.
     """
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
     from datasette_paper.permissions import (
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
@@ -70,7 +70,7 @@ async def _grant_share(ds, doc_id, actor_id, role):
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id=actor_id,
+        principal=Principal.actor(actor_id),
         role=acl_role,
         by_actor="alice",
     )

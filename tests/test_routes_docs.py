@@ -99,7 +99,7 @@ async def test_bootstrap_permissions_for_shared_viewer():
     doc_id = create.json()["id"]
 
     # Hand-grant bob the viewer role via an acl grant.
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
     from datasette_paper.permissions import (
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
@@ -110,7 +110,7 @@ async def test_bootstrap_permissions_for_shared_viewer():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id="bob",
+        principal=Principal.actor("bob"),
         role="Viewer",
         by_actor="alice",
     )

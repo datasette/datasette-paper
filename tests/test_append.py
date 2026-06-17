@@ -205,7 +205,7 @@ async def test_append_auto_snapshots_past_threshold(ds, monkeypatch):
 async def test_append_denied_without_edit_permission():
     """A viewer-only actor (acl Viewer grant) can't append."""
     from datasette.app import Datasette
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
     from datasette_paper.permissions import (
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
@@ -235,7 +235,7 @@ async def test_append_denied_without_edit_permission():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id="bob",
+        principal=Principal.actor("bob"),
         role="Viewer",
         by_actor="alice",
     )

@@ -20,21 +20,18 @@ def _acl_helpers():
 
     Imported on demand (not at module load) so this module stays loadable by
     the bare-``exec`` path that ``sqlite-utils migrate`` uses for codegen.
-    Returns ``(PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, grant,
-    build_roles_registry)``; the two acl callables are ``None`` when acl isn't
-    installed (the backfill then no-ops).
+    Returns ``(PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, grant, Principal)``;
+    the two acl objects are ``None`` when acl isn't installed (the backfill
+    then no-ops).
     """
     from .permissions import PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT
 
     try:  # acl is a soft dependency — the backfill no-ops when it is absent.
-        from datasette_acl.grants import grant as acl_grant
+        from datasette_acl.grants import grant as acl_grant, Principal
     except ImportError:  # pragma: no cover
         acl_grant = None
-    try:
-        from datasette_acl.roles import build_roles_registry
-    except ImportError:  # pragma: no cover
-        build_roles_registry = None
-    return PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, acl_grant, build_roles_registry
+        Principal = None
+    return PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, acl_grant, Principal
 
 
 migrations = Migrations("datasette-paper")
@@ -47,8 +44,9 @@ _ACL_MIGRATION_TABLE = "_datasette_paper_acl_migration"
 _ACL_MIGRATION_KEY = "shares_to_acl_grants"
 
 # Default general-access principal for ``link-*`` visibility. ``_signed_in``
-# means "anyone signed in"; deployments wanting truly public (incl. anonymous)
-# docs can set the ``share-general-principal`` plugin setting to ``*``.
+# means "anyone signed in" (acl's ``authenticated`` public audience);
+# deployments wanting truly public (incl. anonymous) docs can set the
+# ``share-general-principal`` plugin setting to ``*`` (acl's ``everyone``).
 DEFAULT_GENERAL_PRINCIPAL = "_signed_in"
 
 # Old per-doc visibility enum → (general-access principal role) for the
@@ -82,12 +80,15 @@ async def ensure_migrations(database) -> None:
     await database.execute_write_fn(_apply)
 
 
-def _general_principal(datasette) -> str:
-    """Resolve the wildcard principal for ``link-*`` visibility.
+def _general_principal(datasette, Principal):
+    """Resolve the public-audience principal for ``link-*`` visibility.
 
     Configurable via the ``share-general-principal`` plugin setting
     (``datasette-paper`` block); defaults to ``_signed_in``. Only ``*`` and
     ``_signed_in`` are honoured — anything else falls back to the default.
+    The two config strings map onto acl's first-class public audiences:
+    ``_signed_in`` → :meth:`Principal.authenticated`, ``*`` →
+    :meth:`Principal.everyone`.
     """
     config = datasette.plugin_config("datasette-paper") or {}
     principal = config.get("share-general-principal", DEFAULT_GENERAL_PRINCIPAL)
@@ -97,8 +98,8 @@ def _general_principal(datasette) -> str:
             principal,
             DEFAULT_GENERAL_PRINCIPAL,
         )
-        return DEFAULT_GENERAL_PRINCIPAL
-    return principal
+        principal = DEFAULT_GENERAL_PRINCIPAL
+    return Principal.everyone() if principal == "*" else Principal.authenticated()
 
 
 async def _acl_migration_done(db) -> bool:
@@ -140,31 +141,6 @@ async def _mark_acl_migration_done(db) -> None:
     )
 
 
-async def _ensure_paper_roles_registry(
-    datasette, resource_type, build_roles_registry
-) -> bool:
-    """Make sure acl's roles registry knows the ``paper-doc`` roles.
-
-    The data migration runs from paper's ``startup`` hook and calls acl's
-    ``grant(role=...)`` helper, which resolves role names against
-    ``datasette._acl_roles_registry``. That registry is populated by *acl's*
-    own startup hook, and the relative ordering of two plugins' startup hooks
-    is not contractually guaranteed. If paper's hook happened to run first the
-    registry would be missing ``paper-doc`` and every grant would raise
-    ``Unknown role``. Rather than depend on hook ordering, (re)build the
-    registry here if our roles aren't present yet — it is cheap and idempotent.
-
-    Returns False when acl isn't installed (registry helper unavailable), so
-    the caller can skip the migration entirely.
-    """
-    if build_roles_registry is None:
-        return False
-    registry = getattr(datasette, "_acl_roles_registry", None)
-    if not registry or resource_type not in registry:
-        datasette._acl_roles_registry = await build_roles_registry(datasette)
-    return resource_type in (getattr(datasette, "_acl_roles_registry", None) or {})
-
-
 async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
     """One-time backfill of legacy share/visibility data into acl grants.
 
@@ -188,11 +164,9 @@ async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
     """
     stats = {"owners": 0, "shares": 0, "visibility": 0, "skipped": False}
 
-    resource_type, parent, acl_grant, build_roles_registry = _acl_helpers()
+    resource_type, parent, acl_grant, Principal = _acl_helpers()
 
-    if acl_grant is None or not await _ensure_paper_roles_registry(
-        datasette, resource_type, build_roles_registry
-    ):
+    if acl_grant is None:
         # acl absent — nothing to migrate into. Still record the marker so we
         # don't re-scan on every startup; if acl is later installed the share
         # UI / create path seed grants going forward.
@@ -220,7 +194,7 @@ async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
         await _mark_acl_migration_done(db)
         return stats
 
-    general_principal = _general_principal(datasette)
+    general_principal = _general_principal(datasette, Principal)
 
     # Owner + visibility live on the doc row.
     docs = (
@@ -238,13 +212,13 @@ async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
                 resource_type,
                 parent,
                 doc_id,
-                actor_id=str(created_by),
+                principal=Principal.actor(str(created_by)),
                 role="Manager",
                 by_actor=str(created_by),
             )
             stats["owners"] += 1
 
-        # Visibility → general-access (wildcard) grant.
+        # Visibility → general-access (public-audience) grant.
         vis_role = _VISIBILITY_ROLE.get(visibility)
         if vis_role is not None:
             await acl_grant(
@@ -252,7 +226,7 @@ async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
                 resource_type,
                 parent,
                 doc_id,
-                actor_id=general_principal,
+                principal=general_principal,
                 role=vis_role,
                 by_actor=None,
             )
@@ -278,7 +252,7 @@ async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
             resource_type,
             parent,
             str(row["doc_id"]),
-            actor_id=str(row["actor_id"]),
+            principal=Principal.actor(str(row["actor_id"])),
             role=share_role,
             by_actor=str(row["granted_by"]) if row["granted_by"] else None,
         )

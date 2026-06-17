@@ -113,7 +113,7 @@ async def test_make_template_owner_only():
     doc_id = await _alice_doc(ds)
 
     # An acl Editor grant can't make it a template (manage is owner-only).
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
     from datasette_paper.permissions import (
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
@@ -124,7 +124,7 @@ async def test_make_template_owner_only():
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id="bob",
+        principal=Principal.actor("bob"),
         role="Editor",
         by_actor="alice",
     )

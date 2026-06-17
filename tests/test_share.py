@@ -52,28 +52,28 @@ async def _alice_doc(ds, name="P"):
 
 async def _grant_acl(ds, doc_id, actor_id, role):
     """Grant ``actor_id`` an acl role on the doc (Viewer/Editor/Manager)."""
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
 
     await grant(
         ds,
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id=actor_id,
+        principal=Principal.actor(actor_id),
         role=role,
         by_actor="alice",
     )
 
 
 async def _revoke_acl(ds, doc_id, actor_id):
-    from datasette_acl.grants import revoke
+    from datasette_acl.grants import revoke, Principal
 
     await revoke(
         ds,
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id=actor_id,
+        principal=Principal.actor(actor_id),
         by_actor="alice",
     )
 

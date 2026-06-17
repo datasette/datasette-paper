@@ -32,9 +32,10 @@ dev = [
 
 # datasette-acl-share is a sibling checkout, not yet published: paper serves the
 # <datasette-acl-share-dialog> bundle via its asset helper and resolves paper-doc
-# grants through acl in tests. It pins `datasette-acl @ git+...@main` (the acl
-# JSON API has merged), so datasette-acl flows in transitively from there — no
-# separate source for it here (a local path source would conflict with that URL).
+# grants through acl in tests. It pins `datasette-acl @ git+...` to a specific
+# commit archive (the general-access / first-class-principal API it drives), so
+# datasette-acl flows in transitively from there — no separate source for it here
+# (a local path source would conflict with that URL).
 [tool.uv.sources]
 datasette-acl-share = { path = "../datasette-acl-share", editable = true }
 

@@ -24,7 +24,7 @@ def _actor_cookie(ds, actor_id):
 
 async def _grant_acl(ds, doc_id, actor_id, role):
     """Grant ``actor_id`` an acl role (Viewer/Editor/Manager) on the doc."""
-    from datasette_acl.grants import grant
+    from datasette_acl.grants import grant, Principal
     from datasette_paper.permissions import (
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
@@ -35,14 +35,14 @@ async def _grant_acl(ds, doc_id, actor_id, role):
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id=actor_id,
+        principal=Principal.actor(actor_id),
         role=role,
         by_actor="alice",
     )
 
 
 async def _revoke_acl(ds, doc_id, actor_id):
-    from datasette_acl.grants import revoke
+    from datasette_acl.grants import revoke, Principal
     from datasette_paper.permissions import (
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
@@ -53,7 +53,7 @@ async def _revoke_acl(ds, doc_id, actor_id):
         PAPER_DOC_RESOURCE_TYPE,
         PAPER_DOCS_PARENT,
         str(doc_id),
-        actor_id=actor_id,
+        principal=Principal.actor(actor_id),
         by_actor="alice",
     )
 
