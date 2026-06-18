@@ -651,13 +651,13 @@ class Instance:
         that wants to show a "this doc is locked" banner regardless of
         the subscriber's role.
         """
-        from .permissions import PaperDocResource
+        from .permissions import PaperDocResource, PAPER_EDIT
 
         resource = PaperDocResource(self.doc_id)
         for q, (_client_id, actor_id) in list(self.subscribers.items()):
             actor = {"id": actor_id} if actor_id else None
             can_edit = await datasette.allowed(
-                action="paper-edit", resource=resource, actor=actor
+                action=PAPER_EDIT, resource=resource, actor=actor
             )
             q.put_nowait(
                 {
@@ -678,14 +678,14 @@ class Instance:
 
         Returns the number of subscribers that were revoked.
         """
-        from .permissions import PaperDocResource
+        from .permissions import PaperDocResource, PAPER_VIEW
 
         revoked = 0
         resource = PaperDocResource(self.doc_id)
         for q, (_client_id, actor_id) in list(self.subscribers.items()):
             actor = {"id": actor_id} if actor_id else None
             allowed = await datasette.allowed(
-                action="paper-view", resource=resource, actor=actor
+                action=PAPER_VIEW, resource=resource, actor=actor
             )
             if not allowed:
                 # Sentinel — the SSE loop checks `event_name == "closed"`

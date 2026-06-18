@@ -13,6 +13,9 @@ from ..markdown_parser import markdown_to_doc, markdown_to_fragment
 from ..tables import count_tables_with_name, extract_tables, find_table_by_name
 from ..permissions import (
     PAPER_DOCS_PARENT,
+    PAPER_VIEW,
+    PAPER_EDIT,
+    PAPER_MANAGE,
     PaperDocResource,
     can_paper_manage,
     ensure_paper_create,
@@ -104,7 +107,7 @@ async def list_docs(datasette, request):
     # Pull every paper the actor can view in one shot (cap at 1000; if
     # somebody has 1000+ papers visible we'll add proper pagination).
     page = await datasette.allowed_resources(
-        action="paper-view", actor=request.actor, limit=1000
+        action=PAPER_VIEW, actor=request.actor, limit=1000
     )
     # PaperDocResource is two-level — the doc id lives in `child`
     # (parent is the fixed PAPER_DOCS_PARENT sentinel).
@@ -260,7 +263,7 @@ async def get_doc_bootstrap(datasette, request, doc_id: int):
     me = actor_id(request)
     is_owner = doc.created_by is not None and doc.created_by == me
     can_edit = await datasette.allowed(
-        action="paper-edit",
+        action=PAPER_EDIT,
         resource=PaperDocResource(doc_id),
         actor=request.actor,
     )
@@ -557,7 +560,7 @@ async def sweep_subscribers(datasette, request, doc_id: int):
     """
     await ensure_paper_view(datasette, request, doc_id)
     if not await can_paper_manage(datasette, request.actor, doc_id):
-        raise Forbidden("paper-manage")
+        raise Forbidden(PAPER_MANAGE)
     db = paper_db(datasette)
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:
@@ -591,7 +594,7 @@ async def _ensure_owner(datasette, request, doc_id: int):
     """
     await ensure_paper_view(datasette, request, doc_id)
     if not await can_paper_manage(datasette, request.actor, doc_id):
-        raise Forbidden("paper-manage")
+        raise Forbidden(PAPER_MANAGE)
     db = paper_db(datasette)
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:

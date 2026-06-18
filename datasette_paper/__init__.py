@@ -10,6 +10,9 @@ from .permissions import (  # noqa: F401
     PaperDocResource,
     permission_resources_sql,
     PAPER_DOC_RESOURCE_TYPE,
+    PAPER_VIEW,
+    PAPER_EDIT,
+    PAPER_MANAGE,
 )
 from . import routes  # noqa: F401 — triggers decorator registration
 from .routes.events import sse_events
@@ -176,21 +179,21 @@ def register_actions(datasette):
         # per-doc permission check goes through these; paper no longer ships
         # owner/shared/visibility SQL (only the `locked` deny in permissions.py).
         Action(
-            name="paper-view",
+            name=PAPER_VIEW,
             description="View a paper doc",
             resource_class=PaperDocResource,
         ),
         Action(
-            name="paper-edit",
+            name=PAPER_EDIT,
             description="Edit a paper doc",
             resource_class=PaperDocResource,
-            also_requires="paper-view",
+            also_requires=PAPER_VIEW,
         ),
         Action(
-            name="paper-manage",
+            name=PAPER_MANAGE,
             description="Manage sharing for a paper doc",
             resource_class=PaperDocResource,
-            also_requires="paper-view",
+            also_requires=PAPER_VIEW,
         ),
     ]
 
@@ -205,9 +208,9 @@ def datasette_acl_roles(datasette):
     """
     return standard_roles(
         PAPER_DOC_RESOURCE_TYPE,
-        view="paper-view",
-        edit="paper-edit",
-        manage="paper-manage",
+        view=PAPER_VIEW,
+        edit=PAPER_EDIT,
+        manage=PAPER_MANAGE,
         descriptions={
             "Viewer": "Can view the doc",
             "Editor": "Can view and edit the doc",

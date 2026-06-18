@@ -36,12 +36,12 @@ from datasette_acl.grants import grant as _acl_grant, Principal
 PAPER_DOC_RESOURCE_TYPE = "paper-doc"
 
 # Resource-scoped actions, resolved by datasette-acl against grants on
-# PaperDocResource.
-PAPER_DOC_ACTIONS = (
-    "paper-view",
-    "paper-edit",
-    "paper-manage",
-)
+# PaperDocResource. These are the canonical action-name constants — import and
+# use them rather than re-typing the string literals.
+PAPER_VIEW = "paper-view"
+PAPER_EDIT = "paper-edit"
+PAPER_MANAGE = "paper-manage"
+PAPER_DOC_ACTIONS = (PAPER_VIEW, PAPER_EDIT, PAPER_MANAGE)
 
 # Papers all live in a single internal database, so the resource hierarchy's
 # ``parent`` is a fixed sentinel rather than a real database name. The doc id
@@ -120,7 +120,7 @@ async def permission_resources_sql(datasette, actor, action):
     and the two global actions are untouched (we return ``None`` for them, so
     acl and the config-permissions plugin answer them).
     """
-    if action != "paper-edit":
+    if action != PAPER_EDIT:
         return None
 
     return [
@@ -174,7 +174,7 @@ async def ensure_paper_create(datasette, request) -> None:
 
 async def ensure_paper_view(datasette, request, doc_id) -> None:
     await datasette.ensure_permission(
-        action="paper-view",
+        action=PAPER_VIEW,
         resource=PaperDocResource(doc_id),
         actor=request.actor,
     )
@@ -182,7 +182,7 @@ async def ensure_paper_view(datasette, request, doc_id) -> None:
 
 async def ensure_paper_edit(datasette, request, doc_id) -> None:
     await datasette.ensure_permission(
-        action="paper-edit",
+        action=PAPER_EDIT,
         resource=PaperDocResource(doc_id),
         actor=request.actor,
     )
@@ -195,7 +195,7 @@ async def can_paper_view(datasette, actor, doc_id) -> bool:
     the share/list endpoints where we need to inspect rather than gate.
     """
     return await datasette.allowed(
-        action="paper-view",
+        action=PAPER_VIEW,
         resource=PaperDocResource(doc_id),
         actor=actor,
     )
@@ -208,7 +208,7 @@ async def can_paper_edit(datasette, actor, doc_id) -> bool:
     surface denial as a tool-result error rather than an HTTP Forbidden.
     """
     return await datasette.allowed(
-        action="paper-edit",
+        action=PAPER_EDIT,
         resource=PaperDocResource(doc_id),
         actor=actor,
     )
@@ -222,7 +222,7 @@ async def can_paper_manage(datasette, actor, doc_id) -> bool:
     inline ``created_by``-equality owner check.
     """
     return await datasette.allowed(
-        action="paper-manage",
+        action=PAPER_MANAGE,
         resource=PaperDocResource(doc_id),
         actor=actor,
     )
