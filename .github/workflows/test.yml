@@ -25,16 +25,6 @@ jobs:
         run: npm install --prefix frontend
       - name: Build frontend bundle
         run: just frontend
-      # datasette-acl-share is an editable path dependency (../datasette-acl-share)
-      # that isn't published yet, so CI must provide the sibling checkout. Its
-      # built bundle is gitignored, so build it too — paper's doc page reads its
-      # manifest via datasette_share_assets (exercised by the backend suite).
-      - name: Check out + build datasette-acl-share sibling
-        run: |
-          git clone --depth 1 --branch asg017/sharing-v2 \
-            https://github.com/datasette/datasette-acl-share.git ../datasette-acl-share
-          npm --prefix ../datasette-acl-share/frontend install
-          npm --prefix ../datasette-acl-share/frontend run build
       - name: Format check
         run: just format-backend-check
       - name: Lint
@@ -70,14 +60,6 @@ jobs:
         run: npm install --prefix frontend
       - name: Build frontend bundle
         run: just frontend
-      # See the backend job: provide + build the unpublished datasette-acl-share
-      # sibling so its <datasette-acl-share-dialog> bundle is served in e2e.
-      - name: Check out + build datasette-acl-share sibling
-        run: |
-          git clone --depth 1 --branch asg017/sharing-v2 \
-            https://github.com/datasette/datasette-acl-share.git ../datasette-acl-share
-          npm --prefix ../datasette-acl-share/frontend install
-          npm --prefix ../datasette-acl-share/frontend run build
       - name: Install Playwright browsers
         working-directory: frontend
         run: npx playwright install --with-deps chromium

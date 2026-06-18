@@ -102,9 +102,9 @@ def _is_doc_page(request) -> bool:
     return bool(request and _DOC_PAGE_RE.match(request.path or ""))
 
 
-# datasette-acl-share is an optional sibling plugin (local editable dev dep). When
-# it isn't installed the asset helper is unavailable, so the doc page simply
-# renders without the share dialog rather than erroring.
+# datasette-acl-share is an optional dependency (published on PyPI; pulled in via
+# the dev group). When it isn't installed the asset helper is unavailable, so the
+# doc page simply renders without the share dialog rather than erroring.
 try:
     from datasette_acl_share import datasette_share_assets as _share_assets
 except ImportError:  # pragma: no cover
