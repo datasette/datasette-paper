@@ -9,7 +9,7 @@ from sqlite_migrate import Migrations
 # via ``exec`` *without* package context, so a top-level relative import
 # (``from .permissions import …``) raises ``KeyError: '__name__' not in
 # globals``. The async share→acl backfill is the only code that needs the
-# permission constants and acl grant helper, so those imports are deferred into
+# permission constants, so that relative import is deferred into
 # ``migrate_shares_to_acl`` (see ``_acl_helpers``).
 
 logger = logging.getLogger("datasette_paper.migrations")
@@ -18,19 +18,14 @@ logger = logging.getLogger("datasette_paper.migrations")
 def _acl_helpers():
     """Lazily resolve the permission constants + acl grant API.
 
-    Imported on demand (not at module load) so this module stays loadable by
-    the bare-``exec`` path that ``sqlite-utils migrate`` uses for codegen.
-    Returns ``(PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, grant, Principal)``;
-    the two acl objects are ``None`` when acl isn't installed (the backfill
-    then no-ops).
+    The ``.permissions`` import is done on demand (not at module load) so this
+    module stays loadable by the bare-``exec`` path that ``sqlite-utils
+    migrate`` uses for codegen. Returns
+    ``(PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, grant, Principal)``.
     """
     from .permissions import PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT
+    from datasette_acl.grants import grant as acl_grant, Principal
 
-    try:  # acl is a soft dependency — the backfill no-ops when it is absent.
-        from datasette_acl.grants import grant as acl_grant, Principal
-    except ImportError:  # pragma: no cover
-        acl_grant = None
-        Principal = None
     return PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, acl_grant, Principal
 
 
@@ -159,19 +154,12 @@ async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
     short-circuits repeat runs, and acl's ``grant`` only inserts actions a
     principal doesn't already hold (so even a forced re-run produces no
     duplicate grants or audit rows). ``force=True`` bypasses the marker for
-    tests / a deliberate re-run. No-ops (returning zero counts) when acl is not
-    installed. Returns a small stats dict for logging / assertions.
+    tests / a deliberate re-run. Returns a small stats dict for logging /
+    assertions.
     """
     stats = {"owners": 0, "shares": 0, "visibility": 0, "skipped": False}
 
     resource_type, parent, acl_grant, Principal = _acl_helpers()
-
-    if acl_grant is None:
-        # acl absent — nothing to migrate into. Still record the marker so we
-        # don't re-scan on every startup; if acl is later installed the share
-        # UI / create path seed grants going forward.
-        stats["skipped"] = True
-        return stats
 
     db = datasette.get_internal_database()
     await db.execute_write(

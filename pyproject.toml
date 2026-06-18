@@ -11,6 +11,8 @@ classifiers=[
 requires-python = ">=3.10"
 dependencies = [
     "datasette>1a",
+    "datasette-acl>=0.6a0",
+    "datasette-acl-share>=0.0.1a4",
     "datasette-plugin-router>=0.0.1a3",
     "datasette-vite>=0.0.1a4",
     "markdown-it-py[plugins]>=3.0",
@@ -21,9 +23,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "datasette-acl>=0.6a0",
     "datasette-agent",
-    "datasette-acl-share>=0.0.1a4",
     "pytest",
     "pytest-asyncio",
     "ruff>=0.15.12",

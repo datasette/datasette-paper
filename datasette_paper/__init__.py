@@ -3,11 +3,12 @@ import re
 from datasette import hookimpl, Response
 from datasette.permissions import Action
 from datasette_vite import vite_entry
+from datasette_acl.roles import standard_roles
+from datasette_acl_share import datasette_share_assets as _share_assets
 from .router import router
 from .permissions import (  # noqa: F401
     PaperDocResource,
     permission_resources_sql,
-    standard_roles,
     PAPER_DOC_RESOURCE_TYPE,
 )
 from . import routes  # noqa: F401 — triggers decorator registration
@@ -102,19 +103,10 @@ def _is_doc_page(request) -> bool:
     return bool(request and _DOC_PAGE_RE.match(request.path or ""))
 
 
-# datasette-acl-share is an optional dependency (published on PyPI; pulled in via
-# the dev group). When it isn't installed the asset helper is unavailable, so the
-# doc page simply renders without the share dialog rather than erroring.
-try:
-    from datasette_acl_share import datasette_share_assets as _share_assets
-except ImportError:  # pragma: no cover
-    _share_assets = None
-
-
 @hookimpl
 def extra_js_urls(datasette, request):
     """Include the <datasette-acl-share-dialog> JS bundle on the doc page only."""
-    if _share_assets is None or not _is_doc_page(request):
+    if not _is_doc_page(request):
         return []
     return _share_assets(datasette)["js"]
 
@@ -122,7 +114,7 @@ def extra_js_urls(datasette, request):
 @hookimpl
 def extra_css_urls(datasette, request):
     """Include the <datasette-acl-share-dialog> CSS on the doc page only."""
-    if _share_assets is None or not _is_doc_page(request):
+    if not _is_doc_page(request):
         return []
     return _share_assets(datasette)["css"]
 
@@ -209,11 +201,8 @@ def datasette_acl_roles(datasette):
 
     Consumed by datasette-acl's role registry (see ``build_roles_registry``).
     Uses acl's ``standard_roles`` factory for the canonical cumulative triple
-    (Viewer ⊂ Editor ⊂ Manager, ``manage=True`` on Manager). No-op when acl is
-    not installed (``standard_roles is None``).
+    (Viewer ⊂ Editor ⊂ Manager, ``manage=True`` on Manager).
     """
-    if standard_roles is None:
-        return []
     return standard_roles(
         PAPER_DOC_RESOURCE_TYPE,
         view="paper-view",

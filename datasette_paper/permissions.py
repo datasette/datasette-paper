@@ -29,17 +29,7 @@ from __future__ import annotations
 from datasette import hookimpl
 from datasette.permissions import PermissionSQL, Resource
 
-try:  # acl is a soft dependency — the roles hook + grant seeding no-op when absent.
-    from datasette_acl.roles import AclRole, standard_roles
-except ImportError:  # pragma: no cover
-    AclRole = None
-    standard_roles = None
-
-try:
-    from datasette_acl.grants import grant as _acl_grant, Principal
-except ImportError:  # pragma: no cover
-    _acl_grant = None
-    Principal = None
+from datasette_acl.grants import grant as _acl_grant, Principal
 
 
 # Resource type name for the acl-backed model.
@@ -150,10 +140,9 @@ async def seed_owner_manager_grant(datasette, doc_id, created_by) -> None:
 
     Replaces the old ``created_by``-based owner SQL: ownership is now an acl
     Manager grant on the ``paper-doc`` resource. No-op for anonymous creates
-    (``created_by`` falsy — anonymous actors never own) and when acl isn't
-    installed.
+    (``created_by`` falsy — anonymous actors never own).
     """
-    if not created_by or _acl_grant is None:
+    if not created_by:
         return
     await _acl_grant(
         datasette,
