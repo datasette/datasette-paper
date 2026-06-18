@@ -21,23 +21,14 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "datasette-acl",
+    "datasette-acl>=0.6a0",
     "datasette-agent",
-    "datasette-acl-share",
+    "datasette-acl-share>=0.0.1a4",
     "pytest",
     "pytest-asyncio",
     "ruff>=0.15.12",
     "solite>=0.0.1a36",
 ]
-
-# datasette-acl-share is a sibling checkout, not yet published: paper serves the
-# <datasette-acl-share-dialog> bundle via its asset helper and resolves paper-doc
-# grants through acl in tests. It pins `datasette-acl @ git+...` to a specific
-# commit archive (the general-access / first-class-principal API it drives), so
-# datasette-acl flows in transitively from there — no separate source for it here
-# (a local path source would conflict with that URL).
-[tool.uv.sources]
-datasette-acl-share = { path = "../datasette-acl-share", editable = true }
 
 [build-system]
 requires = ["setuptools"]
