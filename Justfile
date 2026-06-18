@@ -156,11 +156,10 @@ test-all *flags:
 # Papers live in Datasette's internal DB; pass `--internal <path>` so they
 # persist across restarts. No user database needs to be attached.
 #
-# Only `list` and `create` are granted globally — `view` and `edit` are
-# resolved per-paper by `permission_resources_sql` against the doc's
-# `created_by` and `_datasette_paper_share` rows. Granting `view`/`edit`
-# globally would bypass the share-role gating and let everyone edit
-# anyone's paper. (The e2e config grants all four because playwright runs
+# Only `create` is granted globally (listing is ungated) — `view` and `edit`
+# are resolved per-paper by datasette-acl grants on the doc. Granting
+# `view`/`edit` globally would bypass the share-role gating and let everyone
+# edit anyone's paper. (The e2e config grants view+edit because playwright runs
 # as anonymous and exercises only the read-only path.)
 dev *flags:
     uv run --prerelease=allow \
@@ -169,7 +168,6 @@ dev *flags:
         --with ../datasette-debug-gotham \
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
-            -s permissions.datasette-paper-list true \
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
             {{flags}}

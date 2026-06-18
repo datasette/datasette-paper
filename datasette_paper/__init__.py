@@ -164,15 +164,14 @@ def register_routes():
 @hookimpl
 def register_actions(datasette):
     return [
-        # --- Global actions (unchanged) -------------------------------------
-        Action(
-            name="datasette-paper-list",
-            description="Can list papers (see the index page + list endpoint)",
-        ),
+        # --- Global action --------------------------------------------------
+        # Creating papers is the one coarse capability paper still gates on a
+        # global permission. Listing/reading is no longer gated globally: the
+        # index, list, search and template-param endpoints are reachable by
+        # anyone and return only the docs acl says the actor can view.
         Action(
             name="datasette-paper-create",
             description="Can create new papers",
-            also_requires="datasette-paper-list",
         ),
         # --- acl-backed resource actions ------------------------------------
         # These resolve against datasette-acl grants on PaperDocResource. Every
@@ -220,18 +219,15 @@ def datasette_acl_roles(datasette):
 
 
 @hookimpl
-def menu_links(datasette, actor, request=None):
-    async def inner():
-        if await datasette.allowed(action="datasette-paper-list", actor=actor):
-            return [
-                {
-                    "href": datasette.urls.path("/-/paper/"),
-                    "label": "Papers",
-                }
-            ]
-        return []
-
-    return inner
+def menu_links(datasette):
+    # Listing is no longer permission-gated, so the "Papers" link is shown to
+    # everyone; the index itself only surfaces docs the actor can view.
+    return [
+        {
+            "href": datasette.urls.path("/-/paper/"),
+            "label": "Papers",
+        }
+    ]
 
 
 @hookimpl

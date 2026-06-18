@@ -34,7 +34,6 @@ async def test_list_filters_to_actor_visible_papers():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },
@@ -83,7 +82,6 @@ async def test_bootstrap_permissions_for_shared_viewer():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },

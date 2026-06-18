@@ -26,8 +26,8 @@ DEFAULT_ACTOR_ID = "alice"
 def make_datasette(*, granted: bool = True) -> Datasette:
     """Construct an in-memory Datasette with the paper permissions flagged.
 
-    *granted=True* grants ``datasette-paper-list`` + ``datasette-paper-create``
-    to everyone (matching the dev / e2e setup). Per-paper ``view`` / ``edit`` /
+    *granted=True* grants ``datasette-paper-create`` to everyone (matching the
+    dev / e2e setup). Listing is ungated. Per-paper ``view`` / ``edit`` /
     ``manage`` are resolved by datasette-acl grants on the ``paper-doc``
     resource (the owner gets a Manager grant seeded on create).
 
@@ -36,7 +36,6 @@ def make_datasette(*, granted: bool = True) -> Datasette:
     config = (
         {
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         }

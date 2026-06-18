@@ -39,7 +39,6 @@ from datasette_paper.permissions import (
 async def _make_ds(config=None):
     base = {
         "permissions": {
-            "datasette-paper-list": True,
             "datasette-paper-create": True,
         }
     }

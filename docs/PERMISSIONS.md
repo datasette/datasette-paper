@@ -24,15 +24,19 @@ Paper itself only: declares the actions + roles + resource class, seeds an owner
 grant on create, emits the `locked` deny, and runs an SSE revocation sweep when
 the dialog mutates a grant.
 
-## TL;DR — the five actions
+## TL;DR — the four actions
 
 | Action | Scope | Resolved by |
 |---|---|---|
-| `datasette-paper-list` | global | standard config-permissions (`permissions:` block) |
-| `datasette-paper-create` | global | config-permissions; `also_requires=datasette-paper-list` |
+| `datasette-paper-create` | global | standard config-permissions (`permissions:` block) |
 | `paper-view` | per-doc (`PaperDocResource`) | datasette-acl grants |
 | `paper-edit` | per-doc (`PaperDocResource`) | datasette-acl grants; `also_requires=paper-view`; **plus** paper's `locked` deny |
 | `paper-manage` | per-doc (`PaperDocResource`) | datasette-acl grants (the Manager role); `also_requires=paper-view` |
+
+**Listing is not gated.** The index, list, search and template-param endpoints
+are reachable by anyone and return only the docs acl says the actor can view
+(`allowed_resources("paper-view")`), so a coarse `datasette-paper-list`
+permission would be redundant — there is no such action.
 
 `paper-manage` **is** a real action now (it was an inline owner check in the
 pre-acl model). It is the Manager-only capability — managing sharing, locking,
@@ -48,22 +52,25 @@ create time (§4).
 ```python
 from datasette.permissions import Action
 
+from .permissions import PAPER_VIEW, PAPER_EDIT, PAPER_MANAGE
+
 @hookimpl
 def register_actions(datasette):
     return [
-        # Global — config-driven.
-        Action(name="datasette-paper-list",  description="Can list papers …"),
-        Action(name="datasette-paper-create", description="Can create new papers",
-               also_requires="datasette-paper-list"),
+        # Global — config-driven. (Listing is ungated; there is no list action.)
+        Action(name="datasette-paper-create", description="Can create new papers"),
         # Per-doc — acl-backed.
-        Action(name="paper-view",   description="View a paper doc",
+        Action(name=PAPER_VIEW,   description="View a paper doc",
                resource_class=PaperDocResource),
-        Action(name="paper-edit",   description="Edit a paper doc",
-               resource_class=PaperDocResource, also_requires="paper-view"),
-        Action(name="paper-manage", description="Manage sharing for a paper doc",
-               resource_class=PaperDocResource, also_requires="paper-view"),
+        Action(name=PAPER_EDIT,   description="Edit a paper doc",
+               resource_class=PaperDocResource, also_requires=PAPER_VIEW),
+        Action(name=PAPER_MANAGE, description="Manage sharing for a paper doc",
+               resource_class=PaperDocResource, also_requires=PAPER_VIEW),
     ]
 ```
+
+(`PAPER_VIEW` / `PAPER_EDIT` / `PAPER_MANAGE` are the action-name constants
+exported by `permissions.py` — import them rather than re-typing the strings.)
 
 Things to know:
 
@@ -72,8 +79,9 @@ Things to know:
 - `resource_class=PaperDocResource` marks the action per-resource. A check with a
   `resource=` argument consults datasette-acl's grants (and paper's
   `permission_resources_sql`); without one it falls back to global config rules.
-- The two **global** actions stay config-driven (the `permissions:` block); the
-  three **per-doc** actions are answered by acl grants, not by paper SQL.
+- The **global** `datasette-paper-create` action stays config-driven (the
+  `permissions:` block); the three **per-doc** actions are answered by acl
+  grants, not by paper SQL.
 
 ---
 
@@ -81,33 +89,33 @@ Things to know:
 
 datasette-acl resolves an action check by matching the actor's granted actions
 against the **roles** a plugin registers for its resource type. Paper registers
-three via the `datasette_acl_roles` hook (`datasette_paper/__init__.py`):
+the canonical cumulative triple via the `datasette_acl_roles` hook
+(`datasette_paper/__init__.py`), using acl's `standard_roles()` factory rather
+than hand-building each `AclRole`:
 
 ```python
+from datasette_acl.roles import standard_roles
+
 @hookimpl
 def datasette_acl_roles(datasette):
-    if AclRole is None:        # acl is a soft dependency
-        return []
-    return [
-        AclRole(resource_type="paper-doc", name="Viewer",  rank=1,
-                actions=["paper-view"]),
-        AclRole(resource_type="paper-doc", name="Editor",  rank=2,
-                actions=["paper-view", "paper-edit"]),
-        AclRole(resource_type="paper-doc", name="Manager", rank=3, manage=True,
-                actions=["paper-view", "paper-edit", "paper-manage"]),
-    ]
+    return standard_roles(
+        "paper-doc",
+        view=PAPER_VIEW, edit=PAPER_EDIT, manage=PAPER_MANAGE,
+    )
 ```
+
+`standard_roles()` returns Viewer (rank 1, `paper-view`), Editor (rank 2,
+`paper-view`+`paper-edit`) and Manager (rank 3, `manage=True`, all three) — the
+same cumulative bundles paper used to spell out by hand.
 
 - `rank` orders the roles (used by the share dialog's role dropdown).
 - `manage=True` flags Manager as the role that may *change* sharing — acl uses it
   to decide `can_manage` in its JSON API, which drives the dialog's read-only vs
   editable rendering.
-- The hook returns `[]` (a no-op) when acl isn't installed, so paper still
-  imports without it; per-doc checks then simply have no grants to match.
 
 The share dialog grants/revokes **roles** (Viewer/Editor/Manager) or, for
-General access, a wildcard principal (`_signed_in` / `*`). Paper never writes
-these — datasette-acl-share does, against acl's JSON API.
+General access, a public-audience principal (`authenticated` / `everyone`).
+Paper never writes these — datasette-acl-share does, against acl's JSON API.
 
 ---
 
@@ -176,11 +184,12 @@ when a doc is created (`datasette_paper/permissions.py`):
 
 ```python
 async def seed_owner_manager_grant(datasette, doc_id, created_by) -> None:
-    if not created_by or _acl_grant is None:   # anonymous never owns; acl optional
+    if not created_by:        # anonymous never owns
         return
     await _acl_grant(
         datasette, PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, str(doc_id),
-        actor_id=str(created_by), role="Manager", by_actor=str(created_by),
+        principal=Principal.actor(str(created_by)),
+        role="Manager", by_actor=str(created_by),
     )
 ```
 
@@ -289,9 +298,9 @@ async def rename_doc(datasette, request, doc_id: int):
 ```python
 @router.GET(r"^/-/paper/api/docs$")
 async def list_docs(datasette, request):
-    await ensure_paper_list(datasette, request)
+    # No global gate — results are acl-filtered, so a no-grant actor gets [].
     page = await datasette.allowed_resources(
-        action="paper-view", actor=request.actor, limit=1000)
+        action=PAPER_VIEW, actor=request.actor, limit=1000)
     doc_ids = [int(r.child) for r in page.resources]   # NOTE: child, not parent
     ...
 ```
@@ -367,11 +376,10 @@ the registered action is what's actually checked.
 
 ## 8. Configuration
 
-### Static config — the two global actions only
+### Static config — the one global action
 
 ```bash
 datasette --internal papers.db \
-    -s permissions.datasette-paper-list true \
     -s permissions.datasette-paper-create true
 ```
 
@@ -379,12 +387,12 @@ or in `datasette.yaml`:
 
 ```yaml
 permissions:
-  datasette-paper-list: true
   datasette-paper-create: true
 ```
 
 The value can be `true` (everyone), an actor-id object (`{"id": "alice"}`), or
-any standard Datasette permission expression.
+any standard Datasette permission expression. Listing is ungated, so it needs no
+config.
 
 **Per-doc access comes from acl grants, not config.** Owner access is the seeded
 Manager grant (§4); everything else is granted through the share dialog. Do
@@ -483,19 +491,20 @@ gracefully once the legacy column/table have been dropped.
 
 The backend specs are the source of truth:
 
-- `tests/test_permissions.py` — action wiring, `also_requires` chain, the
-  `locked` deny, owner/manager paths.
+- `tests/test_permissions.py` — action wiring, ungated listing, the `locked`
+  deny, owner/manager paths.
 - `tests/test_paper_doc_resource.py` — the two-level `PaperDocResource` shape +
   `resources_sql`.
 - `tests/test_share.py` — grant-backed view/edit/manage via the helpers.
 - `tests/test_data_migration.py` — the one-time backfill.
 - `tests/test_lock.py` — the lock deny + per-subscriber `permissions-changed`.
 
-Pattern: build a `Datasette` with the two global grants in config, sign an actor
-cookie, then either drive HTTP or assert `datasette.allowed(...)` directly:
+Pattern: build a `Datasette` with `datasette-paper-create` granted in config,
+sign an actor cookie, then either drive HTTP or assert `datasette.allowed(...)`
+directly:
 
 ```python
-ds = Datasette(memory=True, config={"permissions": {"datasette-paper-list": True}})
+ds = Datasette(memory=True, config={"permissions": {"datasette-paper-create": True}})
 await ds.invoke_startup()
 
 from datasette_paper.permissions import PaperDocResource, seed_owner_manager_grant
@@ -532,6 +541,7 @@ what exercises the real share path.
    need revocation — keying by connection id alone loses the actor.
 9. **Raw ASGI handlers use the bool form** (`datasette.allowed`) + a manual 403 —
    `ensure_permission` raises after headers are sent.
-10. **acl is a soft dependency.** Every acl import is guarded; the roles hook and
-    grant seeding no-op when it's absent, so paper still loads (per-doc checks
-    just have no grants to match).
+10. **acl + acl-share are hard dependencies.** They're declared in
+    `dependencies` and imported unconditionally — no `try/except ImportError`
+    guards, no `None` fallbacks. (datasette-agent stays optional: its tools hook
+    self-registers only when installed.)

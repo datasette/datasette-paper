@@ -15,7 +15,7 @@ async def test_plugin_is_installed():
 async def test_paper_index_renders():
     datasette = Datasette(
         memory=True,
-        config={"permissions": {"datasette-paper-list": True}},
+        config={"permissions": {}},
     )
     response = await datasette.client.get("/-/paper/")
     assert response.status_code == 200
@@ -34,7 +34,7 @@ async def test_paper_index_renders_without_trailing_slash():
     in-app paper-icon back link works regardless of how the URL is typed."""
     datasette = Datasette(
         memory=True,
-        config={"permissions": {"datasette-paper-list": True}},
+        config={"permissions": {}},
     )
     response = await datasette.client.get("/-/paper")
     assert response.status_code == 200

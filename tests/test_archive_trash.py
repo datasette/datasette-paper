@@ -145,7 +145,6 @@ async def test_editor_share_cannot_archive_or_trash():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },

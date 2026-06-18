@@ -20,7 +20,6 @@ from ..permissions import (
     can_paper_manage,
     ensure_paper_create,
     ensure_paper_edit,
-    ensure_paper_list,
     ensure_paper_view,
     seed_owner_manager_grant,
 )
@@ -78,8 +77,8 @@ def _doc_flags_payload(doc) -> dict:
 
 @router.GET(r"^/-/paper/api/docs$")
 async def list_docs(datasette, request):
-    await ensure_paper_list(datasette, request)
-    # ``state`` filters the listing only — it isn't a permission concern.
+    # No global gate — the results are acl-filtered below, so an actor with no
+    # grants simply gets an empty list. ``state`` filters the listing only — it isn't a permission concern.
     # ``allowed_resources`` still pulls every paper the actor can view;
     # the SQL helper then narrows to the requested state set. Default is
     # 'active' to match the main listing UI; the renovated /-/paper page
@@ -688,13 +687,10 @@ async def restore_doc_route(datasette, request, doc_id: int):
 async def list_template_params(datasette, request):
     """List built-in placeholder keys + resolved-now sample values.
 
-    Gated by ``datasette-paper-list`` because the response is data-
-    free (no per-doc info) and the toolbar fetches it once on
-    template load. Sample values let the toolbar render a preview
-    next to each key without re-fetching after each placeholder
-    insert.
+    Ungated: the response is data-free (no per-doc info) — just the built-in
+    placeholder keys and resolved-now sample values the toolbar renders as a
+    preview. The toolbar fetches it once on template load.
     """
-    await ensure_paper_list(datasette, request)
     from ..template_params import builtin_keys, resolve_key
 
     ctx = build_context(actor_id=actor_id(request))
@@ -827,7 +823,7 @@ async def post_snapshot(datasette, request, doc_id: int):
 
 @router.GET(r"^/-/paper/?$")
 async def paper_index_page(datasette, request):
-    await ensure_paper_list(datasette, request)
+    # Ungated shell; the client fetches /api/docs, which is acl-filtered.
     return Response.html(
         await datasette.render_template(
             "paper_base.html",

@@ -17,11 +17,14 @@ unaffected; the owner restores edit via the dedicated /unlock route,
 which gates on view (+ an inline owner check) rather than edit, so the
 lock can never trap them.
 
-Two global actions remain config-driven (handled by Datasette's standard
+One global action remains config-driven (handled by Datasette's standard
 config-permissions plugin from the ``permissions:`` block):
 
-    - ``datasette-paper-list``    — see the index page + list endpoint
     - ``datasette-paper-create``  — POST /-/paper/api/docs
+
+Listing/reading is no longer globally gated: the index, list, search and
+template-param endpoints are reachable by anyone and return only the docs acl
+says the actor can view (``allowed_resources("paper-view")``).
 """
 
 from __future__ import annotations
@@ -158,12 +161,6 @@ async def seed_owner_manager_grant(datasette, doc_id, created_by) -> None:
 # ---------------------------------------------------------------------------
 # Per-action helpers used by route handlers
 # ---------------------------------------------------------------------------
-
-
-async def ensure_paper_list(datasette, request) -> None:
-    await datasette.ensure_permission(
-        action="datasette-paper-list", actor=request.actor
-    )
 
 
 async def ensure_paper_create(datasette, request) -> None:

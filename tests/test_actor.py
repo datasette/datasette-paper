@@ -50,7 +50,6 @@ async def test_create_doc_anonymous_has_null_created_by():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },
@@ -160,16 +159,17 @@ async def test_menu_links_link_present(ds):
 
 
 @pytest.mark.asyncio
-async def test_menu_links_link_absent_for_denied_actor():
-    """Without permission, the Papers link is not rendered."""
+async def test_menu_links_link_present_for_anonymous():
+    """Listing is ungated, so the Papers link surfaces for everyone."""
     from datasette.app import Datasette
 
     ds = Datasette(memory=True, config={})
     await ds.invoke_startup()
     resp = await ds.client.get("/")
     assert resp.status_code == 200
-    # The link must not surface for anonymous users without permission.
-    assert ">Papers<" not in resp.text
+    # The link shows even for anonymous users; the index itself is acl-filtered.
+    assert "/-/paper/" in resp.text
+    assert "Papers" in resp.text
 
 
 # ---------------------------------------------------------------------------

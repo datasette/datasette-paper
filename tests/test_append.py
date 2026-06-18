@@ -216,7 +216,6 @@ async def test_append_denied_without_edit_permission():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },

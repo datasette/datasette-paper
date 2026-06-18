@@ -1,7 +1,7 @@
 """Tests for the datasette-paper permission model.
 
-Global ``datasette-paper-list`` / ``datasette-paper-create`` come from the
-config-permissions plugin; per-doc ``paper-view`` / ``paper-edit`` /
+The global ``datasette-paper-create`` action comes from the config-permissions
+plugin (listing is ungated); per-doc ``paper-view`` / ``paper-edit`` /
 ``paper-manage`` resolve against datasette-acl grants on ``PaperDocResource``.
 The creator gets a Manager grant seeded on create; further access is granted
 through acl. The only bespoke rule paper still owns is the ``locked`` deny.
@@ -59,22 +59,51 @@ async def _revoke_acl(ds, doc_id, actor_id):
 
 
 # ---------------------------------------------------------------------------
-# Anonymous denied — list / create / SSE
+# Listing is ungated — index / api/docs reachable by anyone, acl-filtered
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_anonymous_denied_html_index():
+async def test_anonymous_can_load_html_index():
+    """The index shell is ungated; the client fetches acl-filtered data."""
     ds = await _make_ds({})
     resp = await ds.client.get("/-/paper/")
-    assert resp.status_code == 403
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio
-async def test_anonymous_denied_api_list():
+async def test_anonymous_api_list_ok_but_empty():
+    """Anonymous gets 200 from the list endpoint, but sees no docs (no grants)."""
     ds = await _make_ds({})
     resp = await ds.client.get("/-/paper/api/docs")
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_ungated_returns_only_viewable():
+    """Any actor can hit the list endpoint; results are acl-filtered per actor."""
+    ds = await _make_ds({"datasette-paper-create": True})
+
+    # Alice creates a doc (owner → Manager grant).
+    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
+    r = await ds.client.post("/-/paper/api/docs", json={"name": "A"}, cookies=cookies)
+    doc_id = r.json()["id"]
+
+    # Alice sees it; bob (no grant) gets 200 with an empty list.
+    r = await ds.client.get("/-/paper/api/docs", cookies=cookies)
+    assert r.status_code == 200
+    assert [d["id"] for d in r.json()] == [doc_id]
+
+    cookies_bob = {"ds_actor": _actor_cookie(ds, "bob")}
+    r2 = await ds.client.get("/-/paper/api/docs", cookies=cookies_bob)
+    assert r2.status_code == 200
+    assert r2.json() == []
+
+
+# ---------------------------------------------------------------------------
+# Anonymous denied — create / SSE (still gated)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -97,23 +126,9 @@ async def test_sse_403_for_anonymous():
 
 
 @pytest.mark.asyncio
-async def test_actor_with_list_access_can_list():
-    """Permission granted to a specific actor id; that actor passes the gate."""
-    ds = await _make_ds({"datasette-paper-list": {"id": "alice"}})
-
-    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
-    resp = await ds.client.get("/-/paper/api/docs", cookies=cookies)
-    assert resp.status_code == 200
-
-    cookies_bob = {"ds_actor": _actor_cookie(ds, "bob")}
-    resp2 = await ds.client.get("/-/paper/api/docs", cookies=cookies_bob)
-    assert resp2.status_code == 403
-
-
-@pytest.mark.asyncio
 async def test_create_requires_create_permission():
-    """list-only is not enough to create — also-requires chain works."""
-    ds = await _make_ds({"datasette-paper-list": True})  # no create
+    """Listing is ungated, but creating still needs datasette-paper-create."""
+    ds = await _make_ds({})  # nothing granted
 
     resp = await ds.client.post("/-/paper/api/docs", json={"name": "X"})
     assert resp.status_code == 403
@@ -121,8 +136,8 @@ async def test_create_requires_create_permission():
 
 @pytest.mark.asyncio
 async def test_full_grant_unblocks_full_owner_path():
-    """End-to-end: with list+create granted, alice can create + access her doc."""
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    """End-to-end: with create granted, alice can create + access her doc."""
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
 
     r = await ds.client.get("/-/paper/api/docs", cookies=cookies)
@@ -160,7 +175,7 @@ async def test_owner_can_view_edit_manage_own_paper():
     """Creator gets a Manager grant on create — full access, no lockout."""
     from datasette_paper.permissions import PaperDocResource
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
 
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
@@ -177,7 +192,7 @@ async def test_owner_can_view_edit_manage_own_paper():
 async def test_stranger_denied_on_private_paper():
     from datasette_paper.permissions import PaperDocResource
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
@@ -192,7 +207,7 @@ async def test_stranger_denied_on_private_paper():
 async def test_viewer_grant_can_view_not_edit():
     from datasette_paper.permissions import PaperDocResource
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
@@ -209,7 +224,7 @@ async def test_editor_grant_can_view_and_edit_revoke_denies():
     """With an Editor grant, edit is allowed; revoking it denies again."""
     from datasette_paper.permissions import PaperDocResource
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
@@ -232,7 +247,7 @@ async def test_anonymous_never_owns_even_with_null_created_by():
     from datasette_paper.db import PaperDB
     from datasette_paper.permissions import PaperDocResource
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     paper = PaperDB(ds.get_internal_database())
     # Anonymous-created doc (created_by IS NULL).
     doc = await paper.insert_doc(name="Orphan", created_by=None)
@@ -247,7 +262,7 @@ async def test_also_requires_chain_blocks_edit_when_view_denied():
     """edit also-requires view; an actor with no grant is denied edit."""
     from datasette_paper.permissions import PaperDocResource
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]

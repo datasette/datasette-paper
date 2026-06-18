@@ -25,7 +25,6 @@ async def _make_ds():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },
