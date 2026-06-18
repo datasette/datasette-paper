@@ -30,9 +30,10 @@ from datasette import hookimpl
 from datasette.permissions import PermissionSQL, Resource
 
 try:  # acl is a soft dependency — the roles hook + grant seeding no-op when absent.
-    from datasette_acl.roles import AclRole
+    from datasette_acl.roles import AclRole, standard_roles
 except ImportError:  # pragma: no cover
     AclRole = None
+    standard_roles = None
 
 try:
     from datasette_acl.grants import grant as _acl_grant, Principal

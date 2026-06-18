@@ -5,9 +5,9 @@ from datasette.permissions import Action
 from datasette_vite import vite_entry
 from .router import router
 from .permissions import (  # noqa: F401
-    AclRole,
     PaperDocResource,
     permission_resources_sql,
+    standard_roles,
     PAPER_DOC_RESOURCE_TYPE,
 )
 from . import routes  # noqa: F401 — triggers decorator registration
@@ -208,34 +208,23 @@ def datasette_acl_roles(datasette):
     """Friendly Viewer / Editor / Manager roles for the ``paper-doc`` type.
 
     Consumed by datasette-acl's role registry (see ``build_roles_registry``).
-    No-op when acl is not installed (``AclRole is None``).
+    Uses acl's ``standard_roles`` factory for the canonical cumulative triple
+    (Viewer ⊂ Editor ⊂ Manager, ``manage=True`` on Manager). No-op when acl is
+    not installed (``standard_roles is None``).
     """
-    if AclRole is None:
+    if standard_roles is None:
         return []
-    return [
-        AclRole(
-            resource_type=PAPER_DOC_RESOURCE_TYPE,
-            name="Viewer",
-            actions=["paper-view"],
-            rank=1,
-            description="Can view the doc",
-        ),
-        AclRole(
-            resource_type=PAPER_DOC_RESOURCE_TYPE,
-            name="Editor",
-            actions=["paper-view", "paper-edit"],
-            rank=2,
-            description="Can view and edit the doc",
-        ),
-        AclRole(
-            resource_type=PAPER_DOC_RESOURCE_TYPE,
-            name="Manager",
-            actions=["paper-view", "paper-edit", "paper-manage"],
-            rank=3,
-            manage=True,
-            description="Can view, edit, and manage sharing",
-        ),
-    ]
+    return standard_roles(
+        PAPER_DOC_RESOURCE_TYPE,
+        view="paper-view",
+        edit="paper-edit",
+        manage="paper-manage",
+        descriptions={
+            "Viewer": "Can view the doc",
+            "Editor": "Can view and edit the doc",
+            "Manager": "Can view, edit, and manage sharing",
+        },
+    )
 
 
 @hookimpl
