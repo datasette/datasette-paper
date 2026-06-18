@@ -38,11 +38,12 @@ migrations = Migrations("datasette-paper")
 _ACL_MIGRATION_TABLE = "_datasette_paper_acl_migration"
 _ACL_MIGRATION_KEY = "shares_to_acl_grants"
 
-# Default general-access principal for ``link-*`` visibility. ``_signed_in``
-# means "anyone signed in" (acl's ``authenticated`` public audience);
-# deployments wanting truly public (incl. anonymous) docs can set the
-# ``share-general-principal`` plugin setting to ``*`` (acl's ``everyone``).
-DEFAULT_GENERAL_PRINCIPAL = "_signed_in"
+# Default general-access audience for migrated ``link-*`` visibility, named in
+# acl's own public-principal vocabulary: ``authenticated`` (anyone signed in),
+# ``everyone`` (incl. anonymous) or ``anonymous``. Override via the
+# ``share-general-principal`` plugin setting. Resolved to a real
+# ``Principal`` object with ``Principal.public(...)`` (see _general_principal).
+DEFAULT_GENERAL_PRINCIPAL = "authenticated"
 
 # Old per-doc visibility enum → (general-access principal role) for the
 # wildcard grant. ``private`` grants nothing extra (owner + explicit shares
@@ -76,25 +77,25 @@ async def ensure_migrations(database) -> None:
 
 
 def _general_principal(datasette, Principal):
-    """Resolve the public-audience principal for ``link-*`` visibility.
+    """Resolve the public-audience ``Principal`` for ``link-*`` visibility.
 
     Configurable via the ``share-general-principal`` plugin setting
-    (``datasette-paper`` block); defaults to ``_signed_in``. Only ``*`` and
-    ``_signed_in`` are honoured — anything else falls back to the default.
-    The two config strings map onto acl's first-class public audiences:
-    ``_signed_in`` → :meth:`Principal.authenticated`, ``*`` →
-    :meth:`Principal.everyone`.
+    (``datasette-paper`` block); defaults to ``authenticated``. The value is one
+    of acl's public-principal type names (``authenticated`` / ``everyone`` /
+    ``anonymous``) and is resolved straight to a ``Principal`` via
+    :meth:`Principal.public`; an unrecognised value falls back to the default.
     """
     config = datasette.plugin_config("datasette-paper") or {}
-    principal = config.get("share-general-principal", DEFAULT_GENERAL_PRINCIPAL)
-    if principal not in ("*", "_signed_in"):
+    name = config.get("share-general-principal", DEFAULT_GENERAL_PRINCIPAL)
+    try:
+        return Principal.public(name)
+    except ValueError:
         logger.warning(
             "datasette-paper: ignoring invalid share-general-principal %r; using %r",
-            principal,
+            name,
             DEFAULT_GENERAL_PRINCIPAL,
         )
-        principal = DEFAULT_GENERAL_PRINCIPAL
-    return Principal.everyone() if principal == "*" else Principal.authenticated()
+        return Principal.public(DEFAULT_GENERAL_PRINCIPAL)
 
 
 async def _acl_migration_done(db) -> bool:

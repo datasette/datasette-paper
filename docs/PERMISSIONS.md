@@ -477,13 +477,13 @@ one-shot backfill into acl grants (`datasette_paper/migrations.py`, the
 |---|---|
 | `_datasette_paper_doc.created_by` | a **Manager** grant for that actor |
 | `_datasette_paper_share (actor_id, role='viewer'/'editor')` | a **Viewer** / **Editor** grant |
-| `_datasette_paper_doc.visibility = 'link-view'/'link-edit'` | a **Viewer**/**Editor** grant for the general-access principal (`_signed_in` by default; `*` if `share-general-principal` is set to it) |
+| `_datasette_paper_doc.visibility = 'link-view'/'link-edit'` | a **Viewer**/**Editor** grant for the general-access audience — a `Principal.public(...)` named in acl's own vocabulary (`authenticated` by default; set `share-general-principal` to `everyone`/`anonymous` to widen it) |
 
 It is **idempotent** (a marker table short-circuits repeat runs; acl's `grant`
 only inserts actions a principal doesn't already hold) and **closed by default**:
 anonymous-owned (`created_by` NULL) and `private` docs gain nothing — paper never
-auto-opens a doc on upgrade. It no-ops when acl isn't installed, and bails
-gracefully once the legacy column/table have been dropped.
+auto-opens a doc on upgrade. It bails gracefully once the legacy column/table
+have been dropped.
 
 ---
 
