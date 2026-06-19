@@ -102,10 +102,15 @@ async def test_resolve_not_found():
 
 
 @pytest.mark.asyncio
-async def test_resolve_anonymous_403():
+async def test_resolve_anonymous_ungated_but_no_titles():
+    # Listing is ungated; an anonymous actor reaches the endpoint but every id
+    # resolves to a non-"ok" status (denied / not_found) — no titles leak.
     ds, _ = await setup_paper_datasette(granted=False, actor=None)
     resp = await ds.client.post("/-/paper/api/links/resolve", json={"ids": [1]})
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    entry = resp.json()["links"]["1"]
+    assert entry["status"] in ("denied", "not_found")
+    assert "title" not in entry
 
 
 @pytest.mark.asyncio

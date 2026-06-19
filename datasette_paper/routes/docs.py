@@ -80,7 +80,8 @@ def _doc_flags_payload(doc) -> dict:
 @router.GET(r"^/-/paper/api/docs$")
 async def list_docs(datasette, request):
     # No global gate — the results are acl-filtered below, so an actor with no
-    # grants simply gets an empty list. ``state`` filters the listing only — it isn't a permission concern.
+    # grants simply gets an empty list. ``state`` filters the listing only — it
+    # isn't a permission concern.
     # ``allowed_resources`` still pulls every paper the actor can view;
     # the SQL helper then narrows to the requested state set. Default is
     # 'active' to match the main listing UI; the renovated /-/paper page
@@ -149,7 +150,7 @@ async def list_docs(datasette, request):
 
 @router.GET(r"^/-/paper/api/link-search$")
 async def link_search(datasette, request):
-    await ensure_paper_list(datasette, request)
+    # Ungated — results are restricted to viewable_doc_ids (acl-filtered) below.
     q = (request.args.get("q") or "").strip()
     try:
         limit = min(int(request.args.get("limit") or 20), 50)
@@ -198,7 +199,7 @@ async def _resolve_map(datasette, actor, ids):
 
 @router.POST(r"^/-/paper/api/links/resolve$")
 async def resolve_links(datasette, request):
-    await ensure_paper_list(datasette, request)
+    # Ungated — non-viewable ids resolve to {"status": "denied"} (acl-filtered).
     body = await read_json_body(request)
     raw = body.get("ids") or []
     ids = []
@@ -286,7 +287,7 @@ async def link_access_check(datasette, request, doc_id: int):
 
 @router.GET(r"^/-/paper/api/links/graph$")
 async def links_graph(datasette, request):
-    await ensure_paper_list(datasette, request)
+    # Ungated — the graph is built only from viewable_doc_ids (acl-filtered).
     viewable = await viewable_doc_ids(datasette, request.actor)
     db = paper_db(datasette)
     edges = await db.edges_within(viewable_ids=viewable)

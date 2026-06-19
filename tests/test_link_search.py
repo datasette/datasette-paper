@@ -40,10 +40,13 @@ async def _grant_viewer(ds, doc_id, actor_id):
 
 
 @pytest.mark.asyncio
-async def test_link_search_anonymous_403():
+async def test_link_search_anonymous_ungated_but_empty():
+    # Listing is ungated; an anonymous actor reaches the endpoint but sees no
+    # docs (results are scoped to viewable_doc_ids, which is empty here).
     ds, _ = await setup_paper_datasette(granted=False, actor=None)
     resp = await ds.client.get("/-/paper/api/link-search")
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json() == {"results": []}
 
 
 @pytest.mark.asyncio

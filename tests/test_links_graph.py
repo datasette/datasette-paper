@@ -78,8 +78,11 @@ async def test_graph_titles_only_for_viewable():
 
 
 @pytest.mark.asyncio
-async def test_graph_403_for_anonymous():
+async def test_graph_anonymous_ungated_but_empty():
+    # Listing is ungated; an anonymous actor reaches the endpoint but the graph
+    # is built from viewable_doc_ids only, so it's empty here.
     ds, _ = await setup_paper_datasette(granted=False, actor=None)
 
     resp = await ds.client.get("/-/paper/api/links/graph")
-    assert resp.status_code == 403
+    assert resp.status_code == 200
+    assert resp.json() == {"nodes": [], "edges": []}

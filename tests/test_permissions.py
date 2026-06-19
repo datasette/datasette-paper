@@ -281,7 +281,7 @@ async def test_also_requires_chain_blocks_edit_when_view_denied():
 async def test_viewable_doc_ids_owner_sees_own():
     from datasette_paper.permissions import viewable_doc_ids
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
@@ -293,7 +293,7 @@ async def test_viewable_doc_ids_owner_sees_own():
 async def test_viewable_doc_ids_stranger_excluded():
     from datasette_paper.permissions import viewable_doc_ids
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
@@ -306,7 +306,7 @@ async def test_viewable_doc_ids_stranger_excluded():
 async def test_viewable_doc_ids_viewer_grant_included():
     from datasette_paper.permissions import viewable_doc_ids
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     doc_id = r.json()["id"]
@@ -320,7 +320,7 @@ async def test_viewable_doc_ids_viewer_grant_included():
 async def test_viewable_doc_ids_anonymous_empty():
     from datasette_paper.permissions import viewable_doc_ids
 
-    ds = await _make_ds({"datasette-paper-list": True, "datasette-paper-create": True})
+    ds = await _make_ds({"datasette-paper-create": True})
     cookies = {"ds_actor": _actor_cookie(ds, "alice")}
     r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
     assert r.status_code == 201
