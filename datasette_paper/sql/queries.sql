@@ -17,8 +17,8 @@
 --     $foo::text::                     -- nullable text → str | None
 --     $foo::integer                    -- int (non-null)
 --
--- Multi-statement orchestration (e.g. share replacement, step+version
--- bump) lives in db.py — codegen emits one helper per query block.
+-- Multi-statement orchestration (e.g. the step+version bump) lives in
+-- db.py — codegen emits one helper per query block.
 
 -- ============================================================================
 -- Docs
@@ -31,22 +31,22 @@
 -- name: insertDoc :row -> Doc
 INSERT INTO _datasette_paper_doc (name, created_by, schema_name, kind)
 VALUES ($name::text, $created_by::text::, $schema_name::text, $kind::text)
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked;
 
 -- name: updateDocName :row -> Doc
 UPDATE _datasette_paper_doc
 SET name = $name::text,
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id = $doc_id::integer
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked;
 
 -- name: selectDocById :row -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE id = $doc_id::integer;
 
 -- name: listDocs :rows -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 ORDER BY created_at;
 
@@ -59,7 +59,7 @@ ORDER BY created_at;
 -- kind CHECK set (e.g. ``["doc"]`` for the default index listing or
 -- ``["template"]`` for the templates tab).
 -- name: listDocsByIdsStatesAndKinds :rows -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
@@ -120,7 +120,7 @@ WHERE id = $doc_id::integer;
 -- as an ISO-8601 UTC string in the same format strftime emits, so
 -- string comparison matches chronological order.
 -- name: listTrashedToDelete :rows -> Doc
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE state = 'trashed'
   AND delete_at IS NOT NULL
@@ -210,30 +210,3 @@ FROM _datasette_paper_snapshot
 WHERE doc_id = $doc_id::integer
 ORDER BY version DESC
 LIMIT 1;
-
--- ============================================================================
--- Shares
---
--- `replaceShares` in db.py orchestrates the three statements below
--- in a single write transaction (visibility update + wipe existing
--- shares + insert new ones). Roles are validated in Python before
--- this runs; visibility is also gated by the doc table's CHECK.
--- ============================================================================
-
--- name: selectShares :rows -> Share
-SELECT actor_id, role, granted_by, granted_at
-FROM _datasette_paper_share
-WHERE doc_id = $doc_id::integer
-ORDER BY actor_id;
-
--- name: updateDocVisibility
-UPDATE _datasette_paper_doc
-SET visibility = $visibility::text
-WHERE id = $doc_id::integer;
-
--- name: deleteSharesForDoc
-DELETE FROM _datasette_paper_share WHERE doc_id = $doc_id::integer;
-
--- name: insertShare
-INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by)
-VALUES ($doc_id::integer, $actor_id::text, $role::text, $granted_by::text::);

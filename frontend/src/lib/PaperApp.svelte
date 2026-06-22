@@ -37,6 +37,8 @@
   let isOwner = $derived(permissions?.isOwner ?? false);
   let locked = $derived(permissions?.locked ?? false);
   let kind = $state<"doc" | "template">("doc");
+  // Current actor id from the bootstrap, forwarded to the share dialog.
+  let selfActor = $state<string | null>(null);
 
   let conn: EditorConnection | undefined;
   let unsub: (() => void) | undefined;
@@ -68,6 +70,9 @@
         },
         onKind: (k) => {
           kind = k;
+        },
+        onSelfActor: (a) => {
+          selfActor = a;
         },
         onStepError: (e) => {
           // Keep the first error — subsequent ones don't add information
@@ -179,6 +184,7 @@
     {isOwner}
     {locked}
     {kind}
+    {selfActor}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />

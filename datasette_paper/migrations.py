@@ -1,7 +1,64 @@
+import logging
+
 from sqlite_utils import Database
 from sqlite_migrate import Migrations
 
+# NOTE: keep module-level imports limited to what the ``@migrations()`` step
+# functions below actually need (``Database`` / ``Migrations``). The codegen
+# pipeline (`just codegen-queries` → `sqlite-utils migrate`) loads this module
+# via ``exec`` *without* package context, so a top-level relative import
+# (``from .permissions import …``) raises ``KeyError: '__name__' not in
+# globals``. The async share→acl backfill is the only code that needs the
+# permission constants, so that relative import is deferred into
+# ``migrate_shares_to_acl`` (see ``_acl_helpers``).
+
+logger = logging.getLogger("datasette_paper.migrations")
+
+
+def _acl_helpers():
+    """Lazily resolve the permission constants + acl grant API.
+
+    The ``.permissions`` import is done on demand (not at module load) so this
+    module stays loadable by the bare-``exec`` path that ``sqlite-utils
+    migrate`` uses for codegen. Returns
+    ``(PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, grant, Principal)``.
+    """
+    from .permissions import PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT
+    from datasette_acl.grants import grant as acl_grant, Principal
+
+    return PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, acl_grant, Principal
+
+
 migrations = Migrations("datasette-paper")
+
+# Marker table recording that the one-time visibility/share → acl-grant data
+# migration has completed. Distinct from the sqlite-migrate schema migrations
+# above: those create/alter tables, this backfills acl grants and must not run
+# before acl's startup has built the roles registry.
+_ACL_MIGRATION_TABLE = "_datasette_paper_acl_migration"
+_ACL_MIGRATION_KEY = "shares_to_acl_grants"
+
+# Default general-access audience for migrated ``link-*`` visibility, named in
+# acl's own public-principal vocabulary: ``authenticated`` (anyone signed in),
+# ``everyone`` (incl. anonymous) or ``anonymous``. Override via the
+# ``share-general-principal`` plugin setting. Resolved to a real
+# ``Principal`` object with ``Principal.public(...)`` (see _general_principal).
+DEFAULT_GENERAL_PRINCIPAL = "authenticated"
+
+# Old per-doc visibility enum → (general-access principal role) for the
+# wildcard grant. ``private`` grants nothing extra (owner + explicit shares
+# only). Per DECISIONS.md, upgrade default is CLOSED: we migrate *explicit*
+# link-* visibility faithfully but never auto-open private docs.
+_VISIBILITY_ROLE = {
+    "link-view": "Viewer",
+    "link-edit": "Editor",
+}
+
+# Old per-actor share role → new acl role.
+_SHARE_ROLE = {
+    "viewer": "Viewer",
+    "editor": "Editor",
+}
 
 
 async def ensure_migrations(database) -> None:
@@ -17,6 +74,186 @@ async def ensure_migrations(database) -> None:
         migrations.apply(Database(connection))
 
     await database.execute_write_fn(_apply)
+
+
+def _general_principal(datasette, Principal):
+    """Resolve the public-audience ``Principal`` for ``link-*`` visibility.
+
+    Configurable via the ``share-general-principal`` plugin setting
+    (``datasette-paper`` block); defaults to ``authenticated``. The value is one
+    of acl's public-principal type names (``authenticated`` / ``everyone`` /
+    ``anonymous``) and is resolved straight to a ``Principal`` via
+    :meth:`Principal.public`; an unrecognised value falls back to the default.
+    """
+    config = datasette.plugin_config("datasette-paper") or {}
+    name = config.get("share-general-principal", DEFAULT_GENERAL_PRINCIPAL)
+    try:
+        return Principal.public(name)
+    except ValueError:
+        logger.warning(
+            "datasette-paper: ignoring invalid share-general-principal %r; using %r",
+            name,
+            DEFAULT_GENERAL_PRINCIPAL,
+        )
+        return Principal.public(DEFAULT_GENERAL_PRINCIPAL)
+
+
+async def _acl_migration_done(db) -> bool:
+    """True if the shares→grants migration marker has been recorded."""
+    rows = (
+        await db.execute(
+            f"SELECT 1 FROM {_ACL_MIGRATION_TABLE} WHERE key = ?",
+            [_ACL_MIGRATION_KEY],
+        )
+    ).rows
+    return bool(rows)
+
+
+async def _legacy_share_schema_present(db) -> bool:
+    """True if the pre-acl share storage still exists to be migrated.
+
+    Both the ``_datasette_paper_share`` table and the
+    ``_datasette_paper_doc.visibility`` column are dropped by migration m004
+    after their data is backfilled into acl. This guards the one-time backfill
+    so it no-ops (rather than raising) once that schema is gone.
+    """
+    table = (
+        await db.execute(
+            "SELECT 1 FROM sqlite_master "
+            "WHERE type = 'table' AND name = '_datasette_paper_share'"
+        )
+    ).rows
+    if not table:
+        return False
+    cols = (await db.execute("PRAGMA table_info(_datasette_paper_doc)")).rows
+    return any(row["name"] == "visibility" for row in cols)
+
+
+async def _mark_acl_migration_done(db) -> None:
+    await db.execute_write(
+        f"INSERT OR IGNORE INTO {_ACL_MIGRATION_TABLE} (key, migrated_at) "
+        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [_ACL_MIGRATION_KEY],
+    )
+
+
+async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
+    """One-time backfill of legacy share/visibility data into acl grants.
+
+    Converts every existing doc's ``created_by`` + ``visibility`` and every
+    ``_datasette_paper_share`` row into acl grants on the ``paper-doc``
+    resource, using acl's ``grant`` helper (no raw writes into acl's schema):
+
+        owner (created_by)      -> Manager grant for that actor
+        share row 'viewer'      -> Viewer grant for that actor
+        share row 'editor'      -> Editor grant for that actor
+        visibility 'private'    -> nothing
+        visibility 'link-view'  -> Viewer grant for the general principal
+        visibility 'link-edit'  -> Editor grant for the general principal
+
+    Idempotent on two levels: a marker row in ``_datasette_paper_acl_migration``
+    short-circuits repeat runs, and acl's ``grant`` only inserts actions a
+    principal doesn't already hold (so even a forced re-run produces no
+    duplicate grants or audit rows). ``force=True`` bypasses the marker for
+    tests / a deliberate re-run. Returns a small stats dict for logging /
+    assertions.
+    """
+    stats = {"owners": 0, "shares": 0, "visibility": 0, "skipped": False}
+
+    resource_type, parent, acl_grant, Principal = _acl_helpers()
+
+    db = datasette.get_internal_database()
+    await db.execute_write(
+        f"CREATE TABLE IF NOT EXISTS {_ACL_MIGRATION_TABLE} ("
+        "key TEXT PRIMARY KEY, migrated_at TEXT NOT NULL)"
+    )
+
+    if not force and await _acl_migration_done(db):
+        stats["skipped"] = True
+        return stats
+
+    # The legacy ``visibility`` column + ``_datasette_paper_share`` table were
+    # dropped in migration m004 once their data had been backfilled into acl.
+    # On any DB that held legacy data the backfill ran (and set its marker) on
+    # an earlier boot, so reaching here without that column/table means there is
+    # nothing to migrate (fresh install, or a forced re-run after the drop).
+    # Bail gracefully rather than raising on the missing schema.
+    if not await _legacy_share_schema_present(db):
+        stats["skipped"] = True
+        await _mark_acl_migration_done(db)
+        return stats
+
+    general_principal = _general_principal(datasette, Principal)
+
+    # Owner + visibility live on the doc row.
+    docs = (
+        await db.execute("SELECT id, created_by, visibility FROM _datasette_paper_doc")
+    ).rows
+    for row in docs:
+        doc_id = str(row["id"])
+        created_by = row["created_by"]
+        visibility = row["visibility"]
+
+        # Owner → Manager (skip anonymous-created docs: NULL/empty created_by).
+        if created_by:
+            await acl_grant(
+                datasette,
+                resource_type,
+                parent,
+                doc_id,
+                principal=Principal.actor(str(created_by)),
+                role="Manager",
+                by_actor=str(created_by),
+            )
+            stats["owners"] += 1
+
+        # Visibility → general-access (public-audience) grant.
+        vis_role = _VISIBILITY_ROLE.get(visibility)
+        if vis_role is not None:
+            await acl_grant(
+                datasette,
+                resource_type,
+                parent,
+                doc_id,
+                principal=general_principal,
+                role=vis_role,
+                by_actor=None,
+            )
+            stats["visibility"] += 1
+
+    # Explicit per-actor share rows.
+    shares = (
+        await db.execute(
+            "SELECT doc_id, actor_id, role, granted_by FROM _datasette_paper_share"
+        )
+    ).rows
+    for row in shares:
+        share_role = _SHARE_ROLE.get(row["role"])
+        if share_role is None:  # pragma: no cover - CHECK constraint guards this
+            logger.warning(
+                "datasette-paper: skipping share with unknown role %r (doc %s)",
+                row["role"],
+                row["doc_id"],
+            )
+            continue
+        await acl_grant(
+            datasette,
+            resource_type,
+            parent,
+            str(row["doc_id"]),
+            principal=Principal.actor(str(row["actor_id"])),
+            role=share_role,
+            by_actor=str(row["granted_by"]) if row["granted_by"] else None,
+        )
+        stats["shares"] += 1
+
+    await _mark_acl_migration_done(db)
+    logger.info(
+        "datasette-paper: migrated shares to acl grants "
+        "(owners=%(owners)s shares=%(shares)s visibility=%(visibility)s)",
+        stats,
+    )
+    return stats
 
 
 @migrations()
@@ -242,6 +479,75 @@ def m003_templates_and_lock(db: Database):
             ADD COLUMN locked INTEGER NOT NULL DEFAULT 0
                 CHECK (locked IN (0,1));
 
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_kind
+            ON _datasette_paper_doc(kind) WHERE kind = 'template';
+        """
+    )
+
+
+@migrations()
+def m004_drop_legacy_share_model(db: Database):
+    # Sharing is now owned by datasette-acl (resource type ``paper-doc``).
+    # The owner/visibility/share data was backfilled into acl grants by the
+    # one-time ``migrate_shares_to_acl`` startup routine (see above); this step
+    # retires the legacy storage that fed it:
+    #
+    #   * ``_datasette_paper_share``      — explicit per-actor grants
+    #   * ``_datasette_paper_doc.visibility`` — the link-* general-access enum
+    #
+    # IMPORTANT: this runs in ``ensure_migrations`` BEFORE the startup data
+    # migration's read. On any DB that already holds legacy data the backfill
+    # ran on a prior boot (its marker is set), so dropping here loses nothing;
+    # on a fresh DB there was never any legacy data. ``migrate_shares_to_acl``
+    # tolerates the missing column/table (it treats "no legacy schema" as
+    # "nothing to migrate").
+    #
+    # SQLite only learned ``ALTER TABLE ... DROP COLUMN`` in 3.35; sqlite-migrate
+    # may run against older engines, so drop ``visibility`` via the portable
+    # 12-step table rebuild rather than DROP COLUMN. The rebuilt table keeps the
+    # exact column set + constraints + indexes minus ``visibility``.
+    db.executescript(
+        """
+        DROP TABLE IF EXISTS _datasette_paper_share;
+
+        CREATE TABLE _datasette_paper_doc_new (
+            id              INTEGER PRIMARY KEY NOT NULL,
+            name            TEXT NOT NULL,
+            created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            created_by      TEXT,
+            schema_name     TEXT NOT NULL DEFAULT 'basic+list',
+            current_version INTEGER NOT NULL DEFAULT 0,
+            state           TEXT NOT NULL DEFAULT 'active'
+                              CHECK (state IN ('active','archived','trashed')),
+            archived_at     TEXT,
+            trashed_at      TEXT,
+            delete_at       TEXT,
+            kind            TEXT NOT NULL DEFAULT 'doc'
+                              CHECK (kind IN ('doc','template')),
+            locked          INTEGER NOT NULL DEFAULT 0 CHECK (locked IN (0,1))
+        );
+
+        INSERT INTO _datasette_paper_doc_new (
+            id, name, created_at, updated_at, created_by, schema_name,
+            current_version, state, archived_at, trashed_at, delete_at,
+            kind, locked
+        )
+        SELECT
+            id, name, created_at, updated_at, created_by, schema_name,
+            current_version, state, archived_at, trashed_at, delete_at,
+            kind, locked
+        FROM _datasette_paper_doc;
+
+        DROP TABLE _datasette_paper_doc;
+        ALTER TABLE _datasette_paper_doc_new RENAME TO _datasette_paper_doc;
+
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_owner
+            ON _datasette_paper_doc(created_by);
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_state
+            ON _datasette_paper_doc(state);
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_delete_at
+            ON _datasette_paper_doc(delete_at) WHERE delete_at IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_paper_doc_kind
             ON _datasette_paper_doc(kind) WHERE kind = 'template';
         """

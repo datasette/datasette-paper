@@ -15,11 +15,40 @@ from datasette_agent.tools import (
 )
 
 from datasette_paper.agent_tools import get_paper_agent_tools
+from datasette_paper.permissions import PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT
 
 from conftest import make_datasette
 
 ALICE = {"id": "alice"}
 BOB = {"id": "bob"}
+
+
+async def _grant_acl(ds, doc_id, actor_id, role):
+    """Grant ``actor_id`` an acl role (Viewer/Editor/Manager) on the doc."""
+    from datasette_acl.grants import grant, Principal
+
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        principal=Principal.actor(actor_id),
+        role=role,
+        by_actor="alice",
+    )
+
+
+async def _revoke_acl(ds, doc_id, actor_id):
+    from datasette_acl.grants import revoke, Principal
+
+    await revoke(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        principal=Principal.actor(actor_id),
+        by_actor="alice",
+    )
 
 
 def _tools():
@@ -235,6 +264,107 @@ async def test_insert_anchor_not_found_errors():
         content="y",
     )
     assert out["error"] == "edit_failed"
+
+
+# ---------------------------------------------------------------------------
+# Permission rules: agent tools honour acl read / edit grants
+#
+# read_paper gates on paper-view; append/edit/insert gate on paper-edit. So a
+# Viewer grant (paper-view only) may read but not write, an Editor grant
+# (paper-view + paper-edit) may do both, and an actor with no grant may do
+# neither — exactly the human permission model. The owner-only cases live in
+# the per-tool sections above; these exercise the shared / read-only / revoked
+# paths an agent acting as a non-owner would hit.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_read_allowed_only_with_grant():
+    """An agent may read a doc the actor can view — not before, not after revoke."""
+    ds = await _ds()
+    created = await _call("create_paper", ds, ALICE, name="Shared", content="hi bob\n")
+    doc_id = created["doc_id"]
+    # No grant yet → denied.
+    denied = await _call("read_paper", ds, BOB, doc_id=doc_id)
+    assert denied["error"] == "Permission denied"
+    # Viewer grant → can read.
+    await _grant_acl(ds, doc_id, "bob", "Viewer")
+    out = await _call("read_paper", ds, BOB, doc_id=doc_id)
+    assert out["content_markdown"] == "hi bob\n"
+    # Revoke → denied again.
+    await _revoke_acl(ds, doc_id, "bob")
+    again = await _call("read_paper", ds, BOB, doc_id=doc_id)
+    assert again["error"] == "Permission denied"
+
+
+@pytest.mark.asyncio
+async def test_viewer_grant_can_read_but_not_write():
+    """A read-only (Viewer) actor may read but every write tool is denied."""
+    ds = await _ds()
+    created = await _call("create_paper", ds, ALICE, name="RO", content="line one\n")
+    doc_id = created["doc_id"]
+    await _grant_acl(ds, doc_id, "bob", "Viewer")
+    # Read works.
+    assert "content_markdown" in await _call("read_paper", ds, BOB, doc_id=doc_id)
+    # Every write tool is denied for the read-only actor.
+    appended = await _call("append_to_paper", ds, BOB, doc_id=doc_id, content="x\n")
+    assert appended["error"] == "Permission denied"
+    edited = await _call(
+        "edit_paper", ds, BOB, doc_id=doc_id, old_str="line one", new_str="x"
+    )
+    assert edited["error"] == "Permission denied"
+    inserted = await _call(
+        "insert_into_paper", ds, BOB, doc_id=doc_id, anchor="line one", content="x"
+    )
+    assert inserted["error"] == "Permission denied"
+    # The denied writes never touched the doc.
+    owner_view = await _call("read_paper", ds, ALICE, doc_id=doc_id)
+    assert owner_view["content_markdown"] == "line one\n"
+
+
+@pytest.mark.asyncio
+async def test_editor_grant_can_read_and_write():
+    """An Editor (paper-view + paper-edit) may use read and all write tools."""
+    ds = await _ds()
+    created = await _call("create_paper", ds, ALICE, name="RW", content="alpha\n")
+    doc_id = created["doc_id"]
+    await _grant_acl(ds, doc_id, "bob", "Editor")
+    assert "content_markdown" in await _call("read_paper", ds, BOB, doc_id=doc_id)
+    appended = await _call("append_to_paper", ds, BOB, doc_id=doc_id, content="beta\n")
+    assert appended["appended_blocks"] == 1
+    edited = await _call(
+        "edit_paper", ds, BOB, doc_id=doc_id, old_str="alpha", new_str="ALPHA"
+    )
+    assert "ALPHA" in edited["content_markdown"]
+    inserted = await _call(
+        "insert_into_paper", ds, BOB, doc_id=doc_id, anchor="ALPHA", content="gamma"
+    )
+    assert "gamma" in inserted["content_markdown"]
+
+
+@pytest.mark.asyncio
+async def test_edit_paper_denied_for_other_actor():
+    ds = await _ds()
+    created = await _call("create_paper", ds, ALICE, name="E", content="text here\n")
+    out = await _call(
+        "edit_paper", ds, BOB, doc_id=created["doc_id"], old_str="text", new_str="x"
+    )
+    assert out["error"] == "Permission denied"
+
+
+@pytest.mark.asyncio
+async def test_insert_into_paper_denied_for_other_actor():
+    ds = await _ds()
+    created = await _call("create_paper", ds, ALICE, name="I", content="anchor here\n")
+    out = await _call(
+        "insert_into_paper",
+        ds,
+        BOB,
+        doc_id=created["doc_id"],
+        anchor="anchor",
+        content="x",
+    )
+    assert out["error"] == "Permission denied"
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 """Tests for the template feature.
 
-Templates are real papers with ``kind='template'`` — collab and share
+Templates are real papers with ``kind='template'`` — collab and sharing
 still work the same; what changes is:
 
 * The default list endpoint filters them out (and a ?kind=template /
@@ -30,7 +30,6 @@ async def _make_ds():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },
@@ -112,11 +111,21 @@ async def test_make_template_owner_only():
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
 
-    # Editor share can't make it a template.
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
+    # An acl Editor grant can't make it a template (manage is owner-only).
+    from datasette_acl.grants import grant, Principal
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        principal=Principal.actor("bob"),
+        role="Editor",
+        by_actor="alice",
     )
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/make_template", cookies=_cookie(ds, "bob")

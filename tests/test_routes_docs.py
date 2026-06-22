@@ -20,9 +20,59 @@ async def test_create_doc_then_list(ds):
     docs = response.json()
     assert len(docs) == 1
     assert docs[0]["name"] == "My Paper"
-    # The list now includes per-row visibility + is_owner.
-    assert docs[0]["visibility"] == "private"
+    # The list includes per-row is_owner (sharing itself is now acl-owned, so
+    # there is no per-doc visibility enum on the row anymore).
     assert docs[0]["is_owner"] is True
+
+
+@pytest.mark.asyncio
+async def test_list_created_by_name_falls_back_to_id(ds):
+    """Without a profile source, created_by_name is the id and avatar is None."""
+    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"})
+    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    assert docs[0]["created_by"] == "alice"
+    assert docs[0]["created_by_name"] == "alice"
+    assert docs[0]["created_by_avatar"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_created_by_uses_actor_profile(ds, monkeypatch):
+    """created_by_name + created_by_avatar resolve through actors_from_ids."""
+    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"})
+
+    async def fake_actors_from_ids(actor_ids):
+        return {
+            aid: {
+                "id": aid,
+                "display_name": "Alice Liddell",
+                "avatar_url": f"/-/profile/pic/{aid}",
+            }
+            for aid in actor_ids
+        }
+
+    monkeypatch.setattr(ds, "actors_from_ids", fake_actors_from_ids)
+    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    assert docs[0]["created_by"] == "alice"
+    assert docs[0]["created_by_name"] == "Alice Liddell"
+    assert docs[0]["created_by_avatar"] == "/-/profile/pic/alice"
+
+
+@pytest.mark.asyncio
+async def test_list_created_by_uses_user_profiles(ds):
+    """End-to-end: a seeded datasette-user-profiles row surfaces name + avatar.
+
+    Exercises the real plugin path (no monkeypatch) — resolve_profile_actors is
+    queried directly because user-profiles doesn't register actors_from_ids.
+    """
+    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"})
+    internal = ds.get_internal_database()
+    await internal.execute_write(
+        "INSERT INTO datasette_user_profiles (actor_id, display_name) VALUES (?, ?)",
+        ["alice", "Alice Anderson"],
+    )
+    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    assert docs[0]["created_by_name"] == "Alice Anderson"
+    assert docs[0]["created_by_avatar"] == "/-/profile/pic/alice"
 
 
 @pytest.mark.asyncio
@@ -34,7 +84,6 @@ async def test_list_filters_to_actor_visible_papers():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },
@@ -70,7 +119,6 @@ async def test_bootstrap_includes_permissions_block(ds):
         "canEdit": True,
         "canManage": True,
         "isOwner": True,
-        "visibility": "private",
         "locked": False,
     }
 
@@ -84,7 +132,6 @@ async def test_bootstrap_permissions_for_shared_viewer():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },
@@ -99,11 +146,21 @@ async def test_bootstrap_permissions_for_shared_viewer():
     )
     doc_id = create.json()["id"]
 
-    # Hand-grant bob the viewer role.
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'viewer', 'alice')",
-        [doc_id, "bob"],
+    # Hand-grant bob the viewer role via an acl grant.
+    from datasette_acl.grants import grant, Principal
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        principal=Principal.actor("bob"),
+        role="Viewer",
+        by_actor="alice",
     )
 
     boot = await ds.client.get(f"/-/paper/api/docs/{doc_id}", cookies=bob)
@@ -111,7 +168,7 @@ async def test_bootstrap_permissions_for_shared_viewer():
     assert perms["canEdit"] is False
     assert perms["canManage"] is False
     assert perms["isOwner"] is False
-    assert perms["visibility"] == "private"
+    assert "visibility" not in perms
 
 
 @pytest.mark.asyncio

@@ -212,7 +212,6 @@ async def _make_ds():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },
@@ -247,13 +246,23 @@ async def test_create_from_template_substitutes_placeholders():
     )
     get_registry(ds)._instances.pop(template_id, None)
 
-    # Open the template to bob via link-view so we can demonstrate
-    # the resolver pulls from the *creator's* context, not the
-    # template owner's.
-    await ds.client.post(
-        f"/-/paper/api/docs/{template_id}/share",
-        json={"visibility": "link-view", "shares": []},
-        cookies=_cookie(ds, "alice"),
+    # Open the template to bob via an acl Viewer grant so we can
+    # demonstrate the resolver pulls from the *creator's* context,
+    # not the template owner's.
+    from datasette_acl.grants import grant, Principal
+    from datasette_paper.permissions import (
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+    )
+
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(template_id),
+        principal=Principal.actor("bob"),
+        role="Viewer",
+        by_actor="alice",
     )
 
     # Bob instantiates.

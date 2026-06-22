@@ -1,4 +1,14 @@
-"""Tests for the share endpoints + SSE revocation sweep."""
+"""Tests for the SSE subscriber-revocation sweep (phase-05/04).
+
+Sharing itself now lives in datasette-acl: the ``<datasette-acl-share-dialog>``
+component grants / updates / revokes acl grants directly against the acl JSON
+API, and paper no longer ships its own ``GET/POST /share`` routes or a share
+table. What paper keeps is the *SSE subscriber sweep*: when a grant is revoked
+the dialog fires ``share-revoked`` and the frontend POSTs
+``/-/paper/api/docs/{id}/sweep-subscribers``, which runs
+``Instance.revoke_unauthorized`` so a demoted/removed editor's live SSE queue is
+closed. These tests cover that endpoint and the underlying sweep.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +16,11 @@ import asyncio
 
 import pytest
 from datasette.app import Datasette
+
+from datasette_paper.permissions import (
+    PAPER_DOC_RESOURCE_TYPE,
+    PAPER_DOCS_PARENT,
+)
 
 
 def _cookie(ds, actor_id):
@@ -17,7 +32,6 @@ async def _make_ds():
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },
@@ -35,213 +49,144 @@ async def _alice_doc(ds, name="P"):
     return r.json()["id"]
 
 
-# ---------------------------------------------------------------------------
-# GET /share
-# ---------------------------------------------------------------------------
+async def _grant_acl(ds, doc_id, actor_id, role):
+    """Grant ``actor_id`` an acl role on the doc (Viewer/Editor/Manager)."""
+    from datasette_acl.grants import grant, Principal
 
-
-@pytest.mark.asyncio
-async def test_share_get_owner_sees_can_manage_true():
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-
-    r = await ds.client.get(
-        f"/-/paper/api/docs/{doc_id}/share", cookies=_cookie(ds, "alice")
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["visibility"] == "private"
-    assert body["owner"] == "alice"
-    assert body["shares"] == []
-    assert body["canManage"] is True
-
-
-@pytest.mark.asyncio
-async def test_share_get_viewer_403():
-    """Viewer-share-recipient cannot read share state — editors+owner only."""
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'viewer', 'alice')",
-        [doc_id, "bob"],
+    await grant(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        principal=Principal.actor(actor_id),
+        role=role,
+        by_actor="alice",
     )
 
-    r = await ds.client.get(
-        f"/-/paper/api/docs/{doc_id}/share", cookies=_cookie(ds, "bob")
+
+async def _revoke_acl(ds, doc_id, actor_id):
+    from datasette_acl.grants import revoke, Principal
+
+    await revoke(
+        ds,
+        PAPER_DOC_RESOURCE_TYPE,
+        PAPER_DOCS_PARENT,
+        str(doc_id),
+        principal=Principal.actor(actor_id),
+        by_actor="alice",
     )
-    assert r.status_code == 403
-
-
-@pytest.mark.asyncio
-async def test_share_get_editor_sees_can_manage_false():
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
-    )
-
-    r = await ds.client.get(
-        f"/-/paper/api/docs/{doc_id}/share", cookies=_cookie(ds, "bob")
-    )
-    assert r.status_code == 200
-    body = r.json()
-    assert body["canManage"] is False
-    assert [s["actorID"] for s in body["shares"]] == ["bob"]
-
-
-@pytest.mark.asyncio
-async def test_share_get_stranger_403():
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-    r = await ds.client.get(
-        f"/-/paper/api/docs/{doc_id}/share", cookies=_cookie(ds, "carol")
-    )
-    assert r.status_code == 403
 
 
 # ---------------------------------------------------------------------------
-# POST /share — owner-only mutation
+# POST /sweep-subscribers — manager-only permission surface
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_share_post_owner_replaces_state():
+async def test_sweep_owner_allowed():
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
 
     r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={
-            "visibility": "link-view",
-            "shares": [
-                {"actorID": "bob", "role": "editor"},
-                {"actorID": "carol", "role": "viewer"},
-            ],
-        },
+        f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
         cookies=_cookie(ds, "alice"),
     )
     assert r.status_code == 200
-    body = r.json()
-    assert body["visibility"] == "link-view"
-    by_actor = {s["actorID"]: s for s in body["shares"]}
-    assert by_actor["bob"]["role"] == "editor"
-    assert by_actor["carol"]["role"] == "viewer"
-
-    # Idempotent: re-POST same state, count is the same.
-    r2 = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json=body,
-        cookies=_cookie(ds, "alice"),
-    )
-    assert r2.status_code == 200
-    assert len(r2.json()["shares"]) == 2
+    # No live subscribers, so nothing to revoke.
+    assert r.json() == {"revoked": 0}
 
 
 @pytest.mark.asyncio
-async def test_share_post_editor_403():
-    """Editor (granted via share) cannot mutate the share state — owner-only."""
+async def test_sweep_viewer_403():
+    """A viewer (can view, not manage) cannot trigger the sweep."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
-
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
-    )
+    await _grant_acl(ds, doc_id, "bob", "Viewer")
 
     r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={"visibility": "private", "shares": []},
+        f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
         cookies=_cookie(ds, "bob"),
     )
     assert r.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_share_post_invalid_visibility_400():
+async def test_sweep_editor_403():
+    """An acl Editor can view + edit but not manage — sweep is manager-only."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
+    await _grant_acl(ds, doc_id, "bob", "Editor")
+
     r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={"visibility": "everyone-public", "shares": []},
-        cookies=_cookie(ds, "alice"),
+        f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
+        cookies=_cookie(ds, "bob"),
     )
-    assert r.status_code == 400
+    assert r.status_code == 403
 
 
 @pytest.mark.asyncio
-async def test_share_post_invalid_role_400():
+async def test_sweep_stranger_403():
+    """A stranger can't even see the doc — view pre-check returns 403."""
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
+
     r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={
-            "visibility": "private",
-            "shares": [{"actorID": "bob", "role": "admin"}],
-        },
-        cookies=_cookie(ds, "alice"),
+        f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
+        cookies=_cookie(ds, "carol"),
     )
-    assert r.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_share_post_owner_in_shares_400():
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-    r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={
-            "visibility": "private",
-            "shares": [{"actorID": "alice", "role": "viewer"}],
-        },
-        cookies=_cookie(ds, "alice"),
-    )
-    assert r.status_code == 400
-
-
-@pytest.mark.asyncio
-async def test_share_post_duplicate_actor_400():
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-    r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={
-            "visibility": "private",
-            "shares": [
-                {"actorID": "bob", "role": "viewer"},
-                {"actorID": "bob", "role": "editor"},
-            ],
-        },
-        cookies=_cookie(ds, "alice"),
-    )
-    assert r.status_code == 400
+    assert r.status_code == 403
 
 
 # ---------------------------------------------------------------------------
-# Revocation sweep
+# Revocation sweep behaviour
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_sweep_endpoint_closes_revoked_subscriber():
+    """End-to-end: revoke bob via acl, hit the sweep endpoint, his queue closes."""
+    from datasette_paper.db import PaperDB
+    from datasette_paper.instance import get_registry
+
+    ds = await _make_ds()
+    doc_id = await _alice_doc(ds)
+    await _grant_acl(ds, doc_id, "bob", "Editor")
+
+    paper = PaperDB(ds.get_internal_database())
+    registry = get_registry(ds)
+    instance = await registry.get(paper, doc_id)
+    bob_q = await instance.subscribe(client_id=42, actor_id="bob")
+    alice_q = await instance.subscribe(client_id=43, actor_id="alice")
+    assert len(instance.subscribers) == 2
+
+    # Bob's grant is revoked (as the dialog would do against acl), then the
+    # frontend's share-revoked handler calls the sweep endpoint.
+    await _revoke_acl(ds, doc_id, "bob")
+    r = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
+        cookies=_cookie(ds, "alice"),
+    )
+    assert r.status_code == 200
+    assert r.json() == {"revoked": 1}
+
+    # Bob's queue gets a 'closed' sentinel and is removed; alice's queue stays.
+    payload = await asyncio.wait_for(bob_q.get(), timeout=1.0)
+    assert payload == {"kind": "closed"}
+    assert bob_q not in instance.subscribers
+    assert alice_q in instance.subscribers
 
 
 @pytest.mark.asyncio
 async def test_revocation_closes_open_subscribers():
-    """After bob is removed from shares, his subscribed queue receives a closed sentinel."""
+    """After bob loses acl access, the revocation sweep closes his queue."""
     from datasette_paper.db import PaperDB
     from datasette_paper.instance import get_registry
 
     ds = await _make_ds()
     doc_id = await _alice_doc(ds)
 
-    # Grant bob editor access.
-    await ds.get_internal_database().execute_write(
-        "INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by) "
-        "VALUES (?, ?, 'editor', 'alice')",
-        [doc_id, "bob"],
-    )
+    # Grant bob view access via acl.
+    await _grant_acl(ds, doc_id, "bob", "Editor")
 
     # Bob subscribes (simulating an open SSE stream).
     paper = PaperDB(ds.get_internal_database())
@@ -252,13 +197,10 @@ async def test_revocation_closes_open_subscribers():
 
     assert len(instance.subscribers) == 2
 
-    # Alice removes bob from shares.
-    r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={"visibility": "private", "shares": []},
-        cookies=_cookie(ds, "alice"),
-    )
-    assert r.status_code == 200
+    # Bob's acl grant is revoked; the sweep then closes his queue.
+    await _revoke_acl(ds, doc_id, "bob")
+    revoked = await instance.revoke_unauthorized(ds)
+    assert revoked == 1
 
     # Bob's queue gets a 'closed' sentinel and is removed; alice's queue stays.
     payload = await asyncio.wait_for(bob_q.get(), timeout=1.0)
@@ -269,7 +211,7 @@ async def test_revocation_closes_open_subscribers():
 
 @pytest.mark.asyncio
 async def test_revocation_keeps_owner_subscribed():
-    """Owner's subscribers survive a share-state mutation."""
+    """Owner's subscribers survive a sweep (they always pass paper-view)."""
     from datasette_paper.db import PaperDB
     from datasette_paper.instance import get_registry
 
@@ -281,12 +223,11 @@ async def test_revocation_keeps_owner_subscribed():
     instance = await registry.get(paper, doc_id)
     alice_q = await instance.subscribe(client_id=1, actor_id="alice")
 
+    # Grant + immediately revoke an unrelated actor, then sweep.
+    await _grant_acl(ds, doc_id, "bob", "Viewer")
+    await _revoke_acl(ds, doc_id, "bob")
     r = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/share",
-        json={
-            "visibility": "link-view",
-            "shares": [{"actorID": "bob", "role": "viewer"}],
-        },
+        f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
         cookies=_cookie(ds, "alice"),
     )
     assert r.status_code == 200

@@ -1,8 +1,19 @@
+import re
+
 from datasette import hookimpl, Response
 from datasette.permissions import Action
 from datasette_vite import vite_entry
+from datasette_acl.roles import standard_roles
+from datasette_acl_share import datasette_share_assets as _share_assets
 from .router import router
-from .permissions import PaperResource, permission_resources_sql  # noqa: F401
+from .permissions import (  # noqa: F401
+    PaperDocResource,
+    permission_resources_sql,
+    PAPER_DOC_RESOURCE_TYPE,
+    PAPER_VIEW,
+    PAPER_EDIT,
+    PAPER_MANAGE,
+)
 from . import routes  # noqa: F401 — triggers decorator registration
 from .routes.events import sse_events
 import logging
@@ -85,6 +96,32 @@ def extra_template_vars(datasette):
     }
 
 
+# The doc page is the only paper page that hosts <datasette-acl-share-dialog>, so
+# the share bundle is included there (opt-in) rather than site-wide. Matches
+# ``/-/paper/doc/<id>`` exactly — not the index or any API route.
+_DOC_PAGE_RE = re.compile(r"^/-/paper/doc/\d+$")
+
+
+def _is_doc_page(request) -> bool:
+    return bool(request and _DOC_PAGE_RE.match(request.path or ""))
+
+
+@hookimpl
+def extra_js_urls(datasette, request):
+    """Include the <datasette-acl-share-dialog> JS bundle on the doc page only."""
+    if not _is_doc_page(request):
+        return []
+    return _share_assets(datasette)["js"]
+
+
+@hookimpl
+def extra_css_urls(datasette, request):
+    """Include the <datasette-acl-share-dialog> CSS on the doc page only."""
+    if not _is_doc_page(request):
+        return []
+    return _share_assets(datasette)["css"]
+
+
 _EVENTS_PATTERN = r"^/-/paper/api/docs/(?P<doc_id>\d+)/events$"
 
 
@@ -127,47 +164,75 @@ def register_routes():
 @hookimpl
 def register_actions(datasette):
     return [
-        Action(
-            name="datasette-paper-list",
-            description="Can list papers (see the index page + list endpoint)",
-        ),
+        # --- Global action --------------------------------------------------
+        # Creating papers is the one coarse capability paper still gates on a
+        # global permission. Listing/reading is no longer gated globally: the
+        # index, list, search and template-param endpoints are reachable by
+        # anyone and return only the docs acl says the actor can view.
         Action(
             name="datasette-paper-create",
             description="Can create new papers",
-            also_requires="datasette-paper-list",
+        ),
+        # --- acl-backed resource actions ------------------------------------
+        # These resolve against datasette-acl grants on PaperDocResource. Every
+        # per-doc permission check goes through these; paper no longer ships
+        # owner/shared/visibility SQL (only the `locked` deny in permissions.py).
+        Action(
+            name=PAPER_VIEW,
+            description="View a paper doc",
+            resource_class=PaperDocResource,
         ),
         Action(
-            name="datasette-paper-view",
-            description="Can view a specific paper",
-            resource_class=PaperResource,
+            name=PAPER_EDIT,
+            description="Edit a paper doc",
+            resource_class=PaperDocResource,
+            also_requires=PAPER_VIEW,
         ),
         Action(
-            name="datasette-paper-edit",
-            description="Can edit a specific paper",
-            resource_class=PaperResource,
-            also_requires="datasette-paper-view",
+            name=PAPER_MANAGE,
+            description="Manage sharing for a paper doc",
+            resource_class=PaperDocResource,
+            also_requires=PAPER_VIEW,
         ),
     ]
 
 
 @hookimpl
-def menu_links(datasette, actor, request=None):
-    async def inner():
-        if await datasette.allowed(action="datasette-paper-list", actor=actor):
-            return [
-                {
-                    "href": datasette.urls.path("/-/paper/"),
-                    "label": "Papers",
-                }
-            ]
-        return []
+def datasette_acl_roles(datasette):
+    """Friendly Viewer / Editor / Manager roles for the ``paper-doc`` type.
 
-    return inner
+    Consumed by datasette-acl's role registry (see ``build_roles_registry``).
+    Uses acl's ``standard_roles`` factory for the canonical cumulative triple
+    (Viewer ⊂ Editor ⊂ Manager, ``manage=True`` on Manager).
+    """
+    return standard_roles(
+        PAPER_DOC_RESOURCE_TYPE,
+        view=PAPER_VIEW,
+        edit=PAPER_EDIT,
+        manage=PAPER_MANAGE,
+        descriptions={
+            "Viewer": "Can view the doc",
+            "Editor": "Can view and edit the doc",
+            "Manager": "Can view, edit, and manage sharing",
+        },
+    )
+
+
+@hookimpl
+def menu_links(datasette):
+    # Listing is no longer permission-gated, so the "Papers" link is shown to
+    # everyone; the index itself only surfaces docs the actor can view.
+    return [
+        {
+            "href": datasette.urls.path("/-/paper/"),
+            "label": "Papers",
+        }
+    ]
 
 
 @hookimpl
 async def startup(datasette):
-    from .migrations import ensure_migrations
+    from .migrations import ensure_migrations, migrate_shares_to_acl
 
     internal = datasette.get_internal_database()
     if getattr(internal, "is_temp_disk", False):
@@ -181,6 +246,11 @@ async def startup(datasette):
             "persist across restarts. Pass --internal <path> to retain papers."
         )
     await ensure_migrations(internal)
+    # One-time backfill of legacy visibility/share rows into acl grants. Runs
+    # after the schema migrations (it reads _datasette_paper_doc /
+    # _datasette_paper_share) and is guarded by its own marker so it's a no-op
+    # on every startup after the first. Safe when acl isn't installed.
+    await migrate_shares_to_acl(datasette)
 
 
 # bootstrap-icons / file-text-fill — kept in sync with the icon used in

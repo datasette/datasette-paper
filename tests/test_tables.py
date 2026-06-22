@@ -232,7 +232,6 @@ async def test_tables_endpoints_require_view_permission(ds_paper):
         memory=True,
         config={
             "permissions": {
-                "datasette-paper-list": True,
                 "datasette-paper-create": True,
             }
         },

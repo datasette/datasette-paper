@@ -55,8 +55,10 @@ test("New paper form lets you pick a template", async ({ page }) => {
   await page.goto("/-/paper/");
 
   // The template-picker <select> renders with a "Blank" option plus
-  // one for every template the actor can see.
-  const select = page.locator("select");
+  // one for every template the actor can see. Scope to #app-root: the
+  // datasette-debug-bar plugin (pulled in via the acl deps) injects its
+  // own "act as" <select>, so a bare locator("select") is ambiguous.
+  const select = page.locator("#app-root select");
   await expect(select).toBeVisible();
   // Wait for the template-list fetch to populate the dropdown.
   await expect(select.locator("option")).toContainText([
@@ -81,8 +83,12 @@ test("creating a paper from a template clones the content", async ({ page }) => 
   // The template option appears once the dropdown finishes loading.
   // <option> elements inside a closed <select> are considered hidden,
   // so attach to the parent and assert the option text appears in it.
-  await expect(page.locator("select")).toContainText(`From: ${tmpl.name}`);
-  await page.locator("select").selectOption({ label: `From: ${tmpl.name}` });
+  await expect(page.locator("#app-root select")).toContainText(
+    `From: ${tmpl.name}`,
+  );
+  await page
+    .locator("#app-root select")
+    .selectOption({ label: `From: ${tmpl.name}` });
   await page.getByRole("button", { name: "New paper", exact: true }).click();
 
   // The form navigates to the new doc; the cloned content is the seed
@@ -180,8 +186,12 @@ test("placeholder authored in a template resolves to text in the clone", async (
   // Instantiate via the index picker.
   await page.goto("/-/paper/");
   await page.getByPlaceholder("Paper name").fill("Today");
-  await expect(page.locator("select")).toContainText(`From: ${tmpl.name}`);
-  await page.locator("select").selectOption({ label: `From: ${tmpl.name}` });
+  await expect(page.locator("#app-root select")).toContainText(
+    `From: ${tmpl.name}`,
+  );
+  await page
+    .locator("#app-root select")
+    .selectOption({ label: `From: ${tmpl.name}` });
   await page.getByRole("button", { name: "New paper", exact: true }).click();
 
   await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 10000 });

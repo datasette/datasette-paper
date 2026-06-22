@@ -1,8 +1,15 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { client } from "./client";
-  import ShareDialog from "./ShareDialog.svelte";
+  // Importing the bundle is unnecessary here: datasette-acl-share's JS is included
+  // on the doc page by paper's extra_js_urls hook, which registers the
+  // <datasette-acl-share-dialog> custom element before this component mounts.
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+
+  // acl resource identity for a paper doc: type "paper-doc", a fixed parent
+  // sentinel ("_paper", == PAPER_DOCS_PARENT in permissions.py), child = doc id.
+  const SHARE_RESOURCE_TYPE = "paper-doc";
+  const SHARE_PARENT = "_paper";
 
   let {
     docId,
@@ -13,6 +20,7 @@
     docState = "active",
     locked = false,
     kind = "doc",
+    selfActor = null,
     copyMarkdown,
   }: {
     docId: string;
@@ -23,10 +31,41 @@
     docState?: "active" | "archived" | "trashed";
     locked?: boolean;
     kind?: "doc" | "template";
+    selfActor?: string | null;
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
-  let shareOpen = $state(false);
+  // actor-json the dialog reads to mark the current user's row "(you)".
+  let actorJson = $derived(selfActor ? JSON.stringify({ id: selfActor }) : "");
+
+  // A revoke/grant in the dialog mutates acl directly; ask paper to sweep any
+  // open SSE subscribers whose access just changed so a demoted/removed editor
+  // gets disconnected (revoke_unauthorized on the server). Fire-and-forget —
+  // the sweep is best-effort and the dialog has already persisted the change.
+  async function sweepSubscribers() {
+    try {
+      await fetch(`/-/paper/api/docs/${docId}/sweep-subscribers`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch {
+      // best-effort; subscribers re-check on their next bootstrap anyway.
+    }
+  }
+
+  // Attachment: wire the share dialog's bubbling `share-changed` event, which
+  // the element fires after any grant/update/revoke. It drives the SSE sweep so
+  // a removed or demoted editor gets disconnected: a plain revoke and an
+  // Editor→Viewer downgrade both reduce access, and `share-changed` covers both
+  // (the narrower `share-revoked` would miss the downgrade). The event bubbles +
+  // is composed, so listening on the element catches it.
+  function shareEvents(node: HTMLElement) {
+    const onChanged = () => void sweepSubscribers();
+    node.addEventListener("share-changed", onChanged);
+    return () => {
+      node.removeEventListener("share-changed", onChanged);
+    };
+  }
 
   type CopyFeedback = "idle" | "copied" | "failed";
   let copyState: CopyFeedback = $state("idle");
@@ -134,6 +173,8 @@
   type DocMeta = {
     name: string;
     created_by: string | null;
+    created_by_name: string | null;
+    created_by_avatar: string | null;
     updated_at: string;
     current_version: number;
   };
@@ -248,7 +289,19 @@
     <div class="meta">
       <span class="created-by">
         {#if meta.created_by}
-          by <strong>{meta.created_by}</strong>
+          by
+          {#if meta.created_by_avatar}
+            <img
+              class="creator-avatar"
+              src={meta.created_by_avatar}
+              alt=""
+              onerror={(e) =>
+                ((e.currentTarget as HTMLImageElement).style.display = "none")}
+            />
+          {/if}
+          <strong title={meta.created_by}
+            >{meta.created_by_name ?? meta.created_by}</strong
+          >
         {:else}
           anonymous
         {/if}
@@ -265,15 +318,21 @@
         <span class="saved" aria-live="polite">✓ saved</span>
       {/if}
       <span class="meta-actions">
-        {#if canEdit}
-          <button
-            type="button"
-            class="share-btn"
-            onclick={() => (shareOpen = true)}
-          >
-            Share
-          </button>
-        {/if}
+        <!-- The <datasette-acl-share-dialog> custom element renders its own
+             share-icon trigger button and a native <dialog> modal; paper only
+             feeds it the acl resource identity + current actor and listens for
+             `share-changed` to run its SSE subscriber sweep. The element
+             degrades to a read-only "who has access" view when the actor can't
+             manage, so it is shown to every viewer (not gated on canManage). -->
+        <datasette-acl-share-dialog
+          resource-type={SHARE_RESOURCE_TYPE}
+          parent={SHARE_PARENT}
+          child={docId}
+          resource-label={meta?.name ?? ""}
+          actor-json={actorJson}
+          trigger-label="Share"
+          {@attach shareEvents}
+        ></datasette-acl-share-dialog>
         {#if copyState !== "idle"}
           <span
             class="copy-feedback"
@@ -487,8 +546,6 @@
   </svg>
 {/snippet}
 
-<ShareDialog {docId} bind:open={shareOpen} />
-
 <style>
   .doc-header {
     padding: 12px 4px;
@@ -546,6 +603,18 @@
     font-size: 12px;
     color: #666;
   }
+  .created-by {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .creator-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
+  }
   .saved {
     color: #2a8a2a;
   }
@@ -569,7 +638,11 @@
     color: #5a0000;
   }
 
-  .share-btn {
+  /* Restyle the <datasette-acl-share-dialog> trigger button (light DOM, so its
+     class is reachable) into paper's blue toolbar pill. The descendant selector
+     under .meta-actions outranks acl-share's own bundled trigger CSS regardless
+     of stylesheet order. The dialog/modal itself keeps acl-share's styling. */
+  .meta-actions :global(.datasette-acl-share__trigger.has-label) {
     padding: 3px 12px;
     font-size: 12px;
     line-height: 1.4;
@@ -579,9 +652,12 @@
     border-radius: 999px;
     cursor: pointer;
   }
-  .share-btn:hover {
+  .meta-actions :global(.datasette-acl-share__trigger.has-label:hover) {
     background: #094a8b;
     border-color: #094a8b;
+  }
+  .meta-actions :global(.datasette-acl-share__trigger-text) {
+    font-size: 12px;
   }
 
   /* Segmented Edit/View slider */

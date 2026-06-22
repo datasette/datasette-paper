@@ -20,7 +20,6 @@ class Doc:
     created_by: str | None
     schema_name: str
     current_version: int
-    visibility: str
     state: str
     archived_at: str | None
     trashed_at: str | None
@@ -47,14 +46,6 @@ class Snapshot:
     created_at: str
 
 
-@dataclass
-class Share:
-    actor_id: str
-    role: str
-    granted_by: str | None
-    granted_at: str
-
-
 def insert_doc(
     conn: sqlite3.Connection,
     name: str,
@@ -65,7 +56,7 @@ def insert_doc(
     sql = """\
 INSERT INTO _datasette_paper_doc (name, created_by, schema_name, kind)
 VALUES ($name::text, $created_by::text::, $schema_name::text, $kind::text)
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked;
 """
     params = {
         "name::text": name,
@@ -84,7 +75,7 @@ UPDATE _datasette_paper_doc
 SET name = $name::text,
     updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 WHERE id = $doc_id::integer
-RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked;
+RETURNING id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked;
 """
     params = {"name::text": name, "doc_id::integer": doc_id}
     cursor = conn.execute(sql, params)
@@ -94,7 +85,7 @@ RETURNING id, name, created_at, updated_at, created_by, schema_name, current_ver
 
 def select_doc_by_id(conn: sqlite3.Connection, doc_id: int) -> Doc | None:
     sql = """\
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE id = $doc_id::integer;
 """
@@ -106,7 +97,7 @@ WHERE id = $doc_id::integer;
 
 def list_docs(conn: sqlite3.Connection) -> list[Doc]:
     sql = """\
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 ORDER BY created_at;
 """
@@ -119,7 +110,7 @@ def list_docs_by_ids_states_and_kinds(
     conn: sqlite3.Connection, doc_ids_json: str, states_json: str, kinds_json: str
 ) -> list[Doc]:
     sql = """\
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
@@ -198,7 +189,7 @@ WHERE id = $doc_id::integer;
 
 def list_trashed_to_delete(conn: sqlite3.Connection, now: str) -> list[Doc]:
     sql = """\
-SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, visibility, state, archived_at, trashed_at, delete_at, kind, locked
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
 WHERE state = 'trashed'
   AND delete_at IS NOT NULL
@@ -352,56 +343,3 @@ LIMIT 1;
     cursor = conn.execute(sql, params)
     row = cursor.fetchone()
     return Snapshot(*row) if row is not None else None
-
-
-def select_shares(conn: sqlite3.Connection, doc_id: int) -> list[Share]:
-    sql = """\
-SELECT actor_id, role, granted_by, granted_at
-FROM _datasette_paper_share
-WHERE doc_id = $doc_id::integer
-ORDER BY actor_id;
-"""
-    params = {"doc_id::integer": doc_id}
-    cursor = conn.execute(sql, params)
-    return [Share(*row) for row in cursor.fetchall()]
-
-
-def update_doc_visibility(
-    conn: sqlite3.Connection, visibility: str, doc_id: int
-) -> None:
-    sql = """\
-UPDATE _datasette_paper_doc
-SET visibility = $visibility::text
-WHERE id = $doc_id::integer;
-"""
-    params = {"visibility::text": visibility, "doc_id::integer": doc_id}
-    conn.execute(sql, params)
-    return None
-
-
-def delete_shares_for_doc(conn: sqlite3.Connection, doc_id: int) -> None:
-    sql = "DELETE FROM _datasette_paper_share WHERE doc_id = $doc_id::integer;"
-    params = {"doc_id::integer": doc_id}
-    conn.execute(sql, params)
-    return None
-
-
-def insert_share(
-    conn: sqlite3.Connection,
-    doc_id: int,
-    actor_id: str,
-    role: str,
-    granted_by: str | None,
-) -> None:
-    sql = """\
-INSERT INTO _datasette_paper_share (doc_id, actor_id, role, granted_by)
-VALUES ($doc_id::integer, $actor_id::text, $role::text, $granted_by::text::);
-"""
-    params = {
-        "doc_id::integer": doc_id,
-        "actor_id::text": actor_id,
-        "role::text": role,
-        "granted_by::text::": granted_by,
-    }
-    conn.execute(sql, params)
-    return None
