@@ -26,6 +26,56 @@ async def test_create_doc_then_list(ds):
 
 
 @pytest.mark.asyncio
+async def test_list_created_by_name_falls_back_to_id(ds):
+    """Without a profile source, created_by_name is the id and avatar is None."""
+    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"})
+    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    assert docs[0]["created_by"] == "alice"
+    assert docs[0]["created_by_name"] == "alice"
+    assert docs[0]["created_by_avatar"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_created_by_uses_actor_profile(ds, monkeypatch):
+    """created_by_name + created_by_avatar resolve through actors_from_ids."""
+    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"})
+
+    async def fake_actors_from_ids(actor_ids):
+        return {
+            aid: {
+                "id": aid,
+                "display_name": "Alice Liddell",
+                "avatar_url": f"/-/profile/pic/{aid}",
+            }
+            for aid in actor_ids
+        }
+
+    monkeypatch.setattr(ds, "actors_from_ids", fake_actors_from_ids)
+    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    assert docs[0]["created_by"] == "alice"
+    assert docs[0]["created_by_name"] == "Alice Liddell"
+    assert docs[0]["created_by_avatar"] == "/-/profile/pic/alice"
+
+
+@pytest.mark.asyncio
+async def test_list_created_by_uses_user_profiles(ds):
+    """End-to-end: a seeded datasette-user-profiles row surfaces name + avatar.
+
+    Exercises the real plugin path (no monkeypatch) — resolve_profile_actors is
+    queried directly because user-profiles doesn't register actors_from_ids.
+    """
+    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"})
+    internal = ds.get_internal_database()
+    await internal.execute_write(
+        "INSERT INTO datasette_user_profiles (actor_id, display_name) VALUES (?, ?)",
+        ["alice", "Alice Anderson"],
+    )
+    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    assert docs[0]["created_by_name"] == "Alice Anderson"
+    assert docs[0]["created_by_avatar"] == "/-/profile/pic/alice"
+
+
+@pytest.mark.asyncio
 async def test_list_filters_to_actor_visible_papers():
     """Alice's papers should not appear in Bob's list."""
     from datasette.app import Datasette

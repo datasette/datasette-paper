@@ -173,6 +173,8 @@
   type DocMeta = {
     name: string;
     created_by: string | null;
+    created_by_name: string | null;
+    created_by_avatar: string | null;
     updated_at: string;
     current_version: number;
   };
@@ -287,7 +289,19 @@
     <div class="meta">
       <span class="created-by">
         {#if meta.created_by}
-          by <strong>{meta.created_by}</strong>
+          by
+          {#if meta.created_by_avatar}
+            <img
+              class="creator-avatar"
+              src={meta.created_by_avatar}
+              alt=""
+              onerror={(e) =>
+                ((e.currentTarget as HTMLImageElement).style.display = "none")}
+            />
+          {/if}
+          <strong title={meta.created_by}
+            >{meta.created_by_name ?? meta.created_by}</strong
+          >
         {:else}
           anonymous
         {/if}
@@ -588,6 +602,18 @@
     padding: 0 6px;
     font-size: 12px;
     color: #666;
+  }
+  .created-by {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .creator-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
   }
   .saved {
     color: #2a8a2a;

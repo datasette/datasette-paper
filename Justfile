@@ -164,12 +164,11 @@ test-all *flags:
 dev *flags:
     uv run --prerelease=allow \
         --with ../datasette-sidebar \
-        --with ../datasette-user-profiles \
-        --with ../datasette-debug-gotham \
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
+            -s permissions.profile_access true \
             {{flags}}
 
 dev-with-hmr *flags:

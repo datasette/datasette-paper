@@ -10,6 +10,8 @@
     current_version: number;
     updated_at: string;
     created_by: string | null;
+    created_by_name: string | null;
+    created_by_avatar: string | null;
     visibility: string;
     is_owner: boolean;
     state: DocState;
@@ -431,7 +433,23 @@
                 <span class="badge badge-locked" title="Read-only">Locked</span>
               {/if}
             </td>
-            <td>{doc.created_by ?? ""}</td>
+            <td title={doc.created_by ?? ""}>
+              {#if doc.created_by}
+                <span class="creator">
+                  {#if doc.created_by_avatar}
+                    <img
+                      class="creator-avatar"
+                      src={doc.created_by_avatar}
+                      alt=""
+                      onerror={(e) =>
+                        ((e.currentTarget as HTMLImageElement).style.display =
+                          "none")}
+                    />
+                  {/if}
+                  {doc.created_by_name ?? doc.created_by}
+                </span>
+              {/if}
+            </td>
             <td title={doc.updated_at}>{relativeTime(doc.updated_at)}</td>
             {#if tab === "trashed"}
               <td class="delete-at">{deletesInLabel(doc.delete_at)}</td>
@@ -775,5 +793,17 @@
     background: #eef2f7;
     color: #4a5568;
     border: 1px solid #d0d7e0;
+  }
+  .creator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+  }
+  .creator-avatar {
+    width: 1.4em;
+    height: 1.4em;
+    border-radius: 50%;
+    object-fit: cover;
+    flex-shrink: 0;
   }
 </style>

@@ -24,7 +24,7 @@ from ..permissions import (
     seed_owner_manager_grant,
 )
 from ..template_params import build_context, substitute_placeholders
-from ..util import read_json_body, actor_id, paper_db
+from ..util import read_json_body, actor_id, paper_db, resolve_actor_profiles
 
 
 VALID_STATES = ("active", "archived", "trashed")
@@ -117,6 +117,11 @@ async def list_docs(datasette, request):
     )
     actor = request.actor
     me = actor.get("id") if actor else None
+    # Resolve creator ids to display name + avatar in one batched call (via
+    # datasette-user-profiles, then the core actors_from_ids hook). Falls back
+    # to the id as the name when no profile source is installed; both fields are
+    # None for anonymous-created docs (created_by is None).
+    profiles = await resolve_actor_profiles(datasette, (r.created_by for r in rows))
     return Response.json(
         [
             {
@@ -125,6 +130,12 @@ async def list_docs(datasette, request):
                 "current_version": r.current_version,
                 "updated_at": r.updated_at,
                 "created_by": r.created_by,
+                "created_by_name": (
+                    profiles[r.created_by]["name"] if r.created_by else None
+                ),
+                "created_by_avatar": (
+                    profiles[r.created_by]["avatar_url"] if r.created_by else None
+                ),
                 "is_owner": r.created_by is not None and r.created_by == me,
                 **_doc_state_payload(r),
                 **_doc_flags_payload(r),
