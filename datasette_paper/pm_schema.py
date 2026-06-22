@@ -113,9 +113,32 @@ _placeholder_spec = {
     ],
 }
 
+# Inline atom for cross-document links — mirrors the JS schema in
+# frontend/src/lib/schema.ts. id-only (`docId`); markdown round-trips as
+# `[[id]]` via datasette_paper/markdown.py. toDOM is never rendered
+# server-side but must be structurally valid for node_from_json/Step.apply.
+_paper_link_spec = {
+    "group": "inline",
+    "inline": True,
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {"docId": {"default": None}},
+    "parseDOM": [{"tag": "a[data-paper-link]"}],
+    "toDOM": lambda node: [
+        "a",
+        {
+            "data-paper-link": str(node.attrs.get("docId") or ""),
+            "class": "pm-paper-link",
+        },
+        f"Paper {node.attrs.get('docId')}",
+    ],
+}
+
 _nodes = {
     **_list_nodes,
     "placeholder": _placeholder_spec,
+    "paper_link": _paper_link_spec,
     "task_list": _task_list_spec,
     "task_item": _task_item_spec,
     "table": _table_spec,

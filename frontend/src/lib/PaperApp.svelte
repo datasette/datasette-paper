@@ -12,6 +12,7 @@
   import type { ReporterState } from "./reporter";
   import Toolbar from "./Toolbar.svelte";
   import DocHeader from "./DocHeader.svelte";
+  import LinksPanel from "./LinksPanel.svelte";
 
   let { docId }: { docId: string } = $props();
 
@@ -216,6 +217,7 @@
     <Toolbar {view} {kind} />
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
+  <LinksPanel {docId} />
 </div>
 
 <style>
@@ -430,6 +432,70 @@
   .editor-host :global(li[data-task-item][data-checked="true"] > .task-item-content) {
     text-decoration: line-through;
     color: #888;
+  }
+
+  /* paper_link inline atom — rendered by PaperLinkView, resolved live via
+   * the LinkResolver. Base looks like a link; modifier classes mute /
+   * decorate by resolution state. */
+  .editor-host :global(.pm-paper-link) {
+    display: inline;
+    white-space: nowrap;
+    cursor: pointer;
+    color: #0b5cad;
+    text-decoration: none;
+    padding: 0 2px;
+    border-radius: 3px;
+    background: rgba(11, 92, 173, 0.08);
+  }
+  .editor-host :global(.pm-paper-link:hover) {
+    text-decoration: underline;
+  }
+  .editor-host :global(.pm-paper-link .pm-paper-link-icon) {
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+    margin-right: 0.25em;
+  }
+  .editor-host :global(.pm-paper-link .pm-paper-link-icon svg) {
+    width: 0.9em;
+    height: 0.9em;
+  }
+  .editor-host :global(.pm-paper-link--loading),
+  .editor-host :global(.pm-paper-link--archived),
+  .editor-host :global(.pm-paper-link--trashed) {
+    color: #888;
+    background: rgba(0, 0, 0, 0.05);
+  }
+  .editor-host :global(.pm-paper-link--denied) {
+    color: #888;
+    background: rgba(0, 0, 0, 0.05);
+    cursor: default;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-paper-link--missing) {
+    color: #888;
+    background: rgba(0, 0, 0, 0.05);
+    cursor: default;
+    text-decoration: line-through;
+  }
+  /* Cross-access affordances: an amber warning when a named collaborator of
+   * this doc can't see the target, and a muted dot hint when the doc's
+   * audience can't be fully enumerated. */
+  .editor-host :global(.pm-paper-link .pm-paper-link-warn) {
+    display: inline;
+    margin-left: 0.25em;
+    color: #b45309;
+    font-size: 0.85em;
+    cursor: help;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-paper-link .pm-paper-link-hint) {
+    display: inline;
+    margin-left: 0.25em;
+    color: #999;
+    font-size: 0.85em;
+    cursor: help;
+    text-decoration: none;
   }
 
   /* Tables — prosemirror-tables ships layout but no cell borders. We
@@ -662,5 +728,43 @@
   }
   .editor-host :global(.pm-link-tooltip-btn:hover) {
     background: #e6ebf0;
+  }
+
+  /* `[[`-triggered wiki-link autocomplete. */
+  .editor-host :global(.pm-wikilink-typing) {
+    background: rgba(11, 92, 173, 0.08);
+    border-bottom: 1px solid rgba(11, 92, 173, 0.4);
+    border-radius: 2px;
+  }
+  .editor-host :global(.pm-wikilink-popup) {
+    position: absolute;
+    z-index: 11;
+    min-width: 220px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    font-size: 13px;
+    padding: 4px 0;
+  }
+  .editor-host :global(.pm-wikilink-item) {
+    padding: 4px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .editor-host :global(.pm-wikilink-item:hover) {
+    background: #f1f4f7;
+  }
+  .editor-host :global(.pm-wikilink-item--active) {
+    background: #e1ebf7;
+  }
+  .editor-host :global(.pm-wikilink-empty) {
+    padding: 4px 10px;
+    color: #888;
+    font-style: italic;
   }
 </style>

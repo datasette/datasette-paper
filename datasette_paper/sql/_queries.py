@@ -29,6 +29,25 @@ class Doc:
 
 
 @dataclass
+class LinkEdge:
+    dst_doc_id: int
+    occurrences: int
+
+
+@dataclass
+class Backlink:
+    src_doc_id: int
+    occurrences: int
+
+
+@dataclass
+class GraphEdge:
+    src_doc_id: int
+    dst_doc_id: int
+    occurrences: int
+
+
+@dataclass
 class Step:
     doc_id: int
     version: int
@@ -130,6 +149,119 @@ ORDER BY updated_at DESC;
     }
     cursor = conn.execute(sql, params)
     return [Doc(*row) for row in cursor.fetchall()]
+
+
+def search_docs_by_title(
+    conn: sqlite3.Connection, doc_ids_json: str, like: str, prefix: str, limit: int
+) -> list[Doc]:
+    sql = """\
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+)
+  AND state = 'active'
+  AND kind = 'doc'
+  AND name LIKE $like::text
+ORDER BY
+  CASE WHEN name LIKE $prefix::text THEN 0 ELSE 1 END,
+  length(name),
+  updated_at DESC
+LIMIT $limit::integer;
+"""
+    params = {
+        "doc_ids_json::text": doc_ids_json,
+        "like::text": like,
+        "prefix::text": prefix,
+        "limit::integer": limit,
+    }
+    cursor = conn.execute(sql, params)
+    return [Doc(*row) for row in cursor.fetchall()]
+
+
+def list_docs_by_ids(conn: sqlite3.Connection, doc_ids_json: str) -> list[Doc]:
+    sql = """\
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+);
+"""
+    params = {"doc_ids_json::text": doc_ids_json}
+    cursor = conn.execute(sql, params)
+    return [Doc(*row) for row in cursor.fetchall()]
+
+
+def delete_links_for_src(conn: sqlite3.Connection, src_doc_id: int) -> None:
+    sql = "DELETE FROM _datasette_paper_link WHERE src_doc_id = $src_doc_id::integer;"
+    params = {"src_doc_id::integer": src_doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def insert_link(
+    conn: sqlite3.Connection,
+    src_doc_id: int,
+    dst_doc_id: int,
+    occurrences: int,
+    src_version: int,
+) -> None:
+    sql = """\
+INSERT INTO _datasette_paper_link (src_doc_id, dst_doc_id, occurrences, src_version)
+VALUES ($src_doc_id::integer, $dst_doc_id::integer, $occurrences::integer, $src_version::integer);
+"""
+    params = {
+        "src_doc_id::integer": src_doc_id,
+        "dst_doc_id::integer": dst_doc_id,
+        "occurrences::integer": occurrences,
+        "src_version::integer": src_version,
+    }
+    conn.execute(sql, params)
+    return None
+
+
+def select_links_by_src(conn: sqlite3.Connection, src_doc_id: int) -> list[LinkEdge]:
+    sql = """\
+SELECT dst_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE src_doc_id = $src_doc_id::integer
+ORDER BY dst_doc_id;
+"""
+    params = {"src_doc_id::integer": src_doc_id}
+    cursor = conn.execute(sql, params)
+    return [LinkEdge(*row) for row in cursor.fetchall()]
+
+
+def select_backlinks_by_dst_scoped(
+    conn: sqlite3.Connection, dst_doc_id: int, viewable_json: str
+) -> list[Backlink]:
+    sql = """\
+SELECT src_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE dst_doc_id = $dst_doc_id::integer
+  AND src_doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
+  )
+ORDER BY src_doc_id;
+"""
+    params = {"dst_doc_id::integer": dst_doc_id, "viewable_json::text": viewable_json}
+    cursor = conn.execute(sql, params)
+    return [Backlink(*row) for row in cursor.fetchall()]
+
+
+def select_edges_within(
+    conn: sqlite3.Connection, viewable_json: str
+) -> list[GraphEdge]:
+    sql = """\
+SELECT src_doc_id, dst_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE src_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))
+  AND dst_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))
+ORDER BY src_doc_id, dst_doc_id;
+"""
+    params = {"viewable_json::text": viewable_json}
+    cursor = conn.execute(sql, params)
+    return [GraphEdge(*row) for row in cursor.fetchall()]
 
 
 def archive_doc(conn: sqlite3.Connection, doc_id: int) -> None:

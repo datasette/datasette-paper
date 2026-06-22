@@ -219,6 +219,28 @@ class TestInlineNodes:
         assert len(para["content"]) == 1
         assert para["content"][0]["text"] == "a b"
 
+    def test_paper_link(self):
+        doc = parse_and_validate("see [[12]] ok\n")
+        para = doc["content"][0]
+        assert para["type"] == "paragraph"
+        content = para["content"]
+        assert [n["type"] for n in content] == ["text", "paper_link", "text"]
+        assert content[0]["text"] == "see "
+        assert content[1]["attrs"]["docId"] == 12
+        assert content[2]["text"] == " ok"
+
+    def test_paper_link_non_numeric_stays_text(self):
+        doc = parse_and_validate("[[notanumber]]\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["text"]
+        assert content[0]["text"] == "[[notanumber]]"
+
+    def test_paper_link_multiple(self):
+        doc = parse_and_validate("a [[1]] b [[2]] c\n")
+        content = doc["content"][0]["content"]
+        links = [n for n in content if n["type"] == "paper_link"]
+        assert [link["attrs"]["docId"] for link in links] == [1, 2]
+
 
 # ---------------------------------------------------------------------------
 # Lists

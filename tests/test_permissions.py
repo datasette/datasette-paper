@@ -270,3 +270,64 @@ async def test_also_requires_chain_blocks_edit_when_view_denied():
     res = PaperDocResource(doc_id)
     # Bob has no view grant — edit's also_requires=view kicks in.
     assert not await ds.allowed(action="paper-edit", resource=res, actor={"id": "bob"})
+
+
+# ---------------------------------------------------------------------------
+# viewable_doc_ids — enumerate every doc the actor can view (drains pagination)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_viewable_doc_ids_owner_sees_own():
+    from datasette_paper.permissions import viewable_doc_ids
+
+    ds = await _make_ds({"datasette-paper-create": True})
+    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
+    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
+    doc_id = r.json()["id"]
+
+    assert doc_id in await viewable_doc_ids(ds, {"id": "alice"})
+
+
+@pytest.mark.asyncio
+async def test_viewable_doc_ids_stranger_excluded():
+    from datasette_paper.permissions import viewable_doc_ids
+
+    ds = await _make_ds({"datasette-paper-create": True})
+    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
+    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
+    doc_id = r.json()["id"]
+
+    # Bob has no acl grant on alice's doc — it must not appear.
+    assert doc_id not in await viewable_doc_ids(ds, {"id": "bob"})
+
+
+@pytest.mark.asyncio
+async def test_viewable_doc_ids_viewer_grant_included():
+    from datasette_paper.permissions import viewable_doc_ids
+
+    ds = await _make_ds({"datasette-paper-create": True})
+    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
+    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
+    doc_id = r.json()["id"]
+
+    await _grant_acl(ds, doc_id, "bob", "Viewer")
+
+    assert doc_id in await viewable_doc_ids(ds, {"id": "bob"})
+
+
+@pytest.mark.asyncio
+async def test_viewable_doc_ids_anonymous_empty():
+    from datasette_paper.permissions import viewable_doc_ids
+
+    ds = await _make_ds({"datasette-paper-create": True})
+    cookies = {"ds_actor": _actor_cookie(ds, "alice")}
+    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
+    assert r.status_code == 201
+
+    # Anonymous (actor=None) has no grant on alice's private doc.
+    assert await viewable_doc_ids(ds, None) == []
+
+
+# TODO: drain test — assert >100 viewable docs all returned (proves
+# pagination drain)

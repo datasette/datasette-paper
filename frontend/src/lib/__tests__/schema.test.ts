@@ -48,3 +48,47 @@ describe("placeholder node", () => {
     expect(inserted.attrs.key).toBe("actor");
   });
 });
+
+describe("paper_link node", () => {
+  it("exists on the schema as an inline atom leaf", () => {
+    const t = schema.nodes.paper_link;
+    expect(t).toBeDefined();
+    expect(t.isInline).toBe(true);
+    expect(t.isAtom).toBe(true);
+    expect(t.isLeaf).toBe(true);
+  });
+
+  it("round-trips through JSON", () => {
+    const node = schema.nodes.paper_link.create({ docId: 7 });
+    const json = node.toJSON();
+    expect(json).toEqual({
+      type: "paper_link",
+      attrs: { docId: 7 },
+    });
+    const back = schema.nodeFromJSON(json);
+    expect(back.attrs.docId).toBe(7);
+    expect(back.type).toBe(schema.nodes.paper_link);
+  });
+
+  it("toDOM emits data-paper-link", () => {
+    const node = schema.nodes.paper_link.create({ docId: 7 });
+    const dom = node.type.spec.toDOM!(node) as [string, Record<string, string>, string];
+    expect(dom[1]["data-paper-link"]).toBe("7");
+  });
+
+  it("can be inserted into a paragraph via replaceSelectionWith", () => {
+    const doc = schema.node("doc", null, [schema.node("paragraph")]);
+    let state = EditorState.create({ doc });
+    state = state.apply(state.tr.setSelection(TextSelection.atStart(state.doc)));
+
+    const link = schema.nodes.paper_link.create({ docId: 7 });
+    const tr = state.tr.replaceSelectionWith(link);
+    const next = state.apply(tr);
+
+    const para = next.doc.firstChild!;
+    expect(para.childCount).toBe(1);
+    const inserted = para.firstChild!;
+    expect(inserted.type.name).toBe("paper_link");
+    expect(inserted.attrs.docId).toBe(7);
+  });
+});

@@ -140,6 +140,103 @@ class PaperDB:
 
         return await self.database.execute_write_fn(read)
 
+    async def search_docs_by_title(
+        self,
+        *,
+        doc_ids: list[int],
+        q: str,
+        limit: int,
+    ) -> list[_queries.Doc]:
+        # Variable-length IN via json_each; q is pre-wrapped into LIKE patterns
+        # here so the SQL stays parameter-shaped. `like` matches anywhere,
+        # `prefix` powers the prefix-hits-first ORDER BY. Empty q → both
+        # collapse to "%"/"" which match everything (recent-ish fallback).
+        # NOTE: LIKE metachars (% _) in q aren't escaped — acceptable for v1;
+        # FTS is a later TODO.
+        doc_ids_json = json.dumps(doc_ids)
+        like = f"%{q}%"
+        prefix = f"{q}%"
+
+        def read(conn):
+            return _queries.search_docs_by_title(
+                conn,
+                doc_ids_json=doc_ids_json,
+                like=like,
+                prefix=prefix,
+                limit=limit,
+            )
+
+        return await self.database.execute_write_fn(read)
+
+    async def list_docs_by_ids(self, *, doc_ids: list[int]) -> list[_queries.Doc]:
+        # Any state, any kind — the resolve endpoint needs trashed/archived
+        # rows too (a row that exists is "ok"; only a missing row is
+        # "not_found"). Variable-length IN via json_each, like the siblings.
+        doc_ids_json = json.dumps(doc_ids)
+
+        def read(conn):
+            return _queries.list_docs_by_ids(conn, doc_ids_json=doc_ids_json)
+
+        return await self.database.execute_write_fn(read)
+
+    # ------------------------------------------------------------------
+    # Links
+    # ------------------------------------------------------------------
+
+    async def replace_links(
+        self,
+        *,
+        src_doc_id: int,
+        src_version: int,
+        edges: dict[int, int],
+    ) -> None:
+        # Rebuild the edge set for one src in a single transaction (mirror the
+        # multi-statement insert_step pattern): delete all of src's edges, then
+        # re-insert the current set. dst_doc_id is intentionally not a FK.
+        def write(conn):
+            _queries.delete_links_for_src(conn, src_doc_id=src_doc_id)
+            for dst_doc_id, occurrences in edges.items():
+                _queries.insert_link(
+                    conn,
+                    src_doc_id=src_doc_id,
+                    dst_doc_id=dst_doc_id,
+                    occurrences=occurrences,
+                    src_version=src_version,
+                )
+
+        await self.database.execute_write_fn(write)
+
+    async def links_by_src(self, *, src_doc_id: int) -> list[_queries.LinkEdge]:
+        def read(conn):
+            return _queries.select_links_by_src(conn, src_doc_id=src_doc_id)
+
+        return await self.database.execute_write_fn(read)
+
+    async def backlinks_by_dst(
+        self, *, dst_doc_id: int, viewable_ids: list[int]
+    ) -> list[_queries.Backlink]:
+        # Scoped to the requester's viewable set so private papers that link
+        # this one aren't disclosed. JSON-encode the set for the IN clause.
+        viewable_json = json.dumps(viewable_ids)
+
+        def read(conn):
+            return _queries.select_backlinks_by_dst_scoped(
+                conn, dst_doc_id=dst_doc_id, viewable_json=viewable_json
+            )
+
+        return await self.database.execute_write_fn(read)
+
+    async def edges_within(
+        self, *, viewable_ids: list[int]
+    ) -> list[_queries.GraphEdge]:
+        # Edges whose src AND dst are both viewable. JSON-encode the set.
+        viewable_json = json.dumps(viewable_ids)
+
+        def read(conn):
+            return _queries.select_edges_within(conn, viewable_json=viewable_json)
+
+        return await self.database.execute_write_fn(read)
+
     # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------

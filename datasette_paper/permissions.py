@@ -187,6 +187,65 @@ async def can_paper_edit(datasette, actor, doc_id) -> bool:
     )
 
 
+async def viewable_doc_ids(datasette, actor) -> list[int]:
+    """Every doc id ``actor`` can view (drains pagination).
+
+    ``allowed_resources`` is keyset-paginated (default ``limit=100``);
+    ``PaginatedResources.all()`` is an async generator that walks every
+    page, so we iterate it rather than ``await`` it — a bare ``limit=`` or
+    ``.resources`` would silently cap large grant sets. PaperDocResource is
+    two-level: the doc id is the resource ``child`` (parent is the fixed
+    sentinel).
+    """
+    page = await datasette.allowed_resources(action="paper-view", actor=actor)
+    return [int(r.child) async for r in page.all()]
+
+
+async def named_viewers(datasette, doc_id) -> tuple[set, bool]:
+    """Return (named_actor_ids, has_open_audience) for a doc's paper-view audience.
+
+    Named = explicit actor grants + materialized members of groups that hold
+    paper-view. Open audience = a public-audience grant (acl's first-class
+    ``everyone`` / ``authenticated`` / ``anonymous`` principals) or a dynamic
+    group whose membership is config-driven and not fully enumerable.
+    Best-effort authoring aid (06 §#8) — never a security control.
+    """
+    from datasette_acl.grants import list_grants
+
+    grants = await list_grants(
+        datasette, PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, str(doc_id)
+    )
+    acl_config = datasette.plugin_config("datasette-acl") or {}
+    dynamic_group_names = set((acl_config.get("dynamic-groups") or {}).keys())
+
+    named: set = set()
+    open_audience = False
+    db = datasette.get_internal_database()
+    for g in grants:
+        if "paper-view" not in g["actions"]:
+            continue
+        if g["principal"] == "actor":
+            if g["actor_id"] is not None:
+                named.add(g["actor_id"])
+        elif g["principal"] == "group":
+            # Dynamic groups: membership computed from allow-blocks, only
+            # materialized for already-seen actors → treat as open audience.
+            if g["group_name"] in dynamic_group_names:
+                open_audience = True
+            # Expand the known (materialized) members either way.
+            rows = await db.execute(
+                "SELECT actor_id FROM acl_actor_groups WHERE group_id = ?",
+                [g["group_id"]],
+            )
+            for r in rows.rows:
+                named.add(r["actor_id"])
+        else:
+            # Public audience (everyone / authenticated / anonymous): the
+            # paper-view set is not enumerable as named actors.
+            open_audience = True
+    return named, open_audience
+
+
 async def can_paper_manage(datasette, actor, doc_id) -> bool:
     """True when ``actor`` may manage sharing for ``doc_id``.
 

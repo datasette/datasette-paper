@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { client } from "./client";
+  import LinkGraph from "./LinkGraph.svelte";
 
   type DocState = "active" | "archived" | "trashed";
 
@@ -323,10 +324,34 @@
   });
 
   let visibleRows = $derived(bucket(tab) ?? []);
+
+  // The link graph is lazy-mounted: only when `showGraph` flips true does
+  // <LinkGraph> render, so its dynamic d3-force import doesn't load until
+  // the user opens the graph.
+  let showGraph = $state(false);
+  function toggleGraph(): void {
+    showGraph = !showGraph;
+  }
 </script>
 
 <div class="paper-index">
-  <h1>Papers</h1>
+  <div class="index-header">
+    <h1>Papers</h1>
+    <button
+      type="button"
+      class="graph-toggle"
+      aria-expanded={showGraph}
+      onclick={toggleGraph}
+    >
+      {showGraph ? "Hide graph" : "Graph"}
+    </button>
+  </div>
+
+  {#if showGraph}
+    <section class="graph-panel">
+      <LinkGraph />
+    </section>
+  {/if}
 
   {#if error}
     <div class="error">{error}</div>
@@ -657,6 +682,31 @@
     max-width: 880px;
     margin-left: auto;
     margin-right: auto;
+  }
+  .index-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1em;
+  }
+  .graph-toggle {
+    border: 1px solid #ccc;
+    background: #fff;
+    border-radius: 4px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font: inherit;
+    color: #1a1a1a;
+  }
+  .graph-toggle:hover {
+    background: #f0f3f6;
+  }
+  .graph-panel {
+    margin: 1em 0;
+    padding: 12px;
+    border: 1px solid #e0e4e8;
+    border-radius: 6px;
+    background: #fafbfc;
   }
   .error {
     background: #ffd6d6;

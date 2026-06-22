@@ -214,3 +214,73 @@ async def test_snapshot_round_trip():
     assert snap is not None
     assert snap.version == 5
     assert snap.doc_json == '{"v":5}'
+
+
+@pytest.mark.asyncio
+async def test_list_docs_by_ids_returns_requested():
+    """list_docs_by_ids returns exactly the rows whose ids were asked for."""
+    paper = await make_paper_db()
+    a = await paper.insert_doc(name="A")
+    b = await paper.insert_doc(name="B")
+    await paper.insert_doc(name="C")  # not requested
+
+    rows = await paper.list_docs_by_ids(doc_ids=[a.id, b.id])
+    assert {r.id for r in rows} == {a.id, b.id}
+
+
+@pytest.mark.asyncio
+async def test_list_docs_by_ids_skips_nonexistent():
+    """A missing id is silently absent (no row, no error)."""
+    paper = await make_paper_db()
+    a = await paper.insert_doc(name="A")
+
+    rows = await paper.list_docs_by_ids(doc_ids=[a.id, 9999])
+    assert {r.id for r in rows} == {a.id}
+
+
+@pytest.mark.asyncio
+async def test_list_docs_by_ids_empty_list():
+    """Empty id list → empty result (no SQL error on empty json_each)."""
+    paper = await make_paper_db()
+    await paper.insert_doc(name="A")
+
+    rows = await paper.list_docs_by_ids(doc_ids=[])
+    assert rows == []
+
+
+@pytest.mark.asyncio
+async def test_links_by_src_returns_dst_and_occurrences():
+    """Forward links: each dst the src points at, with occurrence count."""
+    paper = await make_paper_db()
+    src = await paper.insert_doc(name="Src")
+    a = await paper.insert_doc(name="A")
+    b = await paper.insert_doc(name="B")
+
+    await paper.replace_links(
+        src_doc_id=src.id, src_version=1, edges={a.id: 2, b.id: 1}
+    )
+
+    edges = await paper.links_by_src(src_doc_id=src.id)
+    assert {(e.dst_doc_id, e.occurrences) for e in edges} == {(a.id, 2), (b.id, 1)}
+
+
+@pytest.mark.asyncio
+async def test_backlinks_by_dst_excludes_non_viewable_sources():
+    """Backlinks are scoped to the viewable id set (existence privacy)."""
+    paper = await make_paper_db()
+    dst = await paper.insert_doc(name="Dst")
+    src_visible = await paper.insert_doc(name="Visible")
+    src_hidden = await paper.insert_doc(name="Hidden")
+
+    await paper.replace_links(
+        src_doc_id=src_visible.id, src_version=1, edges={dst.id: 1}
+    )
+    await paper.replace_links(
+        src_doc_id=src_hidden.id, src_version=1, edges={dst.id: 1}
+    )
+
+    # Only src_visible is in the viewable set → src_hidden must not appear.
+    backs = await paper.backlinks_by_dst(
+        dst_doc_id=dst.id, viewable_ids=[src_visible.id]
+    )
+    assert {b.src_doc_id for b in backs} == {src_visible.id}

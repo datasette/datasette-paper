@@ -20,6 +20,8 @@ Public API:
 
 from __future__ import annotations
 
+import re
+
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
@@ -346,7 +348,7 @@ def _inline_to_pm(inline_token) -> list[dict]:
         # Unknown inline token kinds are dropped — better silent than crashing
         # in a converter that runs over arbitrary user input.
 
-    return _coalesce_text(raw)
+    return _coalesce_text(_split_paper_links(raw))
 
 
 def _coalesce_text(nodes: list[dict]) -> list[dict]:
@@ -367,6 +369,47 @@ def _coalesce_text(nodes: list[dict]) -> list[dict]:
             out[-1]["text"] = out[-1]["text"] + node["text"]
         else:
             out.append(node)
+    return out
+
+
+_PAPER_LINK_RE = re.compile(r"\[\[(\d+)\]\]")
+
+
+def _split_paper_links(nodes: list[dict]) -> list[dict]:
+    """Split `[[<int>]]` occurrences inside text nodes into `paper_link` atoms.
+
+    markdown-it has no notion of our `[[id]]` link syntax, so it arrives as
+    literal text; we post-process the emitted inline nodes here. Surrounding
+    text keeps its marks; the `paper_link` atom carries none (a bold/italic
+    span around a link is meaningless for an id-only reference). Only the
+    digits-only form matches, so `[[notanumber]]` stays literal text.
+    """
+    out: list[dict] = []
+    for node in nodes:
+        if node.get("type") != "text":
+            out.append(node)
+            continue
+        text = node["text"]
+        marks = node.get("marks")
+        last = 0
+        matched = False
+        for m in _PAPER_LINK_RE.finditer(text):
+            matched = True
+            if m.start() > last:
+                seg = {"type": "text", "text": text[last : m.start()]}
+                if marks:
+                    seg["marks"] = marks
+                out.append(seg)
+            out.append({"type": "paper_link", "attrs": {"docId": int(m.group(1))}})
+            last = m.end()
+        if not matched:
+            out.append(node)
+            continue
+        if last < len(text):
+            seg = {"type": "text", "text": text[last:]}
+            if marks:
+                seg["marks"] = marks
+            out.append(seg)
     return out
 
 

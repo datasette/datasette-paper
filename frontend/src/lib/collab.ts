@@ -16,6 +16,11 @@ import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { tableRowDragPlugin } from "./tableRowDrag";
 import { linkTooltipPlugin } from "./linkTooltip";
+import {
+  wikiLinkSuggestPlugin,
+  wikiLinkSuggestPopupPlugin,
+  wikiLinkKeymap,
+} from "./wikiLinkSuggest";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap } from "prosemirror-example-setup";
@@ -39,6 +44,9 @@ import { schema } from "./schema";
 import { foldHeadingsPlugin } from "./foldHeadings";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
+import { LinkResolver } from "./linkResolver";
+import { AccessChecker } from "./linkAccessCheck";
+import { PaperLinkView } from "./paperLinkView";
 import {
   cursorReporterPlugin,
   remoteCursorsPlugin,
@@ -754,6 +762,10 @@ export class EditorConnection {
   // Unique client ID for this session (random integer)
   private clientID: number;
 
+  // One link resolver per connection (NOT a module singleton — multi-doc tabs + tests).
+  private linkResolver: LinkResolver;
+  private accessChecker: AccessChecker;
+
   // Current viewer's actor id, captured from the bootstrap response.
   // Used to suppress this user's own presence cursor across other tabs.
   private selfActor: string | null = null;
@@ -794,6 +806,11 @@ export class EditorConnection {
     this.opts = opts;
     this.report = report ?? new Reporter();
     this.clientID = Math.floor(Math.random() * 0xffffffff);
+    this.linkResolver = new LinkResolver();
+    // Self-gates via 403 for non-editors. Loaded lazily the first time a
+    // paper_link NodeView subscribes — like LinkResolver, no fetch fires for
+    // a doc with no links to check.
+    this.accessChecker = new AccessChecker(opts.docId);
     this.installNetworkListeners();
     this.start();
   }
@@ -1020,6 +1037,11 @@ export class EditorConnection {
           Delete: deleteRowOrColSelection(),
         }),
         keymap(buildKeymap(schema)),
+        // The `[[` autocomplete keymap must precede baseKeymap so
+        // Enter/Arrow/Escape are intercepted while the popup is open.
+        // Each command returns false when inactive, so normal editing
+        // keystrokes fall through unaffected.
+        keymap(wikiLinkKeymap()),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({
@@ -1038,6 +1060,11 @@ export class EditorConnection {
         // URL and Open/Copy actions since ProseMirror eats anchor clicks
         // while editing.
         linkTooltipPlugin(),
+        // `[[`-triggered wiki-link autocomplete: the state plugin tracks
+        // the in-progress `[[query` span, the popup plugin renders the
+        // floating result list and runs the debounced link-search fetch.
+        wikiLinkSuggestPlugin,
+        wikiLinkSuggestPopupPlugin(),
         // gap cursor — gives ArrowDown/Right past the last block (and
         // ArrowUp/Left before the first) a place to land when no normal
         // text position exists, e.g. between two adjacent tables or after
@@ -1065,6 +1092,14 @@ export class EditorConnection {
       nodeViews: {
         task_item: (node, view, getPos) =>
           new TaskItemView(node, view, getPos as () => number | undefined),
+        paper_link: (node, view, getPos) =>
+          new PaperLinkView(
+            node,
+            view,
+            getPos as () => number | undefined,
+            this.linkResolver,
+            this.accessChecker,
+          ),
       },
       // Returning null falls through to ProseMirror's default; the cast
       // exists because the upstream type insists on `Slice`.
@@ -1442,6 +1477,8 @@ export class EditorConnection {
       clearTimeout(this.snapshotTimer);
       this.snapshotTimer = null;
     }
+    this.linkResolver.dispose();
+    this.accessChecker.dispose();
     if (this.view) {
       this.view.destroy();
       this.view = null;

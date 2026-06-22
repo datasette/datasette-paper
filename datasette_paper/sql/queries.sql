@@ -72,6 +72,71 @@ WHERE id IN (
 )
 ORDER BY updated_at DESC;
 
+-- name: searchDocsByTitle :rows -> Doc
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+)
+  AND state = 'active'
+  AND kind = 'doc'
+  AND name LIKE $like::text
+ORDER BY
+  CASE WHEN name LIKE $prefix::text THEN 0 ELSE 1 END,
+  length(name),
+  updated_at DESC
+LIMIT $limit::integer;
+
+-- name: listDocsByIds :rows -> Doc
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+);
+
+-- ============================================================================
+-- Links
+--
+-- Outgoing paper_link edges for a doc, rebuilt wholesale per src by the
+-- write-tail reindex (delete-all + re-insert in one transaction). dst_doc_id
+-- is intentionally not a FK; src_doc_id cascades on doc hard-delete.
+-- ============================================================================
+
+-- name: deleteLinksForSrc
+DELETE FROM _datasette_paper_link WHERE src_doc_id = $src_doc_id::integer;
+
+-- name: insertLink
+INSERT INTO _datasette_paper_link (src_doc_id, dst_doc_id, occurrences, src_version)
+VALUES ($src_doc_id::integer, $dst_doc_id::integer, $occurrences::integer, $src_version::integer);
+
+-- Forward links: every dst this src points at, with how many times.
+-- name: selectLinksBySrc :rows -> LinkEdge
+SELECT dst_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE src_doc_id = $src_doc_id::integer
+ORDER BY dst_doc_id;
+
+-- Backlinks restricted to sources the requester can view (no existence
+-- disclosure of private papers that link this one). Caller passes the
+-- viewable id set as a JSON array of integers.
+-- name: selectBacklinksByDstScoped :rows -> Backlink
+SELECT src_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE dst_doc_id = $dst_doc_id::integer
+  AND src_doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
+  )
+ORDER BY src_doc_id;
+
+-- Edges where BOTH endpoints are viewable — the permitted subgraph. Caller
+-- passes the viewable id set as a JSON array of integers.
+-- name: selectEdgesWithin :rows -> GraphEdge
+SELECT src_doc_id, dst_doc_id, occurrences
+FROM _datasette_paper_link
+WHERE src_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))
+  AND dst_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))
+ORDER BY src_doc_id, dst_doc_id;
+
 -- ============================================================================
 -- State transitions (archive / trash)
 --

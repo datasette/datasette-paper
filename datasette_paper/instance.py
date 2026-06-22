@@ -120,6 +120,11 @@ class Instance:
         # repeating the materialization work. Cleared at the top of each
         # full re-materialization.
         self._materialization_error: Optional[tuple[int, str]] = None
+        # Doc version at which link edges were last reindexed. Lets the write
+        # tail skip a redundant reindex when nothing advanced the version.
+        # In-memory: lost on eviction/rehydrate, which just means one cheap
+        # idempotent reindex on the next write — fine.
+        self._links_indexed_version: Optional[int] = None
         # Serializes ``add_events`` and the subscribe+backlog snapshot in
         # ``subscribe_with_backlog`` so the Python-level state transitions
         # (version check → validate → write → tail append → broadcast)
@@ -396,7 +401,38 @@ class Instance:
 
         self.last_active = time.monotonic()
         await self._maybe_auto_snapshot(actor_id)
+        await self.reindex_links()
         return self.version
+
+    async def reindex_links(self) -> None:
+        """Rebuild this doc's outgoing link edges from the live doc.
+
+        Called from the write tail. Guarded so it never raises into the write
+        path: skips a poisoned history and a redundant re-run, and swallows +
+        logs any persistence error (an edge-index failure must not fail the
+        user's edit).
+        """
+        if self._materialization_error is not None:
+            return
+        if self._links_indexed_version == self.version:
+            return
+        try:
+            live_json = self.materialize_live_doc()
+            if self._materialization_error is not None:
+                return
+            from .links import extract_links
+
+            edges: dict[int, int] = {}
+            for dst in extract_links(live_json):
+                edges[dst] = edges.get(dst, 0) + 1
+            await self.db.replace_links(
+                src_doc_id=self.doc_id,
+                src_version=self.version,
+                edges=edges,
+            )
+            self._links_indexed_version = self.version
+        except Exception:
+            logger.exception("link reindex failed for doc %s", self.doc_id)
 
     async def _maybe_auto_snapshot(self, actor_id: Optional[str]) -> None:
         """Snapshot when the step tail has drifted past the threshold.
@@ -799,3 +835,56 @@ def get_registry(datasette) -> InstanceRegistry:
     if not hasattr(datasette, "_paper_registry"):
         datasette._paper_registry = InstanceRegistry()
     return datasette._paper_registry
+
+
+# Marker table + key recording that the one-time link-edge backfill has run.
+# Mirrors the share→acl migration marker idiom (see migrations.py) but with a
+# dedicated table so the two markers are independent. Created at runtime — no
+# schema migration, because the backfill only reindexes derived data.
+_LINK_BACKFILL_TABLE = "_datasette_paper_link_backfill"
+_LINK_BACKFILL_KEY = "links_v1"
+
+
+async def backfill_links(datasette, *, force: bool = False) -> dict:
+    """Reindex link edges for every existing doc, once.
+
+    Pre-feature docs (created before the write-tail reindex existed) have no
+    rows in ``_datasette_paper_link``. This walks every doc, hydrates it, and
+    runs the same idempotent reindex the write tail uses. Guarded by a marker
+    row so it only scans once; ``force=True`` bypasses the marker (tests /
+    re-run). Returns a small stats dict for logging / assertions.
+    """
+    from .util import paper_db
+
+    db = paper_db(datasette)
+    internal = datasette.get_internal_database()
+    await internal.execute_write(
+        f"CREATE TABLE IF NOT EXISTS {_LINK_BACKFILL_TABLE} "
+        "(key TEXT PRIMARY KEY, migrated_at TEXT NOT NULL)"
+    )
+    if not force:
+        done = (
+            await internal.execute(
+                f"SELECT 1 FROM {_LINK_BACKFILL_TABLE} WHERE key = ?",
+                [_LINK_BACKFILL_KEY],
+            )
+        ).rows
+        if done:
+            return {"docs": 0, "skipped": True}
+
+    rows = (await internal.execute("SELECT id FROM _datasette_paper_doc")).rows
+    count = 0
+    for row in rows:
+        doc_id = row["id"]
+        try:
+            inst = await Instance.hydrate(db, doc_id)
+            await inst.reindex_links()
+            count += 1
+        except Exception:
+            logger.exception("link backfill failed for doc %s", doc_id)
+    await internal.execute_write(
+        f"INSERT OR IGNORE INTO {_LINK_BACKFILL_TABLE} (key, migrated_at) "
+        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [_LINK_BACKFILL_KEY],
+    )
+    return {"docs": count, "skipped": False}

@@ -444,3 +444,8 @@ def test_table_cell_marks_are_preserved():
     }
     md = doc_to_markdown(_doc(table))
     assert "| **bold** |" in md
+
+
+def test_paper_link_renders_double_bracket():
+    md = doc_to_markdown(_doc(_para({"type": "paper_link", "attrs": {"docId": 12}})))
+    assert "[[12]]" in md

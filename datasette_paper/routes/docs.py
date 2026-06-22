@@ -21,7 +21,9 @@ from ..permissions import (
     ensure_paper_create,
     ensure_paper_edit,
     ensure_paper_view,
+    named_viewers,
     seed_owner_manager_grant,
+    viewable_doc_ids,
 )
 from ..template_params import build_context, substitute_placeholders
 from ..util import read_json_body, actor_id, paper_db, resolve_actor_profiles
@@ -78,7 +80,8 @@ def _doc_flags_payload(doc) -> dict:
 @router.GET(r"^/-/paper/api/docs$")
 async def list_docs(datasette, request):
     # No global gate — the results are acl-filtered below, so an actor with no
-    # grants simply gets an empty list. ``state`` filters the listing only — it isn't a permission concern.
+    # grants simply gets an empty list. ``state`` filters the listing only — it
+    # isn't a permission concern.
     # ``allowed_resources`` still pulls every paper the actor can view;
     # the SQL helper then narrows to the requested state set. Default is
     # 'active' to match the main listing UI; the renovated /-/paper page
@@ -142,6 +145,170 @@ async def list_docs(datasette, request):
             }
             for r in rows
         ]
+    )
+
+
+@router.GET(r"^/-/paper/api/link-search$")
+async def link_search(datasette, request):
+    # Ungated — results are restricted to viewable_doc_ids (acl-filtered) below.
+    q = (request.args.get("q") or "").strip()
+    try:
+        limit = min(int(request.args.get("limit") or 20), 50)
+    except ValueError:
+        limit = 20
+    doc_ids = await viewable_doc_ids(datasette, request.actor)
+    if not doc_ids:
+        return Response.json({"results": []})
+    db = paper_db(datasette)
+    rows = await db.search_docs_by_title(doc_ids=doc_ids, q=q, limit=limit)
+    return Response.json(
+        {
+            "results": [
+                {"id": r.id, "name": r.name, "state": r.state, "kind": r.kind}
+                for r in rows
+            ]
+        }
+    )
+
+
+async def _resolve_map(datasette, actor, ids):
+    """Resolve a list of doc ids to per-id {status, ...} (the link-resolve
+    contract, 08 Q4). denied/not_found carry no title — they must not leak the
+    existence/name of papers the actor can't see. Shared by POST /links/resolve
+    and the forward/backlink endpoints."""
+    viewable = set(await viewable_doc_ids(datasette, actor))
+    db = paper_db(datasette)
+    rows = {r.id: r for r in await db.list_docs_by_ids(doc_ids=ids)}
+    out = {}
+    for i in ids:
+        row = rows.get(i)
+        if row is None:
+            out[i] = {"status": "not_found"}
+        elif i not in viewable:
+            out[i] = {"status": "denied"}
+        else:
+            out[i] = {
+                "status": "ok",
+                "title": row.name,
+                "state": row.state,
+                "kind": row.kind,
+                "href": f"/-/paper/doc/{i}",
+            }
+    return out
+
+
+@router.POST(r"^/-/paper/api/links/resolve$")
+async def resolve_links(datasette, request):
+    # Ungated — non-viewable ids resolve to {"status": "denied"} (acl-filtered).
+    body = await read_json_body(request)
+    raw = body.get("ids") or []
+    ids = []
+    for i in raw[:200]:
+        try:
+            ids.append(int(i))
+        except (TypeError, ValueError):
+            continue
+    out = await _resolve_map(datasette, request.actor, ids)
+    return Response.json({"links": out})
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/links$")
+async def forward_links(datasette, request, doc_id: int):
+    await ensure_paper_view(datasette, request, doc_id)
+    db = paper_db(datasette)
+    edges = await db.links_by_src(src_doc_id=doc_id)
+    resolved = await _resolve_map(
+        datasette, request.actor, [e.dst_doc_id for e in edges]
+    )
+    return Response.json(
+        {
+            "links": [
+                {
+                    "id": e.dst_doc_id,
+                    "occurrences": e.occurrences,
+                    **resolved[e.dst_doc_id],
+                }
+                for e in edges
+            ]
+        }
+    )
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/backlinks$")
+async def backlinks(datasette, request, doc_id: int):
+    await ensure_paper_view(datasette, request, doc_id)
+    viewable = await viewable_doc_ids(datasette, request.actor)
+    db = paper_db(datasette)
+    edges = await db.backlinks_by_dst(dst_doc_id=doc_id, viewable_ids=viewable)
+    resolved = await _resolve_map(
+        datasette, request.actor, [e.src_doc_id for e in edges]
+    )
+    return Response.json(
+        {
+            "backlinks": [
+                {
+                    "id": e.src_doc_id,
+                    "occurrences": e.occurrences,
+                    **resolved[e.src_doc_id],
+                }
+                for e in edges
+            ]
+        }
+    )
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/link-access-check$")
+async def link_access_check(datasette, request, doc_id: int):
+    """Per outgoing link, which named collaborators of this doc can't view the
+    target (best-effort authoring aid, 06 §#8 — never a security control).
+
+    Edit-gated: only editors of the source doc care. Response ``links`` keys
+    are STRING dst doc ids. ``open_audience`` is True when the source doc's
+    paper-view audience can't be fully enumerated (wildcard grant or dynamic
+    group).
+    """
+    await ensure_paper_edit(datasette, request, doc_id)
+    named, open_audience = await named_viewers(datasette, doc_id)
+    # One viewable-set enumeration per named collaborator (C), then membership
+    # tests — not L×C permission checks.
+    per_actor = {a: set(await viewable_doc_ids(datasette, {"id": a})) for a in named}
+    db = paper_db(datasette)
+    edges = await db.links_by_src(src_doc_id=doc_id)
+    out = {}
+    for e in edges:
+        missing = sorted(a for a, v in per_actor.items() if e.dst_doc_id not in v)
+        out[str(e.dst_doc_id)] = {
+            "gap": bool(missing),
+            "missing": missing,
+            "open_audience": open_audience,
+        }
+    return Response.json({"links": out})
+
+
+@router.GET(r"^/-/paper/api/links/graph$")
+async def links_graph(datasette, request):
+    # Ungated — the graph is built only from viewable_doc_ids (acl-filtered).
+    viewable = await viewable_doc_ids(datasette, request.actor)
+    db = paper_db(datasette)
+    edges = await db.edges_within(viewable_ids=viewable)
+    node_ids = sorted({e.src_doc_id for e in edges} | {e.dst_doc_id for e in edges})
+    rows = {r.id: r for r in await db.list_docs_by_ids(doc_ids=node_ids)}
+    return Response.json(
+        {
+            "nodes": [
+                {"id": i, "title": rows[i].name, "state": rows[i].state}
+                for i in node_ids
+                if i in rows
+            ],
+            "edges": [
+                {
+                    "source": e.src_doc_id,
+                    "target": e.dst_doc_id,
+                    "occurrences": e.occurrences,
+                }
+                for e in edges
+            ],
+        }
     )
 
 

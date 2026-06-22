@@ -631,6 +631,422 @@
       "result_class": "Doc"
     },
     {
+      "name": "searchDocsByTitle",
+      "result_type": "Rows",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\n  AND state = 'active'\n  AND kind = 'doc'\n  AND name LIKE $like::text\nORDER BY\n  CASE WHEN name LIKE $prefix::text THEN 0 ELSE 1 END,\n  length(name),\n  updated_at DESC\nLIMIT $limit::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_ids_json::text",
+          "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$like::text",
+          "name": "like",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$prefix::text",
+          "name": "prefix",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$limit::integer",
+          "name": "limit",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
+      "name": "listDocsByIds",
+      "result_type": "Rows",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n);",
+      "parameters": [
+        {
+          "full_name": "$doc_ids_json::text",
+          "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
+      "name": "deleteLinksForSrc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_link WHERE src_doc_id = $src_doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$src_doc_id::integer",
+          "name": "src_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "insertLink",
+      "result_type": "Void",
+      "sql": "INSERT INTO _datasette_paper_link (src_doc_id, dst_doc_id, occurrences, src_version)\nVALUES ($src_doc_id::integer, $dst_doc_id::integer, $occurrences::integer, $src_version::integer);",
+      "parameters": [
+        {
+          "full_name": "$src_doc_id::integer",
+          "name": "src_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$dst_doc_id::integer",
+          "name": "dst_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$occurrences::integer",
+          "name": "occurrences",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$src_version::integer",
+          "name": "src_version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "selectLinksBySrc",
+      "result_type": "Rows",
+      "sql": "SELECT dst_doc_id, occurrences\nFROM _datasette_paper_link\nWHERE src_doc_id = $src_doc_id::integer\nORDER BY dst_doc_id;",
+      "parameters": [
+        {
+          "full_name": "$src_doc_id::integer",
+          "name": "src_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "dst_doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "dst_doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "occurrences",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "occurrences",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "LinkEdge"
+    },
+    {
+      "name": "selectBacklinksByDstScoped",
+      "result_type": "Rows",
+      "sql": "SELECT src_doc_id, occurrences\nFROM _datasette_paper_link\nWHERE dst_doc_id = $dst_doc_id::integer\n  AND src_doc_id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)\n  )\nORDER BY src_doc_id;",
+      "parameters": [
+        {
+          "full_name": "$dst_doc_id::integer",
+          "name": "dst_doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$viewable_json::text",
+          "name": "viewable_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "src_doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "src_doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "occurrences",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "occurrences",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "Backlink"
+    },
+    {
+      "name": "selectEdgesWithin",
+      "result_type": "Rows",
+      "sql": "SELECT src_doc_id, dst_doc_id, occurrences\nFROM _datasette_paper_link\nWHERE src_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))\n  AND dst_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text))\nORDER BY src_doc_id, dst_doc_id;",
+      "parameters": [
+        {
+          "full_name": "$viewable_json::text",
+          "name": "viewable_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "src_doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "src_doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "dst_doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "dst_doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "occurrences",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_link",
+          "origin_column": "occurrences",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "GraphEdge"
+    },
+    {
       "name": "archiveDoc",
       "result_type": "Void",
       "sql": "UPDATE _datasette_paper_doc\nSET state = 'archived',\n    archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),\n    trashed_at = NULL,\n    delete_at = NULL\nWHERE id = $doc_id::integer;",
