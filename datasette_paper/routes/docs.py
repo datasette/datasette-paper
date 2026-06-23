@@ -26,7 +26,13 @@ from ..permissions import (
     viewable_doc_ids,
 )
 from ..template_params import build_context, substitute_placeholders
-from ..util import read_json_body, actor_id, paper_db, resolve_actor_profiles
+from ..util import (
+    read_json_body,
+    actor_id,
+    normalize_tag,
+    paper_db,
+    resolve_actor_profiles,
+)
 
 
 VALID_STATES = ("active", "archived", "trashed")
@@ -106,6 +112,16 @@ async def list_docs(datasette, request):
             status=400,
         )
 
+    # Optional ?tag=foo&tag=bar filter — AND/intersection over normalized
+    # tags. Invalid/blank tags are dropped (a filter, not a mutation); an
+    # all-dropped set behaves like no filter. Deduped so the SQL count match
+    # is exact.
+    tags = []
+    for raw in request.args.getlist("tag"):
+        t = normalize_tag(raw)
+        if t and t not in tags:
+            tags.append(t)
+
     # Pull every paper the actor can view in one shot (cap at 1000; if
     # somebody has 1000+ papers visible we'll add proper pagination).
     page = await datasette.allowed_resources(
@@ -115,9 +131,14 @@ async def list_docs(datasette, request):
     # (parent is the fixed PAPER_DOCS_PARENT sentinel).
     doc_ids = [int(r.child) for r in page.resources]
     db = paper_db(datasette)
-    rows = await db.list_docs_by_ids_states_and_kinds(
-        doc_ids=doc_ids, states=[state], kinds=kinds
-    )
+    if tags:
+        rows = await db.list_docs_by_ids_states_kinds_and_tags(
+            doc_ids=doc_ids, states=[state], kinds=kinds, tags=tags
+        )
+    else:
+        rows = await db.list_docs_by_ids_states_and_kinds(
+            doc_ids=doc_ids, states=[state], kinds=kinds
+        )
     actor = request.actor
     me = actor.get("id") if actor else None
     # Resolve creator ids to display name + avatar in one batched call (via
@@ -125,6 +146,8 @@ async def list_docs(datasette, request):
     # to the id as the name when no profile source is installed; both fields are
     # None for anonymous-created docs (created_by is None).
     profiles = await resolve_actor_profiles(datasette, (r.created_by for r in rows))
+    # Tags for every returned doc in one query (chips on the list page).
+    tags_by_doc = await db.list_tags_for_docs(doc_ids=[r.id for r in rows])
     return Response.json(
         [
             {
@@ -140,6 +163,7 @@ async def list_docs(datasette, request):
                     profiles[r.created_by]["avatar_url"] if r.created_by else None
                 ),
                 "is_owner": r.created_by is not None and r.created_by == me,
+                "tags": tags_by_doc.get(r.id, []),
                 **_doc_state_payload(r),
                 **_doc_flags_payload(r),
             }
@@ -251,6 +275,83 @@ async def resolve_actors(datasette, request):
             "avatar_url": prof.get("avatar_url"),
         }
     return Response.json({"actors": out})
+
+
+# ---------------------------------------------------------------------------
+# Document tags
+#
+# Manual document-level metadata, distinct from inline #tag nodes in the body
+# (separate namespace, no auto-rollup). Mutations are manage-gated like
+# archive/lock/template (via _ensure_owner); reading a doc's tags is
+# view-gated; the vocabulary endpoint is ungated but ACL-filtered.
+# ---------------------------------------------------------------------------
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags$")
+async def list_doc_tags(datasette, request, doc_id: int):
+    await ensure_paper_view(datasette, request, doc_id)
+    db = paper_db(datasette)
+    return Response.json({"tags": await db.list_tags_for_doc(doc_id=doc_id)})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/add$")
+async def add_doc_tag(datasette, request, doc_id: int):
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    body = await read_json_body(request)
+    tag = normalize_tag(body.get("tag"))
+    if tag is None:
+        return Response.json({"error": "invalid tag"}, status=400)
+    db = paper_db(datasette)
+    await db.add_doc_tag(doc_id=doc_id, tag=tag)
+    return Response.json({"tags": await db.list_tags_for_doc(doc_id=doc_id)})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/remove$")
+async def remove_doc_tag(datasette, request, doc_id: int):
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    body = await read_json_body(request)
+    # Normalize so a client sending the display form removes the stored row.
+    tag = normalize_tag(body.get("tag"))
+    if tag is None:
+        return Response.json({"error": "invalid tag"}, status=400)
+    db = paper_db(datasette)
+    await db.remove_doc_tag(doc_id=doc_id, tag=tag)
+    return Response.json({"tags": await db.list_tags_for_doc(doc_id=doc_id)})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/replace$")
+async def replace_doc_tags(datasette, request, doc_id: int):
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    body = await read_json_body(request)
+    raw = body.get("tags") or []
+    # Normalize + dedupe (preserve order); silently drop invalid entries.
+    tags = []
+    for r in raw:
+        t = normalize_tag(r)
+        if t and t not in tags:
+            tags.append(t)
+    db = paper_db(datasette)
+    await db.set_doc_tags(doc_id=doc_id, tags=tags)
+    return Response.json({"tags": await db.list_tags_for_doc(doc_id=doc_id)})
+
+
+@router.GET(r"^/-/paper/api/tags$")
+async def list_tags(datasette, request):
+    # Ungated but ACL-filtered: distinct tags + counts over the docs this
+    # actor can view (filter typeahead / editor autocomplete). A tag on a
+    # doc the actor can't see does not appear.
+    doc_ids = await viewable_doc_ids(datasette, request.actor)
+    if not doc_ids:
+        return Response.json({"tags": []})
+    db = paper_db(datasette)
+    rows = await db.list_all_tags(doc_ids=doc_ids)
+    return Response.json({"tags": [{"tag": t, "count": n} for t, n in rows]})
 
 
 @router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/links$")
