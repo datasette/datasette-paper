@@ -190,6 +190,18 @@ live over SSE, and the header shows who's *currently* online.
 - [ ] Write the README
 `;
 
+// A short doc that shows `@`-mentions resolved to live display names. Kept
+// separate from RICH so the other shots' framing is unaffected.
+const MENTIONS = `# Standup — June 22
+
+[@alice](actor:alice) shipped the collaborative editor. [@bob](actor:bob) is
+writing the markdown docs, and [@carol](actor:carol) is reviewing the launch
+checklist.
+
+Type \`@\` anywhere to mention a teammate — the pill resolves to their live
+display name and links straight to their profile.
+`;
+
 async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -210,7 +222,8 @@ async function seed(ctx) {
   await create("Budget 2026", "bob");
   // The rich doc is owned by ACTOR so its share dialog shows the manager view.
   const richId = await create("Q3 Planning", ACTOR, RICH);
-  return { richId };
+  const mentionId = await create("Standup", ACTOR, MENTIONS);
+  return { richId, mentionId };
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +287,8 @@ async function shotUnion(page, selectors, file, pad = 16) {
 
 // ---------------------------------------------------------------------------
 // Shots. Each gets a fresh page from the shared (cookie-bearing) context.
-function buildShots(ctx, richId) {
+function buildShots(ctx, ids) {
+  const { richId, mentionId } = ids;
   // Stability CSS is injected on the context via addInitScript (see main), so
   // it survives every navigation — addStyleTag here would be discarded by the
   // subsequent page.goto().
@@ -296,6 +310,24 @@ function buildShots(ctx, richId) {
       await gotoEditor(page, richId);
       await freezeVolatile(page);
       await page.screenshot({ path: out("editor") });
+      await page.close();
+    },
+
+    mentions: async () => {
+      const page = await newPage();
+      await gotoEditor(page, mentionId);
+      // Wait for the mention pills to resolve their live display names (the
+      // NodeView fetches through the ActorResolver after mount).
+      await page.locator(".pm-mention").first().waitFor({ state: "visible", timeout: 10_000 });
+      await page.waitForFunction(
+        () =>
+          [...document.querySelectorAll(".pm-mention")].filter((el) =>
+            /\bAda\b|\bBabbage\b|\bShaw\b/.test(el.textContent || ""),
+          ).length >= 3,
+        { timeout: 10_000 },
+      );
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("mentions") });
       await page.close();
     },
 
@@ -427,9 +459,9 @@ async function main() {
     ]);
 
     console.log("seeding papers …");
-    const { richId } = await seed(ctx);
+    const ids = await seed(ctx);
 
-    Object.assign(shotsByName, buildShots(ctx, richId));
+    Object.assign(shotsByName, buildShots(ctx, ids));
     const names = Object.keys(shotsByName);
     const unknown = [...requested].filter((n) => !names.includes(n));
     if (unknown.length) throw new Error(`unknown shot(s): ${unknown.join(", ")} (have: ${names.join(", ")})`);
