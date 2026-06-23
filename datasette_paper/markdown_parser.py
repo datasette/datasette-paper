@@ -26,6 +26,8 @@ from urllib.parse import unquote
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
+from .util import normalize_tag
+
 
 _MARK_OPEN_CLOSE = {
     "strong_open": ("strong_close", "strong"),
@@ -349,7 +351,9 @@ def _inline_to_pm(inline_token) -> list[dict]:
         # Unknown inline token kinds are dropped — better silent than crashing
         # in a converter that runs over arbitrary user input.
 
-    return _coalesce_text(_split_paper_links(_convert_actor_mentions(raw)))
+    return _coalesce_text(
+        _split_paper_links(_convert_tag_links(_convert_actor_mentions(raw)))
+    )
 
 
 def _coalesce_text(nodes: list[dict]) -> list[dict]:
@@ -416,6 +420,56 @@ def _convert_actor_mentions(nodes: list[dict]) -> list[dict]:
             continue
         actor_id = unquote(href[len(_ACTOR_SCHEME) :])
         out.append({"type": "mention", "attrs": {"actorId": actor_id}})
+        prev_href = href
+    return out
+
+
+_TAG_SCHEME = "tag:"
+
+
+def _tag_link_href(node: dict) -> str | None:
+    """Return the `tag:`-scheme href of a text node's link mark, or None.
+
+    Inline tags serialize as `[#slug](tag:<slug>)`; markdown-it parses that
+    into text wrapped in a ``link`` mark whose href carries the `tag:` scheme.
+    """
+    if node.get("type") != "text":
+        return None
+    for m in node.get("marks") or []:
+        if m.get("type") == "link":
+            href = (m.get("attrs") or {}).get("href") or ""
+            if href.startswith(_TAG_SCHEME):
+                return href
+    return None
+
+
+def _convert_tag_links(nodes: list[dict]) -> list[dict]:
+    """Replace `tag:`-scheme link text with value-only `tag` atoms.
+
+    Mirrors _convert_actor_mentions: detection is purely by the link mark's
+    URI scheme, so ordinary `[text](https://…)` links are never touched.
+    Consecutive text nodes sharing the same tag href fold into a single atom;
+    the visible label and the link mark are dropped. The slug is the
+    scheme-stripped, percent-decoded href.
+    """
+    out: list[dict] = []
+    prev_href: str | None = None
+    for node in nodes:
+        href = _tag_link_href(node)
+        if href is None:
+            prev_href = None
+            out.append(node)
+            continue
+        if href == prev_href:
+            continue
+        # Normalize through the same rule as typed / doc-level tags so a
+        # hand-authored `tag:` href can't smuggle in a slug the editor could
+        # never produce (uppercase, spaces, `]`, …). An un-normalizable slug
+        # drops the atom (lossy, like other out-of-schema content) but still
+        # advances prev_href so trailing fragments of the link fold away.
+        tag = normalize_tag(unquote(href[len(_TAG_SCHEME) :]))
+        if tag is not None:
+            out.append({"type": "tag", "attrs": {"tag": tag}})
         prev_href = href
     return out
 

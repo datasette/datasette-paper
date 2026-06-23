@@ -856,4 +856,58 @@
     font-style: italic;
     border-top: 1px solid #eee;
   }
+  /* Inline #tags — a distinct teal accent so they don't read as
+     @mentions (blue) or [[links]]. Rendered by the schema toDOM. */
+  .editor-host :global(.pm-tag) {
+    display: inline;
+    white-space: nowrap;
+    color: #0f766e;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: rgba(15, 118, 110, 0.1);
+    font-weight: 500;
+    user-select: none;
+  }
+  .editor-host :global(.pm-tag-typing) {
+    background: rgba(15, 118, 110, 0.08);
+    border-bottom: 1px solid rgba(15, 118, 110, 0.4);
+    border-radius: 2px;
+  }
+  .editor-host :global(.pm-tag-popup) {
+    position: absolute;
+    z-index: 11;
+    min-width: 180px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    font-size: 13px;
+    padding: 4px 0;
+  }
+  .editor-host :global(.pm-tag-item) {
+    display: flex;
+    align-items: center;
+    padding: 4px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .editor-host :global(.pm-tag-item:hover) {
+    background: #f1f4f7;
+  }
+  .editor-host :global(.pm-tag-item--active) {
+    background: #d8efec;
+  }
+  .editor-host :global(.pm-tag-create) {
+    color: #0f766e;
+    font-style: italic;
+  }
+  .editor-host :global(.pm-tag-empty) {
+    padding: 4px 10px;
+    color: #888;
+    font-style: italic;
+  }
 </style>
