@@ -9,6 +9,15 @@ frontend *flags:
 frontend-dev *flags:
     npm run dev --prefix frontend -- --port {{DEV_PORT}} {{flags}}
 
+# Regenerate the committed doc screenshots in docs/screenshots/. Self-contained:
+# the script boots a throwaway datasette, seeds papers, drives Playwright, then
+# tears it down. Builds the bundle first so shots reflect the current frontend.
+# Pass shot names to regenerate a subset, e.g. `just shots editor tables`.
+shots *names:
+    just frontend
+    npm --prefix frontend exec -- playwright install chromium
+    node frontend/scripts/screenshots.mjs {{names}}
+
 # --- Formatting ---
 # Frontend formatting (prettier) deferred — `just lint-frontend` covers it
 # for now via eslint rules.
