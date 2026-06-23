@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { client } from "./client";
   import LinkGraph from "./LinkGraph.svelte";
+  import TagEditor from "./TagEditor.svelte";
 
   type DocState = "active" | "archived" | "trashed";
 
@@ -21,6 +22,7 @@
     delete_at: string | null;
     kind: "doc" | "template";
     locked: boolean;
+    tags: string[];
   };
 
   // Lazy per-tab caches. `null` means "not fetched yet"; switching tabs
@@ -48,6 +50,56 @@
   let busyKey = $state<string | null>(null);
   // Which row's overflow menu is open, keyed the same way as busyKey.
   let openMenuKey = $state<string | null>(null);
+
+  // Tag vocabulary (instance-wide, for the filter bar + editor autocomplete)
+  // and the currently-selected document-tag filter (AND/intersection). The
+  // row currently being tag-edited (owner-only modal), or null.
+  let vocab = $state<string[]>([]);
+  let tagFilter = $state<string[]>([]);
+  let editingDoc = $state<DocRow | null>(null);
+
+  async function loadVocab(): Promise<void> {
+    const { data } = await client.GET("/-/paper/api/tags");
+    const tags = (data as unknown as { tags: { tag: string }[] } | undefined)?.tags;
+    vocab = (tags ?? []).map((t) => t.tag);
+  }
+
+  function toggleFilter(tag: string): void {
+    tagFilter = tagFilter.includes(tag)
+      ? tagFilter.filter((t) => t !== tag)
+      : [...tagFilter, tag];
+    // The per-tab caches don't encode the filter, so drop them all and
+    // refetch the visible tab with the new ?tag= set.
+    active = archived = trashed = templates = null;
+    void loadTab(tab);
+  }
+
+  function clearFilter(): void {
+    if (!tagFilter.length) return;
+    tagFilter = [];
+    active = archived = trashed = templates = null;
+    void loadTab(tab);
+  }
+
+  function openTagEditor(doc: DocRow): void {
+    closeMenu();
+    editingDoc = doc;
+  }
+
+  // Patch a doc's tags across every cached bucket after an edit, and refresh
+  // the vocabulary (counts/new tags may have changed).
+  function patchDocTags(docId: number, tags: string[]): void {
+    const apply = (rows: DocRow[] | null) =>
+      rows ? rows.map((d) => (d.id === docId ? { ...d, tags } : d)) : rows;
+    active = apply(active);
+    archived = apply(archived);
+    trashed = apply(trashed);
+    templates = apply(templates);
+    if (editingDoc && editingDoc.id === docId) {
+      editingDoc = { ...editingDoc, tags };
+    }
+    void loadVocab();
+  }
 
   // Each minute, recompute relative-time + "deletes in N days" labels by
   // bumping a timestamp the derived helpers read. Cheap; one tick across
@@ -80,11 +132,11 @@
     loading = true;
     error = null;
     // Templates tab queries the kind=template variant; the other tabs
-    // filter by lifecycle state and stick with the default kind=doc.
-    const query =
-      target === "templates"
-        ? { kind: "template" }
-        : { state: target };
+    // filter by lifecycle state and stick with the default kind=doc. The
+    // optional document-tag filter (?tag=…) ANDs across the chosen tags.
+    const query: Record<string, unknown> =
+      target === "templates" ? { kind: "template" } : { state: target };
+    if (tagFilter.length) query.tag = tagFilter;
     const { data, error: err } = await client.GET("/-/paper/api/docs", {
       params: { query: query as never },
     });
@@ -315,6 +367,7 @@
   onMount(() => {
     selectTab("active");
     void ensurePickerTemplates();
+    void loadVocab();
     nowTimer = setInterval(() => {
       nowTick = Date.now();
     }, 60_000);
@@ -421,6 +474,28 @@
     </button>
   </div>
 
+  {#if vocab.length}
+    <div class="tag-filter" role="group" aria-label="Filter by tag">
+      <span class="tag-filter-label">Tags:</span>
+      {#each vocab as t (t)}
+        <button
+          type="button"
+          class="tag-chip tag-chip-button"
+          class:selected={tagFilter.includes(t)}
+          aria-pressed={tagFilter.includes(t)}
+          onclick={() => toggleFilter(t)}
+        >
+          {t}
+        </button>
+      {/each}
+      {#if tagFilter.length}
+        <button type="button" class="tag-filter-clear" onclick={clearFilter}>
+          Clear
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   {#if loading && bucket(tab) === null}
     <p>Loading…</p>
   {:else if visibleRows.length === 0}
@@ -456,6 +531,21 @@
               <a href="/-/paper/doc/{doc.id}">{doc.name}</a>
               {#if doc.locked}
                 <span class="badge badge-locked" title="Read-only">Locked</span>
+              {/if}
+              {#if doc.tags?.length}
+                <span class="row-tags">
+                  {#each doc.tags as t (t)}
+                    <button
+                      type="button"
+                      class="tag-chip tag-chip-button"
+                      class:selected={tagFilter.includes(t)}
+                      aria-label="Filter by {t}"
+                      onclick={() => toggleFilter(t)}
+                    >
+                      {t}
+                    </button>
+                  {/each}
+                </span>
               {/if}
             </td>
             <td title={doc.created_by ?? ""}>
@@ -507,6 +597,13 @@
                   {#if menuOpen}
                     <div class="menu" role="menu">
                       {#if tab === "templates"}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onclick={() => openTagEditor(doc)}
+                        >
+                          Edit tags
+                        </button>
                         {#if doc.locked}
                           <button
                             type="button"
@@ -552,6 +649,13 @@
                           Trash
                         </button>
                       {:else if tab === "active"}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onclick={() => openTagEditor(doc)}
+                        >
+                          Edit tags
+                        </button>
                         {#if doc.locked}
                           <button
                             type="button"
@@ -607,6 +711,13 @@
                           Trash
                         </button>
                       {:else if tab === "archived"}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          onclick={() => openTagEditor(doc)}
+                        >
+                          Edit tags
+                        </button>
                         {#if doc.locked}
                           <button
                             type="button"
@@ -672,6 +783,17 @@
         {/each}
       </tbody>
     </table>
+  {/if}
+
+  {#if editingDoc}
+    <TagEditor
+      docId={editingDoc.id}
+      docName={editingDoc.name}
+      tags={editingDoc.tags}
+      {vocab}
+      onChange={patchDocTags}
+      onClose={() => (editingDoc = null)}
+    />
   {/if}
 </div>
 
@@ -843,6 +965,58 @@
     background: #eef2f7;
     color: #4a5568;
     border: 1px solid #d0d7e0;
+  }
+  .tag-filter {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .tag-filter-label {
+    color: #6a737d;
+    font-size: 0.85em;
+  }
+  .tag-filter-clear {
+    border: none;
+    background: transparent;
+    color: #0b5cad;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85em;
+  }
+  .tag-filter-clear:hover {
+    text-decoration: underline;
+  }
+  .row-tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-left: 6px;
+    vertical-align: 1px;
+  }
+  .tag-chip {
+    display: inline-flex;
+    align-items: center;
+    background: #eef2f7;
+    color: #2c3e50;
+    border: 1px solid #d0d7e0;
+    border-radius: 9px;
+    padding: 1px 8px;
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .tag-chip-button {
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .tag-chip-button:hover {
+    background: #e2e8f0;
+  }
+  .tag-chip-button.selected {
+    background: #0b5cad;
+    color: #fff;
+    border-color: #0b5cad;
   }
   .creator {
     display: inline-flex;
