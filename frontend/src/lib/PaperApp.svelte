@@ -13,8 +13,14 @@
   import Toolbar from "./Toolbar.svelte";
   import DocHeader from "./DocHeader.svelte";
   import LinksPanel from "./LinksPanel.svelte";
+  import ImageDialog from "./ImageDialog.svelte";
+  import { insertImage } from "./image";
 
   let { docId }: { docId: string } = $props();
+
+  // The image insert dialog, owned here so there's a single instance. Both the
+  // toolbar image button and the `/` slash menu open it.
+  let imageDialogOpen = $state(false);
 
   let editorEl: HTMLDivElement | undefined = $state(undefined);
 
@@ -83,6 +89,9 @@
             mode = "view";
           }
         },
+        onInsertImage: () => {
+          imageDialogOpen = true;
+        },
       },
       reporter,
     );
@@ -100,6 +109,12 @@
   $effect(() => {
     conn?.setEditable(canEdit && mode === "edit");
   });
+
+  function onImageInsert(src: string, alt: string) {
+    if (!view) return;
+    insertImage(src, alt)(view.state, view.dispatch);
+    view.focus();
+  }
 
   async function copyMarkdown(): Promise<boolean> {
     if (!view) return false;
@@ -214,10 +229,11 @@
     <div class="status-banner status-{status.state}">{status.message}</div>
   {/if}
   {#if canEdit && mode === "edit"}
-    <Toolbar {view} {kind} />
+    <Toolbar {view} {kind} onInsertImage={() => (imageDialogOpen = true)} />
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
   <LinksPanel {docId} />
+  <ImageDialog bind:open={imageDialogOpen} oninsert={onImageInsert} />
 </div>
 
 <style>
@@ -910,4 +926,47 @@
     color: #888;
     font-style: italic;
   }
+
+  /* Slash command menu — mirrors .pm-tag-popup; z above toolbar + table tooltip. */
+  .editor-host :global(.pm-slash-typing) {
+    background: rgba(11, 92, 173, 0.08);
+    border-radius: 2px;
+  }
+  .editor-host :global(.pm-slash-menu) {
+    position: absolute;
+    z-index: 12;
+    min-width: 220px;
+    max-height: 300px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+    font-size: 13px;
+    padding: 4px 0;
+  }
+  .editor-host :global(.pm-slash-item) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .editor-host :global(.pm-slash-item:hover) {
+    background: #f1f4f7;
+  }
+  .editor-host :global(.pm-slash-item--active) {
+    background: #e4eefb;
+  }
+  .editor-host :global(.pm-slash-icon) {
+    display: inline-flex;
+    color: #555;
+  }
+  .editor-host :global(.pm-slash-empty) {
+    padding: 5px 12px;
+    color: #888;
+    font-style: italic;
+  }
+
 </style>

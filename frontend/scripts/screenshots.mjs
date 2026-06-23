@@ -213,6 +213,8 @@ Type \`#\` anywhere in the body to drop an inline tag — an in-document anchor,
 distinct from a paper's metadata tags shown on the index.
 `;
 
+// A doc with an inline Datasette reference pill (the \`datasette:\` link scheme
+// resolves db/table → a live label).
 async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -252,7 +254,9 @@ async function seed(ctx) {
   await tagDoc(designId, ["design"], "carol");
   await tagDoc(budgetId, ["budget", "q3"], "bob");
   await tagDoc(richId, ["roadmap", "q3"], ACTOR);
-  return { richId, mentionId, inlineTagId };
+  // Empty doc for the slash-menu shot (it mutates its own throwaway doc).
+  const slashId = await create("Slash menu demo", ACTOR);
+  return { richId, mentionId, inlineTagId, slashId };
 }
 
 // ---------------------------------------------------------------------------
@@ -317,7 +321,7 @@ async function shotUnion(page, selectors, file, pad = 16) {
 // ---------------------------------------------------------------------------
 // Shots. Each gets a fresh page from the shared (cookie-bearing) context.
 function buildShots(ctx, ids) {
-  const { richId, mentionId, inlineTagId } = ids;
+  const { richId, mentionId, inlineTagId, slashId } = ids;
   // Stability CSS is injected on the context via addInitScript (see main), so
   // it survives every navigation — addStyleTag here would be discarded by the
   // subsequent page.goto().
@@ -399,6 +403,18 @@ function buildShots(ctx, ids) {
       await page.locator(".pm-tag-popup").waitFor({ state: "visible", timeout: 10_000 });
       await freezeVolatile(page);
       await page.screenshot({ path: out("inline-tag-popup") });
+      await page.close();
+    },
+
+    // The Notion-style `/` slash command menu, open in an empty block.
+    "slash-menu": async () => {
+      const page = await newPage();
+      await gotoEditor(page, slashId);
+      await page.locator(".ProseMirror").click();
+      await page.keyboard.type("/");
+      await page.locator(".pm-slash-menu").waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("slash-menu") });
       await page.close();
     },
 

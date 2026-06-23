@@ -61,6 +61,13 @@ import { PaperLinkView } from "./paperLinkView";
 import { ActorResolver } from "./actorResolver";
 import { MentionView } from "./mentionView";
 import {
+  buildSlashCommands,
+  createSlashSuggestPlugin,
+  slashMenuPopupPlugin,
+  slashKeymap,
+  type SlashCommand,
+} from "./slashMenu";
+import {
   cursorReporterPlugin,
   remoteCursorsPlugin,
   setRemoteUsers,
@@ -166,6 +173,16 @@ export interface ConnectionOpts {
    * uses this to render an error banner and force the editor read-only.
    */
   onStepError?: (err: StepApplyError) => void;
+  /**
+   * Open the image insert dialog — invoked by the `/` slash menu's "Image"
+   * command (the dialog itself is a PaperApp-owned Svelte component).
+   */
+  onInsertImage?: () => void;
+  /**
+   * Open the Datasette embed picker dialog — invoked by the `/` slash menu's
+   * "Datasette embed" command (PaperApp-owned Svelte component).
+   */
+  onInsertDatasetteEmbed?: () => void;
 }
 
 type CommState =
@@ -780,6 +797,8 @@ export class EditorConnection {
   private accessChecker: AccessChecker;
   // One actor resolver per connection (mention NodeViews subscribe to it).
   private actorResolver: ActorResolver;
+  // The `/` slash command registry, built once with the dialog callbacks.
+  private slashCommands: SlashCommand[];
 
   // Current viewer's actor id, captured from the bootstrap response.
   // Used to suppress this user's own presence cursor across other tabs.
@@ -827,6 +846,10 @@ export class EditorConnection {
     // a doc with no links to check.
     this.accessChecker = new AccessChecker(opts.docId);
     this.actorResolver = new ActorResolver();
+    this.slashCommands = buildSlashCommands({
+      openImageDialog: () => this.opts.onInsertImage?.(),
+      openDatasetteEmbed: () => this.opts.onInsertDatasetteEmbed?.(),
+    });
     this.installNetworkListeners();
     this.start();
   }
@@ -1067,6 +1090,11 @@ export class EditorConnection {
         // returning-false contract; the `@`/`#`/`[[` popups never open at
         // once (distinct triggers).
         keymap(tagKeymap()),
+        // The `/` slash-menu keymap likewise precedes baseKeymap so
+        // Enter/Tab/Arrow/Escape drive the command popup while it's open.
+        // Same compose-by-returning-false contract; the `/` popup only opens
+        // in an empty top-level block, so it never collides with `@`/`#`/`[[`.
+        keymap(slashKeymap(this.slashCommands)),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({
@@ -1100,6 +1128,11 @@ export class EditorConnection {
         // suggestion list from the instance-wide tag vocabulary.
         tagSuggestPlugin,
         tagSuggestPopupPlugin(),
+        // `/`-triggered slash command menu: the state plugin tracks the
+        // in-progress `/query` in an empty top-level block, the popup renders
+        // the static command list and commits the chosen insert command.
+        createSlashSuggestPlugin(this.slashCommands),
+        slashMenuPopupPlugin(this.slashCommands),
         // gap cursor — gives ArrowDown/Right past the last block (and
         // ArrowUp/Left before the first) a place to land when no normal
         // text position exists, e.g. between two adjacent tables or after

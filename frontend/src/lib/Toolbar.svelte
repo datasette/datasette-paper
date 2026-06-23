@@ -7,8 +7,6 @@
   import { schema } from "./schema";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { canInsertTable, insertTable } from "./tables";
-  import { insertImage } from "./image";
-  import ImageDialog from "./ImageDialog.svelte";
   // The in-table action bar (add/delete row/col, name input) is owned
   // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). Only the
   // initial Insert-table button lives in the toolbar.
@@ -16,7 +14,14 @@
   let {
     view,
     kind = "doc",
-  }: { view: EditorView | null; kind?: "doc" | "template" } = $props();
+    onInsertImage,
+  }: {
+    view: EditorView | null;
+    kind?: "doc" | "template";
+    // Opens the (PaperApp-owned) image insert dialog. Shared with the `/`
+    // slash menu so there is only ever one ImageDialog instance.
+    onInsertImage?: () => void;
+  } = $props();
 
   // Lazy-loaded list of built-in placeholder keys with sample values.
   // Fetched once on demand (when the dropdown opens for the first
@@ -119,17 +124,6 @@
     const hr = schema.nodes.horizontal_rule;
     const tr = view.state.tr.replaceSelectionWith(hr.create()).scrollIntoView();
     view.dispatch(tr);
-    view.focus();
-  }
-
-  // Insert-image dialog. The dialog hands back a data: URL + alt; we turn it
-  // into an image node at the current selection (paste/drop go through the
-  // EditorView handlers in collab.ts instead).
-  let imageDialogOpen = $state(false);
-
-  function onImageInsert(src: string, alt: string) {
-    if (!view) return;
-    insertImage(src, alt)(view.state, view.dispatch);
     view.focus();
   }
 
@@ -273,7 +267,7 @@
   {@render btn("quote", "Blockquote", () => run(wrapIn(schema.nodes.blockquote)), isBlockquote)}
   {@render btn("codeBlock", "Code block", () => run(setBlockType(schema.nodes.code_block)), isCodeBlock)}
   {@render btn("hr", "Horizontal rule", insertHorizontalRule)}
-  {@render btn("image", "Insert image", () => (imageDialogOpen = true))}
+  {@render btn("image", "Insert image", () => onInsertImage?.())}
   {@render btn(
     "table",
     "Insert table (empty paragraphs only)",
@@ -323,7 +317,6 @@
   {/if}
 </div>
 
-<ImageDialog bind:open={imageDialogOpen} oninsert={onImageInsert} />
 
 <style>
   .paper-toolbar {
