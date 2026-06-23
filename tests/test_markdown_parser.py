@@ -500,3 +500,28 @@ def test_image_roundtrips_through_serializer():
     md1 = doc_to_markdown(doc1)
     doc2 = markdown_to_doc(md1)
     assert doc1 == doc2
+
+
+def test_mention_roundtrips_through_serializer():
+    src = "Hi [@Alice](actor:alice-id) there\n"
+    doc1 = parse_and_validate(src)
+    md1 = doc_to_markdown(doc1)
+    doc2 = markdown_to_doc(md1)
+    assert doc1 == doc2
+
+
+@pytest.mark.parametrize("actor_id", ["alice", "team/eng dept", "weird:id"])
+def test_mention_doc_to_md_to_doc_preserves_actor_id(actor_id):
+    doc = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"type": "mention", "attrs": {"actorId": actor_id}}],
+            }
+        ],
+    }
+    back = markdown_to_doc(doc_to_markdown(doc))
+    mentions = [n for n in back["content"][0]["content"] if n["type"] == "mention"]
+    assert len(mentions) == 1
+    assert mentions[0]["attrs"]["actorId"] == actor_id
