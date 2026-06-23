@@ -16,6 +16,7 @@ import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { tableRowDragPlugin } from "./tableRowDrag";
 import { linkTooltipPlugin } from "./linkTooltip";
+import { handleImagePaste, handleImageDrop } from "./image";
 import {
   wikiLinkSuggestPlugin,
   wikiLinkSuggestPopupPlugin,
@@ -1115,6 +1116,13 @@ export class EditorConnection {
       // so already-marked links (e.g. from a `[text](url)` paste) pass
       // through untouched.
       transformPasted: linkifyPastedSlice,
+      // Image files on the clipboard / dropped in become inline data-URI
+      // images. Returning false (no image files) lets the default text/HTML
+      // paste path run. This is what makes image paste work in Safari, which
+      // puts only the image file on the clipboard with no text/html for the
+      // default parser to pick up. See image.ts.
+      handlePaste: (view, event) => handleImagePaste(view, event),
+      handleDrop: (view, event) => handleImageDrop(view, event as DragEvent),
       dispatchTransaction: (tr) => this.dispatchTransaction(tr),
     });
 
