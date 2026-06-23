@@ -1047,6 +1047,289 @@
       "result_class": "GraphEdge"
     },
     {
+      "name": "insertDocTag",
+      "result_type": "Void",
+      "sql": "INSERT OR IGNORE INTO _datasette_paper_doc_tag (doc_id, tag)\nVALUES ($doc_id::integer, $tag::text);",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$tag::text",
+          "name": "tag",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteDocTag",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_doc_tag\nWHERE doc_id = $doc_id::integer AND tag = $tag::text;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$tag::text",
+          "name": "tag",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteTagsForDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_doc_tag WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "listTagsForDoc",
+      "result_type": "Rows",
+      "sql": "SELECT tag\nFROM _datasette_paper_doc_tag\nWHERE doc_id = $doc_id::integer\nORDER BY tag;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "tag",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc_tag",
+          "origin_column": "tag",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": null
+    },
+    {
+      "name": "listTagsForDocs",
+      "result_type": "Rows",
+      "sql": "SELECT doc_id, tag\nFROM _datasette_paper_doc_tag\nWHERE doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))\nORDER BY doc_id, tag;",
+      "parameters": [
+        {
+          "full_name": "$doc_ids_json::text",
+          "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc_tag",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "tag",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc_tag",
+          "origin_column": "tag",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": null
+    },
+    {
+      "name": "listAllTags",
+      "result_type": "Rows",
+      "sql": "SELECT tag, COUNT(*) AS n\nFROM _datasette_paper_doc_tag\nWHERE doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))\nGROUP BY tag\nORDER BY n DESC, tag;",
+      "parameters": [
+        {
+          "full_name": "$doc_ids_json::text",
+          "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "tag",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc_tag",
+          "origin_column": "tag",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "n",
+          "origin_database": null,
+          "origin_table": null,
+          "origin_column": null,
+          "decltype": null,
+          "nullable": null
+        }
+      ],
+      "result_class": null
+    },
+    {
+      "name": "listDocsByIdsStatesKindsAndTags",
+      "result_type": "Rows",
+      "sql": "SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked\nFROM _datasette_paper_doc\nWHERE id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n)\n  AND state IN (\n    SELECT value FROM json_each($states_json::text)\n)\n  AND kind IN (\n    SELECT value FROM json_each($kinds_json::text)\n)\n  AND (\n    SELECT COUNT(DISTINCT tag) FROM _datasette_paper_doc_tag\n    WHERE doc_id = _datasette_paper_doc.id\n      AND tag IN (SELECT value FROM json_each($tags_json::text))\n  ) = (SELECT COUNT(DISTINCT value) FROM json_each($tags_json::text))\nORDER BY updated_at DESC;",
+      "parameters": [
+        {
+          "full_name": "$doc_ids_json::text",
+          "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$states_json::text",
+          "name": "states_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$kinds_json::text",
+          "name": "kinds_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$tags_json::text",
+          "name": "tags_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
+    },
+    {
       "name": "archiveDoc",
       "result_type": "Void",
       "sql": "UPDATE _datasette_paper_doc\nSET state = 'archived',\n    archived_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),\n    trashed_at = NULL,\n    delete_at = NULL\nWHERE id = $doc_id::integer;",
