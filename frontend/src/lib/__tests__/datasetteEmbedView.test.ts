@@ -1,0 +1,306 @@
+/**
+ * NodeView tests for datasette_embed: renders table / row / denied / not_found
+ * payloads, with all data going into the DOM as text (XSS rule).
+ */
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { EditorView } from "prosemirror-view";
+import { EditorState } from "prosemirror-state";
+
+import { schema } from "../schema";
+import { DatasetteEmbedView } from "../datasetteEmbedView";
+import type { EmbedPayload } from "../datasetteEmbed";
+
+function stubFetch(payload: EmbedPayload) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({ ok: true, json: async () => payload })),
+  );
+}
+
+async function build(ref: string, payload: EmbedPayload): Promise<DatasetteEmbedView> {
+  stubFetch(payload);
+  const node = schema.nodes.datasette_embed.create({ ref });
+  const view = new DatasetteEmbedView(
+    node,
+    {} as unknown as EditorView,
+    () => 0,
+  );
+  // Let the async load() resolve.
+  await new Promise((r) => setTimeout(r, 0));
+  return view;
+}
+
+describe("DatasetteEmbedView", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("renders a table payload into a <table> with header + rows", async () => {
+    const view = await build("/data/vendors", {
+      status: "ok",
+      kind: "table",
+      label: "vendors",
+      db: "data",
+      columns: ["id", "name"],
+      rows: [
+        [1, "Acme"],
+        [2, "Globex"],
+      ],
+      count: 30,
+      truncated: true,
+      href: "/data/vendors",
+    });
+    const table = view.dom.querySelector("table");
+    expect(table).not.toBeNull();
+    expect([...view.dom.querySelectorAll("th")].map((t) => t.textContent)).toEqual([
+      "id",
+      "name",
+    ]);
+    expect(view.dom.querySelectorAll("tbody tr")).toHaveLength(2);
+    expect(view.dom.textContent).toContain("Acme");
+    // Footer: inline limit dropdown + total count ("showing [10] of 30 rows").
+    expect(view.dom.textContent).toContain("of 30 rows");
+    expect(
+      (view.dom.querySelector(".pm-datasette-embed-rows") as HTMLSelectElement).value,
+    ).toBe("10");
+    expect(view.dom.querySelector(".pm-datasette-embed-label")!.textContent).toBe(
+      "data/vendors",
+    );
+  });
+
+  it("makes the header label a link to the resource page", async () => {
+    const view = await build("/data/vendors", {
+      status: "ok",
+      kind: "table",
+      label: "vendors",
+      db: "data",
+      columns: ["id"],
+      rows: [[1]],
+      count: 1,
+      truncated: false,
+      href: "/data/vendors",
+    });
+    const label = view.dom.querySelector(".pm-datasette-embed-label");
+    expect(label?.tagName).toBe("A");
+    expect(label?.getAttribute("href")).toBe("/data/vendors");
+  });
+
+  it("defaults to 10 rows and offers 10/25/100 in the footer dropdown", async () => {
+    const view = await build("/data/vendors", {
+      status: "ok",
+      kind: "table",
+      label: "vendors",
+      db: "data",
+      columns: ["id"],
+      rows: [[1]],
+      count: 1,
+      truncated: false,
+      href: "/data/vendors",
+    });
+    const select = view.dom.querySelector(
+      ".pm-datasette-embed-rows",
+    ) as HTMLSelectElement | null;
+    expect(select).not.toBeNull();
+    expect([...select!.options].map((o) => o.value)).toEqual(["10", "25", "100"]);
+    expect(select!.value).toBe("10");
+  });
+
+  it("fetches with the default limit, then re-fetches when the dropdown changes", async () => {
+    const urls: string[] = [];
+    const payload: EmbedPayload = {
+      status: "ok",
+      kind: "table",
+      label: "vendors",
+      db: "data",
+      columns: ["id"],
+      rows: [[1]],
+      count: 1,
+      truncated: false,
+      href: "/data/vendors",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return { ok: true, json: async () => payload };
+      }),
+    );
+    const node = schema.nodes.datasette_embed.create({ ref: "/data/vendors" });
+    const view = new DatasetteEmbedView(node, {} as unknown as EditorView, () => 0);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(urls[0]).toContain("limit=10");
+
+    const select = view.dom.querySelector(
+      ".pm-datasette-embed-rows",
+    ) as HTMLSelectElement;
+    select.value = "100";
+    select.dispatchEvent(new Event("change"));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(urls.at(-1)).toContain("limit=100");
+  });
+
+  it("renders an 'open in Datasette' footer link to the resource", async () => {
+    const view = await build("/data/vendors", {
+      status: "ok",
+      kind: "table",
+      label: "vendors",
+      db: "data",
+      columns: ["id"],
+      rows: [[1]],
+      count: 1,
+      truncated: false,
+      href: "/data/vendors",
+    });
+    const link = view.dom.querySelector(
+      ".pm-datasette-embed-footer-link",
+    ) as HTMLAnchorElement | null;
+    expect(link?.getAttribute("href")).toBe("/data/vendors");
+    expect(link?.textContent).toContain("open in Datasette");
+  });
+
+  it("renders a row payload into a fields card titled db/table/pk", async () => {
+    const view = await build("/data/vendors/1", {
+      status: "ok",
+      kind: "row",
+      label: "Acme",
+      db: "data",
+      table: "vendors",
+      pk: "1",
+      fields: [
+        { column: "id", value: 1 },
+        { column: "name", value: "Acme" },
+      ],
+      href: "/data/vendors/1",
+    });
+    // Title is the path identity, not the human label.
+    expect(view.dom.querySelector(".pm-datasette-embed-label")!.textContent).toBe(
+      "data/vendors/1",
+    );
+    const dts = [...view.dom.querySelectorAll("dt")].map((d) => d.textContent);
+    const dds = [...view.dom.querySelectorAll("dd")].map((d) => d.textContent);
+    expect(dts).toEqual(["id", "name"]);
+    expect(dds).toEqual(["1", "Acme"]);
+  });
+
+  it("renders a denied placeholder with no data", async () => {
+    const view = await build("/data/secret", { status: "denied" });
+    expect(view.dom.classList.contains("pm-datasette-embed--denied")).toBe(true);
+    expect(view.dom.querySelector("table")).toBeNull();
+    expect(view.dom.textContent).toContain("don't have access");
+    // The label "secret" must not appear.
+    expect(view.dom.textContent).not.toContain("secret");
+  });
+
+  it("renders a not_found placeholder", async () => {
+    const view = await build("/data/nope", { status: "not_found" });
+    expect(view.dom.classList.contains("pm-datasette-embed--missing")).toBe(true);
+    expect(view.dom.textContent).toContain("not found");
+  });
+
+  it("renders a database payload as a table listing", async () => {
+    const view = await build("/data", {
+      status: "ok",
+      kind: "database",
+      label: "data",
+      db: "data",
+      tables: [
+        {
+          name: "vendors",
+          kind: "table",
+          ref: "/data/vendors",
+          href: "/data/vendors",
+          count: 30,
+        },
+        {
+          name: "vendor_names",
+          kind: "view",
+          ref: "/data/vendor_names",
+          href: "/data/vendor_names",
+        },
+      ],
+      href: "/data",
+    });
+    const links = [...view.dom.querySelectorAll(".pm-datasette-embed-table-link")];
+    expect(links.map((l) => l.textContent)).toEqual(["vendors", "vendor_names"]);
+    expect((links[0] as HTMLAnchorElement).getAttribute("href")).toBe("/data/vendors");
+    expect(view.dom.textContent).toContain("30 rows");
+    expect(view.dom.textContent).toContain("2 tables");
+    expect(
+      (view.dom.querySelector(".pm-datasette-embed-label") as HTMLAnchorElement).getAttribute(
+        "href",
+      ),
+    ).toBe("/data");
+  });
+
+  it("overflow menu converts the block embed into an inline ref", async () => {
+    const payload: EmbedPayload = {
+      status: "ok",
+      kind: "table",
+      label: "vendors",
+      db: "data",
+      columns: ["id"],
+      rows: [[1]],
+      count: 1,
+      truncated: false,
+      href: "/data/vendors",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, json: async () => payload })),
+    );
+    const embed = schema.nodes.datasette_embed.create({ ref: "/data/vendors" });
+    const doc = schema.node("doc", null, [embed]);
+    const place = document.createElement("div");
+    document.body.appendChild(place);
+    const view = new EditorView(place, {
+      state: EditorState.create({ doc }),
+      nodeViews: {
+        datasette_embed: (node, v, getPos) =>
+          new DatasetteEmbedView(node, v, getPos as () => number | undefined),
+      },
+    });
+    // Let the NodeView's load() resolve and render the header (with the menu).
+    await new Promise((r) => setTimeout(r, 0));
+
+    const btn = view.dom.querySelector(
+      ".pm-datasette-embed-menu-btn",
+    ) as HTMLButtonElement;
+    expect(btn).not.toBeNull();
+    const menu = view.dom.querySelector(".pm-datasette-embed-menu") as HTMLElement;
+    const isOpen = () => menu.classList.contains("pm-datasette-embed-menu--open");
+    expect(isOpen()).toBe(false);
+    btn.click();
+    expect(isOpen()).toBe(true);
+    // Clicking elsewhere closes it.
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(isOpen()).toBe(false);
+    // Reopen and convert.
+    btn.click();
+    expect(isOpen()).toBe(true);
+
+    (view.dom.querySelector(".pm-datasette-embed-menu-item") as HTMLButtonElement).click();
+
+    const para = view.state.doc.firstChild!;
+    expect(para.type.name).toBe("paragraph");
+    expect(para.firstChild?.type.name).toBe("datasette_ref");
+    expect(para.firstChild?.attrs.ref).toBe("/data/vendors");
+
+    view.destroy();
+    place.remove();
+  });
+
+  it("escapes html in cell values (text node only)", async () => {
+    const view = await build("/data/x", {
+      status: "ok",
+      kind: "table",
+      label: "x",
+      db: "data",
+      columns: ["c"],
+      rows: [["<img src=x onerror=alert(1)>"]],
+      count: 1,
+      truncated: false,
+      href: "/data/x",
+    });
+    // The payload string is present as text, but no <img> element was created.
+    expect(view.dom.querySelector("td img")).toBeNull();
+    expect(view.dom.querySelector("td")!.textContent).toContain("<img");
+  });
+});

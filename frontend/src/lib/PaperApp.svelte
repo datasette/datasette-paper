@@ -14,13 +14,17 @@
   import DocHeader from "./DocHeader.svelte";
   import LinksPanel from "./LinksPanel.svelte";
   import ImageDialog from "./ImageDialog.svelte";
+  import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
   import { insertImage } from "./image";
+  import { insertDatasetteEmbed } from "./datasetteEmbed";
 
   let { docId }: { docId: string } = $props();
 
-  // The image insert dialog, owned here so there's a single instance. Both the
-  // toolbar image button and the `/` slash menu open it.
+  // Insert dialogs, owned here so there's a single instance each. The toolbar
+  // image button and the `/` slash menu both open the image dialog; the embed
+  // dialog is opened by the slash menu and context-aware paste.
   let imageDialogOpen = $state(false);
+  let embedDialogOpen = $state(false);
 
   let editorEl: HTMLDivElement | undefined = $state(undefined);
 
@@ -92,6 +96,9 @@
         onInsertImage: () => {
           imageDialogOpen = true;
         },
+        onInsertDatasetteEmbed: () => {
+          embedDialogOpen = true;
+        },
       },
       reporter,
     );
@@ -113,6 +120,12 @@
   function onImageInsert(src: string, alt: string) {
     if (!view) return;
     insertImage(src, alt)(view.state, view.dispatch);
+    view.focus();
+  }
+
+  function onEmbedInsert(ref: string, mode: string) {
+    if (!view) return;
+    insertDatasetteEmbed(ref, mode)(view.state, view.dispatch);
     view.focus();
   }
 
@@ -234,6 +247,7 @@
   <div class="editor-host" bind:this={editorEl}></div>
   <LinksPanel {docId} />
   <ImageDialog bind:open={imageDialogOpen} oninsert={onImageInsert} />
+  <DatasetteEmbedDialog bind:open={embedDialogOpen} oninsert={onEmbedInsert} />
 </div>
 
 <style>
@@ -969,4 +983,242 @@
     font-style: italic;
   }
 
+  /* Inline Datasette ref pill — mirrors .pm-paper-link / .pm-mention. */
+  .editor-host :global(.pm-datasette-ref) {
+    display: inline;
+    white-space: nowrap;
+    cursor: pointer;
+    color: #6429a8;
+    text-decoration: none;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: rgba(100, 41, 168, 0.1);
+    font-weight: 500;
+    user-select: none;
+  }
+  .editor-host :global(.pm-datasette-ref:hover) {
+    text-decoration: underline;
+  }
+  .editor-host :global(.pm-datasette-ref--loading) {
+    opacity: 0.6;
+  }
+  .editor-host :global(.pm-datasette-ref--denied),
+  .editor-host :global(.pm-datasette-ref--missing) {
+    color: #8a8a8a;
+    background: rgba(0, 0, 0, 0.05);
+    cursor: default;
+  }
+  .editor-host :global(.pm-datasette-ref--missing) {
+    text-decoration: line-through;
+  }
+  .editor-host :global(.pm-datasette-ref-icon) {
+    display: inline-flex;
+    vertical-align: -2px;
+    margin-right: 2px;
+  }
+
+  /* Block Datasette embed card. */
+  .editor-host :global(.pm-datasette-embed) {
+    position: relative;
+    margin: 0 0 0.75em;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    background: #fbfbfd;
+    overflow: hidden;
+  }
+  .editor-host :global(.pm-datasette-embed.ProseMirror-selectednode) {
+    outline: 2px solid #6429a8;
+    outline-offset: 1px;
+  }
+  .editor-host :global(.pm-datasette-embed-head) {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border-bottom: 1px solid #ececf0;
+    background: #f4f4f7;
+    font-size: 12px;
+    color: #555;
+  }
+  .editor-host :global(.pm-datasette-embed-icon) {
+    display: inline-flex;
+    color: #6429a8;
+  }
+  .editor-host :global(.pm-datasette-embed-label) {
+    font-weight: 600;
+    color: #333;
+  }
+  .editor-host :global(.pm-datasette-embed-label--link) {
+    text-decoration: none;
+    cursor: pointer;
+  }
+  .editor-host :global(.pm-datasette-embed-label--link:hover) {
+    color: #6429a8;
+    text-decoration: underline;
+  }
+  .editor-host :global(.pm-datasette-embed-refresh) {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: #777;
+    padding: 2px;
+    display: inline-flex;
+    border-radius: 4px;
+  }
+  .editor-host :global(.pm-datasette-embed-refresh:hover) {
+    background: rgba(0, 0, 0, 0.06);
+    color: #333;
+  }
+  .editor-host :global(.pm-datasette-embed-menu-wrap) {
+    position: relative;
+    display: inline-flex;
+  }
+  .editor-host :global(.pm-datasette-embed-menu-btn) {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    color: #777;
+    padding: 2px;
+    display: inline-flex;
+    border-radius: 4px;
+  }
+  .editor-host :global(.pm-datasette-embed-menu-btn:hover) {
+    background: rgba(0, 0, 0, 0.06);
+    color: #333;
+  }
+  .editor-host :global(.pm-datasette-embed-menu) {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 12;
+    min-width: 180px;
+    padding: 4px;
+    background: #fff;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  }
+  .editor-host :global(.pm-datasette-embed-menu--open) {
+    display: block;
+  }
+  .editor-host :global(.pm-datasette-embed-menu-item) {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+    font-size: 13px;
+    color: #333;
+    padding: 6px 8px;
+    border-radius: 4px;
+  }
+  .editor-host :global(.pm-datasette-embed-menu-item:hover) {
+    background: #f1ecf8;
+    color: #6429a8;
+  }
+  .editor-host :global(.pm-datasette-embed-tables) {
+    list-style: none;
+    margin: 0;
+    padding: 4px 0;
+    max-height: 320px;
+    overflow: auto;
+  }
+  .editor-host :global(.pm-datasette-embed-tables li) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 10px;
+    font-size: 13px;
+  }
+  .editor-host :global(.pm-datasette-embed-table-link) {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: #333;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-datasette-embed-table-link:hover) {
+    color: #6429a8;
+    text-decoration: underline;
+  }
+  .editor-host :global(.pm-datasette-embed-table-count) {
+    margin-left: auto;
+    color: #999;
+    font-variant-numeric: tabular-nums;
+  }
+  .editor-host :global(.pm-datasette-embed-scroll) {
+    overflow: auto;
+    /* ~10 rows + header before vertical scroll kicks in. */
+    max-height: 320px;
+  }
+  .editor-host :global(.pm-datasette-embed table) {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 13px;
+  }
+  .editor-host :global(.pm-datasette-embed th),
+  .editor-host :global(.pm-datasette-embed td) {
+    border: 1px solid #ececf0;
+    padding: 4px 8px;
+    text-align: left;
+    white-space: nowrap;
+  }
+  .editor-host :global(.pm-datasette-embed th) {
+    background: #f4f6f8;
+    font-weight: 600;
+    /* Keep column headers visible while the body scrolls vertically. */
+    position: sticky;
+    top: 0;
+    z-index: 1;
+  }
+  .editor-host :global(.pm-datasette-embed-footer) {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 10px;
+    font-size: 12px;
+    color: #777;
+  }
+  .editor-host :global(.pm-datasette-embed-rows) {
+    font: inherit;
+    font-size: 12px;
+    padding: 0 1px;
+    margin: 0 1px;
+    vertical-align: baseline;
+  }
+  .editor-host :global(.pm-datasette-embed-footer-link),
+  .editor-host :global(.pm-datasette-embed-footer-link:visited) {
+    /* Float "open in Datasette" to the right edge of the footer. */
+    margin-left: auto;
+    color: #6429a8;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-datasette-embed-fields) {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 2px 12px;
+    margin: 0;
+    padding: 10px;
+    font-size: 13px;
+  }
+  .editor-host :global(.pm-datasette-embed-fields dt) {
+    font-weight: 600;
+    color: #555;
+  }
+  .editor-host :global(.pm-datasette-embed-fields dd) {
+    margin: 0;
+  }
+  .editor-host :global(.pm-datasette-embed-skeleton),
+  .editor-host :global(.pm-datasette-embed-placeholder) {
+    padding: 12px;
+    font-size: 13px;
+    color: #888;
+  }
+  .editor-host :global(.pm-datasette-embed--denied .pm-datasette-embed-placeholder) {
+    color: #8a5a00;
+  }
 </style>

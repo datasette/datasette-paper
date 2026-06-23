@@ -2,6 +2,16 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 8485;
 const INTERNAL_DB = "/tmp/datasette-paper-e2e-internal.db";
+// A small user database attached to the server so datasette_ref / datasette_embed
+// have a real resource to resolve + render (the `data/vendors` table).
+const DATA_DB = "/tmp/datasette-paper-e2e-data.db";
+const SETUP_DATA_DB = `uv run --prerelease=allow python3 -c '
+import sqlite3
+db = sqlite3.connect("${DATA_DB}")
+db.execute("create table vendors (id integer primary key, name text)")
+db.executemany("insert into vendors (id, name) values (?, ?)", [(i, "Vendor %d" % i) for i in range(1, 31)])
+db.commit(); db.close()
+'`;
 // Fixed signing secret so the helpers in `e2e/helpers.ts` can mint
 // signed actor cookies for owner-flow tests (lock-as-owner, etc.).
 // Must NOT be a real production value — this is hard-coded in the
@@ -36,7 +46,7 @@ export default defineConfig({
     // names) — but NOT paper-manage, so the share dialog opens read-only
     // (canManage false). Per-paper ownership / manage gating is covered by
     // backend tests, not the playwright suite.
-    command: `rm -f ${INTERNAL_DB} && uv run --prerelease=allow datasette --internal ${INTERNAL_DB} --secret '${E2E_SECRET}' -s permissions.datasette-paper-create true -s permissions.paper-view true -s permissions.paper-edit true -p ${PORT}`,
+    command: `rm -f ${INTERNAL_DB} ${DATA_DB} && ${SETUP_DATA_DB} && uv run --prerelease=allow datasette --internal ${INTERNAL_DB} ${DATA_DB} --secret '${E2E_SECRET}' -s permissions.datasette-paper-create true -s permissions.paper-view true -s permissions.paper-edit true -p ${PORT}`,
     env: { DATASETTE_PAPER_E2E_SECRET: E2E_SECRET },
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,
