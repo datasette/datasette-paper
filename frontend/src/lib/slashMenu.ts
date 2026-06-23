@@ -1,0 +1,425 @@
+/**
+ * Notion-style `/` slash command menu — state + decoration + popup + keymap.
+ *
+ * Mirrors the `mentionSuggest.ts` suggest skeleton (one PluginKey, a
+ * `state.apply` that handles `setMeta` then recomputes from doc+selection, a
+ * `decorations` prop, and a `Plugin.view` popup) with three differences:
+ *   - Trigger is `/` gated to an EMPTY textblock at doc depth 1 (a `/`
+ *     mid-sentence never fires) — the block must contain only the `/query`.
+ *   - Results are a STATIC, filtered command registry (no fetch).
+ *   - Commit clears the `/query` text first, then runs an arbitrary command.
+ *
+ * The popup is vanilla DOM (PM transactions don't drive Svelte rerenders);
+ * state changes go through `setMeta` only. Commands that open Svelte dialogs
+ * (image, Datasette embed) are injected as callbacks so this module stays
+ * decoupled from the page wrapper.
+ */
+import {
+  Plugin,
+  PluginKey,
+  TextSelection,
+  type Command,
+  type EditorState,
+} from "prosemirror-state";
+import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
+import { setBlockType, wrapIn } from "prosemirror-commands";
+import { wrapInList } from "prosemirror-schema-list";
+import { schema } from "./schema";
+import { TOOLBAR_ICONS } from "./icons";
+import { insertTable } from "./tables";
+
+export interface SlashCommand {
+  id: string;
+  label: string;
+  keywords: string[];
+  icon: string; // a TOOLBAR_ICONS key
+  run: (view: EditorView) => void;
+  enabled?: (state: EditorState) => boolean;
+}
+
+export interface SlashState {
+  active: boolean;
+  query: string;
+  from: number; // doc pos of the `/`
+  index: number;
+  dismissedFrom?: number;
+}
+
+type SlashMeta = { type: "move"; d: 1 | -1 } | { type: "cancel" } | { type: "commit" };
+
+const INACTIVE: SlashState = { active: false, query: "", from: -1, index: 0 };
+
+export const slashKey = new PluginKey<SlashState>("slashMenu");
+
+// `/` at the very start of the block, followed by a word-char query, anchored
+// to the text-before-cursor. The empty-block guard lives in recompute().
+const TRIGGER = /^\/(\w*)$/;
+
+function clampIndex(index: number, len: number): number {
+  if (len <= 0) return 0;
+  return Math.max(0, Math.min(index, len - 1));
+}
+
+/** The visible, context-enabled, query-filtered command list (prefix-first). */
+export function filterSlashCommands(
+  commands: SlashCommand[],
+  state: EditorState,
+  query: string,
+): SlashCommand[] {
+  const q = query.toLowerCase();
+  const enabled = commands.filter((c) => (c.enabled ? c.enabled(state) : true));
+  const matched = q
+    ? enabled.filter(
+        (c) =>
+          c.label.toLowerCase().includes(q) ||
+          c.keywords.some((k) => k.toLowerCase().includes(q)),
+      )
+    : enabled;
+  if (!q) return matched;
+  return [...matched].sort(
+    (a, b) =>
+      Number(b.label.toLowerCase().startsWith(q)) -
+      Number(a.label.toLowerCase().startsWith(q)),
+  );
+}
+
+function recompute(prev: SlashState, newState: EditorState): SlashState {
+  const sel = newState.selection;
+  if (!(sel instanceof TextSelection) || !sel.empty || !sel.$cursor) {
+    return { ...INACTIVE, dismissedFrom: prev.dismissedFrom };
+  }
+  const $cursor = sel.$cursor;
+  // Gate to an empty top-level paragraph (mirrors canInsertTable's guard).
+  if ($cursor.depth !== 1 || $cursor.parent.type !== schema.nodes.paragraph) {
+    return INACTIVE;
+  }
+  // Nothing may follow the cursor in the block — the block is just `/query`.
+  if ($cursor.parent.content.size !== $cursor.parentOffset) return INACTIVE;
+
+  const textBefore = $cursor.parent.textBetween(0, $cursor.parentOffset, undefined, "￼");
+  const m = TRIGGER.exec(textBefore);
+  if (!m) return INACTIVE;
+
+  const from = sel.from - m[0].length; // doc pos of the `/`
+  if (prev.dismissedFrom !== undefined && prev.dismissedFrom === from) {
+    return { ...INACTIVE, dismissedFrom: prev.dismissedFrom };
+  }
+  const query = m[1];
+  const sameQuery = prev.active && prev.from === from && prev.query === query;
+  return {
+    active: true,
+    query,
+    from,
+    index: sameQuery ? prev.index : 0,
+  };
+}
+
+/** State-machine plugin. Factory so it can clamp `move` against the filtered
+ * command count for the current state + query. */
+export function createSlashSuggestPlugin(commands: SlashCommand[]): Plugin<SlashState> {
+  return new Plugin<SlashState>({
+    key: slashKey,
+    state: {
+      init() {
+        return { ...INACTIVE };
+      },
+      apply(tr, prev, _oldState, newState) {
+        const meta = tr.getMeta(slashKey) as SlashMeta | undefined;
+        if (meta) {
+          switch (meta.type) {
+            case "move": {
+              const len = filterSlashCommands(commands, newState, prev.query).length;
+              return { ...prev, index: clampIndex(prev.index + meta.d, len) };
+            }
+            case "cancel":
+              return { ...INACTIVE, dismissedFrom: prev.from };
+            case "commit":
+              return { ...INACTIVE };
+          }
+        }
+        return recompute(prev, newState);
+      },
+    },
+    props: {
+      decorations(state) {
+        const ss = slashKey.getState(state);
+        if (!ss || !ss.active) return DecorationSet.empty;
+        return DecorationSet.create(state.doc, [
+          Decoration.inline(ss.from, state.selection.from, {
+            class: "pm-slash-typing",
+          }),
+        ]);
+      },
+    },
+  });
+}
+
+/** Clear the `/query` text, then run the command on the cleaned block. */
+function runSlashCommand(view: EditorView, ss: SlashState, command: SlashCommand): void {
+  view.dispatch(
+    view.state.tr
+      .delete(ss.from, view.state.selection.from)
+      .setMeta(slashKey, { type: "commit" }),
+  );
+  command.run(view);
+  view.focus();
+}
+
+export function moveSlashSelection(d: 1 | -1): Command {
+  return (state, dispatch) => {
+    const ss = slashKey.getState(state);
+    if (!ss || !ss.active) return false;
+    if (dispatch) dispatch(state.tr.setMeta(slashKey, { type: "move", d }));
+    return true;
+  };
+}
+
+export function cancelSlashMenu(): Command {
+  return (state, dispatch) => {
+    const ss = slashKey.getState(state);
+    if (!ss || !ss.active) return false;
+    if (dispatch) dispatch(state.tr.setMeta(slashKey, { type: "cancel" }));
+    return true;
+  };
+}
+
+export function commitSlashSelection(commands: SlashCommand[]): Command {
+  return (state, dispatch, view) => {
+    const ss = slashKey.getState(state);
+    if (!ss || !ss.active) return false;
+    const filtered = filterSlashCommands(commands, state, ss.query);
+    const cmd = filtered[clampIndex(ss.index, filtered.length)];
+    if (!cmd) return false;
+    if (dispatch && view) runSlashCommand(view, ss, cmd);
+    return true;
+  };
+}
+
+/**
+ * Keymap consumed while the `/` popup is open. Each command returns false when
+ * inactive so normal keystrokes fall through. MUST be registered before
+ * `baseKeymap`.
+ */
+export function slashKeymap(commands: SlashCommand[]): Record<string, Command> {
+  return {
+    ArrowDown: moveSlashSelection(1),
+    ArrowUp: moveSlashSelection(-1),
+    Enter: commitSlashSelection(commands),
+    Tab: commitSlashSelection(commands),
+    Escape: cancelSlashMenu(),
+  };
+}
+
+/** The popup (`Plugin.view`) rendering the static command list. */
+class SlashPopupView {
+  private host: HTMLElement | null;
+  private root: HTMLDivElement | null;
+
+  constructor(
+    private view: EditorView,
+    private commands: SlashCommand[],
+  ) {
+    const host = view.dom.parentElement;
+    if (!host) {
+      this.host = null;
+      this.root = null;
+      return;
+    }
+    this.host = host;
+    this.root = document.createElement("div");
+    this.root.className = "pm-slash-menu";
+    this.root.style.display = "none";
+    host.appendChild(this.root);
+    this.update(view);
+  }
+
+  update(view: EditorView): void {
+    this.view = view;
+    const root = this.root;
+    const host = this.host;
+    if (!root || !host) return;
+    const ss = slashKey.getState(view.state);
+    if (!ss || !ss.active) {
+      root.style.display = "none";
+      return;
+    }
+    this.position(view, ss.from);
+    root.style.display = "block";
+    this.renderResults(ss);
+  }
+
+  private position(view: EditorView, from: number): void {
+    const root = this.root;
+    const host = this.host;
+    if (!root || !host) return;
+    let coords: { left: number; bottom: number };
+    try {
+      coords = view.coordsAtPos(from);
+    } catch {
+      return; // jsdom: getClientRects unimplemented — skip positioning
+    }
+    const hostRect = host.getBoundingClientRect();
+    const top = coords.bottom - hostRect.top + 2;
+    let left = coords.left - hostRect.left;
+    const maxLeft = Math.max(0, host.clientWidth - root.offsetWidth);
+    if (left > maxLeft) left = maxLeft;
+    if (left < 0) left = 0;
+    root.style.top = `${top}px`;
+    root.style.left = `${left}px`;
+  }
+
+  private renderResults(ss: SlashState): void {
+    const root = this.root;
+    if (!root) return;
+    root.textContent = "";
+    const filtered = filterSlashCommands(this.commands, this.view.state, ss.query);
+    if (filtered.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "pm-slash-empty";
+      empty.textContent = "No commands";
+      root.appendChild(empty);
+      return;
+    }
+    const active = clampIndex(ss.index, filtered.length);
+    filtered.forEach((command, i) => {
+      const item = document.createElement("div");
+      item.className = "pm-slash-item";
+      if (i === active) item.classList.add("pm-slash-item--active");
+      const icon = document.createElement("span");
+      icon.className = "pm-slash-icon";
+      icon.setAttribute("aria-hidden", "true");
+      icon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS[command.icon as keyof typeof TOOLBAR_ICONS] ?? ""}</svg>`;
+      item.appendChild(icon);
+      item.appendChild(document.createTextNode(command.label));
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault(); // keep editor focus for the commit transaction
+        const ssNow = slashKey.getState(this.view.state);
+        if (ssNow && ssNow.active) runSlashCommand(this.view, ssNow, command);
+      });
+      root.appendChild(item);
+    });
+  }
+
+  destroy(): void {
+    this.root?.remove();
+    this.root = null;
+  }
+}
+
+export function slashMenuPopupPlugin(commands: SlashCommand[]): Plugin {
+  return new Plugin({
+    view(view) {
+      return new SlashPopupView(view, commands);
+    },
+  });
+}
+
+export interface SlashCommandCallbacks {
+  /** Open the image insert dialog (PaperApp-owned Svelte component). */
+  openImageDialog?: () => void;
+  /** Open the Datasette embed picker dialog (PaperApp-owned). */
+  openDatasetteEmbed?: () => void;
+}
+
+function runCommand(cmd: Command): (view: EditorView) => void {
+  return (view) => cmd(view.state, view.dispatch, view);
+}
+
+/** Build the default command registry. Dialog-backed commands use callbacks. */
+export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand[] {
+  const { heading, code_block, blockquote, bullet_list, ordered_list, task_list, horizontal_rule } =
+    schema.nodes;
+  const commands: SlashCommand[] = [
+    {
+      id: "h1",
+      label: "Heading 1",
+      keywords: ["title", "h1", "heading"],
+      icon: "h1",
+      run: runCommand(setBlockType(heading, { level: 1 })),
+    },
+    {
+      id: "h2",
+      label: "Heading 2",
+      keywords: ["h2", "heading", "subtitle"],
+      icon: "h2",
+      run: runCommand(setBlockType(heading, { level: 2 })),
+    },
+    {
+      id: "h3",
+      label: "Heading 3",
+      keywords: ["h3", "heading"],
+      icon: "h3",
+      run: runCommand(setBlockType(heading, { level: 3 })),
+    },
+    {
+      id: "bullet_list",
+      label: "Bullet list",
+      keywords: ["ul", "unordered", "list", "bullet"],
+      icon: "listUl",
+      run: runCommand(wrapInList(bullet_list)),
+    },
+    {
+      id: "ordered_list",
+      label: "Numbered list",
+      keywords: ["ol", "ordered", "numbered", "list"],
+      icon: "listOl",
+      run: runCommand(wrapInList(ordered_list)),
+    },
+    {
+      id: "task_list",
+      label: "Task list",
+      keywords: ["todo", "checklist", "task", "checkbox"],
+      icon: "taskList",
+      run: runCommand(wrapInList(task_list)),
+    },
+    {
+      id: "blockquote",
+      label: "Quote",
+      keywords: ["blockquote", "quote", "citation"],
+      icon: "quote",
+      run: runCommand(wrapIn(blockquote)),
+    },
+    {
+      id: "code_block",
+      label: "Code block",
+      keywords: ["code", "pre", "monospace"],
+      icon: "codeBlock",
+      run: runCommand(setBlockType(code_block)),
+    },
+    {
+      id: "table",
+      label: "Table",
+      keywords: ["grid", "table", "spreadsheet", "data"],
+      icon: "table",
+      // The slash menu only fires in an empty top-level paragraph, so a table
+      // is always insertable here — no canInsertTable gate needed.
+      run: runCommand(insertTable(3, 3)),
+    },
+    {
+      id: "divider",
+      label: "Divider",
+      keywords: ["hr", "rule", "separator", "divider", "line"],
+      icon: "hr",
+      run: (view) => {
+        view.dispatch(
+          view.state.tr.replaceSelectionWith(horizontal_rule.create()).scrollIntoView(),
+        );
+      },
+    },
+    {
+      id: "image",
+      label: "Image",
+      keywords: ["img", "picture", "photo", "image"],
+      icon: "image",
+      run: () => cb.openImageDialog?.(),
+    },
+    {
+      id: "datasette_embed",
+      label: "Datasette embed",
+      keywords: ["datasette", "table", "data", "embed", "database", "query"],
+      icon: "database",
+      run: () => cb.openDatasetteEmbed?.(),
+    },
+  ];
+  return commands;
+}
