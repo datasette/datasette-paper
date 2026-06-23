@@ -60,6 +60,10 @@ import { AccessChecker } from "./linkAccessCheck";
 import { PaperLinkView } from "./paperLinkView";
 import { ActorResolver } from "./actorResolver";
 import { MentionView } from "./mentionView";
+import { DatasetteResolver } from "./datasetteResolver";
+import { InlineEmbedView } from "./inlineEmbedView";
+import { BlockEmbedView } from "./blockEmbedView";
+import { handleDatasettePaste } from "./datasettePaste";
 import {
   buildSlashCommands,
   createSlashSuggestPlugin,
@@ -797,6 +801,8 @@ export class EditorConnection {
   private accessChecker: AccessChecker;
   // One actor resolver per connection (mention NodeViews subscribe to it).
   private actorResolver: ActorResolver;
+  // One datasette resolver per connection (inline_embed pills subscribe).
+  private datasetteResolver: DatasetteResolver;
   // The `/` slash command registry, built once with the dialog callbacks.
   private slashCommands: SlashCommand[];
 
@@ -846,6 +852,7 @@ export class EditorConnection {
     // a doc with no links to check.
     this.accessChecker = new AccessChecker(opts.docId);
     this.actorResolver = new ActorResolver();
+    this.datasetteResolver = new DatasetteResolver();
     this.slashCommands = buildSlashCommands({
       openImageDialog: () => this.opts.onInsertImage?.(),
       openDatasetteEmbed: () => this.opts.onInsertDatasetteEmbed?.(),
@@ -1175,6 +1182,15 @@ export class EditorConnection {
             getPos as () => number | undefined,
             this.actorResolver,
           ),
+        inline_embed: (node, view, getPos) =>
+          new InlineEmbedView(
+            node,
+            view,
+            getPos as () => number | undefined,
+            this.datasetteResolver,
+          ),
+        block_embed: (node, view, getPos) =>
+          new BlockEmbedView(node, view, getPos as () => number | undefined),
       },
       // Returning null falls through to ProseMirror's default; the cast
       // exists because the upstream type insists on `Slice`.
@@ -1195,7 +1211,11 @@ export class EditorConnection {
       // paste path run. This is what makes image paste work in Safari, which
       // puts only the image file on the clipboard with no text/html for the
       // default parser to pick up. See image.ts.
-      handlePaste: (view, event) => handleImagePaste(view, event),
+      // Paste precedence: image files first (Safari puts only the file on the
+      // clipboard), then a Datasette resource URL (auto inline-ref vs block
+      // embed by cursor context), else the default text/HTML paste.
+      handlePaste: (view, event) =>
+        handleImagePaste(view, event) || handleDatasettePaste(view, event),
       handleDrop: (view, event) => handleImageDrop(view, event as DragEvent),
       dispatchTransaction: (tr) => this.dispatchTransaction(tr),
     });
@@ -1562,6 +1582,7 @@ export class EditorConnection {
     this.linkResolver.dispose();
     this.accessChecker.dispose();
     this.actorResolver.dispose();
+    this.datasetteResolver.dispose();
     if (this.view) {
       this.view.destroy();
       this.view = null;

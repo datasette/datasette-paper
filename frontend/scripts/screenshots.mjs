@@ -31,6 +31,11 @@ const PAPER = `${BASE}/-/paper`;
 // are owned (mirrors the e2e harness's hard-coded secret). NOT a real secret.
 const SECRET = "screenshots-secret-not-for-prod";
 const DB = "/tmp/datasette-paper-shots-internal.db";
+// A small user database attached so datasette_ref / datasette_embed have a
+// real resource to resolve + render. The directory name makes the Datasette
+// database name "data", so refs read `/data/vendors` (mirrors the e2e setup).
+const DATA_DIR = "/tmp/datasette-paper-shots-data";
+const DATA_DB = `${DATA_DIR}/data.db`;
 // The browsing actor (owns the rich doc → full owner / manager UI).
 const ACTOR = "alice";
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -82,8 +87,31 @@ async function reachable() {
   }
 }
 
+// Build the throwaway `data` database the embed shots resolve against: a
+// `vendors` table (30 rows) plus a small `regions` table so the database-level
+// embed/pill shots list more than one table. itsdangerous-style: shell out to
+// python.
+function setupDataDb() {
+  const py = `
+import os, sqlite3
+os.makedirs(${JSON.stringify(DATA_DIR)}, exist_ok=True)
+p = ${JSON.stringify(DATA_DB)}
+if os.path.exists(p): os.remove(p)
+db = sqlite3.connect(p)
+db.execute("create table vendors (id integer primary key, name text, region text)")
+regions = ["West", "East", "North", "South"]
+rows = [(i, "Vendor %d" % i, regions[i % 4]) for i in range(1, 31)]
+db.executemany("insert into vendors (id, name, region) values (?, ?, ?)", rows)
+db.execute("create table regions (id integer primary key, name text)")
+db.executemany("insert into regions (id, name) values (?, ?)", list(enumerate(regions, 1)))
+db.commit(); db.close()
+`;
+  execFileSync("uv", ["run", "--prerelease=allow", "python3", "-c", py]);
+}
+
 async function startServer() {
   await rm(DB, { force: true });
+  setupDataDb();
   // Refuse to start if something is already on the port rather than killing
   // it — that "something" might be a server the user cares about. The poll
   // below can't tell a stale server apart from ours, so bail loudly instead.
@@ -104,6 +132,8 @@ async function startServer() {
       "datasette",
       "--internal",
       DB,
+      // The attached user database (resolves as `data`).
+      DATA_DB,
       "--secret",
       SECRET,
       // Throwaway plugin: friendly actor display names ("Alice Ada", …).
@@ -213,8 +243,31 @@ Type \`#\` anywhere in the body to drop an inline tag — an in-document anchor,
 distinct from a paper's metadata tags shown on the index.
 `;
 
-// A doc with an inline Datasette reference pill (the \`datasette:\` link scheme
-// resolves db/table → a live label).
+// Docs for the embed element shots. Each `inline_embed` pill is authored with
+// the \`datasette:\` link scheme (`[label](datasette:<path>)`); each
+// `block_embed` is a fenced \`datasette-embed\` block whose body is the ref
+// path. One doc per resolved kind so the inline/block element shots stay
+// single-purpose. (Block bodies use plain strings to avoid escaping the fence
+// backticks inside a template literal.)
+const INLINE_DB = `# Vendor database
+
+The whole [vendors database](datasette:/data) is addressable as an inline
+reference pill — it resolves to the database's name and links straight to it.
+`;
+const INLINE_TABLE = `# Vendor directory
+
+Our canonical list lives in the [vendors table](datasette:/data/vendors).
+Paste any Datasette URL into the editor to drop a reference pill like that one.
+`;
+const INLINE_ROW = `# Featured vendor
+
+This week we're highlighting [vendor #5](datasette:/data/vendors/5) — an inline
+reference pill that resolves to a single row.
+`;
+const BLOCK_DB = "# Vendors database\n\n```datasette-embed\n/data\n```\n";
+const BLOCK_TABLE = "# Vendors table\n\n```datasette-embed\n/data/vendors\n```\n";
+const BLOCK_ROW = "# Featured vendor\n\n```datasette-embed\n/data/vendors/5\n```\n";
+
 async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -254,9 +307,30 @@ async function seed(ctx) {
   await tagDoc(designId, ["design"], "carol");
   await tagDoc(budgetId, ["budget", "q3"], "bob");
   await tagDoc(richId, ["roadmap", "q3"], ACTOR);
-  // Empty doc for the slash-menu shot (it mutates its own throwaway doc).
+  // Empty docs for the slash-menu / embed-picker authoring shots (each mutates
+  // its own doc so the shots don't contaminate one another).
   const slashId = await create("Slash menu demo", ACTOR);
-  return { richId, mentionId, inlineTagId, slashId };
+  const embedPickerId = await create("Embed picker demo", ACTOR);
+  // Pre-seeded docs, one per embed element × resolved kind (database/table/row).
+  const inlineDbId = await create("Vendor database", ACTOR, INLINE_DB);
+  const inlineTableId = await create("Vendor directory", ACTOR, INLINE_TABLE);
+  const inlineRowId = await create("Featured vendor (inline)", ACTOR, INLINE_ROW);
+  const blockDbId = await create("Vendors database", ACTOR, BLOCK_DB);
+  const blockTableId = await create("Vendors table", ACTOR, BLOCK_TABLE);
+  const blockRowId = await create("Featured vendor (block)", ACTOR, BLOCK_ROW);
+  return {
+    richId,
+    mentionId,
+    inlineTagId,
+    slashId,
+    embedPickerId,
+    inlineDbId,
+    inlineTableId,
+    inlineRowId,
+    blockDbId,
+    blockTableId,
+    blockRowId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -321,12 +395,64 @@ async function shotUnion(page, selectors, file, pad = 16) {
 // ---------------------------------------------------------------------------
 // Shots. Each gets a fresh page from the shared (cookie-bearing) context.
 function buildShots(ctx, ids) {
-  const { richId, mentionId, inlineTagId, slashId } = ids;
+  const {
+    richId,
+    mentionId,
+    inlineTagId,
+    slashId,
+    embedPickerId,
+    inlineDbId,
+    inlineTableId,
+    inlineRowId,
+    blockDbId,
+    blockTableId,
+    blockRowId,
+  } = ids;
   // Stability CSS is injected on the context via addInitScript (see main), so
   // it survives every navigation — addStyleTag here would be discarded by the
   // subsequent page.goto().
   const newPage = () => ctx.newPage();
   const out = (n) => resolve(OUT, `${n}.png`);
+
+  // Inline `inline_embed` pill shot: open a pre-seeded doc, wait for the pill's
+  // resolver fetch to settle (it leaves `--loading`), then full-page capture.
+  const inlineEmbedShot = (id, file) => async () => {
+    const page = await newPage();
+    await gotoEditor(page, id);
+    await page.locator(".pm-inline-embed").first().waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector(".pm-inline-embed");
+        return !!el && !el.classList.contains("pm-inline-embed--loading");
+      },
+      { timeout: 10_000 },
+    );
+    await freezeVolatile(page);
+    await page.screenshot({ path: out(file) });
+    await page.close();
+  };
+
+  // Block `block_embed` shot: open a pre-seeded doc, wait for the NodeView's
+  // per-viewer fetch to replace the loading skeleton with real content
+  // (asserted via `needle`, a string the rendered payload must contain), then
+  // full-page capture.
+  const blockEmbedShot = (id, file, needle) => async () => {
+    const page = await newPage();
+    await gotoEditor(page, id);
+    await page.locator(".pm-block-embed").waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForFunction(
+      (text) => {
+        const el = document.querySelector(".pm-block-embed");
+        if (!el || el.querySelector(".pm-block-embed-skeleton")) return false;
+        return (el.innerText || "").includes(text);
+      },
+      needle,
+      { timeout: 10_000 },
+    );
+    await freezeVolatile(page);
+    await page.screenshot({ path: out(file) });
+    await page.close();
+  };
 
   return {
     index: async () => {
@@ -417,6 +543,37 @@ function buildShots(ctx, ids) {
       await page.screenshot({ path: out("slash-menu") });
       await page.close();
     },
+
+    // The Datasette embed picker dialog (slash command → search → result).
+    "embed-picker": async () => {
+      const page = await newPage();
+      await gotoEditor(page, embedPickerId);
+      await page.locator(".ProseMirror").click();
+      await page.keyboard.type("/datasette");
+      await page.locator(".pm-slash-menu").waitFor({ state: "visible", timeout: 10_000 });
+      await page.keyboard.press("Enter");
+      const dialog = page.locator(".ds-embed-dialog");
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      await dialog.locator(".ds-embed-search").fill("vendors");
+      await dialog
+        .locator(".ds-embed-result", { hasText: "vendors" })
+        .first()
+        .waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await dialog.screenshot({ path: out("embed-picker") });
+      await page.close();
+    },
+
+    // Inline `inline_embed` pills, one per resolved kind (database/table/row).
+    "inline-embed-database": inlineEmbedShot(inlineDbId, "inline-embed-database"),
+    "inline-embed-table": inlineEmbedShot(inlineTableId, "inline-embed-table"),
+    "inline-embed-row": inlineEmbedShot(inlineRowId, "inline-embed-row"),
+
+    // Block `block_embed` renders, one per resolved kind: a database's table
+    // listing, a read-only row-capped table, and a single row's field card.
+    "block-embed-database": blockEmbedShot(blockDbId, "block-embed-database", "vendors"),
+    "block-embed-table": blockEmbedShot(blockTableId, "block-embed-table", "Vendor 1"),
+    "block-embed-row": blockEmbedShot(blockRowId, "block-embed-row", "Vendor 5"),
 
     tables: async () => {
       const page = await newPage();
