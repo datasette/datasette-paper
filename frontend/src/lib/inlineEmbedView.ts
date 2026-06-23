@@ -28,7 +28,7 @@ import type { DatasetteResolver, DatasetteStatus } from "./datasetteResolver";
  *   database     → just its name (the label already *is* the db name)
  * Falls back to the server-supplied label when a piece is missing.
  */
-export function refLabel(status: Extract<DatasetteStatus, { status: "ok" }>): string {
+export function inlineEmbedLabel(status: Extract<DatasetteStatus, { status: "ok" }>): string {
   if (status.kind === "row" && status.db && status.table && status.pk) {
     return `${status.db}/${status.table}/${status.pk}`;
   }
@@ -38,7 +38,7 @@ export function refLabel(status: Extract<DatasetteStatus, { status: "ok" }>): st
   return status.label;
 }
 
-export class DatasetteRefView implements NodeView {
+export class InlineEmbedView implements NodeView {
   dom: HTMLAnchorElement;
   private ref: string | null;
   private resolver: DatasetteResolver;
@@ -52,7 +52,7 @@ export class DatasetteRefView implements NodeView {
   ) {
     this.resolver = resolver;
     this.dom = document.createElement("a");
-    this.dom.className = "pm-datasette-ref";
+    this.dom.className = "pm-inline-embed";
     this.ref = node.attrs.ref ?? null;
     this.subscribe();
   }
@@ -74,7 +74,7 @@ export class DatasetteRefView implements NodeView {
     this.dom.replaceChildren();
     if (iconName) {
       const span = document.createElement("span");
-      span.className = "pm-datasette-ref-icon";
+      span.className = "pm-inline-embed-icon";
       span.setAttribute("aria-hidden", "true");
       span.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS[iconName as keyof typeof TOOLBAR_ICONS] ?? ""}</svg>`;
       this.dom.appendChild(span);
@@ -83,23 +83,23 @@ export class DatasetteRefView implements NodeView {
   }
 
   private renderStatus(status: DatasetteStatus): void {
-    this.dom.className = "pm-datasette-ref";
+    this.dom.className = "pm-inline-embed";
     const raw = this.ref ?? "?";
     if (status.status === "loading") {
       this.dom.removeAttribute("href");
-      this.dom.classList.add("pm-datasette-ref--loading");
+      this.dom.classList.add("pm-inline-embed--loading");
       this.setBody(null, raw);
     } else if (status.status === "denied") {
       this.dom.removeAttribute("href");
-      this.dom.classList.add("pm-datasette-ref--denied");
+      this.dom.classList.add("pm-inline-embed--denied");
       this.setBody("lock", "Permission denied"); // NEVER a label here
     } else if (status.status === "not_found") {
       this.dom.removeAttribute("href");
-      this.dom.classList.add("pm-datasette-ref--missing");
+      this.dom.classList.add("pm-inline-embed--missing");
       this.setBody(null, raw); // NEVER a label here
     } else {
       this.dom.setAttribute("href", status.href);
-      this.setBody(kindIcon(status.kind), refLabel(status));
+      this.setBody(kindIcon(status.kind), inlineEmbedLabel(status));
     }
   }
 

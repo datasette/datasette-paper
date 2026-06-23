@@ -8,7 +8,7 @@ import { EditorView } from "prosemirror-view";
 import { EditorState } from "prosemirror-state";
 
 import { schema } from "../schema";
-import { DatasetteEmbedView } from "../datasetteEmbedView";
+import { BlockEmbedView } from "../blockEmbedView";
 
 type NativeInit = { ok?: boolean; status?: number };
 
@@ -24,16 +24,16 @@ async function build(
   ref: string,
   native: unknown,
   init: NativeInit = {},
-): Promise<DatasetteEmbedView> {
+): Promise<BlockEmbedView> {
   stubFetch(native, init);
   const node = schema.nodes.block_embed.create({ ref });
-  const view = new DatasetteEmbedView(node, {} as unknown as EditorView, () => 0);
+  const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
   // Let the async load() resolve.
   await new Promise((r) => setTimeout(r, 0));
   return view;
 }
 
-describe("DatasetteEmbedView", () => {
+describe("BlockEmbedView", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it("renders a table payload into a <table> with header + rows", async () => {
@@ -57,9 +57,9 @@ describe("DatasetteEmbedView", () => {
     // Footer: inline limit dropdown + total count ("showing [10] of 30 rows").
     expect(view.dom.textContent).toContain("of 30 rows");
     expect(
-      (view.dom.querySelector(".pm-datasette-embed-rows") as HTMLSelectElement).value,
+      (view.dom.querySelector(".pm-block-embed-rows") as HTMLSelectElement).value,
     ).toBe("10");
-    expect(view.dom.querySelector(".pm-datasette-embed-label")!.textContent).toBe(
+    expect(view.dom.querySelector(".pm-block-embed-label")!.textContent).toBe(
       "data/vendors",
     );
   });
@@ -70,7 +70,7 @@ describe("DatasetteEmbedView", () => {
       rows: [[1]],
       count: 1,
     });
-    const label = view.dom.querySelector(".pm-datasette-embed-label");
+    const label = view.dom.querySelector(".pm-block-embed-label");
     expect(label?.tagName).toBe("A");
     expect(label?.getAttribute("href")).toBe("/data/vendors");
   });
@@ -78,7 +78,7 @@ describe("DatasetteEmbedView", () => {
   it("defaults to 10 rows and offers 10/25/100 in the footer dropdown", async () => {
     const view = await build("/data/vendors", { columns: ["id"], rows: [[1]], count: 1 });
     const select = view.dom.querySelector(
-      ".pm-datasette-embed-rows",
+      ".pm-block-embed-rows",
     ) as HTMLSelectElement | null;
     expect(select).not.toBeNull();
     expect([...select!.options].map((o) => o.value)).toEqual(["10", "25", "100"]);
@@ -95,12 +95,12 @@ describe("DatasetteEmbedView", () => {
       }),
     );
     const node = schema.nodes.block_embed.create({ ref: "/data/vendors" });
-    const view = new DatasetteEmbedView(node, {} as unknown as EditorView, () => 0);
+    const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     expect(urls[0]).toContain("_size=10");
 
     const select = view.dom.querySelector(
-      ".pm-datasette-embed-rows",
+      ".pm-block-embed-rows",
     ) as HTMLSelectElement;
     select.value = "100";
     select.dispatchEvent(new Event("change"));
@@ -111,7 +111,7 @@ describe("DatasetteEmbedView", () => {
   it("renders an 'open in Datasette' footer link to the resource", async () => {
     const view = await build("/data/vendors", { columns: ["id"], rows: [[1]], count: 1 });
     const link = view.dom.querySelector(
-      ".pm-datasette-embed-footer-link",
+      ".pm-block-embed-footer-link",
     ) as HTMLAnchorElement | null;
     expect(link?.getAttribute("href")).toBe("/data/vendors");
     expect(link?.textContent).toContain("open in Datasette");
@@ -123,7 +123,7 @@ describe("DatasetteEmbedView", () => {
       rows: [{ id: 1, name: "Acme" }],
     });
     // Title is the path identity, not the human label.
-    expect(view.dom.querySelector(".pm-datasette-embed-label")!.textContent).toBe(
+    expect(view.dom.querySelector(".pm-block-embed-label")!.textContent).toBe(
       "data/vendors/1",
     );
     const dts = [...view.dom.querySelectorAll("dt")].map((d) => d.textContent);
@@ -134,7 +134,7 @@ describe("DatasetteEmbedView", () => {
 
   it("renders a denied placeholder with no data", async () => {
     const view = await build("/data/secret", {}, { ok: false, status: 403 });
-    expect(view.dom.classList.contains("pm-datasette-embed--denied")).toBe(true);
+    expect(view.dom.classList.contains("pm-block-embed--denied")).toBe(true);
     expect(view.dom.querySelector("table")).toBeNull();
     expect(view.dom.textContent).toContain("don't have access");
     // The label "secret" must not appear.
@@ -143,7 +143,7 @@ describe("DatasetteEmbedView", () => {
 
   it("renders a not_found placeholder", async () => {
     const view = await build("/data/nope", {}, { ok: false, status: 404 });
-    expect(view.dom.classList.contains("pm-datasette-embed--missing")).toBe(true);
+    expect(view.dom.classList.contains("pm-block-embed--missing")).toBe(true);
     expect(view.dom.textContent).toContain("not found");
   });
 
@@ -152,13 +152,13 @@ describe("DatasetteEmbedView", () => {
       tables: [{ name: "vendors", count: 30 }],
       views: [{ name: "vendor_names" }],
     });
-    const links = [...view.dom.querySelectorAll(".pm-datasette-embed-table-link")];
+    const links = [...view.dom.querySelectorAll(".pm-block-embed-table-link")];
     expect(links.map((l) => l.textContent)).toEqual(["vendors", "vendor_names"]);
     expect((links[0] as HTMLAnchorElement).getAttribute("href")).toBe("/data/vendors");
     expect(view.dom.textContent).toContain("30 rows");
     expect(view.dom.textContent).toContain("2 tables");
     expect(
-      (view.dom.querySelector(".pm-datasette-embed-label") as HTMLAnchorElement).getAttribute(
+      (view.dom.querySelector(".pm-block-embed-label") as HTMLAnchorElement).getAttribute(
         "href",
       ),
     ).toBe("/data");
@@ -174,18 +174,18 @@ describe("DatasetteEmbedView", () => {
       state: EditorState.create({ doc }),
       nodeViews: {
         block_embed: (node, v, getPos) =>
-          new DatasetteEmbedView(node, v, getPos as () => number | undefined),
+          new BlockEmbedView(node, v, getPos as () => number | undefined),
       },
     });
     // Let the NodeView's load() resolve and render the header (with the menu).
     await new Promise((r) => setTimeout(r, 0));
 
     const btn = view.dom.querySelector(
-      ".pm-datasette-embed-menu-btn",
+      ".pm-block-embed-menu-btn",
     ) as HTMLButtonElement;
     expect(btn).not.toBeNull();
-    const menu = view.dom.querySelector(".pm-datasette-embed-menu") as HTMLElement;
-    const isOpen = () => menu.classList.contains("pm-datasette-embed-menu--open");
+    const menu = view.dom.querySelector(".pm-block-embed-menu") as HTMLElement;
+    const isOpen = () => menu.classList.contains("pm-block-embed-menu--open");
     expect(isOpen()).toBe(false);
     btn.click();
     expect(isOpen()).toBe(true);
@@ -196,7 +196,7 @@ describe("DatasetteEmbedView", () => {
     btn.click();
     expect(isOpen()).toBe(true);
 
-    (view.dom.querySelector(".pm-datasette-embed-menu-item") as HTMLButtonElement).click();
+    (view.dom.querySelector(".pm-block-embed-menu-item") as HTMLButtonElement).click();
 
     const para = view.state.doc.firstChild!;
     expect(para.type.name).toBe("paragraph");

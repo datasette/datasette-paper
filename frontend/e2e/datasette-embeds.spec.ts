@@ -54,7 +54,7 @@ test.describe("slash menu + datasette embed", () => {
     await result.click();
 
     // The embed renders a capped table with real data.
-    const embed = page.locator(".pm-datasette-embed");
+    const embed = page.locator(".pm-block-embed");
     await expect(embed).toBeVisible({ timeout: 10000 });
     await expect
       .poll(async () => embed.locator("table").innerText(), {
@@ -63,14 +63,14 @@ test.describe("slash menu + datasette embed", () => {
       })
       .toContain("Vendor 1");
     // Footer: inline limit dropdown (default 10) + total ("showing [10] of 30 rows").
-    await expect(embed.locator(".pm-datasette-embed-rows")).toHaveValue("10");
+    await expect(embed.locator(".pm-block-embed-rows")).toHaveValue("10");
     await expect(embed).toContainText("of 30 rows");
 
     // Persisted as ref-only: after a reload the NodeView re-fetches + renders.
     await waitForServerVersion(page, host.id, 1);
     await page.reload();
     await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 10000 });
-    const reloaded = page.locator(".pm-datasette-embed");
+    const reloaded = page.locator(".pm-block-embed");
     await expect(reloaded).toBeVisible({ timeout: 10000 });
     await expect
       .poll(async () => reloaded.locator("table").innerText(), {

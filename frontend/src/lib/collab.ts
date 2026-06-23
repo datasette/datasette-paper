@@ -61,8 +61,8 @@ import { PaperLinkView } from "./paperLinkView";
 import { ActorResolver } from "./actorResolver";
 import { MentionView } from "./mentionView";
 import { DatasetteResolver } from "./datasetteResolver";
-import { DatasetteRefView } from "./datasetteRefView";
-import { DatasetteEmbedView } from "./datasetteEmbedView";
+import { InlineEmbedView } from "./inlineEmbedView";
+import { BlockEmbedView } from "./blockEmbedView";
 import { handleDatasettePaste } from "./datasettePaste";
 import {
   buildSlashCommands,
@@ -1183,14 +1183,14 @@ export class EditorConnection {
             this.actorResolver,
           ),
         inline_embed: (node, view, getPos) =>
-          new DatasetteRefView(
+          new InlineEmbedView(
             node,
             view,
             getPos as () => number | undefined,
             this.datasetteResolver,
           ),
         block_embed: (node, view, getPos) =>
-          new DatasetteEmbedView(node, view, getPos as () => number | undefined),
+          new BlockEmbedView(node, view, getPos as () => number | undefined),
       },
       // Returning null falls through to ProseMirror's default; the cast
       // exists because the upstream type insists on `Slice`.

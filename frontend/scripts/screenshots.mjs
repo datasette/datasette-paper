@@ -419,11 +419,11 @@ function buildShots(ctx, ids) {
   const inlineEmbedShot = (id, file) => async () => {
     const page = await newPage();
     await gotoEditor(page, id);
-    await page.locator(".pm-datasette-ref").first().waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".pm-inline-embed").first().waitFor({ state: "visible", timeout: 10_000 });
     await page.waitForFunction(
       () => {
-        const el = document.querySelector(".pm-datasette-ref");
-        return !!el && !el.classList.contains("pm-datasette-ref--loading");
+        const el = document.querySelector(".pm-inline-embed");
+        return !!el && !el.classList.contains("pm-inline-embed--loading");
       },
       { timeout: 10_000 },
     );
@@ -439,11 +439,11 @@ function buildShots(ctx, ids) {
   const blockEmbedShot = (id, file, needle) => async () => {
     const page = await newPage();
     await gotoEditor(page, id);
-    await page.locator(".pm-datasette-embed").waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".pm-block-embed").waitFor({ state: "visible", timeout: 10_000 });
     await page.waitForFunction(
       (text) => {
-        const el = document.querySelector(".pm-datasette-embed");
-        if (!el || el.querySelector(".pm-datasette-embed-skeleton")) return false;
+        const el = document.querySelector(".pm-block-embed");
+        if (!el || el.querySelector(".pm-block-embed-skeleton")) return false;
         return (el.innerText || "").includes(text);
       },
       needle,

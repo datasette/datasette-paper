@@ -984,7 +984,7 @@
   }
 
   /* Inline Datasette ref pill — mirrors .pm-paper-link / .pm-mention. */
-  .editor-host :global(.pm-datasette-ref) {
+  .editor-host :global(.pm-inline-embed) {
     display: inline;
     white-space: nowrap;
     cursor: pointer;
@@ -996,29 +996,29 @@
     font-weight: 500;
     user-select: none;
   }
-  .editor-host :global(.pm-datasette-ref:hover) {
+  .editor-host :global(.pm-inline-embed:hover) {
     text-decoration: underline;
   }
-  .editor-host :global(.pm-datasette-ref--loading) {
+  .editor-host :global(.pm-inline-embed--loading) {
     opacity: 0.6;
   }
-  .editor-host :global(.pm-datasette-ref--denied),
-  .editor-host :global(.pm-datasette-ref--missing) {
+  .editor-host :global(.pm-inline-embed--denied),
+  .editor-host :global(.pm-inline-embed--missing) {
     color: #8a8a8a;
     background: rgba(0, 0, 0, 0.05);
     cursor: default;
   }
-  .editor-host :global(.pm-datasette-ref--missing) {
+  .editor-host :global(.pm-inline-embed--missing) {
     text-decoration: line-through;
   }
-  .editor-host :global(.pm-datasette-ref-icon) {
+  .editor-host :global(.pm-inline-embed-icon) {
     display: inline-flex;
     vertical-align: -2px;
     margin-right: 2px;
   }
 
   /* Block Datasette embed card. */
-  .editor-host :global(.pm-datasette-embed) {
+  .editor-host :global(.pm-block-embed) {
     position: relative;
     margin: 0 0 0.75em;
     border: 1px solid #d4d4d4;
@@ -1026,11 +1026,11 @@
     background: #fbfbfd;
     overflow: hidden;
   }
-  .editor-host :global(.pm-datasette-embed.ProseMirror-selectednode) {
+  .editor-host :global(.pm-block-embed.ProseMirror-selectednode) {
     outline: 2px solid #6429a8;
     outline-offset: 1px;
   }
-  .editor-host :global(.pm-datasette-embed-head) {
+  .editor-host :global(.pm-block-embed-head) {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -1040,23 +1040,23 @@
     font-size: 12px;
     color: #555;
   }
-  .editor-host :global(.pm-datasette-embed-icon) {
+  .editor-host :global(.pm-block-embed-icon) {
     display: inline-flex;
     color: #6429a8;
   }
-  .editor-host :global(.pm-datasette-embed-label) {
+  .editor-host :global(.pm-block-embed-label) {
     font-weight: 600;
     color: #333;
   }
-  .editor-host :global(.pm-datasette-embed-label--link) {
+  .editor-host :global(.pm-block-embed-label--link) {
     text-decoration: none;
     cursor: pointer;
   }
-  .editor-host :global(.pm-datasette-embed-label--link:hover) {
+  .editor-host :global(.pm-block-embed-label--link:hover) {
     color: #6429a8;
     text-decoration: underline;
   }
-  .editor-host :global(.pm-datasette-embed-refresh) {
+  .editor-host :global(.pm-block-embed-refresh) {
     margin-left: auto;
     border: none;
     background: transparent;
@@ -1066,15 +1066,15 @@
     display: inline-flex;
     border-radius: 4px;
   }
-  .editor-host :global(.pm-datasette-embed-refresh:hover) {
+  .editor-host :global(.pm-block-embed-refresh:hover) {
     background: rgba(0, 0, 0, 0.06);
     color: #333;
   }
-  .editor-host :global(.pm-datasette-embed-menu-wrap) {
+  .editor-host :global(.pm-block-embed-menu-wrap) {
     position: relative;
     display: inline-flex;
   }
-  .editor-host :global(.pm-datasette-embed-menu-btn) {
+  .editor-host :global(.pm-block-embed-menu-btn) {
     border: none;
     background: transparent;
     cursor: pointer;
@@ -1083,11 +1083,11 @@
     display: inline-flex;
     border-radius: 4px;
   }
-  .editor-host :global(.pm-datasette-embed-menu-btn:hover) {
+  .editor-host :global(.pm-block-embed-menu-btn:hover) {
     background: rgba(0, 0, 0, 0.06);
     color: #333;
   }
-  .editor-host :global(.pm-datasette-embed-menu) {
+  .editor-host :global(.pm-block-embed-menu) {
     display: none;
     position: absolute;
     top: calc(100% + 4px);
@@ -1100,10 +1100,10 @@
     border-radius: 6px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
   }
-  .editor-host :global(.pm-datasette-embed-menu--open) {
+  .editor-host :global(.pm-block-embed-menu--open) {
     display: block;
   }
-  .editor-host :global(.pm-datasette-embed-menu-item) {
+  .editor-host :global(.pm-block-embed-menu-item) {
     display: block;
     width: 100%;
     text-align: left;
@@ -1116,58 +1116,58 @@
     padding: 6px 8px;
     border-radius: 4px;
   }
-  .editor-host :global(.pm-datasette-embed-menu-item:hover) {
+  .editor-host :global(.pm-block-embed-menu-item:hover) {
     background: #f1ecf8;
     color: #6429a8;
   }
-  .editor-host :global(.pm-datasette-embed-tables) {
+  .editor-host :global(.pm-block-embed-tables) {
     list-style: none;
     margin: 0;
     padding: 4px 0;
     max-height: 320px;
     overflow: auto;
   }
-  .editor-host :global(.pm-datasette-embed-tables li) {
+  .editor-host :global(.pm-block-embed-tables li) {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 4px 10px;
     font-size: 13px;
   }
-  .editor-host :global(.pm-datasette-embed-table-link) {
+  .editor-host :global(.pm-block-embed-table-link) {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     color: #333;
     text-decoration: none;
   }
-  .editor-host :global(.pm-datasette-embed-table-link:hover) {
+  .editor-host :global(.pm-block-embed-table-link:hover) {
     color: #6429a8;
     text-decoration: underline;
   }
-  .editor-host :global(.pm-datasette-embed-table-count) {
+  .editor-host :global(.pm-block-embed-table-count) {
     margin-left: auto;
     color: #999;
     font-variant-numeric: tabular-nums;
   }
-  .editor-host :global(.pm-datasette-embed-scroll) {
+  .editor-host :global(.pm-block-embed-scroll) {
     overflow: auto;
     /* ~10 rows + header before vertical scroll kicks in. */
     max-height: 320px;
   }
-  .editor-host :global(.pm-datasette-embed table) {
+  .editor-host :global(.pm-block-embed table) {
     border-collapse: collapse;
     width: 100%;
     font-size: 13px;
   }
-  .editor-host :global(.pm-datasette-embed th),
-  .editor-host :global(.pm-datasette-embed td) {
+  .editor-host :global(.pm-block-embed th),
+  .editor-host :global(.pm-block-embed td) {
     border: 1px solid #ececf0;
     padding: 4px 8px;
     text-align: left;
     white-space: nowrap;
   }
-  .editor-host :global(.pm-datasette-embed th) {
+  .editor-host :global(.pm-block-embed th) {
     background: #f4f6f8;
     font-weight: 600;
     /* Keep column headers visible while the body scrolls vertically. */
@@ -1175,7 +1175,7 @@
     top: 0;
     z-index: 1;
   }
-  .editor-host :global(.pm-datasette-embed-footer) {
+  .editor-host :global(.pm-block-embed-footer) {
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1183,21 +1183,21 @@
     font-size: 12px;
     color: #777;
   }
-  .editor-host :global(.pm-datasette-embed-rows) {
+  .editor-host :global(.pm-block-embed-rows) {
     font: inherit;
     font-size: 12px;
     padding: 0 1px;
     margin: 0 1px;
     vertical-align: baseline;
   }
-  .editor-host :global(.pm-datasette-embed-footer-link),
-  .editor-host :global(.pm-datasette-embed-footer-link:visited) {
+  .editor-host :global(.pm-block-embed-footer-link),
+  .editor-host :global(.pm-block-embed-footer-link:visited) {
     /* Float "open in Datasette" to the right edge of the footer. */
     margin-left: auto;
     color: #6429a8;
     text-decoration: none;
   }
-  .editor-host :global(.pm-datasette-embed-fields) {
+  .editor-host :global(.pm-block-embed-fields) {
     display: grid;
     grid-template-columns: max-content 1fr;
     gap: 2px 12px;
@@ -1205,20 +1205,20 @@
     padding: 10px;
     font-size: 13px;
   }
-  .editor-host :global(.pm-datasette-embed-fields dt) {
+  .editor-host :global(.pm-block-embed-fields dt) {
     font-weight: 600;
     color: #555;
   }
-  .editor-host :global(.pm-datasette-embed-fields dd) {
+  .editor-host :global(.pm-block-embed-fields dd) {
     margin: 0;
   }
-  .editor-host :global(.pm-datasette-embed-skeleton),
-  .editor-host :global(.pm-datasette-embed-placeholder) {
+  .editor-host :global(.pm-block-embed-skeleton),
+  .editor-host :global(.pm-block-embed-placeholder) {
     padding: 12px;
     font-size: 13px;
     color: #888;
   }
-  .editor-host :global(.pm-datasette-embed--denied .pm-datasette-embed-placeholder) {
+  .editor-host :global(.pm-block-embed--denied .pm-block-embed-placeholder) {
     color: #8a5a00;
   }
 </style>

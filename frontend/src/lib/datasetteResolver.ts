@@ -1,6 +1,6 @@
 /**
  * DatasetteResolver — resolves an `inline_embed` ref path to a display
- * label/kind for the pill NodeView (datasetteRefView.ts), caches results, and
+ * label/kind for the pill NodeView (inlineEmbedView.ts), caches results, and
  * notifies per-ref subscribers. Mirrors `linkResolver.ts` (which models the
  * `denied`/`not_found` states), keyed by the ref path string.
  *

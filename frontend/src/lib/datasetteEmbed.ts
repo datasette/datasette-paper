@@ -1,6 +1,6 @@
 /**
  * Command + fetch helpers for the `block_embed` node and the shared resource
- * picker. Mirrors `image.ts`: the NodeView (datasetteEmbedView.ts) renders,
+ * picker. Mirrors `image.ts`: the NodeView (blockEmbedView.ts) renders,
  * this module owns the insert command and the network calls.
  *
  * The node stores only `ref` (a Datasette URL path) and `mode`; the rendered

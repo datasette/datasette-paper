@@ -26,7 +26,7 @@ import {
 const ROW_LIMIT_OPTIONS = [10, 25, 100];
 const DEFAULT_ROW_LIMIT = 10;
 
-export class DatasetteEmbedView implements NodeView {
+export class BlockEmbedView implements NodeView {
   dom: HTMLDivElement;
   private view: EditorView;
   private getPos: () => number | undefined;
@@ -45,7 +45,7 @@ export class DatasetteEmbedView implements NodeView {
     this.getPos = getPos;
     this.node = node;
     this.dom = document.createElement("div");
-    this.dom.className = "pm-datasette-embed";
+    this.dom.className = "pm-block-embed";
     this.ref = node.attrs.ref ?? null;
     this.mode = node.attrs.mode ?? "table";
     void this.load();
@@ -68,7 +68,7 @@ export class DatasetteEmbedView implements NodeView {
 
   private svgIcon(name: string): HTMLSpanElement {
     const span = document.createElement("span");
-    span.className = "pm-datasette-embed-icon";
+    span.className = "pm-block-embed-icon";
     span.setAttribute("aria-hidden", "true");
     span.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS[name as keyof typeof TOOLBAR_ICONS] ?? ""}</svg>`;
     return span;
@@ -81,25 +81,25 @@ export class DatasetteEmbedView implements NodeView {
    */
   private header(iconName: string, label: string, href?: string): HTMLElement {
     const head = document.createElement("div");
-    head.className = "pm-datasette-embed-head";
+    head.className = "pm-block-embed-head";
     head.appendChild(this.svgIcon(iconName));
 
     let labelEl: HTMLElement;
     if (href) {
       const a = document.createElement("a");
-      a.className = "pm-datasette-embed-label pm-datasette-embed-label--link";
+      a.className = "pm-block-embed-label pm-block-embed-label--link";
       a.href = href;
       labelEl = a;
     } else {
       labelEl = document.createElement("span");
-      labelEl.className = "pm-datasette-embed-label";
+      labelEl.className = "pm-block-embed-label";
     }
     labelEl.textContent = label; // text node — never innerHTML
     head.appendChild(labelEl);
 
     const refresh = document.createElement("button");
     refresh.type = "button";
-    refresh.className = "pm-datasette-embed-refresh";
+    refresh.className = "pm-block-embed-refresh";
     refresh.title = "Refresh";
     refresh.setAttribute("aria-label", "Refresh");
     refresh.appendChild(this.svgIcon("redo")); // arrow-clockwise
@@ -122,11 +122,11 @@ export class DatasetteEmbedView implements NodeView {
    */
   private overflowMenu(): HTMLElement {
     const wrap = document.createElement("div");
-    wrap.className = "pm-datasette-embed-menu-wrap";
+    wrap.className = "pm-block-embed-menu-wrap";
 
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.className = "pm-datasette-embed-menu-btn";
+    btn.className = "pm-block-embed-menu-btn";
     btn.title = "More";
     btn.setAttribute("aria-label", "More");
     btn.appendChild(this.svgIcon("threeDotsVertical"));
@@ -138,11 +138,11 @@ export class DatasetteEmbedView implements NodeView {
     wrap.appendChild(btn);
 
     const menu = document.createElement("div");
-    menu.className = "pm-datasette-embed-menu";
+    menu.className = "pm-block-embed-menu";
 
     const convert = document.createElement("button");
     convert.type = "button";
-    convert.className = "pm-datasette-embed-menu-item";
+    convert.className = "pm-block-embed-menu-item";
     convert.textContent = "Convert to inline element";
     convert.addEventListener("click", (e) => {
       e.preventDefault();
@@ -163,7 +163,7 @@ export class DatasetteEmbedView implements NodeView {
     this.closeMenu();
     // Visibility is a class (not the `hidden` attr) so an author `display`
     // rule can't leave it stuck visible — see the matching CSS.
-    menu.classList.add("pm-datasette-embed-menu--open");
+    menu.classList.add("pm-block-embed-menu--open");
     this.menuEl = menu;
     // Capture-phase so a click anywhere else closes before it does anything.
     document.addEventListener("mousedown", this.onOutsideClick, true);
@@ -172,7 +172,7 @@ export class DatasetteEmbedView implements NodeView {
 
   private closeMenu(): void {
     if (!this.menuEl) return;
-    this.menuEl.classList.remove("pm-datasette-embed-menu--open");
+    this.menuEl.classList.remove("pm-block-embed-menu--open");
     this.menuEl = null;
     document.removeEventListener("mousedown", this.onOutsideClick, true);
     document.removeEventListener("keydown", this.onKeydown, true);
@@ -207,7 +207,7 @@ export class DatasetteEmbedView implements NodeView {
    */
   private rowLimitSelect(): HTMLSelectElement {
     const select = document.createElement("select");
-    select.className = "pm-datasette-embed-rows";
+    select.className = "pm-block-embed-rows";
     for (const n of ROW_LIMIT_OPTIONS) {
       const opt = document.createElement("option");
       opt.value = String(n);
@@ -227,11 +227,11 @@ export class DatasetteEmbedView implements NodeView {
   private renderLoading(): void {
     this.dom.replaceChildren();
     this.dom.classList.remove(
-      "pm-datasette-embed--denied",
-      "pm-datasette-embed--missing",
+      "pm-block-embed--denied",
+      "pm-block-embed--missing",
     );
     const skel = document.createElement("div");
-    skel.className = "pm-datasette-embed-skeleton";
+    skel.className = "pm-block-embed-skeleton";
     skel.textContent = "Loading…";
     this.dom.appendChild(skel);
   }
@@ -240,25 +240,25 @@ export class DatasetteEmbedView implements NodeView {
     this.dom.replaceChildren();
     this.dom.classList.add(modifier);
     const el = document.createElement("div");
-    el.className = "pm-datasette-embed-placeholder";
+    el.className = "pm-block-embed-placeholder";
     el.textContent = text; // generic — never the resource's label or data
     this.dom.appendChild(el);
   }
 
   private render(payload: EmbedPayload): void {
     this.dom.classList.remove(
-      "pm-datasette-embed--denied",
-      "pm-datasette-embed--missing",
+      "pm-block-embed--denied",
+      "pm-block-embed--missing",
     );
     if (payload.status === "denied") {
       this.renderPlaceholder(
-        "pm-datasette-embed--denied",
+        "pm-block-embed--denied",
         "You don't have access to this data",
       );
       return;
     }
     if (payload.status === "not_found") {
-      this.renderPlaceholder("pm-datasette-embed--missing", "Resource not found");
+      this.renderPlaceholder("pm-block-embed--missing", "Resource not found");
       return;
     }
     if (payload.kind === "row") {
@@ -279,7 +279,7 @@ export class DatasetteEmbedView implements NodeView {
     );
 
     const scroll = document.createElement("div");
-    scroll.className = "pm-datasette-embed-scroll";
+    scroll.className = "pm-block-embed-scroll";
     const table = document.createElement("table");
 
     const thead = document.createElement("thead");
@@ -307,11 +307,11 @@ export class DatasetteEmbedView implements NodeView {
     this.dom.appendChild(scroll);
 
     const footer = document.createElement("div");
-    footer.className = "pm-datasette-embed-footer";
+    footer.className = "pm-block-embed-footer";
 
     // "showing [25] of 1,234 rows" — the count number is the limit dropdown.
     const info = document.createElement("span");
-    info.className = "pm-datasette-embed-footer-info";
+    info.className = "pm-block-embed-footer-info";
     info.append("showing ", this.rowLimitSelect());
     if (payload.count != null) {
       info.append(` of ${payload.count} row${payload.count === 1 ? "" : "s"}`);
@@ -321,7 +321,7 @@ export class DatasetteEmbedView implements NodeView {
     footer.appendChild(info);
 
     const link = document.createElement("a");
-    link.className = "pm-datasette-embed-footer-link";
+    link.className = "pm-block-embed-footer-link";
     link.href = payload.href;
     link.textContent = "open in Datasette ↗";
     footer.appendChild(link);
@@ -338,7 +338,7 @@ export class DatasetteEmbedView implements NodeView {
         : `${payload.db}/${payload.label}`;
     this.dom.appendChild(this.header("fileText", title, payload.href));
     const dl = document.createElement("dl");
-    dl.className = "pm-datasette-embed-fields";
+    dl.className = "pm-block-embed-fields";
     for (const field of payload.fields) {
       const dt = document.createElement("dt");
       dt.textContent = field.column; // text node
@@ -358,18 +358,18 @@ export class DatasetteEmbedView implements NodeView {
 
     if (payload.tables.length === 0) {
       const empty = document.createElement("div");
-      empty.className = "pm-datasette-embed-placeholder";
+      empty.className = "pm-block-embed-placeholder";
       empty.textContent = "No tables";
       this.dom.appendChild(empty);
       return;
     }
 
     const list = document.createElement("ul");
-    list.className = "pm-datasette-embed-tables";
+    list.className = "pm-block-embed-tables";
     for (const t of payload.tables) {
       const li = document.createElement("li");
       const a = document.createElement("a");
-      a.className = "pm-datasette-embed-table-link";
+      a.className = "pm-block-embed-table-link";
       a.href = t.href;
       a.appendChild(this.svgIcon(kindIcon(t.kind)));
       const name = document.createElement("span");
@@ -378,7 +378,7 @@ export class DatasetteEmbedView implements NodeView {
       li.appendChild(a);
       if (t.count != null) {
         const count = document.createElement("span");
-        count.className = "pm-datasette-embed-table-count";
+        count.className = "pm-block-embed-table-count";
         count.textContent = `${t.count} row${t.count === 1 ? "" : "s"}`;
         li.appendChild(count);
       }
@@ -387,14 +387,14 @@ export class DatasetteEmbedView implements NodeView {
     this.dom.appendChild(list);
 
     const footer = document.createElement("div");
-    footer.className = "pm-datasette-embed-footer";
+    footer.className = "pm-block-embed-footer";
     const info = document.createElement("span");
-    info.className = "pm-datasette-embed-footer-info";
+    info.className = "pm-block-embed-footer-info";
     const n = payload.tables.length;
     info.textContent = `${n} table${n === 1 ? "" : "s"}`;
     footer.appendChild(info);
     const link = document.createElement("a");
-    link.className = "pm-datasette-embed-footer-link";
+    link.className = "pm-block-embed-footer-link";
     link.href = payload.href;
     link.textContent = "open in Datasette ↗";
     footer.appendChild(link);

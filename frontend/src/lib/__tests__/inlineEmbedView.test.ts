@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import type { EditorView } from "prosemirror-view";
 
 import { schema } from "../schema";
-import { DatasetteRefView } from "../datasetteRefView";
+import { InlineEmbedView } from "../inlineEmbedView";
 import type { DatasetteResolver, DatasetteStatus } from "../datasetteResolver";
 
 function fakeResolver(status: DatasetteStatus): DatasetteResolver {
@@ -19,9 +19,9 @@ function fakeResolver(status: DatasetteStatus): DatasetteResolver {
   } as unknown as DatasetteResolver;
 }
 
-function build(ref: string | null, status: DatasetteStatus): DatasetteRefView {
+function build(ref: string | null, status: DatasetteStatus): InlineEmbedView {
   const node = schema.nodes.inline_embed.create({ ref });
-  return new DatasetteRefView(
+  return new InlineEmbedView(
     node,
     {} as unknown as EditorView,
     () => 0,
@@ -29,7 +29,7 @@ function build(ref: string | null, status: DatasetteStatus): DatasetteRefView {
   );
 }
 
-describe("DatasetteRefView", () => {
+describe("InlineEmbedView", () => {
   it("renders ok with label, icon, and href", () => {
     const view = build("/fixtures/facetable", {
       status: "ok",
@@ -93,21 +93,21 @@ describe("DatasetteRefView", () => {
 
   it("renders denied without the resource label", () => {
     const view = build("/fixtures/secret", { status: "denied" });
-    expect(view.dom.classList.contains("pm-datasette-ref--denied")).toBe(true);
+    expect(view.dom.classList.contains("pm-inline-embed--denied")).toBe(true);
     expect(view.dom.hasAttribute("href")).toBe(false);
     expect(view.dom.textContent).toContain("Permission denied");
   });
 
   it("renders not_found as the raw ref, struck through, no href", () => {
     const view = build("/fixtures/nope", { status: "not_found" });
-    expect(view.dom.classList.contains("pm-datasette-ref--missing")).toBe(true);
+    expect(view.dom.classList.contains("pm-inline-embed--missing")).toBe(true);
     expect(view.dom.hasAttribute("href")).toBe(false);
     expect(view.dom.textContent).toBe("/fixtures/nope");
   });
 
   it("renders loading as the raw ref, muted, no href", () => {
     const view = build("/fixtures/facetable", { status: "loading" });
-    expect(view.dom.classList.contains("pm-datasette-ref--loading")).toBe(true);
+    expect(view.dom.classList.contains("pm-inline-embed--loading")).toBe(true);
     expect(view.dom.hasAttribute("href")).toBe(false);
     expect(view.dom.textContent).toBe("/fixtures/facetable");
   });
