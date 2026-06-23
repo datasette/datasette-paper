@@ -349,35 +349,35 @@ ORDER BY n DESC, tag;
 
 def list_docs_by_ids_states_kinds_and_tags(
     conn: sqlite3.Connection,
+    tags_json: str | None,
     doc_ids_json: str,
     states_json: str,
     kinds_json: str,
-    tags_json: str,
 ) -> list[Doc]:
     sql = """\
+WITH requested_tags AS (
+    SELECT DISTINCT value AS tag FROM json_each($tags_json::text::)
+),
+docs_with_all_tags AS (
+    SELECT doc_id
+    FROM _datasette_paper_doc_tag
+    WHERE tag IN (SELECT tag FROM requested_tags)
+    GROUP BY doc_id
+    HAVING COUNT(DISTINCT tag) = (SELECT COUNT(*) FROM requested_tags)
+)
 SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
-WHERE id IN (
-    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
-)
-  AND state IN (
-    SELECT value FROM json_each($states_json::text)
-)
-  AND kind IN (
-    SELECT value FROM json_each($kinds_json::text)
-)
-  AND (
-    SELECT COUNT(DISTINCT tag) FROM _datasette_paper_doc_tag
-    WHERE doc_id = _datasette_paper_doc.id
-      AND tag IN (SELECT value FROM json_each($tags_json::text))
-  ) = (SELECT COUNT(DISTINCT value) FROM json_each($tags_json::text))
+WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))
+  AND state IN (SELECT value FROM json_each($states_json::text))
+  AND kind IN (SELECT value FROM json_each($kinds_json::text))
+  AND ($tags_json::text:: IS NULL OR id IN (SELECT doc_id FROM docs_with_all_tags))
 ORDER BY updated_at DESC;
 """
     params = {
+        "tags_json::text::": tags_json,
         "doc_ids_json::text": doc_ids_json,
         "states_json::text": states_json,
         "kinds_json::text": kinds_json,
-        "tags_json::text": tags_json,
     }
     cursor = conn.execute(sql, params)
     return [Doc(*row) for row in cursor.fetchall()]

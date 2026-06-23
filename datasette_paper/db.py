@@ -305,7 +305,9 @@ class PaperDB:
         doc_ids_json = json.dumps(doc_ids)
         states_json = json.dumps(states)
         kinds_json = json.dumps(kinds)
-        tags_json = json.dumps(tags)
+        # NULL (not "[]") signals "no tag filter" to the query — see
+        # listDocsByIdsStatesKindsAndTags in queries.sql.
+        tags_json = json.dumps(tags) if tags else None
 
         def read(conn):
             return _queries.list_docs_by_ids_states_kinds_and_tags(

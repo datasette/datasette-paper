@@ -147,17 +147,22 @@ ORDER BY src_doc_id, dst_doc_id;
 -- no-op. Tags are normalized before storage (see normalize_tag in util.py).
 -- ============================================================================
 
+-- Add one (doc_id, tag) row. OR IGNORE makes a duplicate a no-op (the
+-- pair is UNIQUE), so add_doc_tag is idempotent.
 -- name: insertDocTag
 INSERT OR IGNORE INTO _datasette_paper_doc_tag (doc_id, tag)
 VALUES ($doc_id::integer, $tag::text);
 
+-- Remove one tag from a doc. Deleting an absent tag affects 0 rows.
 -- name: deleteDocTag
 DELETE FROM _datasette_paper_doc_tag
 WHERE doc_id = $doc_id::integer AND tag = $tag::text;
 
+-- Clear every tag on a doc — the first half of set_doc_tags (replace).
 -- name: deleteTagsForDoc
 DELETE FROM _datasette_paper_doc_tag WHERE doc_id = $doc_id::integer;
 
+-- All tags on a single doc, alphabetical (the doc's tag list response).
 -- name: listTagsForDoc
 SELECT tag
 FROM _datasette_paper_doc_tag
@@ -181,26 +186,31 @@ WHERE doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::tex
 GROUP BY tag
 ORDER BY n DESC, tag;
 
--- Doc list filtered by ids/states/kinds AND a tag intersection. An empty
--- $tags_json (length 0) matches all docs (the predicate degenerates to
--- 0 = 0); a non-empty list requires the doc to carry every requested tag.
+-- Doc list filtered by ids/states/kinds AND a tag intersection (a doc must
+-- carry EVERY requested tag). CTEs name the two moving parts: the requested
+-- tag set, and the docs that hold all of them (relational division — group
+-- a doc's matching tags and require the distinct count to equal the number
+-- requested). $tags_json is nullable: NULL means "no tag filter" and skips
+-- the intersection (the caller passes NULL, not an empty array, when there
+-- are no tags). json_each(NULL) yields zero rows, so the CTEs stay empty and
+-- harmless in that case.
 -- name: listDocsByIdsStatesKindsAndTags :rows -> Doc
+WITH requested_tags AS (
+    SELECT DISTINCT value AS tag FROM json_each($tags_json::text::)
+),
+docs_with_all_tags AS (
+    SELECT doc_id
+    FROM _datasette_paper_doc_tag
+    WHERE tag IN (SELECT tag FROM requested_tags)
+    GROUP BY doc_id
+    HAVING COUNT(DISTINCT tag) = (SELECT COUNT(*) FROM requested_tags)
+)
 SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
 FROM _datasette_paper_doc
-WHERE id IN (
-    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
-)
-  AND state IN (
-    SELECT value FROM json_each($states_json::text)
-)
-  AND kind IN (
-    SELECT value FROM json_each($kinds_json::text)
-)
-  AND (
-    SELECT COUNT(DISTINCT tag) FROM _datasette_paper_doc_tag
-    WHERE doc_id = _datasette_paper_doc.id
-      AND tag IN (SELECT value FROM json_each($tags_json::text))
-  ) = (SELECT COUNT(DISTINCT value) FROM json_each($tags_json::text))
+WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))
+  AND state IN (SELECT value FROM json_each($states_json::text))
+  AND kind IN (SELECT value FROM json_each($kinds_json::text))
+  AND ($tags_json::text:: IS NULL OR id IN (SELECT doc_id FROM docs_with_all_tags))
 ORDER BY updated_at DESC;
 
 -- ============================================================================

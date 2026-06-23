@@ -292,6 +292,10 @@ async def resolve_actors(datasette, request):
 
 @router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags$")
 async def list_doc_tags(datasette, request, doc_id: int):
+    """List a document's tags. Requires ``paper-view`` on the doc.
+
+    → 200 ``{"tags": [...]}`` (sorted); 403 if the actor can't view it.
+    """
     await ensure_paper_view(datasette, request, doc_id)
     db = paper_db(datasette)
     return Response.json({"tags": await db.list_tags_for_doc(doc_id=doc_id)})
@@ -299,6 +303,12 @@ async def list_doc_tags(datasette, request, doc_id: int):
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/add$")
 async def add_doc_tag(datasette, request, doc_id: int):
+    """Add one tag to a document. Manager-only (``paper-manage``).
+
+    Body ``{"tag": "..."}``; the tag is normalized and a duplicate is a
+    no-op. → 200 ``{"tags": [...]}`` (the doc's full list); 400 invalid/
+    empty tag; 403 for non-managers; 404 if the doc was deleted.
+    """
     doc = await _ensure_owner(datasette, request, doc_id)
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
@@ -313,6 +323,12 @@ async def add_doc_tag(datasette, request, doc_id: int):
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/remove$")
 async def remove_doc_tag(datasette, request, doc_id: int):
+    """Remove one tag from a document. Manager-only (``paper-manage``).
+
+    Body ``{"tag": "..."}``. → 200 ``{"tags": [...]}``; 400 invalid tag;
+    403 for non-managers; 404 if the doc was deleted. Removing an absent
+    tag is a no-op 200.
+    """
     doc = await _ensure_owner(datasette, request, doc_id)
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
@@ -328,6 +344,12 @@ async def remove_doc_tag(datasette, request, doc_id: int):
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/replace$")
 async def replace_doc_tags(datasette, request, doc_id: int):
+    """Replace a document's entire tag set. Manager-only (``paper-manage``).
+
+    Body ``{"tags": [...]}`` — normalized, deduped (order preserved),
+    invalid entries dropped; an empty list clears all tags. → 200
+    ``{"tags": [...]}``; 403 for non-managers; 404 if the doc was deleted.
+    """
     doc = await _ensure_owner(datasette, request, doc_id)
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
@@ -346,9 +368,12 @@ async def replace_doc_tags(datasette, request, doc_id: int):
 
 @router.GET(r"^/-/paper/api/tags$")
 async def list_tags(datasette, request):
-    # Ungated but ACL-filtered: distinct tags + counts over the docs this
-    # actor can view (filter typeahead / editor autocomplete). A tag on a
-    # doc the actor can't see does not appear.
+    """Tag vocabulary (distinct tags + doc counts) for autocomplete/filter.
+
+    Ungated but ACL-filtered: scoped to the docs the actor can view, so a
+    tag only on docs they can't see never appears. → 200 ``{"tags":
+    [{"tag", "count"}, ...]}`` ordered by count desc then tag.
+    """
     doc_ids = await viewable_doc_ids(datasette, request.actor)
     if not doc_ids:
         return Response.json({"tags": []})
