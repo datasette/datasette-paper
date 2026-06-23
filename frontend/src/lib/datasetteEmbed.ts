@@ -52,8 +52,22 @@ export type EmbedPayload =
       }[];
       href: string;
     }
+  | ExternalEmbedPayload
   | { status: "denied" }
   | { status: "not_found" };
+
+/**
+ * Identity payload for a ref owned by a third-party provider (e.g.
+ * datasette-places). `kind` is the provider's kind; a registered frontend
+ * renderer (see embedRegistry.ts) draws the body and fetches its own data.
+ */
+export type ExternalEmbedPayload = {
+  status: "ok";
+  kind: string;
+  label: string;
+  href: string;
+  icon?: string;
+};
 
 export type SearchResult = {
   ref: string;

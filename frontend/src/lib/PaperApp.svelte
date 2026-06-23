@@ -1150,6 +1150,16 @@
     color: #999;
     font-variant-numeric: tabular-nums;
   }
+  .editor-host :global(.pm-datasette-embed-external) {
+    /* Host for a third-party renderer (e.g. a places map). The renderer owns
+       its internal layout; we just give it a sensible default height.
+       `isolation` traps the renderer's internal z-indexes (Leaflet controls
+       sit at ~1000) in their own stacking context so they can't paint over
+       the header's ⋮ overflow menu. */
+    position: relative;
+    isolation: isolate;
+    min-height: 320px;
+  }
   .editor-host :global(.pm-datasette-embed-scroll) {
     overflow: auto;
     /* ~10 rows + header before vertical scroll kicks in. */

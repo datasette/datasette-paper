@@ -20,6 +20,8 @@ export type DatasetteStatus =
       table?: string;
       pk?: string;
       count?: number;
+      /** Optional bootstrap-icon name hint (provider refs, e.g. "globe"). */
+      icon?: string;
     }
   | { status: "denied" }
   | { status: "not_found" }

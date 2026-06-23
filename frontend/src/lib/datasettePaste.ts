@@ -16,6 +16,7 @@
 import type { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import { schema } from "./schema";
+import { embedRegistry } from "./embedRegistry";
 
 export interface RefParseContext {
   /** The page origin, e.g. `window.location.origin`. */
@@ -61,6 +62,26 @@ export function parseDatasetteRef(
   return "/" + segments.join("/");
 }
 
+/**
+ * Ask registered third-party embed renderers (window.datasettePaperEmbeds)
+ * to claim a pasted same-origin URL, returning the ref path to store. Lets a
+ * plugin like datasette-places turn its own `/-/places/list/5` link into an
+ * embed without paper hard-coding that URL scheme.
+ */
+export function matchExternalRef(text: string, origin: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  if (!/^(https?:\/\/|\/)/.test(trimmed)) return null;
+  let url: URL;
+  try {
+    url = new URL(trimmed, origin);
+  } catch {
+    return null;
+  }
+  if (url.origin !== origin) return null;
+  return embedRegistry().match(url);
+}
+
 /** True when the cursor is in an empty top-level paragraph (block surface). */
 function isEmptyTopParagraph(state: EditorState): boolean {
   const sel = state.selection;
@@ -97,7 +118,10 @@ export function handleDatasettePaste(
 ): boolean {
   const text = event.clipboardData?.getData("text/plain") ?? "";
   const origin = ctx?.origin ?? window.location.origin;
-  const ref = parseDatasetteRef(text, { origin, baseUrl: ctx?.baseUrl });
+  // Core db/table/row refs first; otherwise let a third-party provider claim it.
+  const ref =
+    parseDatasetteRef(text, { origin, baseUrl: ctx?.baseUrl }) ??
+    matchExternalRef(text, origin);
   if (ref == null) return false;
 
   const surface = chooseDatasetteSurface(view.state, ref);

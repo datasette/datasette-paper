@@ -2,7 +2,7 @@
  * Tests for context-aware Datasette URL paste: ref parsing, surface choice,
  * and the paste handler's inline-vs-block insertion.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
@@ -11,10 +11,37 @@ import {
   parseDatasetteRef,
   chooseDatasetteSurface,
   handleDatasettePaste,
+  matchExternalRef,
 } from "../datasettePaste";
 
 const ORIGIN = "http://localhost";
 const ctx = { origin: ORIGIN };
+
+describe("matchExternalRef (third-party providers)", () => {
+  afterEach(() => {
+    delete window.datasettePaperEmbeds;
+  });
+
+  it("returns null when no renderer claims the URL", () => {
+    expect(matchExternalRef("http://localhost/-/places/list/5", ORIGIN)).toBeNull();
+  });
+
+  it("delegates to a registered renderer's matchUrl", () => {
+    window.datasettePaperEmbeds = {
+      register() {},
+      get: () => undefined,
+      all: () => [],
+      match: (url: URL) =>
+        url.pathname.startsWith("/-/places/list/") ? url.pathname : null,
+    };
+    expect(matchExternalRef("http://localhost/-/places/list/5", ORIGIN)).toBe(
+      "/-/places/list/5",
+    );
+    // Cross-origin and non-matching paths are still rejected.
+    expect(matchExternalRef("http://evil.test/-/places/list/5", ORIGIN)).toBeNull();
+    expect(matchExternalRef("http://localhost/data/vendors", ORIGIN)).toBeNull();
+  });
+});
 
 describe("parseDatasetteRef", () => {
   it("accepts same-origin db / table / row paths", () => {

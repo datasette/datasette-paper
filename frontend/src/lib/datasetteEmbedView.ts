@@ -21,10 +21,15 @@ import {
   fetchEmbed,
   kindIcon,
   type EmbedPayload,
+  type ExternalEmbedPayload,
 } from "./datasetteEmbed";
+import { embedRegistry } from "./embedRegistry";
 
 const ROW_LIMIT_OPTIONS = [10, 25, 100];
 const DEFAULT_ROW_LIMIT = 10;
+// Kinds rendered by the built-in dispatch; anything else is delegated to a
+// registered external renderer (embedRegistry.ts).
+const BUILTIN_KINDS = new Set(["table", "view", "row", "database"]);
 
 export class DatasetteEmbedView implements NodeView {
   dom: HTMLDivElement;
@@ -39,6 +44,8 @@ export class DatasetteEmbedView implements NodeView {
   private token = 0;
   // The open overflow menu (if any) + its outside-click teardown.
   private menuEl: HTMLElement | null = null;
+  // Cleanup returned by an external renderer's mount(), if any.
+  private cleanupExternal: (() => void) | null = null;
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.view = view;
@@ -53,8 +60,10 @@ export class DatasetteEmbedView implements NodeView {
 
   private async load(): Promise<void> {
     const token = ++this.token;
-    // Any (re)render rebuilds the header, so drop a stale open menu first.
+    // Any (re)render rebuilds the header, so drop a stale open menu and tear
+    // down any externally-mounted view first.
     this.closeMenu();
+    this.disposeExternal();
     this.renderLoading();
     if (this.ref == null) {
       this.render({ status: "not_found" });
@@ -262,12 +271,70 @@ export class DatasetteEmbedView implements NodeView {
       return;
     }
     if (payload.kind === "row") {
-      this.renderRow(payload);
+      this.renderRow(payload as Extract<EmbedPayload, { kind: "row" }>);
     } else if (payload.kind === "database") {
-      this.renderDatabase(payload);
+      this.renderDatabase(payload as Extract<EmbedPayload, { kind: "database" }>);
+    } else if (!BUILTIN_KINDS.has(payload.kind)) {
+      this.renderExternal(payload as ExternalEmbedPayload);
     } else {
-      this.renderTable(payload);
+      this.renderTable(payload as Extract<EmbedPayload, { kind: "table" | "view" }>);
     }
+  }
+
+  /**
+   * Render a third-party provider's embed by delegating to the renderer it
+   * registered via `window.datasettePaperEmbeds` (the JS API). We own the
+   * header (icon + label link + refresh + ⋮ menu); the renderer fills a host
+   * div and fetches its own data. If no renderer is registered (the plugin's
+   * bundle didn't load), fall back to a link.
+   */
+  private renderExternal(payload: ExternalEmbedPayload): void {
+    this.dom.replaceChildren();
+    this.dom.appendChild(
+      this.header(payload.icon || kindIcon(payload.kind), payload.label, payload.href),
+    );
+    const host = document.createElement("div");
+    host.className = "pm-datasette-embed-external";
+    this.dom.appendChild(host);
+
+    const renderer = embedRegistry().get(payload.kind);
+    if (renderer) {
+      try {
+        const cleanup = renderer.mount(host, {
+          ref: this.ref ?? "",
+          payload: payload as unknown as Record<string, unknown>,
+          mode: this.mode,
+        });
+        this.cleanupExternal = typeof cleanup === "function" ? cleanup : null;
+      } catch {
+        host.replaceChildren();
+        const err = document.createElement("div");
+        err.className = "pm-datasette-embed-placeholder";
+        err.textContent = "This embed failed to render";
+        host.appendChild(err);
+      }
+      return;
+    }
+    // No renderer registered for this kind — offer a link out.
+    const fallback = document.createElement("div");
+    fallback.className = "pm-datasette-embed-placeholder";
+    const link = document.createElement("a");
+    link.className = "pm-datasette-embed-footer-link";
+    link.href = payload.href;
+    link.textContent = `Open ${payload.label} ↗`;
+    fallback.appendChild(link);
+    host.appendChild(fallback);
+  }
+
+  private disposeExternal(): void {
+    if (typeof this.cleanupExternal === "function") {
+      try {
+        this.cleanupExternal();
+      } catch {
+        /* a renderer's cleanup must never wedge the NodeView */
+      }
+    }
+    this.cleanupExternal = null;
   }
 
   private renderTable(
@@ -416,6 +483,7 @@ export class DatasetteEmbedView implements NodeView {
 
   destroy(): void {
     this.closeMenu();
+    this.disposeExternal();
   }
 
   // We own the whole managed subtree — keep PM out of it, but let interactive

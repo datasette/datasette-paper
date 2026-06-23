@@ -170,15 +170,22 @@ test-all *flags:
 # `view`/`edit` globally would bypass the share-role gating and let everyone
 # edit anyone's paper. (The e2e config grants view+edit because playwright runs
 # as anonymous and exercises only the read-only path.)
+# datasette-places is loaded too so you can try the third-party embed
+# (paste a `/-/places/list/<id>` link → inline pill / map block). Its two
+# global perms are granted; per-list view/edit come from acl grants (the
+# creator gets a Manager grant on create, same model as papers).
 dev *flags:
     DATASETTE_SECRET=abc123 uv run --prerelease=allow \
         --with ../datasette-sidebar \
         --with ../datasette-user-profiles \
         --with ../datasette-debug-gotham \
+        --with-editable ../datasette-places \
         --with llm-openrouter \
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
             -s permissions.datasette-paper-create true \
+            -s permissions.datasette-places-list true \
+            -s permissions.datasette-places-create true \
             -s permissions.datasette-sidebar-access true \
             -s permissions.profile_access true \
             {{flags}}

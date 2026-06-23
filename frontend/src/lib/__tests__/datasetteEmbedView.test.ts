@@ -287,6 +287,67 @@ describe("DatasetteEmbedView", () => {
     place.remove();
   });
 
+  it("delegates an external kind to a registered renderer and cleans up", async () => {
+    const mounted: HTMLElement[] = [];
+    let cleaned = 0;
+    window.datasettePaperEmbeds = {
+      register() {},
+      get: (kind) =>
+        kind === "place-list"
+          ? {
+              kind: "place-list",
+              mount(host: HTMLElement) {
+                mounted.push(host);
+                host.textContent = "MAP HERE";
+                return () => {
+                  cleaned += 1;
+                };
+              },
+            }
+          : undefined,
+      match: () => null,
+      all: () => [],
+    };
+
+    const view = await build("/-/places/list/5", {
+      status: "ok",
+      kind: "place-list",
+      label: "City Council Map",
+      href: "/-/places/list/5",
+      icon: "globe",
+    });
+    // Header shows the provider label, linked to the resource.
+    const label = view.dom.querySelector(".pm-datasette-embed-label");
+    expect(label?.textContent).toBe("City Council Map");
+    expect((label as HTMLAnchorElement).getAttribute("href")).toBe("/-/places/list/5");
+    // The renderer mounted into the host.
+    const host = view.dom.querySelector(".pm-datasette-embed-external");
+    expect(host).not.toBeNull();
+    expect(host!.textContent).toContain("MAP HERE");
+    expect(mounted).toHaveLength(1);
+
+    // Destroy runs the renderer's cleanup.
+    view.destroy();
+    expect(cleaned).toBe(1);
+    delete window.datasettePaperEmbeds;
+  });
+
+  it("falls back to a link for an external kind with no registered renderer", async () => {
+    delete window.datasettePaperEmbeds;
+    const view = await build("/-/places/list/5", {
+      status: "ok",
+      kind: "place-list",
+      label: "City Council Map",
+      href: "/-/places/list/5",
+      icon: "globe",
+    });
+    const link = view.dom.querySelector(
+      ".pm-datasette-embed-external .pm-datasette-embed-footer-link",
+    ) as HTMLAnchorElement | null;
+    expect(link?.getAttribute("href")).toBe("/-/places/list/5");
+    expect(link?.textContent).toContain("City Council Map");
+  });
+
   it("escapes html in cell values (text node only)", async () => {
     const view = await build("/data/x", {
       status: "ok",

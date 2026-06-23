@@ -51,10 +51,11 @@ async def datasette_search(datasette, request):
 async def datasette_embed(datasette, request):
     """Render a ref to a read-only embed payload (capped rows / row fields)."""
     ref = request.args.get("ref") or ""
+    mode = request.args.get("mode") or "table"
     try:
         limit = int(request.args.get("limit") or DEFAULT_EMBED_LIMIT)
     except ValueError:
         limit = DEFAULT_EMBED_LIMIT
     limit = max(1, min(limit, MAX_EMBED_LIMIT))
-    payload = await render_ref(datasette, request.actor, ref, limit)
+    payload = await render_ref(datasette, request.actor, ref, mode, limit)
     return Response.json(payload)

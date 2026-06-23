@@ -99,7 +99,8 @@ export class DatasetteRefView implements NodeView {
       this.setBody(null, raw); // NEVER a label here
     } else {
       this.dom.setAttribute("href", status.href);
-      this.setBody(kindIcon(status.kind), refLabel(status));
+      // Provider refs may hint an icon (e.g. "globe"); else fall back by kind.
+      this.setBody(status.icon ?? kindIcon(status.kind), refLabel(status));
     }
   }
 

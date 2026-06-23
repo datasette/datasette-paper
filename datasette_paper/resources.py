@@ -13,18 +13,22 @@ carry NO label or data, so we never leak the existence, name, or contents
 of a resource the viewer can't see. This mirrors ``_resolve_map`` in
 ``routes/docs.py``.
 
-**Provider-dispatch seam (forward-compat with ticket 06).** Resolution and
-rendering go through ``_provider_for(...)``, which will eventually offer a
-ref to any registered ``paper_resource_provider`` hook before falling back
-to the built-in core-Datasette provider. Only the built-in provider ships
-today; the seam keeps the door open without coupling callers to it.
+**Provider-dispatch seam.** Resolution and rendering go through
+``_provider_for(...)``, which offers a (normalized) ref to each provider
+returned by the ``paper_resource_provider`` hook before falling back to the
+built-in core-Datasette provider. External providers (e.g. datasette-places)
+claim their own URL namespace, supply labels + render payloads, and enforce
+their own permissions. See ``hookspecs.py`` for the provider interface.
 """
 
 import base64
+import logging
 
 from datasette.resources import DatabaseResource, TableResource
 from datasette.utils import escape_sqlite, tilde_encode
 from datasette.utils.asgi import DatabaseNotFound, RowNotFound, TableNotFound
+
+logger = logging.getLogger(__name__)
 
 # Datasette's internal database (holds the plugin's own `_datasette_paper_*`
 # tables); never offered as an embeddable resource.
@@ -76,19 +80,29 @@ def _strip_base_url(datasette, ref):
     return ref
 
 
-def _split_ref(datasette, ref):
-    """Split a ref path into its (still tilde-encoded) segments, or None.
+def _normalize_ref(datasette, ref):
+    """Normalize a ref to a base_url-relative path with a single leading slash
+    (e.g. ``/fixtures/facetable`` or ``/-/places/list/5``), or None. Providers
+    claim and resolve against this normalized form — base_url is stripped once,
+    centrally, so providers don't each re-handle it."""
+    if not ref or not isinstance(ref, str):
+        return None
+    path = _strip_base_url(datasette, ref.strip())
+    if not path.startswith("/"):
+        path = "/" + path
+    if len(path) > 1:
+        path = path.rstrip("/")
+    return path or None
+
+
+def _segments(ref):
+    """The (still tilde-encoded) path segments of a normalized ref.
 
     ``/fixtures`` → ``["fixtures"]`` (database)
     ``/fixtures/facetable`` → ``["fixtures", "facetable"]`` (table/view)
     ``/fixtures/facetable/42`` → ``["fixtures", "facetable", "42"]`` (row)
     """
-    if not ref or not isinstance(ref, str):
-        return None
-    path = _strip_base_url(datasette, ref.strip()).strip("/")
-    if not path:
-        return None
-    return path.split("/")
+    return [s for s in (ref or "").strip("/").split("/") if s]
 
 
 # ---------------------------------------------------------------------------
@@ -98,14 +112,23 @@ def _split_ref(datasette, ref):
 
 class _CoreDatasetteProvider:
     """Resolves/renders refs that point at core Datasette databases, tables,
-    views, and rows. The default (and currently only) provider."""
+    views, and rows — the built-in fallback provider behind the
+    ``paper_resource_provider`` dispatch seam. Operates on a base_url-relative
+    ref string (the dispatcher normalizes before claiming)."""
 
-    def claims(self, datasette, segments):
-        # Core claims any well-formed db / table / row path. Future plugin
-        # providers (ticket 06) get first refusal before this fallback.
-        return 1 <= len(segments) <= 3
+    def claims(self, ref):
+        # Core claims any well-formed db / table / row path. External plugin
+        # providers get first refusal before this fallback; Datasette tooling
+        # / static / plugin paths (leading "-" or "_") are not core resources.
+        segments = _segments(ref)
+        return bool(
+            segments
+            and 1 <= len(segments) <= 3
+            and not segments[0].startswith(("-", "_"))
+        )
 
-    async def resolve(self, datasette, actor, segments):
+    async def resolve(self, datasette, actor, ref):
+        segments = _segments(ref)
         if len(segments) == 1:
             return await self._resolve_database(datasette, actor, segments[0])
         if len(segments) == 2:
@@ -114,7 +137,8 @@ class _CoreDatasetteProvider:
             return await self._resolve_row(datasette, actor, segments)
         return {"status": "not_found"}
 
-    async def render(self, datasette, actor, segments, limit):
+    async def render(self, datasette, actor, ref, mode, limit):
+        segments = _segments(ref)
         if len(segments) == 1:
             return await self._render_database(datasette, actor, segments[0])
         if len(segments) == 2:
@@ -122,6 +146,9 @@ class _CoreDatasetteProvider:
         if len(segments) == 3:
             return await self._render_row(datasette, actor, segments)
         return {"status": "not_found"}
+
+    def frontend_assets(self, datasette):
+        return {"js": [], "css": []}
 
     # -- resolution -------------------------------------------------------
 
@@ -294,15 +321,58 @@ class _CoreDatasetteProvider:
 
 _CORE_PROVIDER = _CoreDatasetteProvider()
 
-# Future: populated from the `paper_resource_provider` hook (ticket 06).
-_PROVIDERS = []
+
+def _external_providers(datasette):
+    """Providers contributed by sibling plugins via `paper_resource_provider`.
+    Each hookimpl may return one provider or a list; flatten and drop Nones."""
+    from datasette.plugins import pm
+
+    providers = []
+    hook = getattr(pm.hook, "paper_resource_provider", None)
+    if hook is None:
+        return providers
+    for result in hook(datasette=datasette) or []:
+        if result is None:
+            continue
+        if isinstance(result, (list, tuple)):
+            providers.extend(p for p in result if p is not None)
+        else:
+            providers.append(result)
+    return providers
 
 
-def _provider_for(datasette, segments):
-    for provider in _PROVIDERS:
-        if provider.claims(datasette, segments):
-            return provider
+def _provider_for(datasette, ref):
+    """The first external provider claiming `ref`, else the built-in core
+    provider. `ref` is already normalized (see `_normalize_ref`)."""
+    for provider in _external_providers(datasette):
+        try:
+            if provider.claims(ref):
+                return provider
+        except Exception:
+            logger.exception("paper_resource_provider.claims raised for %r", ref)
     return _CORE_PROVIDER
+
+
+def provider_frontend_assets(datasette):
+    """Dedup'd JS/CSS asset URLs declared by all registered providers, for
+    injection into the paper editor page (see `extra_js_urls` in __init__)."""
+    js, css = [], []
+    for provider in _external_providers(datasette):
+        getter = getattr(provider, "frontend_assets", None)
+        if getter is None:
+            continue
+        try:
+            assets = getter(datasette) or {}
+        except Exception:
+            logger.exception("paper_resource_provider.frontend_assets raised")
+            continue
+        for url in assets.get("js", []) or []:
+            if url not in js:
+                js.append(url)
+        for url in assets.get("css", []) or []:
+            if url not in css:
+                css.append(url)
+    return {"js": js, "css": css}
 
 
 # ---------------------------------------------------------------------------
@@ -359,29 +429,31 @@ async def _row_label(db, table, row, pk_values):
 
 
 async def resolve_ref(datasette, actor, ref):
-    """Resolve a single ref to ``{status, kind, label, ...}`` for the actor."""
-    segments = _split_ref(datasette, ref)
-    if segments is None:
+    """Resolve a single ref to ``{status, kind, label, ...}`` for the actor,
+    dispatching to a `paper_resource_provider` that claims it, else core."""
+    norm = _normalize_ref(datasette, ref)
+    if norm is None:
         return {"status": "not_found"}
-    return await _provider_for(datasette, segments).resolve(datasette, actor, segments)
+    return await _provider_for(datasette, norm).resolve(datasette, actor, norm)
 
 
 async def resolve_refs(datasette, actor, refs):
-    """Batch ``resolve_ref`` — returns ``{ref: result}`` for each input ref."""
+    """Batch ``resolve_ref`` — returns ``{ref: result}`` for each input ref
+    (keyed by the original, un-normalized ref the client sent)."""
     out = {}
     for ref in refs:
         out[ref] = await resolve_ref(datasette, actor, ref)
     return out
 
 
-async def render_ref(datasette, actor, ref, limit=DEFAULT_EMBED_LIMIT):
-    """Render a ref to an embed payload (table rows / row fields) for the
-    actor. ``denied`` / ``not_found`` carry no data."""
-    segments = _split_ref(datasette, ref)
-    if segments is None:
+async def render_ref(datasette, actor, ref, mode="table", limit=DEFAULT_EMBED_LIMIT):
+    """Render a ref to an embed payload for the actor, dispatching like
+    ``resolve_ref``. ``denied`` / ``not_found`` carry no data."""
+    norm = _normalize_ref(datasette, ref)
+    if norm is None:
         return {"status": "not_found"}
-    return await _provider_for(datasette, segments).render(
-        datasette, actor, segments, limit
+    return await _provider_for(datasette, norm).render(
+        datasette, actor, norm, mode, limit
     )
 
 
