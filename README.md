@@ -11,7 +11,8 @@ storage in Datasette's internal database, real-time collaboration over SSE.
 <p align="center"><img src="docs/screenshots/editor.png" alt="The paper editor: a rich-text document with headings, a table and a task list, a formatting toolbar, and a header showing the author, edit time and number of users online." width="800"></p>
 
 Rich text with **tables** and **task lists**, **wiki-style links** between papers,
-and **per-paper sharing**:
+**images** (paste, drag-and-drop, or insert from the toolbar), and **per-paper
+sharing**:
 
 <table>
 <tr>
@@ -23,6 +24,11 @@ and **per-paper sharing**:
 <td><img src="docs/screenshots/share.png" alt="The share dialog showing people with access and their roles, plus general link access."></td>
 </tr>
 </table>
+
+Insert an image by pasting, dropping a file, or using the toolbar's image
+button — which offers a paste area or a file upload with a live preview:
+
+<p align="center"><img src="docs/screenshots/image-dialog-chosen.png" alt="The insert-image dialog with the Upload tab active, showing a preview of the chosen image, an alt-text field, and an enabled Insert button." width="440"></p>
 
 And a paper index listing everyone's papers with author and last-edited time:
 
