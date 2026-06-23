@@ -9,12 +9,6 @@ from datasette.plugins import pm
 from . import hookspecs as _hookspecs
 from .embed_providers import provider_frontend_assets
 from .router import router
-
-# Expose paper's own plugin hooks on Datasette's plugin manager so sibling
-# plugins (e.g. datasette-places) can implement ``paper_embed_provider``.
-# Guarded so a re-import never double-registers the spec.
-if not hasattr(pm.hook, "paper_embed_provider"):
-    pm.add_hookspecs(_hookspecs)
 from .permissions import (  # noqa: F401
     PaperDocResource,
     permission_resources_sql,
@@ -26,6 +20,10 @@ from .permissions import (  # noqa: F401
 from . import routes  # noqa: F401 — triggers decorator registration
 from .routes.events import sse_events
 import logging
+
+# Expose paper's own plugin hooks on Datasette's plugin manager so sibling
+# plugins (e.g. datasette-places) can implement ``paper_embed_provider``.
+pm.add_hookspecs(_hookspecs)
 
 logger = logging.getLogger(__name__)
 
