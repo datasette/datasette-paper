@@ -445,6 +445,14 @@ def _render_inlines(nodes: list) -> str:
             # percent-encode the id so the link form stays well-formed.
             safe_label = label.replace("]", "\\]")
             out.append(f"[@{safe_label}](actor:{quote(actor_id, safe='')})")
+        elif t == "tag":
+            tag = (n.get("attrs") or {}).get("tag") or ""
+            # `[#tag](tag:<slug>)` — `#` inside the link text so it renders as
+            # a single "#tag" link; the `tag:` scheme lets the parser detect
+            # inline tags unambiguously (a bare `#tag` would collide with ATX
+            # headings). Escape `]` and percent-encode the slug.
+            safe_tag = tag.replace("]", "\\]")
+            out.append(f"[#{safe_tag}](tag:{quote(tag, safe='')})")
 
     close_through(0)
     return "".join(out)
