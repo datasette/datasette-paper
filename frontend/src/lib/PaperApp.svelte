@@ -303,6 +303,13 @@
   .editor-host :global(.ProseMirror p) {
     margin: 0 0 0.75em;
   }
+  /* Keep a large pasted/inserted image from overflowing the document. The
+   * image node is inline; constrain to the content width and preserve aspect
+   * ratio. ProseMirror's selected-node outline still shows on click. */
+  .editor-host :global(.ProseMirror img) {
+    max-width: 100%;
+    height: auto;
+  }
   .editor-host :global(.ProseMirror h1) {
     font-size: 1.9em;
     line-height: 1.25;
