@@ -238,6 +238,89 @@ class PaperDB:
         return await self.database.execute_write_fn(read)
 
     # ------------------------------------------------------------------
+    # Document tags
+    # ------------------------------------------------------------------
+
+    async def add_doc_tag(self, *, doc_id: int, tag: str) -> None:
+        def write(conn):
+            _queries.insert_doc_tag(conn, doc_id=doc_id, tag=tag)
+
+        await self.database.execute_write_fn(write)
+
+    async def remove_doc_tag(self, *, doc_id: int, tag: str) -> None:
+        def write(conn):
+            _queries.delete_doc_tag(conn, doc_id=doc_id, tag=tag)
+
+        await self.database.execute_write_fn(write)
+
+    async def set_doc_tags(self, *, doc_id: int, tags: list[str]) -> None:
+        # Atomic replace: clear the doc's tags then re-insert the new set in
+        # one transaction (mirror replace_links).
+        def write(conn):
+            _queries.delete_tags_for_doc(conn, doc_id=doc_id)
+            for tag in tags:
+                _queries.insert_doc_tag(conn, doc_id=doc_id, tag=tag)
+
+        await self.database.execute_write_fn(write)
+
+    async def list_tags_for_doc(self, *, doc_id: int) -> list[str]:
+        def read(conn):
+            return _queries.list_tags_for_doc(conn, doc_id=doc_id)
+
+        rows = await self.database.execute_write_fn(read)
+        return [r.tag for r in rows]
+
+    async def list_tags_for_docs(self, *, doc_ids: list[int]) -> dict[int, list[str]]:
+        # One query for the whole list page; fold (doc_id, tag) rows into a
+        # per-doc map. Docs with no tags are simply absent.
+        doc_ids_json = json.dumps(doc_ids)
+
+        def read(conn):
+            return _queries.list_tags_for_docs(conn, doc_ids_json=doc_ids_json)
+
+        rows = await self.database.execute_write_fn(read)
+        out: dict[int, list[str]] = {}
+        for r in rows:
+            out.setdefault(r.doc_id, []).append(r.tag)
+        return out
+
+    async def list_all_tags(self, *, doc_ids: list[int]) -> list[tuple[str, int]]:
+        # Distinct tags + counts over the given (ACL-visible) doc-id scope.
+        doc_ids_json = json.dumps(doc_ids)
+
+        def read(conn):
+            return _queries.list_all_tags(conn, doc_ids_json=doc_ids_json)
+
+        rows = await self.database.execute_write_fn(read)
+        return [(r.tag, r.n) for r in rows]
+
+    async def list_docs_by_ids_states_kinds_and_tags(
+        self,
+        *,
+        doc_ids: list[int],
+        states: list[str],
+        kinds: list[str],
+        tags: list[str],
+    ) -> list[_queries.Doc]:
+        doc_ids_json = json.dumps(doc_ids)
+        states_json = json.dumps(states)
+        kinds_json = json.dumps(kinds)
+        # NULL (not "[]") signals "no tag filter" to the query — see
+        # listDocsByIdsStatesKindsAndTags in queries.sql.
+        tags_json = json.dumps(tags) if tags else None
+
+        def read(conn):
+            return _queries.list_docs_by_ids_states_kinds_and_tags(
+                conn,
+                doc_ids_json=doc_ids_json,
+                states_json=states_json,
+                kinds_json=kinds_json,
+                tags_json=tags_json,
+            )
+
+        return await self.database.execute_write_fn(read)
+
+    # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------
 

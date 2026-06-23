@@ -216,13 +216,30 @@ async function seed(ctx) {
     }
     return (await r.json()).id;
   };
+  // Set a doc's tags via the replace API. Mutations require manage, so send
+  // the owner's signed cookie (the create endpoint seeds owner = author).
+  const tagDoc = async (id, tags, owner) => {
+    const r = await ctx.request.post(`${PAPER}/api/docs/${id}/tags/replace`, {
+      data: { tags },
+      headers: { Cookie: `ds_actor=${signActorCookie(owner)}` },
+    });
+    if (r.status() !== 200) {
+      throw new Error(`tag "${id}" failed: ${r.status()} ${await r.text()}`);
+    }
+  };
   // List-page filler, created oldest-first so the rich doc sorts to the top.
-  await create("Product Roadmap", "bob");
-  await create("Design Notes", "carol");
-  await create("Budget 2026", "bob");
+  const roadmapId = await create("Product Roadmap", "bob");
+  const designId = await create("Design Notes", "carol");
+  const budgetId = await create("Budget 2026", "bob");
   // The rich doc is owned by ACTOR so its share dialog shows the manager view.
   const richId = await create("Q3 Planning", ACTOR, RICH);
   const mentionId = await create("Standup", ACTOR, MENTIONS);
+  // Document-level tags: populate a vocabulary so the index shows per-row tag
+  // chips + the filter bar, and the owner-only tag editor has content.
+  await tagDoc(roadmapId, ["roadmap", "q3"], "bob");
+  await tagDoc(designId, ["design"], "carol");
+  await tagDoc(budgetId, ["budget", "q3"], "bob");
+  await tagDoc(richId, ["roadmap", "q3"], ACTOR);
   return { richId, mentionId };
 }
 
@@ -310,6 +327,21 @@ function buildShots(ctx, ids) {
       await gotoEditor(page, richId);
       await freezeVolatile(page);
       await page.screenshot({ path: out("editor") });
+      await page.close();
+    },
+
+    // The owner-only tag editor modal, opened from a doc's row action menu.
+    "tag-editor": async () => {
+      const page = await newPage();
+      await page.goto(PAPER);
+      await page.locator(".paper-index table tbody tr").first().waitFor({ timeout: 15_000 });
+      const row = page.locator(".paper-index tbody tr", { hasText: "Q3 Planning" }).first();
+      await row.locator('[aria-label="Actions"]').click();
+      await page.locator("button", { hasText: "Edit tags" }).first().click();
+      const dialog = page.locator(".tag-editor");
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await dialog.screenshot({ path: out("tag-editor") });
       await page.close();
     },
 

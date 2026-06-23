@@ -138,6 +138,82 @@ WHERE src_doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($viewable_json
 ORDER BY src_doc_id, dst_doc_id;
 
 -- ============================================================================
+-- Document tags
+--
+-- Manual document-level tags (distinct from inline #tag nodes — separate
+-- namespace, no auto-rollup). Mutations are manage-gated in the route
+-- handler; listing/filtering is ACL-filtered by passing a viewable doc-id
+-- set. insertDocTag is INSERT OR IGNORE so a duplicate (doc_id, tag) is a
+-- no-op. Tags are normalized before storage (see normalize_tag in util.py).
+-- ============================================================================
+
+-- Add one (doc_id, tag) row. OR IGNORE makes a duplicate a no-op (the
+-- pair is UNIQUE), so add_doc_tag is idempotent.
+-- name: insertDocTag
+INSERT OR IGNORE INTO _datasette_paper_doc_tag (doc_id, tag)
+VALUES ($doc_id::integer, $tag::text);
+
+-- Remove one tag from a doc. Deleting an absent tag affects 0 rows.
+-- name: deleteDocTag
+DELETE FROM _datasette_paper_doc_tag
+WHERE doc_id = $doc_id::integer AND tag = $tag::text;
+
+-- Clear every tag on a doc — the first half of set_doc_tags (replace).
+-- name: deleteTagsForDoc
+DELETE FROM _datasette_paper_doc_tag WHERE doc_id = $doc_id::integer;
+
+-- All tags on a single doc, alphabetical (the doc's tag list response).
+-- name: listTagsForDoc
+SELECT tag
+FROM _datasette_paper_doc_tag
+WHERE doc_id = $doc_id::integer
+ORDER BY tag;
+
+-- Tags for many docs in one query (the list page). Caller passes the
+-- visible doc-id set as a JSON array of integers.
+-- name: listTagsForDocs
+SELECT doc_id, tag
+FROM _datasette_paper_doc_tag
+WHERE doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))
+ORDER BY doc_id, tag;
+
+-- Distinct tags + doc counts over a viewable doc-id scope (filter typeahead
+-- / editor autocomplete). Caller passes the ACL-visible id set.
+-- name: listAllTags
+SELECT tag, COUNT(*) AS n
+FROM _datasette_paper_doc_tag
+WHERE doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))
+GROUP BY tag
+ORDER BY n DESC, tag;
+
+-- Doc list filtered by ids/states/kinds AND a tag intersection (a doc must
+-- carry EVERY requested tag). CTEs name the two moving parts: the requested
+-- tag set, and the docs that hold all of them (relational division — group
+-- a doc's matching tags and require the distinct count to equal the number
+-- requested). $tags_json is nullable: NULL means "no tag filter" and skips
+-- the intersection (the caller passes NULL, not an empty array, when there
+-- are no tags). json_each(NULL) yields zero rows, so the CTEs stay empty and
+-- harmless in that case.
+-- name: listDocsByIdsStatesKindsAndTags :rows -> Doc
+WITH requested_tags AS (
+    SELECT DISTINCT value AS tag FROM json_each($tags_json::text::)
+),
+docs_with_all_tags AS (
+    SELECT doc_id
+    FROM _datasette_paper_doc_tag
+    WHERE tag IN (SELECT tag FROM requested_tags)
+    GROUP BY doc_id
+    HAVING COUNT(DISTINCT tag) = (SELECT COUNT(*) FROM requested_tags)
+)
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))
+  AND state IN (SELECT value FROM json_each($states_json::text))
+  AND kind IN (SELECT value FROM json_each($kinds_json::text))
+  AND ($tags_json::text:: IS NULL OR id IN (SELECT doc_id FROM docs_with_all_tags))
+ORDER BY updated_at DESC;
+
+-- ============================================================================
 -- State transitions (archive / trash)
 --
 -- Owner-only — enforced inline in the route handler. Each query is a

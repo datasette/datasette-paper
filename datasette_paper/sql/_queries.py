@@ -48,6 +48,23 @@ class GraphEdge:
 
 
 @dataclass
+class ListTagsForDocRow:
+    tag: str
+
+
+@dataclass
+class ListTagsForDocsRow:
+    doc_id: int
+    tag: str
+
+
+@dataclass
+class ListAllTagsRow:
+    tag: str
+    n: Any
+
+
+@dataclass
 class Step:
     doc_id: int
     version: int
@@ -262,6 +279,108 @@ ORDER BY src_doc_id, dst_doc_id;
     params = {"viewable_json::text": viewable_json}
     cursor = conn.execute(sql, params)
     return [GraphEdge(*row) for row in cursor.fetchall()]
+
+
+def insert_doc_tag(conn: sqlite3.Connection, doc_id: int, tag: str) -> None:
+    sql = """\
+INSERT OR IGNORE INTO _datasette_paper_doc_tag (doc_id, tag)
+VALUES ($doc_id::integer, $tag::text);
+"""
+    params = {"doc_id::integer": doc_id, "tag::text": tag}
+    conn.execute(sql, params)
+    return None
+
+
+def delete_doc_tag(conn: sqlite3.Connection, doc_id: int, tag: str) -> None:
+    sql = """\
+DELETE FROM _datasette_paper_doc_tag
+WHERE doc_id = $doc_id::integer AND tag = $tag::text;
+"""
+    params = {"doc_id::integer": doc_id, "tag::text": tag}
+    conn.execute(sql, params)
+    return None
+
+
+def delete_tags_for_doc(conn: sqlite3.Connection, doc_id: int) -> None:
+    sql = "DELETE FROM _datasette_paper_doc_tag WHERE doc_id = $doc_id::integer;"
+    params = {"doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def list_tags_for_doc(conn: sqlite3.Connection, doc_id: int) -> list[ListTagsForDocRow]:
+    sql = """\
+SELECT tag
+FROM _datasette_paper_doc_tag
+WHERE doc_id = $doc_id::integer
+ORDER BY tag;
+"""
+    params = {"doc_id::integer": doc_id}
+    cursor = conn.execute(sql, params)
+    return [ListTagsForDocRow(*row) for row in cursor.fetchall()]
+
+
+def list_tags_for_docs(
+    conn: sqlite3.Connection, doc_ids_json: str
+) -> list[ListTagsForDocsRow]:
+    sql = """\
+SELECT doc_id, tag
+FROM _datasette_paper_doc_tag
+WHERE doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))
+ORDER BY doc_id, tag;
+"""
+    params = {"doc_ids_json::text": doc_ids_json}
+    cursor = conn.execute(sql, params)
+    return [ListTagsForDocsRow(*row) for row in cursor.fetchall()]
+
+
+def list_all_tags(conn: sqlite3.Connection, doc_ids_json: str) -> list[ListAllTagsRow]:
+    sql = """\
+SELECT tag, COUNT(*) AS n
+FROM _datasette_paper_doc_tag
+WHERE doc_id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))
+GROUP BY tag
+ORDER BY n DESC, tag;
+"""
+    params = {"doc_ids_json::text": doc_ids_json}
+    cursor = conn.execute(sql, params)
+    return [ListAllTagsRow(*row) for row in cursor.fetchall()]
+
+
+def list_docs_by_ids_states_kinds_and_tags(
+    conn: sqlite3.Connection,
+    tags_json: str | None,
+    doc_ids_json: str,
+    states_json: str,
+    kinds_json: str,
+) -> list[Doc]:
+    sql = """\
+WITH requested_tags AS (
+    SELECT DISTINCT value AS tag FROM json_each($tags_json::text::)
+),
+docs_with_all_tags AS (
+    SELECT doc_id
+    FROM _datasette_paper_doc_tag
+    WHERE tag IN (SELECT tag FROM requested_tags)
+    GROUP BY doc_id
+    HAVING COUNT(DISTINCT tag) = (SELECT COUNT(*) FROM requested_tags)
+)
+SELECT id, name, created_at, updated_at, created_by, schema_name, current_version, state, archived_at, trashed_at, delete_at, kind, locked
+FROM _datasette_paper_doc
+WHERE id IN (SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text))
+  AND state IN (SELECT value FROM json_each($states_json::text))
+  AND kind IN (SELECT value FROM json_each($kinds_json::text))
+  AND ($tags_json::text:: IS NULL OR id IN (SELECT doc_id FROM docs_with_all_tags))
+ORDER BY updated_at DESC;
+"""
+    params = {
+        "tags_json::text::": tags_json,
+        "doc_ids_json::text": doc_ids_json,
+        "states_json::text": states_json,
+        "kinds_json::text": kinds_json,
+    }
+    cursor = conn.execute(sql, params)
+    return [Doc(*row) for row in cursor.fetchall()]
 
 
 def archive_doc(conn: sqlite3.Connection, doc_id: int) -> None:

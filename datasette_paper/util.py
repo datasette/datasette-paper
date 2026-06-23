@@ -3,15 +3,39 @@
 from __future__ import annotations
 
 import json
+import re
 
 from datasette_user_profiles import resolve_profile_actors
 
 from .db import PaperDB
 
+MAX_TAG_LEN = 64
+_TAG_ALLOWED = re.compile(r"[^a-z0-9/_-]+")
+_TAG_WS = re.compile(r"\s+")
+
 
 async def read_json_body(request) -> dict:
     """Parse the request body as JSON and return a dict."""
     return json.loads(await request.post_body())
+
+
+def normalize_tag(raw) -> str | None:
+    """Normalize a user-supplied tag to its canonical stored form.
+
+    Trim, lowercase, collapse internal whitespace to ``-``, and drop any
+    character outside ``[a-z0-9/_-]`` (``/`` is kept so nested-tag syntax —
+    e.g. ``inbox/to-read`` — survives for the inline #tag feature). Collapses
+    repeated/leading/trailing dashes. Returns ``None`` when the result is
+    empty or exceeds ``MAX_TAG_LEN`` so callers can reject with a 400.
+    """
+    if raw is None:
+        return None
+    s = _TAG_WS.sub("-", str(raw).strip().lower())
+    s = _TAG_ALLOWED.sub("", s)
+    s = re.sub(r"-{2,}", "-", s).strip("-")
+    if not s or len(s) > MAX_TAG_LEN:
+        return None
+    return s
 
 
 def empty_doc_json() -> dict:
