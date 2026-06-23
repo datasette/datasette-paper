@@ -27,6 +27,11 @@ import {
   mentionSuggestPopupPlugin,
   mentionKeymap,
 } from "./mentionSuggest";
+import {
+  tagSuggestPlugin,
+  tagSuggestPopupPlugin,
+  tagKeymap,
+} from "./tagSuggest";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap } from "prosemirror-example-setup";
@@ -1058,6 +1063,10 @@ export class EditorConnection {
         // commands also return false when inactive, so they compose with the
         // `[[` keymap (the two popups never open at once — distinct triggers).
         keymap(mentionKeymap()),
+        // The `#`-tag keymap likewise precedes baseKeymap. Same compose-by-
+        // returning-false contract; the `@`/`#`/`[[` popups never open at
+        // once (distinct triggers).
+        keymap(tagKeymap()),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({
@@ -1086,6 +1095,11 @@ export class EditorConnection {
         // result list and runs the doc-scoped mention-search fetch.
         mentionSuggestPlugin,
         mentionSuggestPopupPlugin(this.opts.docId),
+        // `#`-triggered tag autocomplete: the state plugin tracks the
+        // in-progress `#query` span, the popup plugin renders the floating
+        // suggestion list from the instance-wide tag vocabulary.
+        tagSuggestPlugin,
+        tagSuggestPopupPlugin(),
         // gap cursor — gives ArrowDown/Right past the last block (and
         // ArrowUp/Left before the first) a place to land when no normal
         // text position exists, e.g. between two adjacent tables or after
