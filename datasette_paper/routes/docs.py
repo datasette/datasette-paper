@@ -212,6 +212,47 @@ async def resolve_links(datasette, request):
     return Response.json({"links": out})
 
 
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/mention-search$")
+async def mention_search(datasette, request, doc_id: int):
+    # View-gated: only people who can see the doc may list its viewers.
+    await ensure_paper_view(datasette, request, doc_id)
+    q = (request.args.get("q") or "").strip().lower()
+    try:
+        limit = min(int(request.args.get("limit") or 20), 50)
+    except ValueError:
+        limit = 20
+    named, open_audience = await named_viewers(datasette, doc_id)
+    profiles = await resolve_actor_profiles(datasette, named)
+    results = []
+    for aid in named:
+        prof = profiles.get(aid) or {}
+        name = prof.get("name") or aid
+        if q and q not in name.lower() and q not in aid.lower():
+            continue
+        results.append({"id": aid, "name": name, "avatar_url": prof.get("avatar_url")})
+    # Stable, useful ordering: prefix matches first, then by name.
+    results.sort(key=lambda r: (not r["name"].lower().startswith(q), r["name"].lower()))
+    return Response.json({"results": results[:limit], "open_audience": open_audience})
+
+
+@router.POST(r"^/-/paper/api/actors/resolve$")
+async def resolve_actors(datasette, request):
+    # Ungated, mirroring resolve_links — display names are low-sensitivity
+    # (already shown as created_by_name to anyone who can list docs).
+    body = await read_json_body(request)
+    raw = body.get("ids") or []
+    ids = [str(i) for i in raw[:200] if i]
+    profiles = await resolve_actor_profiles(datasette, ids)
+    out = {}
+    for aid in ids:
+        prof = profiles.get(aid) or {}
+        out[aid] = {
+            "name": prof.get("name") or aid,
+            "avatar_url": prof.get("avatar_url"),
+        }
+    return Response.json({"actors": out})
+
+
 @router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/links$")
 async def forward_links(datasette, request, doc_id: int):
     await ensure_paper_view(datasette, request, doc_id)
