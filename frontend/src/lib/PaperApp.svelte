@@ -505,6 +505,33 @@
     text-decoration: none;
   }
 
+  /* mention inline atom — rendered by MentionView, resolved live via the
+   * ActorResolver. A subtle rounded pill carrying the actor's display name
+   * (and optional avatar). Non-text-selectable so it acts as one unit. */
+  .editor-host :global(.pm-mention) {
+    display: inline;
+    white-space: nowrap;
+    color: #0b5cad;
+    padding: 0 4px;
+    border-radius: 3px;
+    background: rgba(11, 92, 173, 0.1);
+    font-weight: 500;
+    user-select: none;
+  }
+  .editor-host :global(.pm-mention--loading) {
+    color: #888;
+    background: rgba(0, 0, 0, 0.05);
+  }
+  .editor-host :global(.pm-mention .pm-mention-avatar) {
+    display: inline-block;
+    width: 0.9em;
+    height: 0.9em;
+    border-radius: 50%;
+    object-fit: cover;
+    vertical-align: middle;
+    margin-right: 0.25em;
+  }
+
   /* Tables — prosemirror-tables ships layout but no cell borders. We
    * draw a light grid + a header background. `--default-cell-min-width`
    * stops empty cells from collapsing to 0px wide. */
@@ -773,5 +800,60 @@
     padding: 4px 10px;
     color: #888;
     font-style: italic;
+  }
+
+  /* `@`-triggered mention autocomplete. Mirrors the `[[` popup. */
+  .editor-host :global(.pm-mention-typing) {
+    background: rgba(11, 92, 173, 0.08);
+    border-bottom: 1px solid rgba(11, 92, 173, 0.4);
+    border-radius: 2px;
+  }
+  .editor-host :global(.pm-mention-popup) {
+    position: absolute;
+    z-index: 11;
+    min-width: 220px;
+    max-height: 260px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid #d4d4d4;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    font-size: 13px;
+    padding: 4px 0;
+  }
+  .editor-host :global(.pm-mention-item) {
+    display: flex;
+    align-items: center;
+    padding: 4px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .editor-host :global(.pm-mention-item:hover) {
+    background: #f1f4f7;
+  }
+  .editor-host :global(.pm-mention-item--active) {
+    background: #e1ebf7;
+  }
+  .editor-host :global(.pm-mention-item .pm-mention-avatar) {
+    width: 1.1em;
+    height: 1.1em;
+    border-radius: 50%;
+    object-fit: cover;
+    margin-right: 0.4em;
+    flex: none;
+  }
+  .editor-host :global(.pm-mention-empty) {
+    padding: 4px 10px;
+    color: #888;
+    font-style: italic;
+  }
+  .editor-host :global(.pm-mention-typing-hint) {
+    padding: 4px 10px;
+    color: #999;
+    font-size: 0.85em;
+    font-style: italic;
+    border-top: 1px solid #eee;
   }
 </style>

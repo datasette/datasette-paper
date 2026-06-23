@@ -22,6 +22,11 @@ import {
   wikiLinkSuggestPopupPlugin,
   wikiLinkKeymap,
 } from "./wikiLinkSuggest";
+import {
+  mentionSuggestPlugin,
+  mentionSuggestPopupPlugin,
+  mentionKeymap,
+} from "./mentionSuggest";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap } from "prosemirror-example-setup";
@@ -48,6 +53,8 @@ import { TaskItemView } from "./taskItemView";
 import { LinkResolver } from "./linkResolver";
 import { AccessChecker } from "./linkAccessCheck";
 import { PaperLinkView } from "./paperLinkView";
+import { ActorResolver } from "./actorResolver";
+import { MentionView } from "./mentionView";
 import {
   cursorReporterPlugin,
   remoteCursorsPlugin,
@@ -766,6 +773,8 @@ export class EditorConnection {
   // One link resolver per connection (NOT a module singleton — multi-doc tabs + tests).
   private linkResolver: LinkResolver;
   private accessChecker: AccessChecker;
+  // One actor resolver per connection (mention NodeViews subscribe to it).
+  private actorResolver: ActorResolver;
 
   // Current viewer's actor id, captured from the bootstrap response.
   // Used to suppress this user's own presence cursor across other tabs.
@@ -812,6 +821,7 @@ export class EditorConnection {
     // paper_link NodeView subscribes — like LinkResolver, no fetch fires for
     // a doc with no links to check.
     this.accessChecker = new AccessChecker(opts.docId);
+    this.actorResolver = new ActorResolver();
     this.installNetworkListeners();
     this.start();
   }
@@ -1043,6 +1053,11 @@ export class EditorConnection {
         // Each command returns false when inactive, so normal editing
         // keystrokes fall through unaffected.
         keymap(wikiLinkKeymap()),
+        // The `@`-mention keymap must likewise precede baseKeymap so
+        // Enter/Arrow/Escape are intercepted while its popup is open. Its
+        // commands also return false when inactive, so they compose with the
+        // `[[` keymap (the two popups never open at once — distinct triggers).
+        keymap(mentionKeymap()),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({
@@ -1066,6 +1081,11 @@ export class EditorConnection {
         // floating result list and runs the debounced link-search fetch.
         wikiLinkSuggestPlugin,
         wikiLinkSuggestPopupPlugin(),
+        // `@`-triggered mention autocomplete: the state plugin tracks the
+        // in-progress `@query` span, the popup plugin renders the floating
+        // result list and runs the doc-scoped mention-search fetch.
+        mentionSuggestPlugin,
+        mentionSuggestPopupPlugin(this.opts.docId),
         // gap cursor — gives ArrowDown/Right past the last block (and
         // ArrowUp/Left before the first) a place to land when no normal
         // text position exists, e.g. between two adjacent tables or after
@@ -1100,6 +1120,13 @@ export class EditorConnection {
             getPos as () => number | undefined,
             this.linkResolver,
             this.accessChecker,
+          ),
+        mention: (node, view, getPos) =>
+          new MentionView(
+            node,
+            view,
+            getPos as () => number | undefined,
+            this.actorResolver,
           ),
       },
       // Returning null falls through to ProseMirror's default; the cast
@@ -1487,6 +1514,7 @@ export class EditorConnection {
     }
     this.linkResolver.dispose();
     this.accessChecker.dispose();
+    this.actorResolver.dispose();
     if (this.view) {
       this.view.destroy();
       this.view = null;
