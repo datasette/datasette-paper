@@ -92,6 +92,27 @@ async def test_append_rich_content_roundtrips(ds):
 
 
 @pytest.mark.asyncio
+async def test_append_datasette_ref_and_embed_roundtrip(ds):
+    """An inline datasette ref and a block embed fence survive the full
+    append → step-apply → materialize → serialize path (proves the schema
+    lock-step holds end-to-end through the markdown API)."""
+    doc_id = await _make_doc(ds)
+    content = (
+        "See [/fixtures/facetable](datasette:/fixtures/facetable) here.\n\n"
+        "```datasette-embed\n/fixtures/facetable\n```\n\n"
+        "```datasette-embed\n/fixtures/vendors/42\nmode: row\n```\n"
+    )
+    resp = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/append", json={"content": content}
+    )
+    assert resp.status_code == 200
+    md = await _document_markdown(ds, doc_id)
+    assert "[/fixtures/facetable](datasette:/fixtures/facetable)" in md
+    assert "```datasette-embed\n/fixtures/facetable\n```" in md
+    assert "```datasette-embed\n/fixtures/vendors/42\nmode: row\n```" in md
+
+
+@pytest.mark.asyncio
 async def test_append_empty_markdown_is_noop(ds):
     doc_id = await _make_doc(ds)
     # Bump the version once so we can assert it doesn't move.

@@ -194,6 +194,25 @@ def _tokens_to_doc(tokens) -> dict:
             text = tok.content or ""
             if text.endswith("\n"):
                 text = text[:-1]
+            # A fence whose info string is `datasette-embed` is a block embed,
+            # not a code block: first line = ref path, optional `mode: <mode>`
+            # line. (Indented code_block tokens carry no info string.)
+            info = (getattr(tok, "info", "") or "").strip()
+            if t == "fence" and info == "datasette-embed":
+                lines = text.split("\n")
+                ref = lines[0].strip() if lines else ""
+                mode = "table"
+                for line in lines[1:]:
+                    stripped = line.strip()
+                    if stripped.startswith("mode:"):
+                        mode = stripped[len("mode:") :].strip() or "table"
+                append(
+                    {
+                        "type": "datasette_embed",
+                        "attrs": {"ref": ref or None, "mode": mode},
+                    }
+                )
+                continue
             cb: dict = {"type": "code_block", "content": []}
             if text:
                 cb["content"].append({"type": "text", "text": text})
@@ -350,7 +369,9 @@ def _inline_to_pm(inline_token) -> list[dict]:
         # in a converter that runs over arbitrary user input.
 
     return _coalesce_text(
-        _split_paper_links(_convert_tag_links(_convert_actor_mentions(raw)))
+        _split_paper_links(
+            _convert_datasette_refs(_convert_tag_links(_convert_actor_mentions(raw)))
+        )
     )
 
 
@@ -462,6 +483,52 @@ def _convert_tag_links(nodes: list[dict]) -> list[dict]:
             continue
         tag = unquote(href[len(_TAG_SCHEME) :])
         out.append({"type": "tag", "attrs": {"tag": tag}})
+        prev_href = href
+    return out
+
+
+_DATASETTE_SCHEME = "datasette:"
+
+
+def _datasette_link_href(node: dict) -> str | None:
+    """Return the `datasette:`-scheme href of a text node's link mark, or None.
+
+    Inline refs serialize as `[label](datasette:<path>)`; markdown-it parses
+    that into text wrapped in a ``link`` mark whose href carries the
+    `datasette:` scheme.
+    """
+    if node.get("type") != "text":
+        return None
+    for m in node.get("marks") or []:
+        if m.get("type") == "link":
+            href = (m.get("attrs") or {}).get("href") or ""
+            if href.startswith(_DATASETTE_SCHEME):
+                return href
+    return None
+
+
+def _convert_datasette_refs(nodes: list[dict]) -> list[dict]:
+    """Replace `datasette:`-scheme link text with identity-only `datasette_ref`
+    atoms.
+
+    Mirrors _convert_actor_mentions: detection is purely by the link mark's
+    URI scheme, so ordinary `[text](https://…)` links are never touched.
+    Consecutive text nodes sharing the same href fold into a single atom; the
+    visible label and the link mark are dropped (the NodeView resolves the live
+    label). The ref path is the scheme-stripped, percent-decoded href.
+    """
+    out: list[dict] = []
+    prev_href: str | None = None
+    for node in nodes:
+        href = _datasette_link_href(node)
+        if href is None:
+            prev_href = None
+            out.append(node)
+            continue
+        if href == prev_href:
+            continue
+        ref = unquote(href[len(_DATASETTE_SCHEME) :])
+        out.append({"type": "datasette_ref", "attrs": {"ref": ref}})
         prev_href = href
     return out
 
