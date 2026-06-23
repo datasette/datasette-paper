@@ -263,6 +263,28 @@ class TestInlineNodes:
         link = content[-1]
         assert link["marks"][0]["attrs"]["href"] == "https://example.com/y"
 
+    def test_tag_from_tag_scheme_link(self):
+        doc = parse_and_validate("Our [#roadmap](tag:roadmap) plan\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["text", "tag", "text"]
+        assert content[0]["text"] == "Our "
+        assert content[1]["attrs"]["tag"] == "roadmap"
+        assert "marks" not in content[1]
+        assert content[2]["text"] == " plan"
+
+    def test_tag_percent_decodes_slug(self):
+        doc = parse_and_validate("[#nested](tag:inbox%2Fto-read)\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["tag"]
+        assert content[0]["attrs"]["tag"] == "inbox/to-read"
+
+    def test_ordinary_link_is_not_a_tag(self):
+        doc = parse_and_validate("see [docs](https://example.com/y)\n")
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "tag" for n in content)
+        link = content[-1]
+        assert link["marks"][0]["attrs"]["href"] == "https://example.com/y"
+
 
 # ---------------------------------------------------------------------------
 # Lists

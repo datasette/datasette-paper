@@ -105,6 +105,36 @@ const mentionNode: NodeSpec = {
   ],
 };
 
+// Inline atom for #tags — value-only (`tag`), authored via the `#`
+// autocomplete and rendered by a NodeView (tagView.ts). The toDOM here is a
+// static fallback. Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as `[#label](tag:slug)`. Unlike
+// mentions there is no async resolver — the tag is its own label.
+const tagNode: NodeSpec = {
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: { tag: { default: null } },
+  parseDOM: [
+    {
+      tag: "span[data-tag]",
+      getAttrs: (el) => ({
+        tag: (el as HTMLElement).getAttribute("data-tag") || null,
+      }),
+    },
+  ],
+  toDOM: (node) => [
+    "span",
+    {
+      "data-tag": String(node.attrs.tag ?? ""),
+      class: "pm-tag",
+    },
+    `#${node.attrs.tag ?? "?"}`,
+  ],
+};
+
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
     group: "block",
@@ -168,6 +198,7 @@ export const schema = new Schema({
     .append({ placeholder: placeholderNode })
     .append({ paper_link: paperLinkNode })
     .append({ mention: mentionNode })
+    .append({ tag: tagNode })
     .append(taskNodes)
     .append({ ...tNodes, table: tableWithName }),
   marks: baseMarks,

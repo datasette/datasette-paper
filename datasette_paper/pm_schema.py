@@ -158,11 +158,35 @@ _mention_spec = {
     ],
 }
 
+# Inline atom for #tags — mirrors the JS schema in
+# frontend/src/lib/schema.ts. value-only (`tag`); markdown round-trips as
+# `[#label](tag:slug)` via datasette_paper/markdown.py. No async resolver
+# (the tag is its own label). toDOM must be structurally valid for
+# node_from_json/Step.apply but is never rendered server-side.
+_tag_spec = {
+    "group": "inline",
+    "inline": True,
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {"tag": {"default": None}},
+    "parseDOM": [{"tag": "span[data-tag]"}],
+    "toDOM": lambda node: [
+        "span",
+        {
+            "data-tag": str(node.attrs.get("tag") or ""),
+            "class": "pm-tag",
+        },
+        f"#{node.attrs.get('tag')}",
+    ],
+}
+
 _nodes = {
     **_list_nodes,
     "placeholder": _placeholder_spec,
     "paper_link": _paper_link_spec,
     "mention": _mention_spec,
+    "tag": _tag_spec,
     "task_list": _task_list_spec,
     "task_item": _task_item_spec,
     "table": _table_spec,

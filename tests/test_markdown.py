@@ -471,3 +471,17 @@ def test_mention_percent_encodes_awkward_actor_ids():
         _doc(_para({"type": "mention", "attrs": {"actorId": "team/eng dept"}}))
     )
     assert md == "[@team/eng dept](actor:team%2Feng%20dept)\n"
+
+
+def test_tag_serializes_as_tag_scheme_link():
+    md = doc_to_markdown(
+        _doc(_para(_text("Our "), {"type": "tag", "attrs": {"tag": "roadmap"}}))
+    )
+    assert md == "Our [#roadmap](tag:roadmap)\n"
+
+
+def test_tag_percent_encodes_nested_slug():
+    md = doc_to_markdown(
+        _doc(_para({"type": "tag", "attrs": {"tag": "inbox/to-read"}}))
+    )
+    assert md == "[#inbox/to-read](tag:inbox%2Fto-read)\n"
