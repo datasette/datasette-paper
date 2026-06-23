@@ -9,6 +9,7 @@ import { EditorState } from "prosemirror-state";
 
 import { schema } from "../schema";
 import { BlockEmbedView } from "../blockEmbedView";
+import { embedRegistry } from "../embedRegistry";
 
 type NativeInit = { ok?: boolean; status?: number };
 
@@ -205,6 +206,63 @@ describe("BlockEmbedView", () => {
 
     view.destroy();
     place.remove();
+  });
+
+  it("delegates a provider-claimed ref to its mount, with a header from resolve", async () => {
+    const mount = vi.fn((host: HTMLElement) => {
+      host.textContent = "custom body";
+    });
+    embedRegistry().register({
+      kind: "place-list",
+      matchRef: (ref) => ref.startsWith("/-/places/list/"),
+      resolve: async (ref) => ({
+        status: "ok",
+        kind: "place-list",
+        label: "My places",
+        href: ref,
+      }),
+      mount,
+    });
+    try {
+      // No fetch should happen for a provider-claimed ref.
+      const fetchSpy = vi.fn();
+      vi.stubGlobal("fetch", fetchSpy);
+      const node = schema.nodes.block_embed.create({ ref: "/-/places/list/5" });
+      const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(view.dom.querySelector(".pm-block-embed-label")!.textContent).toBe(
+        "My places",
+      );
+      const host = view.dom.querySelector(".pm-block-embed-external");
+      expect(host).not.toBeNull();
+      expect(host!.textContent).toBe("custom body");
+      expect(mount).toHaveBeenCalledTimes(1);
+    } finally {
+      delete window.datasettePaperEmbeds;
+    }
+  });
+
+  it("renders a leak-free denied placeholder when a provider resolves denied", async () => {
+    embedRegistry().register({
+      kind: "place-list",
+      matchRef: (ref) => ref.startsWith("/-/places/"),
+      resolve: async () => ({ status: "denied" }),
+      mount: () => {
+        throw new Error("must not mount on denied");
+      },
+    });
+    try {
+      const node = schema.nodes.block_embed.create({ ref: "/-/places/list/secret" });
+      const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(view.dom.classList.contains("pm-block-embed--denied")).toBe(true);
+      expect(view.dom.textContent).not.toContain("secret");
+      expect(view.dom.querySelector(".pm-block-embed-external")).toBeNull();
+    } finally {
+      delete window.datasettePaperEmbeds;
+    }
   });
 
   it("escapes html in cell values (text node only)", async () => {

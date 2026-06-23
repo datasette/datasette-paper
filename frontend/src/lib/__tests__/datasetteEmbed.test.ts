@@ -11,6 +11,7 @@ import {
   searchResources,
   cellText,
   kindIcon,
+  safeHref,
 } from "../datasetteEmbed";
 
 function emptyState(): EditorState {
@@ -18,6 +19,28 @@ function emptyState(): EditorState {
   const state = EditorState.create({ doc });
   return state.apply(state.tr.setSelection(TextSelection.atStart(state.doc)));
 }
+
+describe("safeHref", () => {
+  it("passes relative paths and http(s) URLs through", () => {
+    expect(safeHref("/data/vendors")).toBe("/data/vendors");
+    expect(safeHref("https://example.com/x")).toBe("https://example.com/x");
+    expect(safeHref("http://example.com")).toBe("http://example.com");
+  });
+
+  it("collapses dangerous schemes to '#'", () => {
+    expect(safeHref("javascript:alert(1)")).toBe("#");
+    expect(safeHref("JavaScript:alert(1)")).toBe("#");
+    expect(safeHref("data:text/html,<script>")).toBe("#");
+    expect(safeHref("vbscript:msgbox(1)")).toBe("#");
+    expect(safeHref(undefined)).toBe("#");
+    expect(safeHref("")).toBe("#");
+  });
+
+  it("allows protocol-relative http(s) URLs (off-site nav, not XSS)", () => {
+    // `//host` resolves to an http(s) navigation — no worse than a normal link.
+    expect(safeHref("//example.com")).toBe("//example.com");
+  });
+});
 
 describe("insertDatasetteEmbed", () => {
   it("inserts a block_embed node with ref + mode", () => {

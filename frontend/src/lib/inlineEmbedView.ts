@@ -17,7 +17,7 @@
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
 import { TOOLBAR_ICONS } from "./icons";
-import { kindIcon } from "./datasetteEmbed";
+import { kindIcon, safeHref } from "./datasetteEmbed";
 import type { DatasetteResolver, DatasetteStatus } from "./datasetteResolver";
 
 /**
@@ -98,7 +98,7 @@ export class InlineEmbedView implements NodeView {
       this.dom.classList.add("pm-inline-embed--missing");
       this.setBody(null, raw); // NEVER a label here
     } else {
-      this.dom.setAttribute("href", status.href);
+      this.dom.setAttribute("href", safeHref(status.href));
       this.setBody(kindIcon(status.kind), inlineEmbedLabel(status));
     }
   }

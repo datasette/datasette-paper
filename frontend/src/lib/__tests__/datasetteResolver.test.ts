@@ -9,6 +9,7 @@ import {
   resolveRef,
   type DatasetteStatus,
 } from "../datasetteResolver";
+import { embedRegistry } from "../embedRegistry";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -147,5 +148,74 @@ describe("resolveRef (native .json)", () => {
       }),
     );
     expect(await resolveRef("/d/t")).toBeNull();
+  });
+});
+
+describe("resolveRef (third-party provider delegation)", () => {
+  afterEach(() => {
+    delete window.datasettePaperEmbeds;
+    vi.unstubAllGlobals();
+  });
+
+  it("delegates a claimed ref to the provider's resolve, never fetching", async () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    embedRegistry().register({
+      kind: "place-list",
+      matchRef: (ref) => ref.startsWith("/-/places/list/"),
+      resolve: async (ref) => ({
+        status: "ok",
+        kind: "place-list",
+        label: "My places",
+        href: ref,
+      }),
+      mount: () => {},
+    });
+    expect(await resolveRef("/-/places/list/5")).toEqual({
+      status: "ok",
+      kind: "place-list",
+      label: "My places",
+      href: "/-/places/list/5",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("returns null (transient) when a provider's resolve throws", async () => {
+    embedRegistry().register({
+      kind: "place-list",
+      matchRef: (ref) => ref.startsWith("/-/places/"),
+      resolve: async () => {
+        throw new Error("boom");
+      },
+      mount: () => {},
+    });
+    expect(await resolveRef("/-/places/list/5")).toBeNull();
+  });
+
+  it("falls back to a generic ref-labelled pill when a provider omits resolve", async () => {
+    embedRegistry().register({
+      kind: "place-list",
+      matchRef: (ref) => ref.startsWith("/-/places/"),
+      mount: () => {},
+    });
+    expect(await resolveRef("/-/places/list/5")).toEqual({
+      status: "ok",
+      kind: "place-list",
+      label: "/-/places/list/5",
+      href: "/-/places/list/5",
+    });
+  });
+
+  it("leaves an unclaimed ref on the native path", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ count: 1 }) })),
+    );
+    embedRegistry().register({
+      kind: "place-list",
+      matchRef: (ref) => ref.startsWith("/-/places/"),
+      mount: () => {},
+    });
+    expect(await resolveRef("/d/t")).toMatchObject({ status: "ok", kind: "table" });
   });
 });

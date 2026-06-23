@@ -5,7 +5,16 @@ from datasette.permissions import Action
 from datasette_vite import vite_entry
 from datasette_acl.roles import standard_roles
 from datasette_acl_share import datasette_share_assets as _share_assets
+from datasette.plugins import pm
+from . import hookspecs as _hookspecs
+from .embed_providers import provider_frontend_assets
 from .router import router
+
+# Expose paper's own plugin hooks on Datasette's plugin manager so sibling
+# plugins (e.g. datasette-places) can implement ``paper_embed_provider``.
+# Guarded so a re-import never double-registers the spec.
+if not hasattr(pm.hook, "paper_embed_provider"):
+    pm.add_hookspecs(_hookspecs)
 from .permissions import (  # noqa: F401
     PaperDocResource,
     permission_resources_sql,
@@ -108,18 +117,20 @@ def _is_doc_page(request) -> bool:
 
 @hookimpl
 def extra_js_urls(datasette, request):
-    """Include the <datasette-acl-share-dialog> JS bundle on the doc page only."""
+    """On the doc page only: the <datasette-acl-share-dialog> JS bundle plus
+    any JS declared by registered ``paper_embed_provider``s (e.g.
+    datasette-places' embed renderer bundle)."""
     if not _is_doc_page(request):
         return []
-    return _share_assets(datasette)["js"]
+    return _share_assets(datasette)["js"] + provider_frontend_assets(datasette)["js"]
 
 
 @hookimpl
 def extra_css_urls(datasette, request):
-    """Include the <datasette-acl-share-dialog> CSS on the doc page only."""
+    """On the doc page only: share-dialog CSS plus provider-declared CSS."""
     if not _is_doc_page(request):
         return []
-    return _share_assets(datasette)["css"]
+    return _share_assets(datasette)["css"] + provider_frontend_assets(datasette)["css"]
 
 
 _EVENTS_PATTERN = r"^/-/paper/api/docs/(?P<doc_id>\d+)/events$"
