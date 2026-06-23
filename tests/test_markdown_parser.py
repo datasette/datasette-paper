@@ -303,15 +303,15 @@ class TestInlineNodes:
 
 
 # ---------------------------------------------------------------------------
-# Datasette refs + embeds
+# Inline + block embeds
 # ---------------------------------------------------------------------------
 
 
-class TestDatasetteRef:
+class TestInlineEmbed:
     def test_ref_from_datasette_scheme_link(self):
         doc = parse_and_validate("see [x](datasette:/fixtures/facetable) ok\n")
         content = doc["content"][0]["content"]
-        assert [n["type"] for n in content] == ["text", "datasette_ref", "text"]
+        assert [n["type"] for n in content] == ["text", "inline_embed", "text"]
         assert content[0]["text"] == "see "
         assert content[1]["attrs"]["ref"] == "/fixtures/facetable"
         assert "marks" not in content[1]
@@ -320,20 +320,20 @@ class TestDatasetteRef:
     def test_ref_percent_decodes_path(self):
         doc = parse_and_validate("[x](datasette:/db/t%20with%20space/1)\n")
         content = doc["content"][0]["content"]
-        assert [n["type"] for n in content] == ["datasette_ref"]
+        assert [n["type"] for n in content] == ["inline_embed"]
         assert content[0]["attrs"]["ref"] == "/db/t with space/1"
 
     def test_ordinary_link_is_not_a_ref(self):
         doc = parse_and_validate("see [docs](https://example.com/y)\n")
         content = doc["content"][0]["content"]
-        assert all(n["type"] != "datasette_ref" for n in content)
+        assert all(n["type"] != "inline_embed" for n in content)
 
 
-class TestDatasetteEmbed:
+class TestBlockEmbed:
     def test_embed_fence_default_mode(self):
         doc = parse_and_validate("```datasette-embed\n/fixtures/facetable\n```\n")
         block = doc["content"][0]
-        assert block["type"] == "datasette_embed"
+        assert block["type"] == "block_embed"
         assert block["attrs"] == {"ref": "/fixtures/facetable", "mode": "table"}
 
     def test_embed_fence_with_mode_line(self):
@@ -341,7 +341,7 @@ class TestDatasetteEmbed:
             "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
         )
         block = doc["content"][0]
-        assert block["type"] == "datasette_embed"
+        assert block["type"] == "block_embed"
         assert block["attrs"] == {"ref": "/fixtures/facetable/1", "mode": "row"}
 
     def test_plain_fence_stays_code_block(self):
@@ -603,7 +603,7 @@ def test_mention_roundtrips_through_serializer():
     assert doc1 == doc2
 
 
-def test_datasette_ref_roundtrips_through_serializer():
+def test_inline_embed_roundtrips_through_serializer():
     src = "see [/fixtures/facetable](datasette:/fixtures/facetable) ok\n"
     doc1 = parse_and_validate(src)
     md1 = doc_to_markdown(doc1)
@@ -611,7 +611,7 @@ def test_datasette_ref_roundtrips_through_serializer():
     assert doc1 == doc2
 
 
-def test_datasette_embed_roundtrips_through_serializer():
+def test_block_embed_roundtrips_through_serializer():
     src = "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
     doc1 = parse_and_validate(src)
     md1 = doc_to_markdown(doc1)

@@ -385,9 +385,9 @@ def _insert_node(pos: int, node: dict) -> str:
 
 
 @pytest.mark.asyncio
-async def test_post_datasette_ref_and_embed_apply(ds_paper):
-    """A step inserting a `datasette_ref` (inline) and one inserting a
-    `datasette_embed` (block) both validate + apply — proving pm_schema.py
+async def test_post_inline_and_block_embed_apply(ds_paper):
+    """A step inserting an `inline_embed` (inline) and one inserting a
+    `block_embed` (block) both validate + apply — proving pm_schema.py
     mirrors the JS schema (no 422), and the materializer round-trips them to
     markdown."""
     ds, _paper_db = ds_paper
@@ -395,7 +395,7 @@ async def test_post_datasette_ref_and_embed_apply(ds_paper):
     url = f"/-/paper/api/docs/{doc_id}/events"
 
     # Inline ref inside the empty starter paragraph (pos 1).
-    ref_node = {"type": "datasette_ref", "attrs": {"ref": "/fixtures/facetable"}}
+    ref_node = {"type": "inline_embed", "attrs": {"ref": "/fixtures/facetable"}}
     r1 = await ds.client.post(
         url,
         json={"version": 0, "clientID": 1, "steps": [_insert_node(1, ref_node)]},
@@ -406,7 +406,7 @@ async def test_post_datasette_ref_and_embed_apply(ds_paper):
     # Block embed appended after the paragraph (doc end is now at pos 3:
     # paragraph open + inline atom + close).
     embed_node = {
-        "type": "datasette_embed",
+        "type": "block_embed",
         "attrs": {"ref": "/fixtures/facetable", "mode": "table"},
     }
     r2 = await ds.client.post(

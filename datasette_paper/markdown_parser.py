@@ -210,7 +210,7 @@ def _tokens_to_doc(tokens) -> dict:
                         mode = stripped[len("mode:") :].strip() or "table"
                 append(
                     {
-                        "type": "datasette_embed",
+                        "type": "block_embed",
                         "attrs": {"ref": ref or None, "mode": mode},
                     }
                 )
@@ -516,7 +516,7 @@ def _datasette_link_href(node: dict) -> str | None:
 
 
 def _convert_datasette_refs(nodes: list[dict]) -> list[dict]:
-    """Replace `datasette:`-scheme link text with identity-only `datasette_ref`
+    """Replace `datasette:`-scheme link text with identity-only `inline_embed`
     atoms.
 
     Mirrors _convert_actor_mentions: detection is purely by the link mark's
@@ -536,7 +536,7 @@ def _convert_datasette_refs(nodes: list[dict]) -> list[dict]:
         if href == prev_href:
             continue
         ref = unquote(href[len(_DATASETTE_SCHEME) :])
-        out.append({"type": "datasette_ref", "attrs": {"ref": ref}})
+        out.append({"type": "inline_embed", "attrs": {"ref": ref}})
         prev_href = href
     return out
 

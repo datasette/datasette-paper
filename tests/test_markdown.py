@@ -487,12 +487,12 @@ def test_tag_percent_encodes_nested_slug():
     assert md == "[#inbox/to-read](tag:inbox%2Fto-read)\n"
 
 
-def test_datasette_ref_serializes_as_datasette_scheme_link():
+def test_inline_embed_serializes_as_datasette_scheme_link():
     md = doc_to_markdown(
         _doc(
             _para(
                 _text("see "),
-                {"type": "datasette_ref", "attrs": {"ref": "/fixtures/facetable"}},
+                {"type": "inline_embed", "attrs": {"ref": "/fixtures/facetable"}},
             )
         )
     )
@@ -501,18 +501,18 @@ def test_datasette_ref_serializes_as_datasette_scheme_link():
     assert md == "see [/fixtures/facetable](datasette:/fixtures/facetable)\n"
 
 
-def test_datasette_embed_serializes_as_fenced_block():
+def test_block_embed_serializes_as_fenced_block():
     md = doc_to_markdown(
-        _doc({"type": "datasette_embed", "attrs": {"ref": "/fixtures/facetable"}})
+        _doc({"type": "block_embed", "attrs": {"ref": "/fixtures/facetable"}})
     )
     assert md == "```datasette-embed\n/fixtures/facetable\n```\n"
 
 
-def test_datasette_embed_non_default_mode_emits_mode_line():
+def test_block_embed_non_default_mode_emits_mode_line():
     md = doc_to_markdown(
         _doc(
             {
-                "type": "datasette_embed",
+                "type": "block_embed",
                 "attrs": {"ref": "/fixtures/facetable/1", "mode": "row"},
             }
         )

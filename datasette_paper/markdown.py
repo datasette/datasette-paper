@@ -75,7 +75,7 @@ def _render_block(node: dict) -> str:
         return _render_task_list(node)
     if t == "table":
         return _render_table(node)
-    if t == "datasette_embed":
+    if t == "block_embed":
         attrs = node.get("attrs") or {}
         ref = attrs.get("ref") or ""
         mode = attrs.get("mode") or "table"
@@ -466,7 +466,7 @@ def _render_inlines(nodes: list) -> str:
             # the slug for the href.
             safe_tag = tag.replace("]", "\\]")
             out.append(f"[#{safe_tag}](tag:{quote(tag, safe='')})")
-        elif t == "datasette_ref":
+        elif t == "inline_embed":
             ref = (n.get("attrs") or {}).get("ref") or ""
             # `[label](datasette:<path>)` — the `datasette:` scheme lets the
             # parser detect refs unambiguously. There is no resolved label at

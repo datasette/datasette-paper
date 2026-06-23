@@ -92,8 +92,8 @@ async def test_append_rich_content_roundtrips(ds):
 
 
 @pytest.mark.asyncio
-async def test_append_datasette_ref_and_embed_roundtrip(ds):
-    """An inline datasette ref and a block embed fence survive the full
+async def test_append_inline_and_block_embed_roundtrip(ds):
+    """An inline embed and a block embed fence survive the full
     append → step-apply → materialize → serialize path (proves the schema
     lock-step holds end-to-end through the markdown API)."""
     doc_id = await _make_doc(ds)

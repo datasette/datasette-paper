@@ -93,9 +93,9 @@ describe("paper_link node", () => {
   });
 });
 
-describe("datasette_ref node", () => {
+describe("inline_embed node", () => {
   it("exists on the schema as an inline atom leaf", () => {
-    const t = schema.nodes.datasette_ref;
+    const t = schema.nodes.inline_embed;
     expect(t).toBeDefined();
     expect(t.isInline).toBe(true);
     expect(t.isAtom).toBe(true);
@@ -103,21 +103,21 @@ describe("datasette_ref node", () => {
   });
 
   it("round-trips through JSON", () => {
-    const node = schema.nodes.datasette_ref.create({ ref: "/fixtures/facetable" });
+    const node = schema.nodes.inline_embed.create({ ref: "/fixtures/facetable" });
     const json = node.toJSON();
     expect(json).toEqual({
-      type: "datasette_ref",
+      type: "inline_embed",
       attrs: { ref: "/fixtures/facetable" },
     });
     const back = schema.nodeFromJSON(json);
     expect(back.attrs.ref).toBe("/fixtures/facetable");
-    expect(back.type).toBe(schema.nodes.datasette_ref);
+    expect(back.type).toBe(schema.nodes.inline_embed);
   });
 
-  it("toDOM emits data-datasette-ref", () => {
-    const node = schema.nodes.datasette_ref.create({ ref: "/fixtures/facetable" });
+  it("toDOM emits data-inline-embed", () => {
+    const node = schema.nodes.inline_embed.create({ ref: "/fixtures/facetable" });
     const dom = node.type.spec.toDOM!(node) as [string, Record<string, string>, string];
-    expect(dom[1]["data-datasette-ref"]).toBe("/fixtures/facetable");
+    expect(dom[1]["data-inline-embed"]).toBe("/fixtures/facetable");
   });
 
   it("can be inserted into a paragraph via replaceSelectionWith", () => {
@@ -125,21 +125,21 @@ describe("datasette_ref node", () => {
     let state = EditorState.create({ doc });
     state = state.apply(state.tr.setSelection(TextSelection.atStart(state.doc)));
 
-    const ref = schema.nodes.datasette_ref.create({ ref: "/fixtures/facetable/1" });
+    const ref = schema.nodes.inline_embed.create({ ref: "/fixtures/facetable/1" });
     const tr = state.tr.replaceSelectionWith(ref);
     const next = state.apply(tr);
 
     const para = next.doc.firstChild!;
     expect(para.childCount).toBe(1);
     const inserted = para.firstChild!;
-    expect(inserted.type.name).toBe("datasette_ref");
+    expect(inserted.type.name).toBe("inline_embed");
     expect(inserted.attrs.ref).toBe("/fixtures/facetable/1");
   });
 });
 
-describe("datasette_embed node", () => {
+describe("block_embed node", () => {
   it("exists on the schema as a block atom leaf", () => {
-    const t = schema.nodes.datasette_embed;
+    const t = schema.nodes.block_embed;
     expect(t).toBeDefined();
     expect(t.isBlock).toBe(true);
     expect(t.isAtom).toBe(true);
@@ -147,37 +147,37 @@ describe("datasette_embed node", () => {
   });
 
   it("round-trips through JSON with default mode", () => {
-    const node = schema.nodes.datasette_embed.create({ ref: "/fixtures/facetable" });
+    const node = schema.nodes.block_embed.create({ ref: "/fixtures/facetable" });
     const json = node.toJSON();
     expect(json).toEqual({
-      type: "datasette_embed",
+      type: "block_embed",
       attrs: { ref: "/fixtures/facetable", mode: "table" },
     });
     const back = schema.nodeFromJSON(json);
     expect(back.attrs.ref).toBe("/fixtures/facetable");
     expect(back.attrs.mode).toBe("table");
-    expect(back.type).toBe(schema.nodes.datasette_embed);
+    expect(back.type).toBe(schema.nodes.block_embed);
   });
 
-  it("toDOM emits data-datasette-embed and data-embed-mode", () => {
-    const node = schema.nodes.datasette_embed.create({
+  it("toDOM emits data-block-embed and data-embed-mode", () => {
+    const node = schema.nodes.block_embed.create({
       ref: "/fixtures/facetable",
       mode: "row",
     });
     const dom = node.type.spec.toDOM!(node) as [string, Record<string, string>, string];
-    expect(dom[1]["data-datasette-embed"]).toBe("/fixtures/facetable");
+    expect(dom[1]["data-block-embed"]).toBe("/fixtures/facetable");
     expect(dom[1]["data-embed-mode"]).toBe("row");
   });
 
   it("can be inserted at the top level of the doc", () => {
     const doc = schema.node("doc", null, [schema.node("paragraph")]);
     const state = EditorState.create({ doc });
-    const embed = schema.nodes.datasette_embed.create({ ref: "/fixtures/facetable" });
+    const embed = schema.nodes.block_embed.create({ ref: "/fixtures/facetable" });
     const tr = state.tr.insert(state.doc.content.size, embed);
     const next = state.apply(tr);
 
     const inserted = next.doc.lastChild!;
-    expect(inserted.type.name).toBe("datasette_embed");
+    expect(inserted.type.name).toBe("block_embed");
     expect(inserted.attrs.ref).toBe("/fixtures/facetable");
   });
 });
