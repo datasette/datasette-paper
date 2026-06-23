@@ -7,7 +7,6 @@ from datasette_acl.roles import standard_roles
 from datasette_acl_share import datasette_share_assets as _share_assets
 from datasette.plugins import pm
 from . import hookspecs as _hookspecs
-from .embed_providers import provider_frontend_assets
 from .router import router
 from .permissions import (  # noqa: F401
     PaperDocResource,
@@ -115,20 +114,25 @@ def _is_doc_page(request) -> bool:
 
 @hookimpl
 def extra_js_urls(datasette, request):
-    """On the doc page only: the <datasette-acl-share-dialog> JS bundle plus
-    any JS declared by registered ``paper_embed_provider``s (e.g.
-    datasette-places' embed renderer bundle)."""
+    """Include the <datasette-acl-share-dialog> JS bundle on the doc page only.
+
+    Third-party ``paper_embed_provider`` bundles are NOT injected here — the
+    editor lazy-loads them per provider from the ``embed_providers`` manifest
+    (see ``embed_providers.py`` / ``frontend/src/lib/embedProviders.ts``), so a
+    doc only pulls the provider JS it actually uses."""
     if not _is_doc_page(request):
         return []
-    return _share_assets(datasette)["js"] + provider_frontend_assets(datasette)["js"]
+    return _share_assets(datasette)["js"]
 
 
 @hookimpl
 def extra_css_urls(datasette, request):
-    """On the doc page only: share-dialog CSS plus provider-declared CSS."""
+    """Include the <datasette-acl-share-dialog> CSS on the doc page only.
+
+    Provider CSS is lazy-loaded with the provider bundle, not injected here."""
     if not _is_doc_page(request):
         return []
-    return _share_assets(datasette)["css"] + provider_frontend_assets(datasette)["css"]
+    return _share_assets(datasette)["css"]
 
 
 _EVENTS_PATTERN = r"^/-/paper/api/docs/(?P<doc_id>\d+)/events$"

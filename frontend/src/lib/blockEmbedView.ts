@@ -24,6 +24,7 @@ import {
   type EmbedPayload,
 } from "./datasetteEmbed";
 import { embedRegistry, type PaperEmbedProvider } from "./embedRegistry";
+import { ensureProviderForRef, manifestKindForRef } from "./embedProviders";
 import type { DatasetteStatus } from "./datasetteResolver";
 
 const ROW_LIMIT_OPTIONS = [10, 25, 100];
@@ -68,8 +69,15 @@ export class BlockEmbedView implements NodeView {
       return;
     }
     // A third-party provider that claims this ref renders it itself — paper
-    // owns the header chrome, the provider fills the body (loadExternal).
-    const provider = embedRegistry().providerForRef(this.ref);
+    // owns the header chrome, the provider fills the body (loadExternal). If
+    // its bundle isn't loaded yet, lazy-inject it (manifest maps ref prefix →
+    // provider) and retry; a stale load (ref change / refresh) bails after.
+    let provider = embedRegistry().providerForRef(this.ref);
+    if (!provider && manifestKindForRef(this.ref)) {
+      await ensureProviderForRef(this.ref);
+      if (token !== this.token) return;
+      provider = embedRegistry().providerForRef(this.ref);
+    }
     if (provider) {
       await this.loadExternal(token, provider);
       return;

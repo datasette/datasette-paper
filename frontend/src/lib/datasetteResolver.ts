@@ -18,6 +18,7 @@
  */
 import { refSegments } from "./datasetteEmbed";
 import { embedRegistry } from "./embedRegistry";
+import { ensureProviderForRef, manifestKindForRef } from "./embedProviders";
 
 export type DatasetteStatus =
   | {
@@ -45,8 +46,13 @@ export async function resolveRef(ref: string): Promise<DatasetteStatus | null> {
   // A third-party provider that claims this ref owns its resolution — it
   // fetches its own data (with the viewer's cookie) and applies its own leak
   // discipline. A provider with no `resolve` falls through to a generic
-  // ref-labelled pill below.
-  const provider = embedRegistry().providerForRef(ref);
+  // ref-labelled pill below. If the owning provider's bundle isn't loaded yet,
+  // lazy-inject it (the manifest maps the ref's prefix → provider) and retry.
+  let provider = embedRegistry().providerForRef(ref);
+  if (!provider && manifestKindForRef(ref)) {
+    await ensureProviderForRef(ref);
+    provider = embedRegistry().providerForRef(ref);
+  }
   if (provider?.resolve) {
     try {
       return await provider.resolve(ref);

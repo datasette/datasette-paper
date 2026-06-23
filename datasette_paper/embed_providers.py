@@ -1,10 +1,14 @@
-"""Collect frontend assets declared by third-party ``paper_embed_provider``s.
+"""Build the third-party ``paper_embed_provider`` manifest for the editor page.
 
 The embed feature is otherwise client-side (the browser hits Datasette's native
-``.json`` API). The one backend responsibility is loading each provider's JS/CSS
-bundle onto the editor page; ``__init__.py``'s ``extra_js_urls`` /
-``extra_css_urls`` hooks fold the result of :func:`provider_frontend_assets`
-into the doc-page asset list. See ``hookspecs.py`` for the provider contract.
+``.json`` API). The backend's one job is telling the editor *which* providers
+exist and *where* their bundles live — **without** loading those bundles. The
+doc page (``routes/docs.py``) folds :func:`provider_manifest` into its
+``page_data`` blob; the frontend (``frontend/src/lib/embedProviders.ts``) reads
+it and lazy-injects a provider's JS/CSS only when the document actually uses
+that provider — either because the doc contains one of its embeds (matched by
+``ref_prefixes``) or because the author picks it from the ``/`` menu. See
+``hookspecs.py`` for the provider contract.
 """
 
 import logging
@@ -31,34 +35,56 @@ def _providers(datasette):
     return providers
 
 
-def provider_frontend_assets(datasette):
-    """Return ``{"js": [...], "css": [...]}`` aggregated across all providers.
+def provider_manifest(datasette):
+    """Return a list of provider descriptors for the editor's lazy loader.
 
-    URLs are de-duplicated preserving first-seen order. A provider whose
-    ``frontend_assets`` is missing or raises contributes nothing (logged) —
-    one bad plugin can't break the editor page for everyone.
+    Each entry is::
+
+        {
+            "kind": "place-list",          # stable id; matches the JS register() kind
+            "label": "Place list",         # human label (defaults to kind)
+            "js": [...urls], "css": [...urls],
+            "ref_prefixes": ["/-/places/"] # stored-ref namespaces this provider owns
+        }
+
+    ``ref_prefixes`` is how paper decides, *server-knowably*, that a stored ref
+    like ``/-/places/list/5`` belongs to this provider — so it can inject the
+    bundle on demand without first running the provider's in-bundle ``matchRef``.
+
+    A provider with no ``kind`` is skipped (the kind ties the manifest entry to
+    the bundle's ``register({kind})`` call). A provider whose ``frontend_assets``
+    raises is logged and skipped — one bad plugin can't break the editor page.
+    De-duplicated by ``kind`` (first wins).
     """
-    js: list[str] = []
-    css: list[str] = []
-    seen_js: set[str] = set()
-    seen_css: set[str] = set()
-
+    out = []
+    seen: set[str] = set()
     for provider in _providers(datasette):
-        fn = getattr(provider, "frontend_assets", None)
-        if not callable(fn):
+        kind = getattr(provider, "kind", None)
+        if not kind:
+            logger.warning("paper_embed_provider missing a `kind`; skipping")
             continue
-        try:
-            assets = fn(datasette) or {}
-        except Exception:
-            logger.exception("paper_embed_provider.frontend_assets raised; skipping")
+        if kind in seen:
             continue
-        for url in assets.get("js", []) or []:
-            if url not in seen_js:
-                seen_js.add(url)
-                js.append(url)
-        for url in assets.get("css", []) or []:
-            if url not in seen_css:
-                seen_css.add(url)
-                css.append(url)
 
-    return {"js": js, "css": css}
+        assets = {}
+        fn = getattr(provider, "frontend_assets", None)
+        if callable(fn):
+            try:
+                assets = fn(datasette) or {}
+            except Exception:
+                logger.exception(
+                    "paper_embed_provider.frontend_assets raised; skipping"
+                )
+                continue
+
+        seen.add(kind)
+        out.append(
+            {
+                "kind": kind,
+                "label": getattr(provider, "label", None) or kind,
+                "js": list(assets.get("js") or []),
+                "css": list(assets.get("css") or []),
+                "ref_prefixes": list(getattr(provider, "ref_prefixes", None) or []),
+            }
+        )
+    return out

@@ -1,23 +1,36 @@
-"""Tests for the ``paper_embed_provider`` hook: frontend-asset collection,
-de-duplication, exception isolation, and doc-page-gated injection.
+"""Tests for the ``paper_embed_provider`` hook: manifest building, dedupe by
+kind, exception isolation, and the fact that provider bundles are **not**
+injected globally (the editor lazy-loads them from the doc-page manifest).
 
-The hook's *only* backend job is contributing a provider's JS/CSS bundle to
-the editor page (resolve/render are client-side — see
-``frontend/src/lib/embedRegistry.ts``). These tests register fake providers on
-Datasette's plugin manager and assert the aggregation + injection behaviour.
+The hook's backend job is describing each provider (kind / label / asset URLs /
+ref-prefixes) so the editor can lazy-inject a bundle only when the doc uses it —
+resolve/render are client-side (see ``frontend/src/lib/embedProviders.ts`` and
+``embedRegistry.ts``). These tests register fake providers on Datasette's plugin
+manager and assert the manifest + non-injection behaviour.
 """
 
+import json
+
+import pytest
 from datasette import hookimpl
 from datasette.plugins import pm
 
 import datasette_paper  # noqa: F401 — ensures the hookspec is registered
-from datasette_paper.embed_providers import provider_frontend_assets
+from datasette_paper.embed_providers import provider_manifest
 
 from conftest import make_datasette
 
 
 class _Provider:
-    def __init__(self, js=None, css=None, raises=False):
+    def __init__(
+        self, kind=None, label=None, js=None, css=None, ref_prefixes=None, raises=False
+    ):
+        if kind is not None:
+            self.kind = kind
+        if label is not None:
+            self.label = label
+        if ref_prefixes is not None:
+            self.ref_prefixes = ref_prefixes
         self._js = js or []
         self._css = css or []
         self._raises = raises
@@ -29,7 +42,7 @@ class _Provider:
 
 
 class _PluginShim:
-    """A throwaway plugin exposing one provider via the hook."""
+    """A throwaway plugin exposing one or more providers via the hook."""
 
     def __init__(self, *providers):
         self._providers = list(providers)
@@ -49,33 +62,63 @@ def _unregister(shim):
     pm.unregister(shim)
 
 
-def test_no_providers_yields_empty_assets():
+def test_no_providers_yields_empty_manifest():
     ds = make_datasette()
-    assert provider_frontend_assets(ds) == {"js": [], "css": []}
+    assert provider_manifest(ds) == []
 
 
-def test_collects_js_and_css_across_providers():
+def test_manifest_describes_each_provider():
     ds = make_datasette()
     shim = _register(
-        _Provider(js=["/a.js"], css=["/a.css"]),
-        _Provider(js=["/b.js"]),
+        _Provider(
+            kind="place-list",
+            label="Places",
+            js=["/places.js"],
+            css=["/places.css"],
+            ref_prefixes=["/-/places/"],
+        ),
+        _Provider(kind="sheet", js=["/sheet.js"]),
     )
     try:
-        assets = provider_frontend_assets(ds)
-        assert assets["js"] == ["/a.js", "/b.js"]
-        assert assets["css"] == ["/a.css"]
+        assert provider_manifest(ds) == [
+            {
+                "kind": "place-list",
+                "label": "Places",
+                "js": ["/places.js"],
+                "css": ["/places.css"],
+                "ref_prefixes": ["/-/places/"],
+            },
+            {
+                "kind": "sheet",
+                "label": "sheet",  # defaults to kind
+                "js": ["/sheet.js"],
+                "css": [],
+                "ref_prefixes": [],
+            },
+        ]
     finally:
         _unregister(shim)
 
 
-def test_dedupes_preserving_first_seen_order():
+def test_provider_without_kind_is_skipped():
+    ds = make_datasette()
+    shim = _register(_Provider(js=["/anon.js"]), _Provider(kind="ok", js=["/ok.js"]))
+    try:
+        manifest = provider_manifest(ds)
+        assert [e["kind"] for e in manifest] == ["ok"]
+    finally:
+        _unregister(shim)
+
+
+def test_dedupes_by_kind_first_wins():
     ds = make_datasette()
     shim = _register(
-        _Provider(js=["/dup.js", "/a.js"]),
-        _Provider(js=["/dup.js", "/b.js"]),
+        _Provider(kind="dup", js=["/first.js"]),
+        _Provider(kind="dup", js=["/second.js"]),
     )
     try:
-        assert provider_frontend_assets(ds)["js"] == ["/dup.js", "/a.js", "/b.js"]
+        manifest = provider_manifest(ds)
+        assert [e["js"] for e in manifest] == [["/first.js"]]
     finally:
         _unregister(shim)
 
@@ -83,12 +126,12 @@ def test_dedupes_preserving_first_seen_order():
 def test_a_raising_provider_is_skipped_not_fatal():
     ds = make_datasette()
     shim = _register(
-        _Provider(raises=True),
-        _Provider(js=["/good.js"]),
+        _Provider(kind="bad", raises=True),
+        _Provider(kind="good", js=["/good.js"]),
     )
     try:
-        # The bad provider contributes nothing; the good one still lands.
-        assert provider_frontend_assets(ds)["js"] == ["/good.js"]
+        manifest = provider_manifest(ds)
+        assert [e["kind"] for e in manifest] == ["good"]
     finally:
         _unregister(shim)
 
@@ -98,23 +141,44 @@ class _FakeRequest:
         self.path = path
 
 
-def test_provider_js_injected_on_doc_page_only():
+def test_provider_assets_not_injected_globally():
+    """Provider JS/CSS is delivered via the doc-page manifest, NOT folded into
+    extra_js_urls/extra_css_urls (which would load every provider everywhere)."""
     ds = make_datasette()
-    shim = _register(_Provider(js=["/places.js"], css=["/places.css"]))
+    shim = _register(_Provider(kind="places", js=["/places.js"], css=["/places.css"]))
     try:
         doc_js = datasette_paper.extra_js_urls(ds, _FakeRequest("/-/paper/doc/1"))
         doc_css = datasette_paper.extra_css_urls(ds, _FakeRequest("/-/paper/doc/1"))
-        assert "/places.js" in doc_js
-        assert "/places.css" in doc_css
+        assert "/places.js" not in doc_js
+        assert "/places.css" not in doc_css
+    finally:
+        _unregister(shim)
 
-        # Not the index, not an API route.
-        assert datasette_paper.extra_js_urls(ds, _FakeRequest("/-/paper")) == []
-        assert (
-            datasette_paper.extra_js_urls(
-                ds, _FakeRequest("/-/paper/api/docs/1/document")
-            )
-            == []
+
+@pytest.mark.asyncio
+async def test_manifest_lands_in_doc_page_data(ds):
+    """The doc page embeds the provider manifest in its page_data blob so the
+    frontend loader can lazy-inject bundles on demand."""
+    created = await ds.client.post("/-/paper/api/docs", json={"name": "Embed test"})
+    assert created.status_code == 201
+    doc_id = created.json()["id"]
+    shim = _register(
+        _Provider(
+            kind="place-list",
+            label="Places",
+            js=["/places.js"],
+            ref_prefixes=["/-/places/"],
         )
+    )
+    try:
+        resp = await ds.client.get(f"/-/paper/doc/{doc_id}")
+        assert resp.status_code == 200
+        # The page_data <script> blob carries the manifest entry.
+        start = resp.text.index('id="pageData">') + len('id="pageData">')
+        end = resp.text.index("</script>", start)
+        page_data = json.loads(resp.text[start:end])
+        kinds = [e["kind"] for e in page_data["embed_providers"]]
+        assert "place-list" in kinds
     finally:
         _unregister(shim)
 

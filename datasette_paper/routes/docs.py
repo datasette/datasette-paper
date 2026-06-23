@@ -6,6 +6,7 @@ import json
 from datasette import Forbidden, Response
 
 from ..router import router
+from ..embed_providers import provider_manifest
 from ..errors import InvalidStepError
 from ..instance import get_registry
 from ..markdown import doc_to_markdown, extract_tasks, group_tasks_by_section
@@ -1209,6 +1210,10 @@ async def paper_doc_page(datasette, request, doc_id: int):
                     "doc_id": doc_id,
                     "share_parent": PAPER_DOCS_PARENT,
                     "actor": {"id": me} if me else None,
+                    # Lazy-load manifest for third-party embed providers — the
+                    # editor injects a provider's bundle only when the doc uses
+                    # it (see embed_providers.py / embedProviders.ts).
+                    "embed_providers": provider_manifest(datasette),
                 },
             },
             request=request,

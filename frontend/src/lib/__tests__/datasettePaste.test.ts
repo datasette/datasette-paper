@@ -10,10 +10,12 @@ import { schema } from "../schema";
 import {
   parseDatasetteRef,
   matchExternalRef,
+  matchManifestRef,
   chooseDatasetteSurface,
   handleDatasettePaste,
 } from "../datasettePaste";
 import { embedRegistry } from "../embedRegistry";
+import { setProviderManifest, _resetProvidersForTest } from "../embedProviders";
 
 const ORIGIN = "http://localhost";
 const ctx = { origin: ORIGIN };
@@ -234,5 +236,45 @@ describe("handleDatasettePaste", () => {
     } finally {
       delete window.datasettePaperEmbeds;
     }
+  });
+});
+
+describe("matchManifestRef (lazy provider, bundle not yet loaded)", () => {
+  afterEach(() => _resetProvidersForTest());
+
+  it("claims a same-origin URL whose path is under a manifest ref prefix", () => {
+    setProviderManifest([{ kind: "places", ref_prefixes: ["/-/places/"] }]);
+    expect(matchManifestRef(`${ORIGIN}/-/places/list/5`, ctx)).toBe(
+      "/-/places/list/5",
+    );
+  });
+
+  it("ignores URLs no manifest provider claims, and other origins", () => {
+    setProviderManifest([{ kind: "places", ref_prefixes: ["/-/places/"] }]);
+    expect(matchManifestRef(`${ORIGIN}/data/vendors`, ctx)).toBeNull();
+    expect(matchManifestRef("https://evil.test/-/places/list/5", ctx)).toBeNull();
+  });
+
+  it("strips a non-root base_url before matching the prefix", () => {
+    setProviderManifest([{ kind: "places", ref_prefixes: ["/-/places/"] }]);
+    expect(
+      matchManifestRef(`${ORIGIN}/app/-/places/list/5`, {
+        origin: ORIGIN,
+        baseUrl: "/app/",
+      }),
+    ).toBe("/-/places/list/5");
+  });
+
+  it("the paste handler falls back to the manifest for an unloaded provider", () => {
+    setProviderManifest([{ kind: "places", ref_prefixes: ["/-/places/"] }]);
+    const { view, getDoc } = fakeView(emptyParaState());
+    const claimed = handleDatasettePaste(
+      view,
+      pasteEvent(`${ORIGIN}/-/places/list/5`),
+      ctx,
+    );
+    expect(claimed).toBe(true);
+    expect(getDoc().doc.firstChild!.type.name).toBe("block_embed");
+    expect(getDoc().doc.firstChild!.attrs.ref).toBe("/-/places/list/5");
   });
 });

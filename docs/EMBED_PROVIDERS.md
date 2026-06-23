@@ -19,8 +19,11 @@ and leak discipline are the provider's own responsibility** — exactly as for
 core db/table/row refs. Never reveal a label or data for a resource the viewer
 can't see; return `denied` / `not_found` instead.
 
-The plugin's backend has exactly **one** job: get the provider's JS/CSS bundle
-onto the editor page. That is the `paper_embed_provider` hook.
+The plugin's backend has exactly **one** job: *describe* the provider so paper
+can fetch its JS/CSS bundle **on demand**. That is the `paper_embed_provider`
+hook. Paper does **not** load every provider on every doc page — it injects a
+bundle only when the doc actually uses it (an embed under the provider's
+`ref_prefixes`) or when the author picks it from the `/` menu.
 
 ## Backend: the `paper_embed_provider` hook
 
@@ -28,6 +31,10 @@ onto the editor page. That is the `paper_embed_provider` hook.
 from datasette import hookimpl
 
 class PlacesEmbedProvider:
+    kind = "place-list"               # MUST equal the JS register({kind}) call
+    label = "Place list"              # shown in the / menu (optional)
+    ref_prefixes = ["/-/places/"]     # stored-ref namespaces this provider owns
+
     def frontend_assets(self, datasette):
         return {
             "js": ["/-/static-plugins/datasette_places/paper-embed.js"],
@@ -41,9 +48,18 @@ def paper_embed_provider(datasette):
 
 - Return a single provider or a list. The hook is registered on Datasette's own
   plugin manager, so any installed plugin can implement it.
-- `frontend_assets(datasette) -> {"js": [...], "css": [...]}` is the only
-  method. Both keys are optional. URLs are injected into the paper doc page
-  (`/-/paper/doc/<id>`) **only**, de-duplicated across providers.
+- `kind` (**required**) ties the manifest entry to your bundle's
+  `register({kind})` call. A provider without it is skipped.
+- `ref_prefixes` (optional, but needed for lazy-loading) lists the stored-ref
+  namespaces you own, e.g. `["/-/places/"]`. When a doc contains an embed whose
+  ref starts with one of them, paper injects your bundle and lets it render.
+  **For paste-to-embed to work before your bundle loads, your stored ref must be
+  the URL's path under one of these prefixes** (paper can't run your in-bundle
+  `matchUrl` until the bundle is loaded).
+- `label` (optional) is the `/`-menu label; defaults to `kind`.
+- `frontend_assets(datasette) -> {"js": [...], "css": [...]}` supplies the
+  bundle URLs. Both keys optional. They are folded into the doc page's
+  `page_data` manifest and lazy-injected — **never** added to every page.
 - A provider that raises in `frontend_assets` is logged and skipped — it can't
   break the editor page.
 
