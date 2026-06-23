@@ -12,6 +12,7 @@ import type { Command } from "prosemirror-state";
 
 export const EMBED_ENDPOINT = "/-/paper/api/datasette/embed";
 export const SEARCH_ENDPOINT = "/-/paper/api/datasette/search";
+export const SOURCES_ENDPOINT = "/-/paper/api/datasette/sources";
 
 /** A JSON-safe cell value: sqlite scalars, or a {$base64} envelope for blobs. */
 export type CellValue = string | number | boolean | null | { $base64: true; encoded: string };
@@ -71,9 +72,26 @@ export type ExternalEmbedPayload = {
 
 export type SearchResult = {
   ref: string;
-  kind: "table" | "view" | "database";
+  kind: string;
   label: string;
-  db: string;
+  // Core results carry the database name; provider results may instead supply
+  // a free-form secondary line (e.g. "12 places"). The picker shows whichever
+  // is present.
+  db?: string;
+  detail?: string;
+};
+
+/**
+ * A browsable insert "source" contributed by a `paper_resource_provider`
+ * (the backend `/sources` endpoint). Each becomes a `/`-menu command + a
+ * search-and-insert dialog scoped to that provider. The built-in
+ * core-Datasette embed is NOT a provider source — it has its own command.
+ */
+export type ProviderSource = {
+  id: string;
+  label: string;
+  icon: string; // a TOOLBAR_ICONS key
+  mode: string; // stored on the inserted datasette_embed node
 };
 
 /** bootstrap-icon name to show for each resolved resource kind. */
@@ -121,9 +139,18 @@ export async function fetchEmbed(ref: string, limit?: number): Promise<EmbedPayl
   }
 }
 
-/** Search visible databases / tables / views by name for the picker. */
-export async function searchResources(q: string, limit = 20): Promise<SearchResult[]> {
+/**
+ * Search resources by name for the picker. With no `source` this searches
+ * core databases / tables / views; with a provider `source` id it dispatches
+ * to that provider's own search (e.g. the actor's place lists).
+ */
+export async function searchResources(
+  q: string,
+  limit = 20,
+  source?: string,
+): Promise<SearchResult[]> {
   const params = new URLSearchParams({ q, limit: String(limit) });
+  if (source) params.set("source", source);
   try {
     const res = await fetch(`${SEARCH_ENDPOINT}?${params.toString()}`, {
       headers: { "Content-Type": "application/json" },
@@ -131,6 +158,20 @@ export async function searchResources(q: string, limit = 20): Promise<SearchResu
     if (!res.ok) return [];
     const json = (await res.json()) as { results?: SearchResult[] };
     return json.results ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/** Fetch the provider-contributed insert sources (empty on any failure). */
+export async function fetchSources(): Promise<ProviderSource[]> {
+  try {
+    const res = await fetch(SOURCES_ENDPOINT, {
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { sources?: ProviderSource[] };
+    return json.sources ?? [];
   } catch {
     return [];
   }

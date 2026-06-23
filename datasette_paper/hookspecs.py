@@ -28,6 +28,21 @@ A provider is any object implementing::
         # JS/CSS the frontend renderer needs; injected into the paper editor
         # page only (not every Datasette page).
 
+    picker() -> {"id","label","icon","mode"?}   # optional
+        # Opt this provider into the editor's insert UI as a named, browsable
+        # source — e.g. {"id":"places","label":"Places map","icon":"globe"}.
+        # Presence adds a `/`-menu command and a search-and-insert dialog
+        # scoped to this provider. `mode` (default "block") is stored on the
+        # inserted embed node. `id` must be stable and not "datasette" (the
+        # reserved core source). Requires `search` to be useful.
+
+    async search(datasette, actor, q: str, limit: int) -> [ {...} ]   # optional
+        # Resources the actor can see whose name matches `q`, for the picker.
+        # Each item: {"ref","kind","label","detail"?} — `ref` is a path this
+        # provider `claims`; `detail` is an optional secondary line (e.g.
+        # "12 places"). Permission-filter to the actor; never list a resource
+        # they can't see (same leak discipline as `resolve`).
+
 **Permission is the provider's own responsibility** — check the actor
 against your own model and return ``{"status": "denied"}`` for someone who
 can't see the resource. Never leak a label or data on ``denied`` /

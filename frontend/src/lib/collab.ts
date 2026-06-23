@@ -64,8 +64,11 @@ import { DatasetteResolver } from "./datasetteResolver";
 import { DatasetteRefView } from "./datasetteRefView";
 import { DatasetteEmbedView } from "./datasetteEmbedView";
 import { handleDatasettePaste } from "./datasettePaste";
+import { fetchSources, type ProviderSource } from "./datasetteEmbed";
+import { ResourceAccessChecker } from "./resourceAccessCheck";
 import {
   buildSlashCommands,
+  buildProviderSlashCommands,
   createSlashSuggestPlugin,
   slashMenuPopupPlugin,
   slashKeymap,
@@ -187,6 +190,11 @@ export interface ConnectionOpts {
    * "Datasette embed" command (PaperApp-owned Svelte component).
    */
   onInsertDatasetteEmbed?: () => void;
+  /**
+   * Open the embed picker scoped to a provider source (e.g. "Places map") —
+   * invoked by a provider `/` slash command discovered from `/sources`.
+   */
+  onInsertProviderEmbed?: (source: ProviderSource) => void;
 }
 
 type CommState =
@@ -799,11 +807,15 @@ export class EditorConnection {
   // One link resolver per connection (NOT a module singleton — multi-doc tabs + tests).
   private linkResolver: LinkResolver;
   private accessChecker: AccessChecker;
+  // Per-ref "who can't see this embed" checker (datasette_embed/_ref subscribe).
+  private resourceAccessChecker: ResourceAccessChecker;
   // One actor resolver per connection (mention NodeViews subscribe to it).
   private actorResolver: ActorResolver;
   // One datasette resolver per connection (datasette_ref pills subscribe).
   private datasetteResolver: DatasetteResolver;
-  // The `/` slash command registry, built once with the dialog callbacks.
+  // The `/` slash command registry. Built once with the dialog callbacks; the
+  // popup/keymap read this array live, so provider commands fetched async at
+  // startup are pushed into it in place (see loadProviderCommands).
   private slashCommands: SlashCommand[];
 
   // Current viewer's actor id, captured from the bootstrap response.
@@ -851,14 +863,32 @@ export class EditorConnection {
     // paper_link NodeView subscribes — like LinkResolver, no fetch fires for
     // a doc with no links to check.
     this.accessChecker = new AccessChecker(opts.docId);
+    this.resourceAccessChecker = new ResourceAccessChecker(opts.docId);
     this.actorResolver = new ActorResolver();
     this.datasetteResolver = new DatasetteResolver();
     this.slashCommands = buildSlashCommands({
       openImageDialog: () => this.opts.onInsertImage?.(),
       openDatasetteEmbed: () => this.opts.onInsertDatasetteEmbed?.(),
     });
+    void this.loadProviderCommands();
     this.installNetworkListeners();
     this.start();
+  }
+
+  /**
+   * Discover provider-contributed insert sources (`/sources`) and splice a `/`
+   * command for each into `this.slashCommands` in place — the popup and keymap
+   * close over that array reference and read it live, so the commands light up
+   * as soon as the fetch resolves without rebuilding the editor.
+   */
+  private async loadProviderCommands(): Promise<void> {
+    const sources = await fetchSources();
+    if (sources.length === 0) return;
+    const providerCommands = buildProviderSlashCommands(sources, {
+      openProviderEmbed: (source) => this.opts.onInsertProviderEmbed?.(source),
+    });
+    // Insert before any trailing core "Datasette embed" so related items group.
+    this.slashCommands.push(...providerCommands);
   }
 
   // ── Online / offline ───────────────────────────────────────────────────────
@@ -1188,9 +1218,15 @@ export class EditorConnection {
             view,
             getPos as () => number | undefined,
             this.datasetteResolver,
+            this.resourceAccessChecker,
           ),
         datasette_embed: (node, view, getPos) =>
-          new DatasetteEmbedView(node, view, getPos as () => number | undefined),
+          new DatasetteEmbedView(
+            node,
+            view,
+            getPos as () => number | undefined,
+            this.resourceAccessChecker,
+          ),
       },
       // Returning null falls through to ProseMirror's default; the cast
       // exists because the upstream type insists on `Slice`.
@@ -1581,6 +1617,7 @@ export class EditorConnection {
     }
     this.linkResolver.dispose();
     this.accessChecker.dispose();
+    this.resourceAccessChecker.dispose();
     this.actorResolver.dispose();
     this.datasetteResolver.dispose();
     if (this.view) {

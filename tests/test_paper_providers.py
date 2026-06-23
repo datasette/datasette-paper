@@ -13,9 +13,11 @@ from datasette.plugins import pm
 
 import datasette_paper  # noqa: F401 — ensures the hookspec is registered
 from datasette_paper.resources import (
+    pickable_sources,
     provider_frontend_assets,
     render_ref,
     resolve_ref,
+    search_resources,
 )
 
 
@@ -48,6 +50,26 @@ class _FakeProvider:
 
     def frontend_assets(self, datasette):
         return {"js": ["/-/static-plugins/fake/embed.js"], "css": ["/-/x.css"]}
+
+    def picker(self):
+        return {"id": "fake", "label": "Fake thing", "icon": "globe", "mode": "block"}
+
+    async def search(self, datasette, actor, q, limit):
+        # A blocked actor sees nothing (the provider's own leak discipline).
+        if actor and actor.get("id") == "blocked":
+            return []
+        items = [
+            {"ref": "/-/fake/1", "kind": "fake-thing", "label": "Apple", "detail": "x"},
+            {
+                "ref": "/-/fake/2",
+                "kind": "fake-thing",
+                "label": "Banana",
+                "detail": "y",
+            },
+        ]
+        if q:
+            items = [i for i in items if q.lower() in i["label"].lower()]
+        return items[:limit]
 
 
 class _FakePlugin:
@@ -112,3 +134,40 @@ async def test_no_providers_means_empty_assets():
     # Without the fixture, no fake provider is registered.
     ds = Datasette(memory=True)
     assert provider_frontend_assets(ds) == {"js": [], "css": []}
+
+
+def test_pickable_sources_lists_provider_picker(ds_with_provider):
+    sources = pickable_sources(ds_with_provider)
+    assert sources == [
+        {"id": "fake", "label": "Fake thing", "icon": "globe", "mode": "block"}
+    ]
+
+
+def test_pickable_sources_empty_without_providers():
+    assert pickable_sources(Datasette(memory=True)) == []
+
+
+@pytest.mark.asyncio
+async def test_search_dispatches_to_provider_source(ds_with_provider):
+    results = await search_resources(
+        ds_with_provider, {"id": "a"}, "ban", 20, source="fake"
+    )
+    assert results == [
+        {"ref": "/-/fake/2", "kind": "fake-thing", "label": "Banana", "detail": "y"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_search_provider_source_honors_leak_discipline(ds_with_provider):
+    results = await search_resources(
+        ds_with_provider, {"id": "blocked"}, "", 20, source="fake"
+    )
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_unknown_source_is_empty(ds_with_provider):
+    results = await search_resources(
+        ds_with_provider, {"id": "a"}, "", 20, source="does-not-exist"
+    )
+    assert results == []

@@ -27,6 +27,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
 import { insertTable } from "./tables";
+import type { ProviderSource } from "./datasetteEmbed";
 
 export interface SlashCommand {
   id: string;
@@ -319,6 +320,8 @@ export interface SlashCommandCallbacks {
   openImageDialog?: () => void;
   /** Open the Datasette embed picker dialog (PaperApp-owned). */
   openDatasetteEmbed?: () => void;
+  /** Open the embed picker scoped to a provider source (e.g. Places map). */
+  openProviderEmbed?: (source: ProviderSource) => void;
 }
 
 function runCommand(cmd: Command): (view: EditorView) => void {
@@ -422,4 +425,23 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
   ];
   return commands;
+}
+
+/**
+ * One `/`-menu command per provider-contributed source (the `/sources`
+ * endpoint), each opening the picker dialog scoped to that source. These are
+ * discovered async at editor startup; `collab.ts` pushes them into the same
+ * command array the popup/keymap already read, so they appear once fetched.
+ */
+export function buildProviderSlashCommands(
+  sources: ProviderSource[],
+  cb: SlashCommandCallbacks = {},
+): SlashCommand[] {
+  return sources.map((source) => ({
+    id: `provider:${source.id}`,
+    label: source.label,
+    keywords: ["embed", "insert", source.id, ...source.label.toLowerCase().split(/\s+/)],
+    icon: source.icon in TOOLBAR_ICONS ? source.icon : "database",
+    run: () => cb.openProviderEmbed?.(source),
+  }));
 }

@@ -19,6 +19,10 @@ import type { EditorView, NodeView } from "prosemirror-view";
 import { TOOLBAR_ICONS } from "./icons";
 import { kindIcon } from "./datasetteEmbed";
 import type { DatasetteResolver, DatasetteStatus } from "./datasetteResolver";
+import {
+  buildAccessBadge,
+  type ResourceAccessChecker,
+} from "./resourceAccessCheck";
 
 /**
  * Display label for a resolved ref, built from its path identity so the pill
@@ -43,17 +47,26 @@ export class DatasetteRefView implements NodeView {
   private ref: string | null;
   private resolver: DatasetteResolver;
   private unsubscribe: (() => void) | null = null;
+  // "Who can't see this" check + subscription + last rendered status (so the
+  // checker can re-append the badge without re-resolving the label).
+  private accessChecker?: ResourceAccessChecker;
+  private accessUnsub: (() => void) | null = null;
+  private lastStatus: DatasetteStatus = { status: "loading" };
 
   constructor(
     node: PMNode,
     _view: EditorView,
     _getPos: () => number | undefined,
     resolver: DatasetteResolver,
+    accessChecker?: ResourceAccessChecker,
   ) {
     this.resolver = resolver;
+    this.accessChecker = accessChecker;
     this.dom = document.createElement("a");
     this.dom.className = "pm-datasette-ref";
     this.ref = node.attrs.ref ?? null;
+    this.accessUnsub =
+      accessChecker?.subscribe(() => this.renderStatus(this.lastStatus)) ?? null;
     this.subscribe();
   }
 
@@ -65,6 +78,7 @@ export class DatasetteRefView implements NodeView {
       return;
     }
     this.dom.setAttribute("title", this.ref);
+    this.accessChecker?.ensure(this.ref);
     this.unsubscribe = this.resolver.request(this.ref, (s) =>
       this.renderStatus(s),
     );
@@ -83,6 +97,7 @@ export class DatasetteRefView implements NodeView {
   }
 
   private renderStatus(status: DatasetteStatus): void {
+    this.lastStatus = status;
     this.dom.className = "pm-datasette-ref";
     const raw = this.ref ?? "?";
     if (status.status === "loading") {
@@ -101,6 +116,13 @@ export class DatasetteRefView implements NodeView {
       this.dom.setAttribute("href", status.href);
       // Provider refs may hint an icon (e.g. "globe"); else fall back by kind.
       this.setBody(status.icon ?? kindIcon(status.kind), refLabel(status));
+      // Only a resolvable (ok) ref carries a cross-access badge — a denied /
+      // missing pill already shows no label, so a "who can't see it" hint
+      // would be meaningless (and a leak vector).
+      const badge = buildAccessBadge(
+        this.ref ? this.accessChecker?.get(this.ref) : undefined,
+      );
+      if (badge) this.dom.appendChild(badge);
     }
   }
 
@@ -126,5 +148,7 @@ export class DatasetteRefView implements NodeView {
   destroy(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    this.accessUnsub?.();
+    this.accessUnsub = null;
   }
 }

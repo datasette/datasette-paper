@@ -24,6 +24,10 @@ import {
   type ExternalEmbedPayload,
 } from "./datasetteEmbed";
 import { embedRegistry } from "./embedRegistry";
+import {
+  buildAccessBadge,
+  type ResourceAccessChecker,
+} from "./resourceAccessCheck";
 
 const ROW_LIMIT_OPTIONS = [10, 25, 100];
 const DEFAULT_ROW_LIMIT = 10;
@@ -46,8 +50,18 @@ export class DatasetteEmbedView implements NodeView {
   private menuEl: HTMLElement | null = null;
   // Cleanup returned by an external renderer's mount(), if any.
   private cleanupExternal: (() => void) | null = null;
+  // "Who can't see this" check + its subscription + the header slot the badge
+  // lives in (rebuilt by header(); updateAccessBadge() refills it on notify).
+  private accessChecker?: ResourceAccessChecker;
+  private accessUnsub: (() => void) | null = null;
+  private accessSlot: HTMLElement | null = null;
 
-  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
+  constructor(
+    node: PMNode,
+    view: EditorView,
+    getPos: () => number | undefined,
+    accessChecker?: ResourceAccessChecker,
+  ) {
     this.view = view;
     this.getPos = getPos;
     this.node = node;
@@ -55,6 +69,11 @@ export class DatasetteEmbedView implements NodeView {
     this.dom.className = "pm-datasette-embed";
     this.ref = node.attrs.ref ?? null;
     this.mode = node.attrs.mode ?? "table";
+    this.accessChecker = accessChecker;
+    // Re-render only the badge slot when the check resolves (cheap; never
+    // re-runs the data load()).
+    this.accessUnsub =
+      accessChecker?.subscribe(() => this.updateAccessBadge()) ?? null;
     void this.load();
   }
 
@@ -69,6 +88,7 @@ export class DatasetteEmbedView implements NodeView {
       this.render({ status: "not_found" });
       return;
     }
+    this.accessChecker?.ensure(this.ref);
     const payload = await fetchEmbed(this.ref, this.limit);
     // A newer load() (ref change / refresh) superseded this one.
     if (token !== this.token) return;
@@ -105,6 +125,13 @@ export class DatasetteEmbedView implements NodeView {
     }
     labelEl.textContent = label; // text node — never innerHTML
     head.appendChild(labelEl);
+
+    // Cross-access badge slot — filled now and refreshed on checker notify.
+    const slot = document.createElement("span");
+    slot.className = "pm-datasette-embed-warn-slot";
+    this.accessSlot = slot;
+    head.appendChild(slot);
+    this.updateAccessBadge();
 
     const refresh = document.createElement("button");
     refresh.type = "button";
@@ -234,6 +261,7 @@ export class DatasetteEmbedView implements NodeView {
   }
 
   private renderLoading(): void {
+    this.accessSlot = null; // no header in this state
     this.dom.replaceChildren();
     this.dom.classList.remove(
       "pm-datasette-embed--denied",
@@ -246,6 +274,7 @@ export class DatasetteEmbedView implements NodeView {
   }
 
   private renderPlaceholder(modifier: string, text: string): void {
+    this.accessSlot = null; // no header in this state
     this.dom.replaceChildren();
     this.dom.classList.add(modifier);
     const el = document.createElement("div");
@@ -324,6 +353,17 @@ export class DatasetteEmbedView implements NodeView {
     link.textContent = `Open ${payload.label} ↗`;
     fallback.appendChild(link);
     host.appendChild(fallback);
+  }
+
+  /** Refill the header's badge slot from the current access-gap report. Only
+   * the block kinds with a header() show it; placeholder states have no slot. */
+  private updateAccessBadge(): void {
+    const slot = this.accessSlot;
+    if (!slot) return;
+    slot.replaceChildren();
+    if (this.ref == null) return;
+    const badge = buildAccessBadge(this.accessChecker?.get(this.ref));
+    if (badge) slot.appendChild(badge);
   }
 
   private disposeExternal(): void {
@@ -484,6 +524,8 @@ export class DatasetteEmbedView implements NodeView {
   destroy(): void {
     this.closeMenu();
     this.disposeExternal();
+    this.accessUnsub?.();
+    this.accessUnsub = null;
   }
 
   // We own the whole managed subtree — keep PM out of it, but let interactive

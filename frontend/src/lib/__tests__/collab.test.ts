@@ -505,6 +505,14 @@ describe("send() 410 response", () => {
           json: async () => ({}),
         });
       }
+      // Provider-source discovery (fired once at construction) — not a bootstrap.
+      if ((url as string).endsWith("/datasette/sources")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ sources: [] }),
+        });
+      }
       // Bootstrap GET
       bootstrapCallCount++;
       return Promise.resolve({
@@ -2865,25 +2873,34 @@ describe("step-apply error handling", () => {
   it("send: 422 from /events fires onStepError with phase=send and locks read-only", async () => {
     const el = makeEl();
 
-    // Bootstrap is happy; the 422 only fires on the subsequent POST /events.
-    const fetchMock = vi
-      .fn()
-      .mockImplementationOnce(async () => ({
+    // Bootstrap is happy; the 422 only fires on the POST /events. URL-aware so
+    // the construction-time /sources discovery fetch doesn't consume a slot.
+    const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+      if (opts?.method === "POST" && (url as string).endsWith("/events")) {
+        return Promise.resolve({
+          ok: false,
+          status: 422,
+          statusText: "Unprocessable Entity",
+          json: async () => ({
+            error: "invalid_step",
+            step_index: 0,
+            message: "Invalid content for node list_item",
+          }),
+        });
+      }
+      if ((url as string).endsWith("/datasette/sources")) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ sources: [] }),
+        });
+      }
+      return Promise.resolve({
         ok: true,
         status: 200,
         json: async () => ({ ...BOOTSTRAP }),
-      }))
-      // Second fetch (POST /events) returns 422.
-      .mockImplementationOnce(async () => ({
-        ok: false,
-        status: 422,
-        statusText: "Unprocessable Entity",
-        json: async () => ({
-          error: "invalid_step",
-          step_index: 0,
-          message: "Invalid content for node list_item",
-        }),
-      }));
+      });
+    });
     (globalThis as Record<string, unknown>).fetch = fetchMock;
 
     const errors: StepApplyError[] = [];

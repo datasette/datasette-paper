@@ -353,6 +353,62 @@ def _provider_for(datasette, ref):
     return _CORE_PROVIDER
 
 
+# Identifier for the built-in core-Datasette picker source. Reserved so an
+# external provider can't shadow it.
+CORE_SOURCE_ID = "datasette"
+
+
+def pickable_sources(datasette):
+    """Browsable insert "sources" contributed by external providers — the
+    optional `picker()` method on a provider returns ``{id, label, icon,
+    mode?}`` to opt in (e.g. datasette-places → "Places map"). The built-in
+    core-Datasette source is offered by the frontend directly and is NOT
+    listed here. Returns a deduped list (first declaration of an id wins;
+    `CORE_SOURCE_ID` is reserved)."""
+    sources = []
+    seen = {CORE_SOURCE_ID}
+    for provider in _external_providers(datasette):
+        getter = getattr(provider, "picker", None)
+        if getter is None:
+            continue
+        try:
+            spec = getter() or None
+        except Exception:
+            logger.exception("paper_resource_provider.picker raised")
+            continue
+        if not isinstance(spec, dict):
+            continue
+        source_id = spec.get("id")
+        if not source_id or source_id in seen:
+            continue
+        seen.add(source_id)
+        sources.append(
+            {
+                "id": source_id,
+                "label": spec.get("label") or source_id,
+                "icon": spec.get("icon") or "database",
+                "mode": spec.get("mode") or "block",
+            }
+        )
+    return sources
+
+
+def _provider_by_source_id(datasette, source_id):
+    """The external provider whose `picker()` declares `source_id`, or None."""
+    for provider in _external_providers(datasette):
+        getter = getattr(provider, "picker", None)
+        if getter is None:
+            continue
+        try:
+            spec = getter() or {}
+        except Exception:
+            logger.exception("paper_resource_provider.picker raised")
+            continue
+        if isinstance(spec, dict) and spec.get("id") == source_id:
+            return provider
+    return None
+
+
 def provider_frontend_assets(datasette):
     """Dedup'd JS/CSS asset URLs declared by all registered providers, for
     injection into the paper editor page (see `extra_js_urls` in __init__)."""
@@ -457,9 +513,28 @@ async def render_ref(datasette, actor, ref, mode="table", limit=DEFAULT_EMBED_LI
     )
 
 
-async def search_resources(datasette, actor, q, limit=20):
-    """Databases / tables / views the actor can see whose name matches ``q``
-    (prefix matches first). Excludes the internal DB and Paper's own tables."""
+async def search_resources(datasette, actor, q, limit=20, source=None):
+    """Resources the actor can see whose name matches ``q`` (prefix first).
+
+    With no ``source`` (or the reserved ``CORE_SOURCE_ID``) this searches core
+    Datasette databases / tables / views — excluding the internal DB and
+    Paper's own tables. With a provider ``source`` id it dispatches to that
+    provider's optional ``search(datasette, actor, q, limit)`` method (e.g.
+    datasette-places searching the actor's place lists). An unknown source, or
+    a provider without ``search``, yields ``[]`` — permission filtering and
+    leak discipline are the provider's responsibility, same as ``resolve``.
+    """
+    if source and source != CORE_SOURCE_ID:
+        provider = _provider_by_source_id(datasette, source)
+        searcher = getattr(provider, "search", None) if provider else None
+        if searcher is None:
+            return []
+        try:
+            results = await searcher(datasette, actor, q or "", limit)
+        except Exception:
+            logger.exception("paper_resource_provider.search raised for %r", source)
+            return []
+        return list(results or [])[:limit]
     q_low = (q or "").lower()
     results = []
     for db_name, db in datasette.databases.items():
@@ -497,3 +572,30 @@ async def search_resources(datasette, actor, q, limit=20):
         key=lambda r: (not r["label"].lower().startswith(q_low), r["label"].lower())
     )
     return results[:limit]
+
+
+async def resource_access_gap(datasette, doc_id, ref):
+    """Which named viewers of ``doc_id`` can't see the resource ``ref``.
+
+    The embed analogue of ``link_access_check`` (06 §#8): a best-effort
+    authoring aid, never a security control. For each named paper-view
+    collaborator we ``resolve`` the ref *as that actor* through the same
+    provider dispatch the embed render uses — a non-``ok`` status means they
+    can't see it. ``open_audience`` mirrors ``named_viewers``: the doc's
+    audience can't be fully enumerated, so the answer is necessarily partial.
+
+    Returns ``{"gap": bool, "missing": [actor_id…], "open_audience": bool}``.
+    """
+    from .permissions import named_viewers
+
+    named, open_audience = await named_viewers(datasette, doc_id)
+    missing = []
+    for actor_id in named:
+        result = await resolve_ref(datasette, {"id": actor_id}, ref)
+        if (result or {}).get("status") != "ok":
+            missing.append(actor_id)
+    return {
+        "gap": bool(missing),
+        "missing": sorted(missing),
+        "open_audience": open_audience,
+    }

@@ -427,6 +427,25 @@ async def link_access_check(datasette, request, doc_id: int):
     return Response.json({"links": out})
 
 
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/resource-access-check$")
+async def resource_access_check(datasette, request, doc_id: int):
+    """Whether some named collaborator of this doc can't view an embedded
+    Datasette/provider resource (``?ref=…``) — the embed analogue of
+    ``link_access_check``. Best-effort authoring aid (06 §#8), never a security
+    control; edit-gated like its sibling so only editors pay for the check.
+
+    Response: ``{"gap", "missing", "open_audience"}`` (same shape as one
+    ``links`` entry above). A missing/blank ref → no gap.
+    """
+    await ensure_paper_edit(datasette, request, doc_id)
+    ref = (request.args.get("ref") or "").strip()
+    if not ref:
+        return Response.json({"gap": False, "missing": [], "open_audience": False})
+    from ..resources import resource_access_gap
+
+    return Response.json(await resource_access_gap(datasette, doc_id, ref))
+
+
 @router.GET(r"^/-/paper/api/links/graph$")
 async def links_graph(datasette, request):
     # Ungated — the graph is built only from viewable_doc_ids (acl-filtered).

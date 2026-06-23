@@ -6,13 +6,22 @@
    * is handed back via `oninsert`; the caller turns it into a `datasette_embed`
    * node (see datasetteEmbed.ts `insertDatasetteEmbed`).
    */
-  import { searchResources, type SearchResult } from "./datasetteEmbed";
+  import {
+    searchResources,
+    type SearchResult,
+    type ProviderSource,
+  } from "./datasetteEmbed";
 
   let {
     open = $bindable(false),
+    source = null,
     oninsert,
   }: {
     open?: boolean;
+    // null → the built-in core-Datasette picker (search tables/views/dbs +
+    // paste a ref path). A ProviderSource → scope search to that provider
+    // (e.g. "Places map") and insert with the provider's render mode.
+    source?: ProviderSource | null;
     oninsert: (ref: string, mode: string) => void;
   } = $props();
 
@@ -22,6 +31,14 @@
   let mode = $state("table");
   let results = $state<SearchResult[]>([]);
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // Core lets the user pick a table render mode + paste a raw ref path;
+  // provider sources don't (the provider owns rendering + its own URL space).
+  let isCore = $derived(source === null);
+  let title = $derived(isCore ? "Insert Datasette embed" : `Insert ${source!.label}`);
+  let placeholder = $derived(
+    isCore ? "Search tables, views, databases…" : `Search ${source!.label.toLowerCase()}…`,
+  );
 
   function reset() {
     query = "";
@@ -43,7 +60,7 @@
   });
 
   async function runSearch(q: string) {
-    results = await searchResources(q, 20);
+    results = await searchResources(q, 20, source?.id);
   }
 
   function onQueryInput() {
@@ -52,7 +69,8 @@
   }
 
   function choose(ref: string) {
-    oninsert(ref, mode);
+    // Provider sources carry a fixed render mode; core uses the dropdown.
+    oninsert(ref, source ? source.mode : mode);
     open = false;
   }
 
@@ -75,7 +93,7 @@
   }}
 >
   <div class="ds-embed-dialog__head">
-    <strong>Insert Datasette embed</strong>
+    <strong>{title}</strong>
     <button type="button" class="ds-embed-dialog__x" aria-label="Close" onclick={cancel}
       >×</button
     >
@@ -84,7 +102,7 @@
   <input
     class="ds-embed-search"
     type="text"
-    placeholder="Search tables, views, databases…"
+    {placeholder}
     bind:value={query}
     oninput={onQueryInput}
   />
@@ -95,7 +113,7 @@
         <button type="button" class="ds-embed-result" onclick={() => choose(r.ref)}>
           <span class="ds-embed-result-kind">{r.kind}</span>
           <span class="ds-embed-result-label">{r.label}</span>
-          <span class="ds-embed-result-db">{r.db}</span>
+          <span class="ds-embed-result-db">{r.detail ?? r.db ?? ""}</span>
         </button>
       </li>
     {:else}
@@ -103,38 +121,44 @@
     {/each}
   </ul>
 
-  <div class="ds-embed-manual">
-    <label class="ds-embed-manual-label" for="ds-embed-manual-input">
-      …or a ref path
-    </label>
-    <input
-      id="ds-embed-manual-input"
-      class="ds-embed-manual-input"
-      type="text"
-      placeholder="/db/table or /db/table/42"
-      bind:value={manualRef}
-      onkeydown={(e) => {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          insertManual();
-        }
-      }}
-    />
-    <select class="ds-embed-mode" bind:value={mode} aria-label="Render mode">
-      <option value="table">table</option>
-      <option value="row">row</option>
-    </select>
-  </div>
+  {#if isCore}
+    <div class="ds-embed-manual">
+      <label class="ds-embed-manual-label" for="ds-embed-manual-input">
+        …or a ref path
+      </label>
+      <input
+        id="ds-embed-manual-input"
+        class="ds-embed-manual-input"
+        type="text"
+        placeholder="/db/table or /db/table/42"
+        bind:value={manualRef}
+        onkeydown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            insertManual();
+          }
+        }}
+      />
+      <select class="ds-embed-mode" bind:value={mode} aria-label="Render mode">
+        <option value="table">table</option>
+        <option value="row">row</option>
+      </select>
+    </div>
 
-  <div class="ds-embed-dialog__foot">
-    <button type="button" class="ds-embed-cancel-btn" onclick={cancel}>Cancel</button>
-    <button
-      type="button"
-      class="ds-embed-insert-btn"
-      disabled={!manualRef.trim()}
-      onclick={insertManual}>Insert ref</button
-    >
-  </div>
+    <div class="ds-embed-dialog__foot">
+      <button type="button" class="ds-embed-cancel-btn" onclick={cancel}>Cancel</button>
+      <button
+        type="button"
+        class="ds-embed-insert-btn"
+        disabled={!manualRef.trim()}
+        onclick={insertManual}>Insert ref</button
+      >
+    </div>
+  {:else}
+    <div class="ds-embed-dialog__foot">
+      <button type="button" class="ds-embed-cancel-btn" onclick={cancel}>Cancel</button>
+    </div>
+  {/if}
 </dialog>
 
 <style>

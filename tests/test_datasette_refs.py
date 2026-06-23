@@ -265,3 +265,26 @@ async def test_embed_not_found_carries_no_data():
     ds = await _make_ds()
     payload = await _embed(ds, "alice", "/data/nope")
     assert payload == {"status": "not_found"}
+
+
+@pytest.mark.asyncio
+async def test_sources_endpoint_empty_without_providers():
+    # No paper_resource_provider registered in this suite → no pickable sources.
+    ds = await _make_ds()
+    r = await ds.client.get(
+        "/-/paper/api/datasette/sources", cookies=_cookies(ds, "alice")
+    )
+    assert r.status_code == 200
+    assert r.json() == {"sources": []}
+
+
+@pytest.mark.asyncio
+async def test_search_unknown_source_returns_empty():
+    # A source id with no matching provider yields [] (never core fallback).
+    ds = await _make_ds()
+    r = await ds.client.get(
+        "/-/paper/api/datasette/search?q=&source=nope",
+        cookies=_cookies(ds, "alice"),
+    )
+    assert r.status_code == 200
+    assert r.json()["results"] == []

@@ -16,7 +16,7 @@
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
   import { insertImage } from "./image";
-  import { insertDatasetteEmbed } from "./datasetteEmbed";
+  import { insertDatasetteEmbed, type ProviderSource } from "./datasetteEmbed";
 
   let { docId }: { docId: string } = $props();
 
@@ -25,6 +25,10 @@
   // dialog is opened by the slash menu and context-aware paste.
   let imageDialogOpen = $state(false);
   let embedDialogOpen = $state(false);
+  // The embed picker is one dialog. `null` source → the core Datasette picker
+  // (slash "Datasette embed" / context paste); a ProviderSource → the picker
+  // scoped to that provider (e.g. "Places map"), opened by a provider command.
+  let embedDialogSource = $state<ProviderSource | null>(null);
 
   let editorEl: HTMLDivElement | undefined = $state(undefined);
 
@@ -97,6 +101,11 @@
           imageDialogOpen = true;
         },
         onInsertDatasetteEmbed: () => {
+          embedDialogSource = null;
+          embedDialogOpen = true;
+        },
+        onInsertProviderEmbed: (source) => {
+          embedDialogSource = source;
           embedDialogOpen = true;
         },
       },
@@ -247,7 +256,11 @@
   <div class="editor-host" bind:this={editorEl}></div>
   <LinksPanel {docId} />
   <ImageDialog bind:open={imageDialogOpen} oninsert={onImageInsert} />
-  <DatasetteEmbedDialog bind:open={embedDialogOpen} oninsert={onEmbedInsert} />
+  <DatasetteEmbedDialog
+    bind:open={embedDialogOpen}
+    source={embedDialogSource}
+    oninsert={onEmbedInsert}
+  />
 </div>
 
 <style>
@@ -533,6 +546,28 @@
     font-size: 0.85em;
     cursor: help;
     text-decoration: none;
+  }
+  /* Same cross-access affordances for datasette_ref pills and datasette_embed
+   * blocks (the resource analogue of the paper-link badges above). */
+  .editor-host :global(.pm-resource-warn) {
+    display: inline;
+    margin-left: 0.25em;
+    color: #b45309;
+    font-size: 0.85em;
+    cursor: help;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-resource-hint) {
+    display: inline;
+    margin-left: 0.25em;
+    color: #999;
+    font-size: 0.85em;
+    cursor: help;
+    text-decoration: none;
+  }
+  .editor-host :global(.pm-datasette-embed-warn-slot) {
+    display: inline-flex;
+    align-items: center;
   }
 
   /* mention inline atom — rendered by MentionView, resolved live via the

@@ -19,6 +19,7 @@ from ..resources import (
     DEFAULT_EMBED_LIMIT,
     MAX_EMBED_LIMIT,
     MAX_RESOLVE_REFS,
+    pickable_sources,
     render_ref,
     resolve_refs,
     search_resources,
@@ -35,15 +36,26 @@ async def datasette_resolve(datasette, request):
     return Response.json({"refs": out})
 
 
+@router.GET(r"^/-/paper/api/datasette/sources$")
+async def datasette_sources(datasette, request):
+    """Browsable insert sources contributed by external providers (e.g. a
+    "Places map" picker). The built-in core-Datasette embed is offered by the
+    frontend directly, so it's not listed here."""
+    return Response.json({"sources": pickable_sources(datasette)})
+
+
 @router.GET(r"^/-/paper/api/datasette/search$")
 async def datasette_search(datasette, request):
-    """Name-search visible databases / tables / views for the picker."""
+    """Name-search resources for the picker. With no ``source`` this searches
+    visible databases / tables / views; with a provider ``source`` id it
+    dispatches to that provider's own search (e.g. the actor's place lists)."""
     q = (request.args.get("q") or "").strip()
+    source = (request.args.get("source") or "").strip() or None
     try:
         limit = min(int(request.args.get("limit") or 20), 50)
     except ValueError:
         limit = 20
-    results = await search_resources(datasette, request.actor, q, limit)
+    results = await search_resources(datasette, request.actor, q, limit, source=source)
     return Response.json({"results": results})
 
 
