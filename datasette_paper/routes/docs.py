@@ -237,12 +237,15 @@ async def mention_search(datasette, request, doc_id: int):
 
 @router.POST(r"^/-/paper/api/actors/resolve$")
 async def resolve_actors(datasette, request):
-    # Ungated, mirroring resolve_links — display names are low-sensitivity
-    # (already shown as created_by_name to anyone who can list docs).
+    # Name + avatar are profile data, so the lookup is gated on
+    # user-profiles' `profile_access` action. Rather than 403 (which wedges
+    # mention chips on "loading"), we degrade like resolve_links: without it,
+    # each id echoes back as its own name — the caller already supplied it.
     body = await read_json_body(request)
     raw = body.get("ids") or []
     ids = [str(i) for i in raw[:200] if i]
-    profiles = await resolve_actor_profiles(datasette, ids)
+    may_resolve = await datasette.allowed(action="profile_access", actor=request.actor)
+    profiles = await resolve_actor_profiles(datasette, ids) if may_resolve else {}
     out = {}
     for aid in ids:
         prof = profiles.get(aid) or {}
