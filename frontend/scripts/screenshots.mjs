@@ -202,6 +202,17 @@ Type \`@\` anywhere to mention a teammate — the pill resolves to their live
 display name and links straight to their profile.
 `;
 
+// A doc with inline \`#tags\` in the body — navigational anchors, a separate
+// namespace from the document-level metadata tags.
+const INLINE_TAGS = `# Release notes
+
+This work spans [#roadmap](tag:roadmap) and [#q3-planning](tag:q3-planning),
+with follow-ups filed under [#tech-debt](tag:tech-debt).
+
+Type \`#\` anywhere in the body to drop an inline tag — an in-document anchor,
+distinct from a paper's metadata tags shown on the index.
+`;
+
 async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -234,13 +245,14 @@ async function seed(ctx) {
   // The rich doc is owned by ACTOR so its share dialog shows the manager view.
   const richId = await create("Q3 Planning", ACTOR, RICH);
   const mentionId = await create("Standup", ACTOR, MENTIONS);
+  const inlineTagId = await create("Release notes", ACTOR, INLINE_TAGS);
   // Document-level tags: populate a vocabulary so the index shows per-row tag
   // chips + the filter bar, and the owner-only tag editor has content.
   await tagDoc(roadmapId, ["roadmap", "q3"], "bob");
   await tagDoc(designId, ["design"], "carol");
   await tagDoc(budgetId, ["budget", "q3"], "bob");
   await tagDoc(richId, ["roadmap", "q3"], ACTOR);
-  return { richId, mentionId };
+  return { richId, mentionId, inlineTagId };
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +317,7 @@ async function shotUnion(page, selectors, file, pad = 16) {
 // ---------------------------------------------------------------------------
 // Shots. Each gets a fresh page from the shared (cookie-bearing) context.
 function buildShots(ctx, ids) {
-  const { richId, mentionId } = ids;
+  const { richId, mentionId, inlineTagId } = ids;
   // Stability CSS is injected on the context via addInitScript (see main), so
   // it survives every navigation — addStyleTag here would be discarded by the
   // subsequent page.goto().
@@ -360,6 +372,33 @@ function buildShots(ctx, ids) {
       );
       await freezeVolatile(page);
       await page.screenshot({ path: out("mentions") });
+      await page.close();
+    },
+
+    "inline-tags": async () => {
+      const page = await newPage();
+      await gotoEditor(page, inlineTagId);
+      // Wait for the inline #tag pills to render.
+      await page.waitForFunction(
+        () => document.querySelectorAll(".pm-tag").length >= 3,
+        { timeout: 10_000 },
+      );
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("inline-tags") });
+      await page.close();
+    },
+
+    "inline-tag-popup": async () => {
+      const page = await newPage();
+      await gotoEditor(page, inlineTagId);
+      // Land the cursor at the end of the intro paragraph, then trigger the
+      // `#` suggest popup with a partial query.
+      await page.locator(".ProseMirror p").first().click();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" #road");
+      await page.locator(".pm-tag-popup").waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("inline-tag-popup") });
       await page.close();
     },
 
