@@ -576,3 +576,25 @@ def m005_links(db: Database):
             ON _datasette_paper_link(dst_doc_id);
         """
     )
+
+
+@migrations()
+def m006_doc_tags(db: Database):
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _datasette_paper_doc_tag (
+            --! Document-level tags: manual metadata on a whole doc, used to
+            --! filter/group the document list. Distinct from inline #tag
+            --! nodes in the doc body (separate namespace, no auto-rollup).
+            doc_id     INTEGER NOT NULL REFERENCES _datasette_paper_doc(id) ON DELETE CASCADE,
+            --- Normalized tag (trim + lowercase + dashed); see normalize_tag.
+            tag        TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            PRIMARY KEY (doc_id, tag)
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_tag_doc
+            ON _datasette_paper_doc_tag(doc_id);
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_tag_tag
+            ON _datasette_paper_doc_tag(tag);
+        """
+    )
