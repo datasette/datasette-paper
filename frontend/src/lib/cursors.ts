@@ -118,6 +118,9 @@ export function cursorReporterPlugin(opts: CursorReporterOpts): Plugin {
 export interface RemoteUser {
   clientID: number;
   actorID: string | null;
+  // Resolved display name (datasette-user-profiles); falls back to the
+  // actor id server-side, so it's null only for anonymous clients.
+  name?: string | null;
   anchor: number;
   head: number;
 }
@@ -161,8 +164,11 @@ export function remoteCursorsPlugin(): Plugin<DecorationSet> {
         for (const u of meta.users) {
           if (u.clientID === meta.selfClientID) continue;
           if (meta.selfActor !== null && u.actorID === meta.selfActor) continue;
+          // Colour keys off the stable actor/client id; only the label text
+          // prefers the resolved display name.
           const color = colorFor(u.actorID ?? u.clientID);
-          const label = u.actorID ?? `user ${u.clientID.toString(36).slice(0, 4)}`;
+          const label =
+            u.name ?? u.actorID ?? `user ${u.clientID.toString(36).slice(0, 4)}`;
           const head = clampPos(u.head, docSize);
           const anchor = clampPos(u.anchor, docSize);
           // Selection range highlight (only if spanning at least one char)

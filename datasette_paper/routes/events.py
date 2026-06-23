@@ -195,9 +195,12 @@ async def post_presence(datasette, request, doc_id: str):
         return Response.json({"error": "invalid presence body"}, status=400)
     registry = get_registry(datasette)
     instance = await registry.get(db, doc_id_int)
+    me = actor_id(request)
+    # Cache the display name before broadcasting so the payload carries it.
+    await instance.ensure_actor_name(datasette, me)
     instance.update_presence(
         client_id=client_id,
-        actor_id=actor_id(request),
+        actor_id=me,
         anchor=anchor,
         head=head,
     )

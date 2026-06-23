@@ -57,6 +57,9 @@ logger = logging.getLogger("datasette_paper.instance")
 MAX_INSTANCES = 20
 MAX_TAIL = 10000
 SNAPSHOT_THRESHOLD = 100
+# How long a resolved display name stays cached before the next presence
+# POST re-resolves it, so a profile rename surfaces without re-hydrating.
+ACTOR_NAME_TTL_SECONDS = 300
 
 # Sentinel client_id stamped on steps produced by the server itself (the
 # markdown append/ingest API), as opposed to a prosemirror-collab client.
@@ -109,6 +112,11 @@ class Instance:
         # client_id → {actor_id, anchor, head, ts}. Updated on every
         # presence POST and pruned when subscribers leave.
         self.presence: dict[int, dict] = {}
+        # actor_id → (display name, resolved-at monotonic ts). Populated
+        # lazily by ``ensure_actor_name`` (re-resolved past
+        # ACTOR_NAME_TTL_SECONDS) and surfaced in the presence payload so
+        # remote cursors show a profile name rather than the raw id.
+        self.actor_names: dict[str, tuple[str, float]] = {}
         self.last_active: float = time.monotonic()
         # Cached live doc (snapshot + applied steps_tail). Lazy: built on
         # first materialize call, invalidated by version mismatch.
@@ -750,6 +758,32 @@ class Instance:
         }
         self._broadcast_presence_nowait()
 
+    async def ensure_actor_name(self, datasette, actor_id: Optional[str]) -> None:
+        """Resolve and cache an actor's display name, refreshing if stale.
+
+        Resolution goes through datasette-user-profiles with the same
+        fallback chain as the rest of the plugin, ending at the actor id
+        itself — so the cache always holds something printable. Cheap and
+        bounded: at most one resolution per distinct participant per
+        ACTOR_NAME_TTL_SECONDS window.
+        """
+        if not actor_id:
+            return
+        cached = self.actor_names.get(actor_id)
+        if cached and (time.monotonic() - cached[1]) < ACTOR_NAME_TTL_SECONDS:
+            return
+        from .util import resolve_actor_profiles
+
+        profiles = await resolve_actor_profiles(datasette, [actor_id])
+        prof = profiles.get(actor_id)
+        # resolve_actor_profiles falls back to the id, so name is non-empty.
+        name = (prof or {}).get("name") or actor_id
+        self.actor_names[actor_id] = (name, time.monotonic())
+
+    def _name_for(self, actor_id: Optional[str]) -> Optional[str]:
+        entry = self.actor_names.get(actor_id) if actor_id else None
+        return entry[0] if entry else None
+
     def _presence_payload(self) -> dict:
         return {
             "kind": "presence",
@@ -757,6 +791,7 @@ class Instance:
                 {
                     "clientID": cid,
                     "actorID": entry["actor_id"],
+                    "name": self._name_for(entry["actor_id"]),
                     "anchor": entry["anchor"],
                     "head": entry["head"],
                 }
