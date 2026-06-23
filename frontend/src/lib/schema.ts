@@ -76,6 +76,35 @@ const paperLinkNode: NodeSpec = {
   ],
 };
 
+// Inline atom for @mentions — id-only (`actorId`), authored via the `@`
+// autocomplete and rendered by a NodeView (mentionView.ts). The toDOM here is
+// a static fallback. Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as `[@label](actor:id)`.
+const mentionNode: NodeSpec = {
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: { actorId: { default: null } },
+  parseDOM: [
+    {
+      tag: "span[data-mention]",
+      getAttrs: (el) => ({
+        actorId: (el as HTMLElement).getAttribute("data-mention") || null,
+      }),
+    },
+  ],
+  toDOM: (node) => [
+    "span",
+    {
+      "data-mention": String(node.attrs.actorId ?? ""),
+      class: "pm-mention",
+    },
+    `@${node.attrs.actorId ?? "?"}`,
+  ],
+};
+
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
     group: "block",
@@ -138,6 +167,7 @@ export const schema = new Schema({
   nodes: baseNodes
     .append({ placeholder: placeholderNode })
     .append({ paper_link: paperLinkNode })
+    .append({ mention: mentionNode })
     .append(taskNodes)
     .append({ ...tNodes, table: tableWithName }),
   marks: baseMarks,

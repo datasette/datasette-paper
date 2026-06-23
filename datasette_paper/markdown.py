@@ -7,22 +7,41 @@ and a few corner cases (e.g. tight vs loose lists, exact bullet markers)
 may differ.
 """
 
+import contextvars
 import re
-from typing import List
+from typing import List, Optional
+from urllib.parse import quote
+
+# Optional {actor_id: display_name} map consulted by the `mention` inline
+# renderer, scoped to a single ``doc_to_markdown`` call. A ContextVar avoids
+# threading the map through every recursive `_render_*` helper. Absent a name
+# the renderer falls back to the actor id, which keeps the doc→md→doc
+# round-trip (e.g. the agent edit path) lossless.
+_actor_names: contextvars.ContextVar[dict] = contextvars.ContextVar(
+    "paper_actor_names", default={}
+)
 
 
-def doc_to_markdown(doc: dict) -> str:
-    """Serialize a ProseMirror doc to a markdown string ending in a newline."""
+def doc_to_markdown(doc: dict, actor_names: Optional[dict] = None) -> str:
+    """Serialize a ProseMirror doc to a markdown string ending in a newline.
+
+    ``actor_names`` optionally maps actor ids to display names for `mention`
+    nodes; when omitted, mentions render with the actor id as their label.
+    """
     if doc.get("type") != "doc":
         raise ValueError("expected top-level 'doc' node")
-    blocks = doc.get("content") or []
-    out: List[str] = []
-    for i, block in enumerate(blocks):
-        if i:
-            out.append("\n")
-        out.append(_render_block(block))
-    text = "".join(out).rstrip() + "\n"
-    return text
+    token = _actor_names.set(actor_names or {})
+    try:
+        blocks = doc.get("content") or []
+        out: List[str] = []
+        for i, block in enumerate(blocks):
+            if i:
+                out.append("\n")
+            out.append(_render_block(block))
+        text = "".join(out).rstrip() + "\n"
+        return text
+    finally:
+        _actor_names.reset(token)
 
 
 def _render_block(node: dict) -> str:
@@ -417,6 +436,15 @@ def _render_inlines(nodes: list) -> str:
         elif t == "paper_link":
             doc_id = (n.get("attrs") or {}).get("docId")
             out.append(f"[[{doc_id}]]")
+        elif t == "mention":
+            actor_id = (n.get("attrs") or {}).get("actorId") or ""
+            label = _actor_names.get().get(actor_id) or actor_id
+            # `[@Name](actor:<id>)` — `@` inside the link text so it renders
+            # as a single "@Name" link; the `actor:` scheme lets the parser
+            # detect mentions unambiguously. Escape `]` in the label and
+            # percent-encode the id so the link form stays well-formed.
+            safe_label = label.replace("]", "\\]")
+            out.append(f"[@{safe_label}](actor:{quote(actor_id, safe='')})")
 
     close_through(0)
     return "".join(out)

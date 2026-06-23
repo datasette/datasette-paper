@@ -241,6 +241,28 @@ class TestInlineNodes:
         links = [n for n in content if n["type"] == "paper_link"]
         assert [link["attrs"]["docId"] for link in links] == [1, 2]
 
+    def test_mention_from_actor_scheme_link(self):
+        doc = parse_and_validate("Hi [@Alice Smith](actor:alice-id) there\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["text", "mention", "text"]
+        assert content[0]["text"] == "Hi "
+        assert content[1]["attrs"]["actorId"] == "alice-id"
+        assert "marks" not in content[1]
+        assert content[2]["text"] == " there"
+
+    def test_mention_percent_decodes_actor_id(self):
+        doc = parse_and_validate("[@Team](actor:team%2Feng%20dept)\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["mention"]
+        assert content[0]["attrs"]["actorId"] == "team/eng dept"
+
+    def test_ordinary_link_is_not_a_mention(self):
+        doc = parse_and_validate("see [docs](https://example.com/y)\n")
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "mention" for n in content)
+        link = content[-1]
+        assert link["marks"][0]["attrs"]["href"] == "https://example.com/y"
+
 
 # ---------------------------------------------------------------------------
 # Lists
@@ -478,3 +500,28 @@ def test_image_roundtrips_through_serializer():
     md1 = doc_to_markdown(doc1)
     doc2 = markdown_to_doc(md1)
     assert doc1 == doc2
+
+
+def test_mention_roundtrips_through_serializer():
+    src = "Hi [@Alice](actor:alice-id) there\n"
+    doc1 = parse_and_validate(src)
+    md1 = doc_to_markdown(doc1)
+    doc2 = markdown_to_doc(md1)
+    assert doc1 == doc2
+
+
+@pytest.mark.parametrize("actor_id", ["alice", "team/eng dept", "weird:id"])
+def test_mention_doc_to_md_to_doc_preserves_actor_id(actor_id):
+    doc = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [{"type": "mention", "attrs": {"actorId": actor_id}}],
+            }
+        ],
+    }
+    back = markdown_to_doc(doc_to_markdown(doc))
+    mentions = [n for n in back["content"][0]["content"] if n["type"] == "mention"]
+    assert len(mentions) == 1
+    assert mentions[0]["attrs"]["actorId"] == actor_id

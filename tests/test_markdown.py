@@ -449,3 +449,25 @@ def test_table_cell_marks_are_preserved():
 def test_paper_link_renders_double_bracket():
     md = doc_to_markdown(_doc(_para({"type": "paper_link", "attrs": {"docId": 12}})))
     assert "[[12]]" in md
+
+
+def test_mention_without_name_map_falls_back_to_actor_id():
+    md = doc_to_markdown(
+        _doc(_para(_text("Hi "), {"type": "mention", "attrs": {"actorId": "alice"}}))
+    )
+    assert md == "Hi [@alice](actor:alice)\n"
+
+
+def test_mention_with_name_map_uses_display_name():
+    md = doc_to_markdown(
+        _doc(_para({"type": "mention", "attrs": {"actorId": "alice"}})),
+        actor_names={"alice": "Alice Smith"},
+    )
+    assert md == "[@Alice Smith](actor:alice)\n"
+
+
+def test_mention_percent_encodes_awkward_actor_ids():
+    md = doc_to_markdown(
+        _doc(_para({"type": "mention", "attrs": {"actorId": "team/eng dept"}}))
+    )
+    assert md == "[@team/eng dept](actor:team%2Feng%20dept)\n"
