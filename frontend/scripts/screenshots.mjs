@@ -87,8 +87,10 @@ async function reachable() {
   }
 }
 
-// Build the throwaway `data` database (vendors table, 30 rows) the datasette
-// embed/ref shots resolve against. itsdangerous-style: shell out to python.
+// Build the throwaway `data` database the embed shots resolve against: a
+// `vendors` table (30 rows) plus a small `regions` table so the database-level
+// embed/pill shots list more than one table. itsdangerous-style: shell out to
+// python.
 function setupDataDb() {
   const py = `
 import os, sqlite3
@@ -97,8 +99,11 @@ p = ${JSON.stringify(DATA_DB)}
 if os.path.exists(p): os.remove(p)
 db = sqlite3.connect(p)
 db.execute("create table vendors (id integer primary key, name text, region text)")
-rows = [(i, "Vendor %d" % i, ["West", "East", "North", "South"][i % 4]) for i in range(1, 31)]
+regions = ["West", "East", "North", "South"]
+rows = [(i, "Vendor %d" % i, regions[i % 4]) for i in range(1, 31)]
 db.executemany("insert into vendors (id, name, region) values (?, ?, ?)", rows)
+db.execute("create table regions (id integer primary key, name text)")
+db.executemany("insert into regions (id, name) values (?, ?)", list(enumerate(regions, 1)))
 db.commit(); db.close()
 `;
   execFileSync("uv", ["run", "--prerelease=allow", "python3", "-c", py]);
@@ -238,13 +243,30 @@ Type \`#\` anywhere in the body to drop an inline tag — an in-document anchor,
 distinct from a paper's metadata tags shown on the index.
 `;
 
-// A doc with an inline Datasette reference pill (the \`datasette:\` link scheme
-// resolves db/table → a live label).
-const DS_REF = `# Vendor directory
+// Docs for the embed element shots. Each `inline_embed` pill is authored with
+// the \`datasette:\` link scheme (`[label](datasette:<path>)`); each
+// `block_embed` is a fenced \`datasette-embed\` block whose body is the ref
+// path. One doc per resolved kind so the inline/block element shots stay
+// single-purpose. (Block bodies use plain strings to avoid escaping the fence
+// backticks inside a template literal.)
+const INLINE_DB = `# Vendor database
 
-Our canonical list lives in Datasette: [the vendors table](datasette:/data/vendors).
+The whole [vendors database](datasette:/data) is addressable as an inline
+reference pill — it resolves to the database's name and links straight to it.
+`;
+const INLINE_TABLE = `# Vendor directory
+
+Our canonical list lives in the [vendors table](datasette:/data/vendors).
 Paste any Datasette URL into the editor to drop a reference pill like that one.
 `;
+const INLINE_ROW = `# Featured vendor
+
+This week we're highlighting [vendor #5](datasette:/data/vendors/5) — an inline
+reference pill that resolves to a single row.
+`;
+const BLOCK_DB = "# Vendors database\n\n```datasette-embed\n/data\n```\n";
+const BLOCK_TABLE = "# Vendors table\n\n```datasette-embed\n/data/vendors\n```\n";
+const BLOCK_ROW = "# Featured vendor\n\n```datasette-embed\n/data/vendors/5\n```\n";
 
 async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
@@ -285,13 +307,30 @@ async function seed(ctx) {
   await tagDoc(designId, ["design"], "carol");
   await tagDoc(budgetId, ["budget", "q3"], "bob");
   await tagDoc(richId, ["roadmap", "q3"], ACTOR);
-  // Empty docs for the slash-menu / datasette-embed authoring shots (each
-  // mutates its own doc so the shots don't contaminate one another).
+  // Empty docs for the slash-menu / embed-picker authoring shots (each mutates
+  // its own doc so the shots don't contaminate one another).
   const slashId = await create("Slash menu demo", ACTOR);
-  const embedDialogId = await create("Embed picker demo", ACTOR);
-  const embedId = await create("Vendors embed demo", ACTOR);
-  const refId = await create("Vendor directory", ACTOR, DS_REF);
-  return { richId, mentionId, inlineTagId, slashId, embedDialogId, embedId, refId };
+  const embedPickerId = await create("Embed picker demo", ACTOR);
+  // Pre-seeded docs, one per embed element × resolved kind (database/table/row).
+  const inlineDbId = await create("Vendor database", ACTOR, INLINE_DB);
+  const inlineTableId = await create("Vendor directory", ACTOR, INLINE_TABLE);
+  const inlineRowId = await create("Featured vendor (inline)", ACTOR, INLINE_ROW);
+  const blockDbId = await create("Vendors database", ACTOR, BLOCK_DB);
+  const blockTableId = await create("Vendors table", ACTOR, BLOCK_TABLE);
+  const blockRowId = await create("Featured vendor (block)", ACTOR, BLOCK_ROW);
+  return {
+    richId,
+    mentionId,
+    inlineTagId,
+    slashId,
+    embedPickerId,
+    inlineDbId,
+    inlineTableId,
+    inlineRowId,
+    blockDbId,
+    blockTableId,
+    blockRowId,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -356,12 +395,64 @@ async function shotUnion(page, selectors, file, pad = 16) {
 // ---------------------------------------------------------------------------
 // Shots. Each gets a fresh page from the shared (cookie-bearing) context.
 function buildShots(ctx, ids) {
-  const { richId, mentionId, inlineTagId, slashId, embedDialogId, embedId, refId } = ids;
+  const {
+    richId,
+    mentionId,
+    inlineTagId,
+    slashId,
+    embedPickerId,
+    inlineDbId,
+    inlineTableId,
+    inlineRowId,
+    blockDbId,
+    blockTableId,
+    blockRowId,
+  } = ids;
   // Stability CSS is injected on the context via addInitScript (see main), so
   // it survives every navigation — addStyleTag here would be discarded by the
   // subsequent page.goto().
   const newPage = () => ctx.newPage();
   const out = (n) => resolve(OUT, `${n}.png`);
+
+  // Inline `inline_embed` pill shot: open a pre-seeded doc, wait for the pill's
+  // resolver fetch to settle (it leaves `--loading`), then full-page capture.
+  const inlineEmbedShot = (id, file) => async () => {
+    const page = await newPage();
+    await gotoEditor(page, id);
+    await page.locator(".pm-datasette-ref").first().waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForFunction(
+      () => {
+        const el = document.querySelector(".pm-datasette-ref");
+        return !!el && !el.classList.contains("pm-datasette-ref--loading");
+      },
+      { timeout: 10_000 },
+    );
+    await freezeVolatile(page);
+    await page.screenshot({ path: out(file) });
+    await page.close();
+  };
+
+  // Block `block_embed` shot: open a pre-seeded doc, wait for the NodeView's
+  // per-viewer fetch to replace the loading skeleton with real content
+  // (asserted via `needle`, a string the rendered payload must contain), then
+  // full-page capture.
+  const blockEmbedShot = (id, file, needle) => async () => {
+    const page = await newPage();
+    await gotoEditor(page, id);
+    await page.locator(".pm-datasette-embed").waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForFunction(
+      (text) => {
+        const el = document.querySelector(".pm-datasette-embed");
+        if (!el || el.querySelector(".pm-datasette-embed-skeleton")) return false;
+        return (el.innerText || "").includes(text);
+      },
+      needle,
+      { timeout: 10_000 },
+    );
+    await freezeVolatile(page);
+    await page.screenshot({ path: out(file) });
+    await page.close();
+  };
 
   return {
     index: async () => {
@@ -453,10 +544,10 @@ function buildShots(ctx, ids) {
       await page.close();
     },
 
-    // The Datasette embed picker dialog (search → result).
-    "datasette-embed-dialog": async () => {
+    // The Datasette embed picker dialog (slash command → search → result).
+    "embed-picker": async () => {
       const page = await newPage();
-      await gotoEditor(page, embedDialogId);
+      await gotoEditor(page, embedPickerId);
       await page.locator(".ProseMirror").click();
       await page.keyboard.type("/datasette");
       await page.locator(".pm-slash-menu").waitFor({ state: "visible", timeout: 10_000 });
@@ -469,50 +560,20 @@ function buildShots(ctx, ids) {
         .first()
         .waitFor({ state: "visible", timeout: 10_000 });
       await freezeVolatile(page);
-      await dialog.screenshot({ path: out("datasette-embed-dialog") });
+      await dialog.screenshot({ path: out("embed-picker") });
       await page.close();
     },
 
-    // A picked embed rendered as a read-only, row-capped table.
-    "datasette-embed": async () => {
-      const page = await newPage();
-      await gotoEditor(page, embedId);
-      await page.locator(".ProseMirror").click();
-      await page.keyboard.type("/datasette");
-      await page.locator(".pm-slash-menu").waitFor({ state: "visible", timeout: 10_000 });
-      await page.keyboard.press("Enter");
-      const dialog = page.locator(".ds-embed-dialog");
-      await dialog.waitFor({ state: "visible", timeout: 10_000 });
-      await dialog.locator(".ds-embed-search").fill("vendors");
-      await dialog.locator(".ds-embed-result", { hasText: "vendors" }).first().click();
-      const embed = page.locator(".pm-datasette-embed");
-      await embed.waitFor({ state: "visible", timeout: 10_000 });
-      await page.waitForFunction(
-        () => /Vendor 1\b/.test(document.querySelector(".pm-datasette-embed table")?.innerText || ""),
-        { timeout: 10_000 },
-      );
-      await freezeVolatile(page);
-      await page.screenshot({ path: out("datasette-embed") });
-      await page.close();
-    },
+    // Inline `inline_embed` pills, one per resolved kind (database/table/row).
+    "inline-embed-database": inlineEmbedShot(inlineDbId, "inline-embed-database"),
+    "inline-embed-table": inlineEmbedShot(inlineTableId, "inline-embed-table"),
+    "inline-embed-row": inlineEmbedShot(inlineRowId, "inline-embed-row"),
 
-    // An inline datasette_ref pill resolved to a live label.
-    "datasette-ref": async () => {
-      const page = await newPage();
-      await gotoEditor(page, refId);
-      await page.locator(".pm-datasette-ref").first().waitFor({ state: "visible", timeout: 10_000 });
-      // Wait for it to leave the loading state (resolver fetch completes).
-      await page.waitForFunction(
-        () => {
-          const el = document.querySelector(".pm-datasette-ref");
-          return !!el && !el.classList.contains("pm-datasette-ref--loading");
-        },
-        { timeout: 10_000 },
-      );
-      await freezeVolatile(page);
-      await page.screenshot({ path: out("datasette-ref") });
-      await page.close();
-    },
+    // Block `block_embed` renders, one per resolved kind: a database's table
+    // listing, a read-only row-capped table, and a single row's field card.
+    "block-embed-database": blockEmbedShot(blockDbId, "block-embed-database", "vendors"),
+    "block-embed-table": blockEmbedShot(blockTableId, "block-embed-table", "Vendor 1"),
+    "block-embed-row": blockEmbedShot(blockRowId, "block-embed-row", "Vendor 5"),
 
     tables: async () => {
       const page = await newPage();
