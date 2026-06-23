@@ -135,10 +135,34 @@ _paper_link_spec = {
     ],
 }
 
+# Inline atom for @mentions — mirrors the JS schema in
+# frontend/src/lib/schema.ts. id-only (`actorId`); markdown round-trips as
+# `[@label](actor:id)` via datasette_paper/markdown.py. toDOM is never
+# rendered server-side but must be structurally valid for
+# node_from_json/Step.apply.
+_mention_spec = {
+    "group": "inline",
+    "inline": True,
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {"actorId": {"default": None}},
+    "parseDOM": [{"tag": "span[data-mention]"}],
+    "toDOM": lambda node: [
+        "span",
+        {
+            "data-mention": str(node.attrs.get("actorId") or ""),
+            "class": "pm-mention",
+        },
+        f"@{node.attrs.get('actorId')}",
+    ],
+}
+
 _nodes = {
     **_list_nodes,
     "placeholder": _placeholder_spec,
     "paper_link": _paper_link_spec,
+    "mention": _mention_spec,
     "task_list": _task_list_spec,
     "task_item": _task_item_spec,
     "table": _table_spec,

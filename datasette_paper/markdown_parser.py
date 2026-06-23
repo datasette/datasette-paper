@@ -21,6 +21,7 @@ Public API:
 from __future__ import annotations
 
 import re
+from urllib.parse import unquote
 
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
@@ -348,7 +349,7 @@ def _inline_to_pm(inline_token) -> list[dict]:
         # Unknown inline token kinds are dropped — better silent than crashing
         # in a converter that runs over arbitrary user input.
 
-    return _coalesce_text(_split_paper_links(raw))
+    return _coalesce_text(_split_paper_links(_convert_actor_mentions(raw)))
 
 
 def _coalesce_text(nodes: list[dict]) -> list[dict]:
@@ -369,6 +370,53 @@ def _coalesce_text(nodes: list[dict]) -> list[dict]:
             out[-1]["text"] = out[-1]["text"] + node["text"]
         else:
             out.append(node)
+    return out
+
+
+_ACTOR_SCHEME = "actor:"
+
+
+def _actor_link_href(node: dict) -> str | None:
+    """Return the `actor:`-scheme href of a text node's link mark, or None.
+
+    Mentions serialize as `[@Name](actor:<id>)`; markdown-it parses that into
+    text wrapped in a ``link`` mark whose href carries the `actor:` scheme.
+    """
+    if node.get("type") != "text":
+        return None
+    for m in node.get("marks") or []:
+        if m.get("type") == "link":
+            href = (m.get("attrs") or {}).get("href") or ""
+            if href.startswith(_ACTOR_SCHEME):
+                return href
+    return None
+
+
+def _convert_actor_mentions(nodes: list[dict]) -> list[dict]:
+    """Replace `actor:`-scheme link text with id-only `mention` atoms.
+
+    Detection is purely by the link mark's URI scheme — no `@`-boundary or
+    path heuristics, so ordinary `[text](https://…)` links are never touched.
+    Consecutive text nodes sharing the same actor href fold into a single
+    mention; the visible label and the link mark are dropped (the NodeView
+    resolves the live display name). The actor id is the scheme-stripped,
+    percent-decoded href.
+    """
+    out: list[dict] = []
+    prev_href: str | None = None
+    for node in nodes:
+        href = _actor_link_href(node)
+        if href is None:
+            prev_href = None
+            out.append(node)
+            continue
+        # Same mention's text continuing across split text nodes — the atom
+        # was already emitted, so swallow the remaining label fragments.
+        if href == prev_href:
+            continue
+        actor_id = unquote(href[len(_ACTOR_SCHEME) :])
+        out.append({"type": "mention", "attrs": {"actorId": actor_id}})
+        prev_href = href
     return out
 
 
