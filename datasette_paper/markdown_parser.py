@@ -26,6 +26,8 @@ from urllib.parse import unquote
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
+from .util import normalize_tag
+
 
 _MARK_OPEN_CLOSE = {
     "strong_open": ("strong_close", "strong"),
@@ -460,8 +462,14 @@ def _convert_tag_links(nodes: list[dict]) -> list[dict]:
             continue
         if href == prev_href:
             continue
-        tag = unquote(href[len(_TAG_SCHEME) :])
-        out.append({"type": "tag", "attrs": {"tag": tag}})
+        # Normalize through the same rule as typed / doc-level tags so a
+        # hand-authored `tag:` href can't smuggle in a slug the editor could
+        # never produce (uppercase, spaces, `]`, …). An un-normalizable slug
+        # drops the atom (lossy, like other out-of-schema content) but still
+        # advances prev_href so trailing fragments of the link fold away.
+        tag = normalize_tag(unquote(href[len(_TAG_SCHEME) :]))
+        if tag is not None:
+            out.append({"type": "tag", "attrs": {"tag": tag}})
         prev_href = href
     return out
 

@@ -450,7 +450,11 @@ def _render_inlines(nodes: list) -> str:
             # `[#tag](tag:<slug>)` — `#` inside the link text so it renders as
             # a single "#tag" link; the `tag:` scheme lets the parser detect
             # inline tags unambiguously (a bare `#tag` would collide with ATX
-            # headings). Escape `]` and percent-encode the slug.
+            # headings). Slugs are normalized at every input path (editor
+            # trigger, doc-tag normalize_tag, and the md parser) so `]` can't
+            # occur; the escape is defense-in-depth against an unvalidated
+            # collab step, mirroring the mention case above. Percent-encode
+            # the slug for the href.
             safe_tag = tag.replace("]", "\\]")
             out.append(f"[#{safe_tag}](tag:{quote(tag, safe='')})")
 

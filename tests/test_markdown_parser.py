@@ -285,6 +285,22 @@ class TestInlineNodes:
         link = content[-1]
         assert link["marks"][0]["attrs"]["href"] == "https://example.com/y"
 
+    def test_tag_slug_is_normalized(self):
+        # A hand-authored href with chars the editor could never type
+        # (uppercase, `]`) is normalized to the canonical slug rule, so the
+        # stored tag never contains `]`.
+        doc = parse_and_validate("[#x](tag:Foo%5DBar)\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["tag"]
+        assert content[0]["attrs"]["tag"] == "foobar"
+
+    def test_unnormalizable_tag_slug_drops_atom(self):
+        # A slug that normalizes to empty produces no tag atom (lossy, like
+        # other out-of-schema content) rather than an invalid empty tag.
+        doc = parse_and_validate("[#x](tag:%5D%5D)\n")
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "tag" for n in content)
+
 
 # ---------------------------------------------------------------------------
 # Lists
