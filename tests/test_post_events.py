@@ -364,3 +364,61 @@ async def test_post_broadcasts_to_subscribers(ds_paper):
     assert payload["version"] == 1
     assert len(payload["steps"]) == 1
     assert payload["clientIDs"][0] == 5
+
+
+# ---------------------------------------------------------------------------
+# Schema lock-step: new node types apply server-side (pm_schema.py mirrors
+# frontend/src/lib/schema.ts). A divergence here yields a 422 InvalidStepError.
+# ---------------------------------------------------------------------------
+
+
+def _insert_node(pos: int, node: dict) -> str:
+    """JSON-encoded `replace` step inserting a single node at `pos`."""
+    return json.dumps(
+        {
+            "stepType": "replace",
+            "from": pos,
+            "to": pos,
+            "slice": {"content": [node]},
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_post_inline_and_block_embed_apply(ds_paper):
+    """A step inserting an `inline_embed` (inline) and one inserting a
+    `block_embed` (block) both validate + apply — proving pm_schema.py
+    mirrors the JS schema (no 422), and the materializer round-trips them to
+    markdown."""
+    ds, _paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+    url = f"/-/paper/api/docs/{doc_id}/events"
+
+    # Inline ref inside the empty starter paragraph (pos 1).
+    ref_node = {"type": "inline_embed", "attrs": {"ref": "/fixtures/facetable"}}
+    r1 = await ds.client.post(
+        url,
+        json={"version": 0, "clientID": 1, "steps": [_insert_node(1, ref_node)]},
+    )
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["version"] == 1
+
+    # Block embed appended after the paragraph (doc end is now at pos 3:
+    # paragraph open + inline atom + close).
+    embed_node = {
+        "type": "block_embed",
+        "attrs": {"ref": "/fixtures/facetable", "mode": "table"},
+    }
+    r2 = await ds.client.post(
+        url,
+        json={"version": 1, "clientID": 1, "steps": [_insert_node(3, embed_node)]},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["version"] == 2
+
+    # The materialized doc round-trips both nodes to markdown.
+    doc = await ds.client.get(f"/-/paper/api/docs/{doc_id}/document")
+    assert doc.status_code == 200
+    md = doc.json()["content_markdown"]
+    assert "[/fixtures/facetable](datasette:/fixtures/facetable)" in md
+    assert "```datasette-embed\n/fixtures/facetable\n```" in md

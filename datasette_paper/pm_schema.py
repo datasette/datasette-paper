@@ -181,12 +181,60 @@ _tag_spec = {
     ],
 }
 
+# Inline atom for references to a Datasette resource — mirrors the JS schema
+# in frontend/src/lib/schema.ts. identity-only (`ref`, a Datasette URL path);
+# markdown round-trips as `[label](datasette:<path>)` via
+# datasette_paper/markdown.py. The display label is resolved per-viewer by the
+# NodeView and never persisted. toDOM is never rendered server-side but must be
+# structurally valid for node_from_json/Step.apply.
+_inline_embed_spec = {
+    "group": "inline",
+    "inline": True,
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {"ref": {"default": None}},
+    "parseDOM": [{"tag": "a[data-inline-embed]"}],
+    "toDOM": lambda node: [
+        "a",
+        {
+            "data-inline-embed": str(node.attrs.get("ref") or ""),
+            "class": "pm-inline-embed",
+        },
+        str(node.attrs.get("ref") or ""),
+    ],
+}
+
+# Block atom for an embedded read-only render of a Datasette resource —
+# mirrors the JS schema. identity-only (`ref` + `mode`); rendered data is
+# fetched per-viewer and never persisted. markdown round-trips as a
+# ```datasette-embed fence via datasette_paper/markdown.py.
+_block_embed_spec = {
+    "group": "block",
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {"ref": {"default": None}, "mode": {"default": "table"}},
+    "parseDOM": [{"tag": "div[data-block-embed]"}],
+    "toDOM": lambda node: [
+        "div",
+        {
+            "data-block-embed": str(node.attrs.get("ref") or ""),
+            "data-embed-mode": str(node.attrs.get("mode") or "table"),
+            "class": "pm-block-embed",
+        },
+        str(node.attrs.get("ref") or ""),
+    ],
+}
+
 _nodes = {
     **_list_nodes,
     "placeholder": _placeholder_spec,
     "paper_link": _paper_link_spec,
     "mention": _mention_spec,
     "tag": _tag_spec,
+    "inline_embed": _inline_embed_spec,
+    "block_embed": _block_embed_spec,
     "task_list": _task_list_spec,
     "task_item": _task_item_spec,
     "table": _table_spec,

@@ -485,3 +485,36 @@ def test_tag_percent_encodes_nested_slug():
         _doc(_para({"type": "tag", "attrs": {"tag": "inbox/to-read"}}))
     )
     assert md == "[#inbox/to-read](tag:inbox%2Fto-read)\n"
+
+
+def test_inline_embed_serializes_as_datasette_scheme_link():
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                _text("see "),
+                {"type": "inline_embed", "attrs": {"ref": "/fixtures/facetable"}},
+            )
+        )
+    )
+    # The path keeps its slashes (it doubles as the label) and is the
+    # authoritative identity after the `datasette:` scheme.
+    assert md == "see [/fixtures/facetable](datasette:/fixtures/facetable)\n"
+
+
+def test_block_embed_serializes_as_fenced_block():
+    md = doc_to_markdown(
+        _doc({"type": "block_embed", "attrs": {"ref": "/fixtures/facetable"}})
+    )
+    assert md == "```datasette-embed\n/fixtures/facetable\n```\n"
+
+
+def test_block_embed_non_default_mode_emits_mode_line():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "block_embed",
+                "attrs": {"ref": "/fixtures/facetable/1", "mode": "row"},
+            }
+        )
+    )
+    assert md == "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"

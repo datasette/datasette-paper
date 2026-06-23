@@ -75,6 +75,15 @@ def _render_block(node: dict) -> str:
         return _render_task_list(node)
     if t == "table":
         return _render_table(node)
+    if t == "block_embed":
+        attrs = node.get("attrs") or {}
+        ref = attrs.get("ref") or ""
+        mode = attrs.get("mode") or "table"
+        # A fenced block with info string `datasette-embed`: the first body
+        # line is the authoritative ref path; a non-default mode goes on a
+        # second `mode: <mode>` line (ticket 05 parses it back).
+        body = ref if mode == "table" else f"{ref}\nmode: {mode}"
+        return "```datasette-embed\n" + body + "\n```\n"
     if t == "list_item":
         # list_item is rendered by _render_list with markers; calling here
         # returns the bare child blocks.
@@ -457,6 +466,15 @@ def _render_inlines(nodes: list) -> str:
             # the slug for the href.
             safe_tag = tag.replace("]", "\\]")
             out.append(f"[#{safe_tag}](tag:{quote(tag, safe='')})")
+        elif t == "inline_embed":
+            ref = (n.get("attrs") or {}).get("ref") or ""
+            # `[label](datasette:<path>)` — the `datasette:` scheme lets the
+            # parser detect refs unambiguously. There is no resolved label at
+            # serialize time, so the path doubles as the label (like paper_link
+            # rendering `[[id]]`). The path is authoritative; keep its slashes
+            # intact (don't percent-encode), only escape `]` in the label.
+            safe = ref.replace("]", "\\]")
+            out.append(f"[{safe}](datasette:{ref})")
 
     close_through(0)
     return "".join(out)

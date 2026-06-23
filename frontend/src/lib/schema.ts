@@ -135,6 +135,69 @@ const tagNode: NodeSpec = {
   ],
 };
 
+// Inline atom for references to a Datasette resource (db/table/view/row or a
+// sibling-plugin resource) — identity-only (`ref`, a Datasette URL path),
+// authored via context-aware URL paste and rendered by a NodeView
+// (inlineEmbedView.ts) that resolves a live display label. The toDOM here is
+// a static fallback. Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as `[label](datasette:<path>)`.
+const inlineEmbedNode: NodeSpec = {
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: { ref: { default: null } },
+  parseDOM: [
+    {
+      tag: "a[data-inline-embed]",
+      getAttrs: (el) => ({
+        ref: (el as HTMLElement).getAttribute("data-inline-embed") || null,
+      }),
+    },
+  ],
+  toDOM: (node) => [
+    "a",
+    {
+      "data-inline-embed": String(node.attrs.ref ?? ""),
+      class: "pm-inline-embed",
+      href: node.attrs.ref ?? "#",
+    },
+    String(node.attrs.ref ?? "?"),
+  ],
+};
+
+// Block atom for an embedded read-only render of a Datasette resource —
+// identity-only (`ref` + `mode`); rendered data is fetched per-viewer by a
+// NodeView (blockEmbedView.ts) and never persisted in attrs. The toDOM
+// here is a static fallback. Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as a ```datasette-embed fence.
+const blockEmbedNode: NodeSpec = {
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: { ref: { default: null }, mode: { default: "table" } },
+  parseDOM: [
+    {
+      tag: "div[data-block-embed]",
+      getAttrs: (el) => ({
+        ref: (el as HTMLElement).getAttribute("data-block-embed") || null,
+        mode: (el as HTMLElement).getAttribute("data-embed-mode") || "table",
+      }),
+    },
+  ],
+  toDOM: (node) => [
+    "div",
+    {
+      "data-block-embed": String(node.attrs.ref ?? ""),
+      "data-embed-mode": String(node.attrs.mode ?? "table"),
+      class: "pm-block-embed",
+    },
+    String(node.attrs.ref ?? "?"),
+  ],
+};
+
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
     group: "block",
@@ -199,6 +262,8 @@ export const schema = new Schema({
     .append({ paper_link: paperLinkNode })
     .append({ mention: mentionNode })
     .append({ tag: tagNode })
+    .append({ inline_embed: inlineEmbedNode })
+    .append({ block_embed: blockEmbedNode })
     .append(taskNodes)
     .append({ ...tNodes, table: tableWithName }),
   marks: baseMarks,
