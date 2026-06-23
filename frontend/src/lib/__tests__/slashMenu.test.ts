@@ -2,7 +2,7 @@
  * Tests for the `/` slash command menu: trigger gating, query filtering,
  * commit (clear /query then run command), and enabled() gating.
  */
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
@@ -13,8 +13,10 @@ import {
   filterSlashCommands,
   commitSlashSelection,
   buildSlashCommands,
+  providerSlashCommands,
   type SlashCommand,
 } from "../slashMenu";
+import { embedRegistry } from "../embedRegistry";
 
 const commands = buildSlashCommands();
 
@@ -162,5 +164,48 @@ describe("commitSlashSelection", () => {
       stateWith([schema.node("paragraph", null, [schema.text("x")])], 2, ""),
     );
     expect(commitSlashSelection(commands)(view.state, view.dispatch, view)).toBe(false);
+  });
+});
+
+describe("providerSlashCommands (third-party sources)", () => {
+  afterEach(() => {
+    delete window.datasettePaperEmbeds;
+  });
+
+  it("builds one command per provider that implements picker()", () => {
+    embedRegistry().register({
+      kind: "place-list",
+      picker: () => ({ id: "places", label: "Places map", icon: "globe" }),
+      mount: () => {},
+    });
+    // A provider with no picker() contributes no command.
+    embedRegistry().register({ kind: "no-picker", mount: () => {} });
+
+    const open = vi.fn();
+    const cmds = providerSlashCommands({ openDatasetteEmbed: open });
+    expect(cmds).toHaveLength(1);
+    expect(cmds[0]).toMatchObject({ id: "embed_source:places", label: "Places map" });
+
+    cmds[0].run({} as unknown as EditorView);
+    expect(open).toHaveBeenCalledWith("places");
+  });
+
+  it("falls back to the database icon for an unknown icon name", () => {
+    embedRegistry().register({
+      kind: "place-list",
+      picker: () => ({ id: "places", label: "Places", icon: "not-a-real-icon" }),
+      mount: () => {},
+    });
+    expect(providerSlashCommands({})[0].icon).toBe("database");
+  });
+
+  it("is included in buildSlashCommands output", () => {
+    embedRegistry().register({
+      kind: "place-list",
+      picker: () => ({ id: "places", label: "Places map" }),
+      mount: () => {},
+    });
+    const ids = buildSlashCommands().map((c) => c.id);
+    expect(ids).toContain("embed_source:places");
   });
 });
