@@ -31,6 +31,11 @@ const PAPER = `${BASE}/-/paper`;
 // are owned (mirrors the e2e harness's hard-coded secret). NOT a real secret.
 const SECRET = "screenshots-secret-not-for-prod";
 const DB = "/tmp/datasette-paper-shots-internal.db";
+// A small user database attached so datasette_ref / datasette_embed have a
+// real resource to resolve + render. The directory name makes the Datasette
+// database name "data", so refs read `/data/vendors` (mirrors the e2e setup).
+const DATA_DIR = "/tmp/datasette-paper-shots-data";
+const DATA_DB = `${DATA_DIR}/data.db`;
 // The browsing actor (owns the rich doc → full owner / manager UI).
 const ACTOR = "alice";
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -82,8 +87,26 @@ async function reachable() {
   }
 }
 
+// Build the throwaway `data` database (vendors table, 30 rows) the datasette
+// embed/ref shots resolve against. itsdangerous-style: shell out to python.
+function setupDataDb() {
+  const py = `
+import os, sqlite3
+os.makedirs(${JSON.stringify(DATA_DIR)}, exist_ok=True)
+p = ${JSON.stringify(DATA_DB)}
+if os.path.exists(p): os.remove(p)
+db = sqlite3.connect(p)
+db.execute("create table vendors (id integer primary key, name text, region text)")
+rows = [(i, "Vendor %d" % i, ["West", "East", "North", "South"][i % 4]) for i in range(1, 31)]
+db.executemany("insert into vendors (id, name, region) values (?, ?, ?)", rows)
+db.commit(); db.close()
+`;
+  execFileSync("uv", ["run", "--prerelease=allow", "python3", "-c", py]);
+}
+
 async function startServer() {
   await rm(DB, { force: true });
+  setupDataDb();
   // Refuse to start if something is already on the port rather than killing
   // it — that "something" might be a server the user cares about. The poll
   // below can't tell a stale server apart from ours, so bail loudly instead.
@@ -104,6 +127,8 @@ async function startServer() {
       "datasette",
       "--internal",
       DB,
+      // The attached user database (resolves as `data`).
+      DATA_DB,
       "--secret",
       SECRET,
       // Throwaway plugin: friendly actor display names ("Alice Ada", …).
@@ -215,6 +240,12 @@ distinct from a paper's metadata tags shown on the index.
 
 // A doc with an inline Datasette reference pill (the \`datasette:\` link scheme
 // resolves db/table → a live label).
+const DS_REF = `# Vendor directory
+
+Our canonical list lives in Datasette: [the vendors table](datasette:/data/vendors).
+Paste any Datasette URL into the editor to drop a reference pill like that one.
+`;
+
 async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -254,9 +285,13 @@ async function seed(ctx) {
   await tagDoc(designId, ["design"], "carol");
   await tagDoc(budgetId, ["budget", "q3"], "bob");
   await tagDoc(richId, ["roadmap", "q3"], ACTOR);
-  // Empty doc for the slash-menu shot (it mutates its own throwaway doc).
+  // Empty docs for the slash-menu / datasette-embed authoring shots (each
+  // mutates its own doc so the shots don't contaminate one another).
   const slashId = await create("Slash menu demo", ACTOR);
-  return { richId, mentionId, inlineTagId, slashId };
+  const embedDialogId = await create("Embed picker demo", ACTOR);
+  const embedId = await create("Vendors embed demo", ACTOR);
+  const refId = await create("Vendor directory", ACTOR, DS_REF);
+  return { richId, mentionId, inlineTagId, slashId, embedDialogId, embedId, refId };
 }
 
 // ---------------------------------------------------------------------------
@@ -321,7 +356,7 @@ async function shotUnion(page, selectors, file, pad = 16) {
 // ---------------------------------------------------------------------------
 // Shots. Each gets a fresh page from the shared (cookie-bearing) context.
 function buildShots(ctx, ids) {
-  const { richId, mentionId, inlineTagId, slashId } = ids;
+  const { richId, mentionId, inlineTagId, slashId, embedDialogId, embedId, refId } = ids;
   // Stability CSS is injected on the context via addInitScript (see main), so
   // it survives every navigation — addStyleTag here would be discarded by the
   // subsequent page.goto().
@@ -415,6 +450,67 @@ function buildShots(ctx, ids) {
       await page.locator(".pm-slash-menu").waitFor({ state: "visible", timeout: 10_000 });
       await freezeVolatile(page);
       await page.screenshot({ path: out("slash-menu") });
+      await page.close();
+    },
+
+    // The Datasette embed picker dialog (search → result).
+    "datasette-embed-dialog": async () => {
+      const page = await newPage();
+      await gotoEditor(page, embedDialogId);
+      await page.locator(".ProseMirror").click();
+      await page.keyboard.type("/datasette");
+      await page.locator(".pm-slash-menu").waitFor({ state: "visible", timeout: 10_000 });
+      await page.keyboard.press("Enter");
+      const dialog = page.locator(".ds-embed-dialog");
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      await dialog.locator(".ds-embed-search").fill("vendors");
+      await dialog
+        .locator(".ds-embed-result", { hasText: "vendors" })
+        .first()
+        .waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await dialog.screenshot({ path: out("datasette-embed-dialog") });
+      await page.close();
+    },
+
+    // A picked embed rendered as a read-only, row-capped table.
+    "datasette-embed": async () => {
+      const page = await newPage();
+      await gotoEditor(page, embedId);
+      await page.locator(".ProseMirror").click();
+      await page.keyboard.type("/datasette");
+      await page.locator(".pm-slash-menu").waitFor({ state: "visible", timeout: 10_000 });
+      await page.keyboard.press("Enter");
+      const dialog = page.locator(".ds-embed-dialog");
+      await dialog.waitFor({ state: "visible", timeout: 10_000 });
+      await dialog.locator(".ds-embed-search").fill("vendors");
+      await dialog.locator(".ds-embed-result", { hasText: "vendors" }).first().click();
+      const embed = page.locator(".pm-datasette-embed");
+      await embed.waitFor({ state: "visible", timeout: 10_000 });
+      await page.waitForFunction(
+        () => /Vendor 1\b/.test(document.querySelector(".pm-datasette-embed table")?.innerText || ""),
+        { timeout: 10_000 },
+      );
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("datasette-embed") });
+      await page.close();
+    },
+
+    // An inline datasette_ref pill resolved to a live label.
+    "datasette-ref": async () => {
+      const page = await newPage();
+      await gotoEditor(page, refId);
+      await page.locator(".pm-datasette-ref").first().waitFor({ state: "visible", timeout: 10_000 });
+      // Wait for it to leave the loading state (resolver fetch completes).
+      await page.waitForFunction(
+        () => {
+          const el = document.querySelector(".pm-datasette-ref");
+          return !!el && !el.classList.contains("pm-datasette-ref--loading");
+        },
+        { timeout: 10_000 },
+      );
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("datasette-ref") });
       await page.close();
     },
 
