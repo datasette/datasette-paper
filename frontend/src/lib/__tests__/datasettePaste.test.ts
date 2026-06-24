@@ -2,16 +2,20 @@
  * Tests for context-aware Datasette URL paste: ref parsing, surface choice,
  * and the paste handler's inline-vs-block insertion.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
 import { schema } from "../schema";
 import {
   parseDatasetteRef,
+  matchExternalRef,
+  matchManifestRef,
   chooseDatasetteSurface,
   handleDatasettePaste,
 } from "../datasettePaste";
+import { embedRegistry, _resetEmbedRegistryForTest } from "../embedRegistry";
+import { setProviderManifest, _resetProvidersForTest } from "../embedProviders";
 
 const ORIGIN = "http://localhost";
 const ctx = { origin: ORIGIN };
@@ -65,6 +69,41 @@ describe("parseDatasetteRef", () => {
         baseUrl: "/data/",
       }),
     ).toBe("/fixtures/facetable");
+  });
+});
+
+// --- third-party provider URL claiming -----------------------------------
+
+describe("matchExternalRef", () => {
+  afterEach(() => {
+    _resetEmbedRegistryForTest();
+  });
+
+  it("lets a registered provider claim a same-origin plugin URL", () => {
+    embedRegistry().register({
+      kind: "place-list",
+      matchUrl: (url) => {
+        const m = url.pathname.match(/^\/-\/places\/list\/(\d+)$/);
+        return m ? `/-/places/list/${m[1]}` : null;
+      },
+      mount: () => {},
+    });
+    expect(matchExternalRef(`${ORIGIN}/-/places/list/5`, ORIGIN)).toBe(
+      "/-/places/list/5",
+    );
+  });
+
+  it("rejects external origins even when a provider would claim the path", () => {
+    embedRegistry().register({
+      kind: "place-list",
+      matchUrl: () => "/-/places/list/5",
+      mount: () => {},
+    });
+    expect(matchExternalRef("https://evil.com/-/places/list/5", ORIGIN)).toBeNull();
+  });
+
+  it("returns null when no provider claims the URL", () => {
+    expect(matchExternalRef(`${ORIGIN}/-/places/list/5`, ORIGIN)).toBeNull();
   });
 });
 
@@ -175,5 +214,67 @@ describe("handleDatasettePaste", () => {
     // Doc untouched (still an empty paragraph).
     expect(getDoc().doc.firstChild!.type.name).toBe("paragraph");
     expect(getDoc().doc.firstChild!.content.size).toBe(0);
+  });
+
+  it("inserts a provider-claimed plugin URL as a block embed", () => {
+    embedRegistry().register({
+      kind: "place-list",
+      matchUrl: (url) =>
+        url.pathname.startsWith("/-/places/list/") ? url.pathname : null,
+      mount: () => {},
+    });
+    try {
+      const { view, getDoc } = fakeView(emptyParaState());
+      const claimed = handleDatasettePaste(
+        view,
+        pasteEvent(`${ORIGIN}/-/places/list/5`),
+        ctx,
+      );
+      expect(claimed).toBe(true);
+      expect(getDoc().doc.firstChild!.type.name).toBe("block_embed");
+      expect(getDoc().doc.firstChild!.attrs.ref).toBe("/-/places/list/5");
+    } finally {
+      _resetEmbedRegistryForTest();
+    }
+  });
+});
+
+describe("matchManifestRef (lazy provider, bundle not yet loaded)", () => {
+  afterEach(() => _resetProvidersForTest());
+
+  it("claims a same-origin URL whose path is under a manifest ref prefix", () => {
+    setProviderManifest([{ kind: "places", ref_prefixes: ["/-/places/"] }]);
+    expect(matchManifestRef(`${ORIGIN}/-/places/list/5`, ctx)).toBe(
+      "/-/places/list/5",
+    );
+  });
+
+  it("ignores URLs no manifest provider claims, and other origins", () => {
+    setProviderManifest([{ kind: "places", ref_prefixes: ["/-/places/"] }]);
+    expect(matchManifestRef(`${ORIGIN}/data/vendors`, ctx)).toBeNull();
+    expect(matchManifestRef("https://evil.test/-/places/list/5", ctx)).toBeNull();
+  });
+
+  it("strips a non-root base_url before matching the prefix", () => {
+    setProviderManifest([{ kind: "places", ref_prefixes: ["/-/places/"] }]);
+    expect(
+      matchManifestRef(`${ORIGIN}/app/-/places/list/5`, {
+        origin: ORIGIN,
+        baseUrl: "/app/",
+      }),
+    ).toBe("/-/places/list/5");
+  });
+
+  it("the paste handler falls back to the manifest for an unloaded provider", () => {
+    setProviderManifest([{ kind: "places", ref_prefixes: ["/-/places/"] }]);
+    const { view, getDoc } = fakeView(emptyParaState());
+    const claimed = handleDatasettePaste(
+      view,
+      pasteEvent(`${ORIGIN}/-/places/list/5`),
+      ctx,
+    );
+    expect(claimed).toBe(true);
+    expect(getDoc().doc.firstChild!.type.name).toBe("block_embed");
+    expect(getDoc().doc.firstChild!.attrs.ref).toBe("/-/places/list/5");
   });
 });

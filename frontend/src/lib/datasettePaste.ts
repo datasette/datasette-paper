@@ -16,6 +16,8 @@
 import type { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import { schema } from "./schema";
+import { embedRegistry } from "./embedRegistry";
+import { manifestEntryForRef } from "./embedProviders";
 
 export interface RefParseContext {
   /** The page origin, e.g. `window.location.origin`. */
@@ -61,6 +63,58 @@ export function parseDatasetteRef(
   return "/" + segments.join("/");
 }
 
+/**
+ * Ask registered third-party embed providers (the embed registry) to
+ * claim a pasted same-origin URL, returning the ref path to store. Lets a
+ * plugin like datasette-places turn its own `/-/places/list/5` link into an
+ * embed without paper hard-coding that URL scheme. Same-origin only in v1
+ * (external-web link cards are a separate, server-side feature).
+ */
+export function matchExternalRef(text: string, origin: string): string | null {
+  const trimmed = text.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  if (!/^(https?:\/\/|\/)/.test(trimmed)) return null;
+  let url: URL;
+  try {
+    url = new URL(trimmed, origin);
+  } catch {
+    return null;
+  }
+  if (url.origin !== origin) return null;
+  return embedRegistry().match(url);
+}
+
+/**
+ * Claim a pasted same-origin URL for a provider that is declared in the
+ * manifest but whose bundle isn't loaded yet — matched by the URL's
+ * base-relative path against the provider's `ref_prefixes`. Returns that path
+ * to store as the ref; the NodeView lazy-loads the bundle on render. This is
+ * the path-based fallback to `matchExternalRef` (which needs the bundle loaded
+ * to run the provider's own `matchUrl`); a provider that transforms URL→ref
+ * non-trivially only claims pastes once its bundle is loaded.
+ */
+export function matchManifestRef(
+  text: string,
+  ctx: RefParseContext,
+): string | null {
+  const trimmed = text.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  if (!/^(https?:\/\/|\/)/.test(trimmed)) return null;
+  let url: URL;
+  try {
+    url = new URL(trimmed, ctx.origin);
+  } catch {
+    return null;
+  }
+  if (url.origin !== ctx.origin) return null;
+  let path = url.pathname;
+  const base = ctx.baseUrl && ctx.baseUrl !== "/" ? ctx.baseUrl : null;
+  if (base && path.startsWith(base)) {
+    path = "/" + path.slice(base.length);
+  }
+  return manifestEntryForRef(path) ? path : null;
+}
+
 /** True when the cursor is in an empty top-level paragraph (block surface). */
 function isEmptyTopParagraph(state: EditorState): boolean {
   const sel = state.selection;
@@ -97,7 +151,12 @@ export function handleDatasettePaste(
 ): boolean {
   const text = event.clipboardData?.getData("text/plain") ?? "";
   const origin = ctx?.origin ?? window.location.origin;
-  const ref = parseDatasetteRef(text, { origin, baseUrl: ctx?.baseUrl });
+  // Core db/table/row refs first; then a loaded provider's own matchUrl;
+  // finally the manifest prefix fallback for a provider not yet loaded.
+  const ref =
+    parseDatasetteRef(text, { origin, baseUrl: ctx?.baseUrl }) ??
+    matchExternalRef(text, origin) ??
+    matchManifestRef(text, { origin, baseUrl: ctx?.baseUrl });
   if (ref == null) return false;
 
   const surface = chooseDatasetteSurface(view.state, ref);

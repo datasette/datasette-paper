@@ -17,6 +17,8 @@
  * unsubscribe from `destroy()`.
  */
 import { refSegments } from "./datasetteEmbed";
+import { embedRegistry } from "./embedRegistry";
+import { ensureProviderForRef, manifestKindForRef } from "./embedProviders";
 
 export type DatasetteStatus =
   | {
@@ -41,6 +43,27 @@ type Subscriber = (status: DatasetteStatus) => void;
  * pill stays "loading" and an invalidate can retry).
  */
 export async function resolveRef(ref: string): Promise<DatasetteStatus | null> {
+  // A third-party provider that claims this ref owns its resolution — it
+  // fetches its own data (with the viewer's cookie) and applies its own leak
+  // discipline. A provider with no `resolve` falls through to a generic
+  // ref-labelled pill below. If the owning provider's bundle isn't loaded yet,
+  // lazy-inject it (the manifest maps the ref's prefix → provider) and retry.
+  let provider = embedRegistry().providerForRef(ref);
+  if (!provider && manifestKindForRef(ref)) {
+    await ensureProviderForRef(ref);
+    provider = embedRegistry().providerForRef(ref);
+  }
+  if (provider?.resolve) {
+    try {
+      return await provider.resolve(ref);
+    } catch {
+      return null; // transient — leave uncached so an invalidate can retry
+    }
+  }
+  if (provider) {
+    return { status: "ok", kind: provider.kind, label: ref, href: ref };
+  }
+
   const seg = refSegments(ref);
   if (seg.length < 1 || seg.length > 3) return { status: "not_found" };
   const path = "/" + seg.join("/");

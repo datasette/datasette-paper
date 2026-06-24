@@ -5,6 +5,8 @@ from datasette.permissions import Action
 from datasette_vite import vite_entry
 from datasette_acl.roles import standard_roles
 from datasette_acl_share import datasette_share_assets as _share_assets
+from datasette.plugins import pm
+from . import hookspecs as _hookspecs
 from .router import router
 from .permissions import (  # noqa: F401
     PaperDocResource,
@@ -17,6 +19,10 @@ from .permissions import (  # noqa: F401
 from . import routes  # noqa: F401 — triggers decorator registration
 from .routes.events import sse_events
 import logging
+
+# Expose paper's own plugin hooks on Datasette's plugin manager so sibling
+# plugins (e.g. datasette-places) can implement ``paper_embed_provider``.
+pm.add_hookspecs(_hookspecs)
 
 logger = logging.getLogger(__name__)
 

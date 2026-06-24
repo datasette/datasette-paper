@@ -20,8 +20,12 @@ import {
   cellText,
   fetchEmbed,
   kindIcon,
+  safeHref,
   type EmbedPayload,
 } from "./datasetteEmbed";
+import { embedRegistry, type PaperEmbedProvider } from "./embedRegistry";
+import { ensureProviderForRef, manifestKindForRef } from "./embedProviders";
+import type { DatasetteStatus } from "./datasetteResolver";
 
 const ROW_LIMIT_OPTIONS = [10, 25, 100];
 const DEFAULT_ROW_LIMIT = 10;
@@ -39,6 +43,8 @@ export class BlockEmbedView implements NodeView {
   private token = 0;
   // The open overflow menu (if any) + its outside-click teardown.
   private menuEl: HTMLElement | null = null;
+  // Cleanup returned by a third-party provider's mount(), if any.
+  private cleanupExternal: (() => void) | null = null;
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.view = view;
@@ -53,17 +59,116 @@ export class BlockEmbedView implements NodeView {
 
   private async load(): Promise<void> {
     const token = ++this.token;
-    // Any (re)render rebuilds the header, so drop a stale open menu first.
+    // Any (re)render rebuilds the header, so drop a stale open menu and tear
+    // down any externally-mounted view first.
     this.closeMenu();
+    this.disposeExternal();
     this.renderLoading();
     if (this.ref == null) {
       this.render({ status: "not_found" });
+      return;
+    }
+    // A third-party provider that claims this ref renders it itself — paper
+    // owns the header chrome, the provider fills the body (loadExternal). If
+    // its bundle isn't loaded yet, lazy-inject it (manifest maps ref prefix →
+    // provider) and retry; a stale load (ref change / refresh) bails after.
+    let provider = embedRegistry().providerForRef(this.ref);
+    if (!provider && manifestKindForRef(this.ref)) {
+      await ensureProviderForRef(this.ref);
+      if (token !== this.token) return;
+      provider = embedRegistry().providerForRef(this.ref);
+    }
+    if (provider) {
+      await this.loadExternal(token, provider);
       return;
     }
     const payload = await fetchEmbed(this.ref, this.limit);
     // A newer load() (ref change / refresh) superseded this one.
     if (token !== this.token) return;
     this.render(payload);
+  }
+
+  /**
+   * Render a third-party provider's block embed. The provider's `resolve`
+   * supplies the header identity (and the leak-free denied/not_found states,
+   * exactly like a core ref); its `mount` fills the body host div. A provider
+   * with no `resolve` gets a generic ref-labelled header.
+   */
+  private async loadExternal(token: number, provider: PaperEmbedProvider): Promise<void> {
+    let status: DatasetteStatus = {
+      status: "ok",
+      kind: provider.kind,
+      label: this.ref ?? "",
+      href: this.ref ?? "#",
+    };
+    if (provider.resolve) {
+      try {
+        const resolved = await provider.resolve(this.ref ?? "");
+        // null = transient failure; leave the skeleton up (no cache here).
+        if (resolved) status = resolved;
+      } catch {
+        status = { status: "not_found" };
+      }
+    }
+    if (token !== this.token) return;
+    if (status.status === "loading" || status.status === "denied") {
+      // Treat a lingering "loading" as no-data; denied is leak-free.
+      if (status.status === "denied") {
+        this.renderPlaceholder(
+          "pm-block-embed--denied",
+          "You don't have access to this data",
+        );
+      }
+      return;
+    }
+    if (status.status === "not_found") {
+      this.renderPlaceholder("pm-block-embed--missing", "Resource not found");
+      return;
+    }
+    this.renderExternalCard(provider, status);
+  }
+
+  /**
+   * Header (from the resolved identity) + a host div the provider's renderer
+   * mounts into. We own the icon/label/refresh/⋮ chrome; the renderer owns the
+   * body and fetches its own data. A renderer that throws degrades to a
+   * generic message rather than wedging the NodeView.
+   */
+  private renderExternalCard(
+    provider: PaperEmbedProvider,
+    status: Extract<DatasetteStatus, { status: "ok" }>,
+  ): void {
+    this.dom.replaceChildren();
+    this.dom.appendChild(
+      this.header(kindIcon(status.kind), status.label, status.href),
+    );
+    const host = document.createElement("div");
+    host.className = "pm-block-embed-external";
+    this.dom.appendChild(host);
+    try {
+      const cleanup = provider.mount(host, {
+        ref: this.ref ?? "",
+        mode: this.mode,
+      });
+      this.cleanupExternal = typeof cleanup === "function" ? cleanup : null;
+    } catch {
+      host.replaceChildren();
+      const err = document.createElement("div");
+      err.className = "pm-block-embed-placeholder";
+      err.textContent = "This embed failed to render";
+      host.appendChild(err);
+    }
+  }
+
+  private disposeExternal(): void {
+    if (typeof this.cleanupExternal === "function") {
+      try {
+        this.cleanupExternal();
+      } catch {
+        /* a renderer's cleanup must never wedge the NodeView */
+      }
+    }
+    this.cleanupExternal = null;
   }
 
   private svgIcon(name: string): HTMLSpanElement {
@@ -88,7 +193,7 @@ export class BlockEmbedView implements NodeView {
     if (href) {
       const a = document.createElement("a");
       a.className = "pm-block-embed-label pm-block-embed-label--link";
-      a.href = href;
+      a.href = safeHref(href);
       labelEl = a;
     } else {
       labelEl = document.createElement("span");
@@ -416,6 +521,7 @@ export class BlockEmbedView implements NodeView {
 
   destroy(): void {
     this.closeMenu();
+    this.disposeExternal();
   }
 
   // We own the whole managed subtree — keep PM out of it, but let interactive
