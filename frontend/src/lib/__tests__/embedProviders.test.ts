@@ -14,6 +14,7 @@ import {
   manifestEntryForRef,
   manifestSources,
   manifestKindForSource,
+  embedInsertSources,
   ensureProvider,
   ensureProviderForRef,
   _resetProvidersForTest,
@@ -75,6 +76,42 @@ describe("manifest sources", () => {
     expect(manifestKindForSource("grid")).toBe("sheet");
     expect(manifestKindForSource("place-map")).toBe("places");
     expect(manifestKindForSource("nope")).toBeUndefined();
+  });
+});
+
+describe("embedInsertSources (shared by slash menu + toolbar)", () => {
+  afterEach(() => _resetProvidersForTest());
+
+  it("returns just the native entry when no providers are registered", () => {
+    setProviderManifest([]);
+    expect(embedInsertSources()).toEqual([
+      { label: "Datasette embed", icon: "database" },
+    ]);
+  });
+
+  it("puts the native entry first, then one entry per manifest source", () => {
+    setProviderManifest([
+      {
+        kind: "places",
+        sources: [
+          { id: "place-list", label: "Places", icon: "globe" },
+          { id: "place-map", label: "Map", mode: "map" },
+        ],
+      },
+      { kind: "sheet", sources: [{ id: "grid", label: "Grid" }] },
+      { kind: "no-source" },
+    ]);
+    expect(embedInsertSources()).toEqual([
+      { label: "Datasette embed", icon: "database" }, // native, id undefined
+      { id: "place-list", label: "Places", icon: "globe", mode: undefined },
+      { id: "place-map", label: "Map", icon: undefined, mode: "map" },
+      { id: "grid", label: "Grid", icon: undefined, mode: undefined },
+    ]);
+  });
+
+  it("native entry always has an undefined id", () => {
+    setProviderManifest([{ kind: "p", sources: [{ id: "s", label: "S" }] }]);
+    expect(embedInsertSources()[0].id).toBeUndefined();
   });
 });
 

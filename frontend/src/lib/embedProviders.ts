@@ -108,6 +108,35 @@ export function manifestKindForSource(id: string): string | undefined {
 }
 
 /**
+ * One insertable embed source for a picker launcher. The `/` slash menu and
+ * the toolbar dropdown both consume `embedInsertSources()` — the single source
+ * of truth, so the two entry points can't drift (same labels, same native
+ * entry, same provider set + order).
+ */
+export interface EmbedInsertSource {
+  /** Source id passed to the picker; undefined = native Datasette. */
+  id?: string;
+  label: string;
+  /** TOOLBAR_ICONS key; callers fall back to "database" if absent/unknown. */
+  icon?: string;
+  mode?: string;
+}
+
+/** Native Datasette (always first) followed by every manifest provider
+ *  source, in manifest order. Synchronous — reads the already-set manifest. */
+export function embedInsertSources(): EmbedInsertSource[] {
+  return [
+    { label: "Datasette embed", icon: "database" }, // native; id undefined
+    ...manifestSources().map((s) => ({
+      id: s.id,
+      label: s.label,
+      icon: s.icon,
+      mode: s.mode,
+    })),
+  ];
+}
+
+/**
  * Ensure provider `kind`'s bundle is loaded and registered. Idempotent and
  * de-duped: an already-registered provider resolves immediately; concurrent
  * callers share one in-flight promise. A bundle that fails to import (or whose
