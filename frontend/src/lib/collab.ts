@@ -64,6 +64,7 @@ import { DatasetteResolver } from "./datasetteResolver";
 import { InlineEmbedView } from "./inlineEmbedView";
 import { BlockEmbedView } from "./blockEmbedView";
 import { SqlBlockView } from "./sqlBlockView";
+import { TagView } from "./tagView";
 import { handleDatasettePaste } from "./datasettePaste";
 import {
   buildSlashCommands,
@@ -1196,6 +1197,7 @@ export class EditorConnection {
           new BlockEmbedView(node, view, getPos as () => number | undefined),
         sql_block: (node, view, getPos) =>
           new SqlBlockView(node, view, getPos as () => number | undefined),
+        tag: (node, view) => new TagView(node, view),
       },
       // Returning null falls through to ProseMirror's default; the cast
       // exists because the upstream type insists on `Slice`.

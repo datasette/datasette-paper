@@ -14,6 +14,7 @@ from ..instance import get_registry
 from ..markdown import doc_to_markdown, extract_tasks, group_tasks_by_section
 from ..markdown_parser import markdown_to_doc, markdown_to_fragment
 from ..tables import count_tables_with_name, extract_tables, find_table_by_name
+from ..tags import extract_tags
 from ..permissions import (
     PAPER_DOCS_PARENT,
     PAPER_VIEW,
@@ -488,6 +489,55 @@ async def links_graph(datasette, request):
             ],
         }
     )
+
+
+@router.GET(r"^/-/paper/api/tags/(?P<tag>[^/]+)/refs$")
+async def tag_refs(datasette, request, tag: str):
+    """Docs whose body contains the inline ``#tag`` ``tag``, ACL-filtered.
+
+    Ungated but scoped to ``allowed_resources("paper-view")`` like the list /
+    backlinks endpoints, so a non-viewer's doc is never disclosed. Inline tags
+    are a SEPARATE namespace from the doc-level ``?tag=`` filter and the
+    ``_datasette_paper_doc_tag`` table — this scans the document body.
+
+    LIKE-scan v1 (see todos/tags/07): a SQL ``LIKE`` over each viewable doc's
+    latest snapshot is a *candidate* filter; each candidate's materialized live
+    doc is then walked for a real ``tag`` node (which also picks up live steps
+    not yet snapshotted). A derived inline-tag index table is the documented
+    follow-up if this scan becomes a hotspot.
+
+    → 200 ``{"tag": slug, "docs": [{id, name, state, kind, occurrences,
+    updated_at}]}`` ordered by ``updated_at`` DESC; 400 if the slug normalizes
+    to None.
+    """
+    slug = normalize_tag(tag)
+    if slug is None:
+        return Response.json({"error": "invalid tag"}, status=400)
+
+    viewable = await viewable_doc_ids(datasette, request.actor)
+    db = paper_db(datasette)
+    # Loose candidate pattern — Python confirmation is authoritative, so an
+    # over-match (the slug appearing in plain text or as a substring) is fine.
+    candidates = await db.tag_ref_candidates(like=f"%{slug}%", viewable_ids=viewable)
+
+    registry = get_registry(datasette)
+    docs = []
+    for cand in candidates:
+        instance = await registry.get(db, cand.id)
+        live_doc = instance.materialize_live_doc()
+        occurrences = sum(1 for t in extract_tags(live_doc) if t == slug)
+        if occurrences:
+            docs.append(
+                {
+                    "id": cand.id,
+                    "name": cand.name,
+                    "state": cand.state,
+                    "kind": cand.kind,
+                    "occurrences": occurrences,
+                    "updated_at": cand.updated_at,
+                }
+            )
+    return Response.json({"tag": slug, "docs": docs})
 
 
 @router.POST(r"^/-/paper/api/docs$")
@@ -1188,6 +1238,29 @@ async def paper_index_page(datasette, request):
                 "page_title": "Papers",
                 "entrypoint": "src/pages/index/main.ts",
                 "page_data": {},
+            },
+            request=request,
+        )
+    )
+
+
+@router.GET(r"^/-/paper/tag/(?P<tag>[^/]+)$")
+async def paper_tag_page(datasette, request, tag: str):
+    """Inline-tag search results page for ``#tag``.
+
+    Ungated shell; the client fetches ``/api/tags/{slug}/refs``, which is
+    acl-filtered. ``tag`` is normalized for the title/page_data so the slug the
+    page queries matches what the chip click navigated to. A slug that
+    normalizes to None still renders the page (the refs API returns 400, which
+    the client surfaces as an empty/error state)."""
+    slug = normalize_tag(tag) or tag
+    return Response.html(
+        await datasette.render_template(
+            "paper_base.html",
+            {
+                "page_title": f"#{slug}",
+                "entrypoint": "src/pages/tag/main.ts",
+                "page_data": {"tag": slug},
             },
             request=request,
         )

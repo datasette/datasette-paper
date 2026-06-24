@@ -351,3 +351,28 @@ FROM _datasette_paper_snapshot
 WHERE doc_id = $doc_id::integer
 ORDER BY version DESC
 LIMIT 1;
+
+-- ============================================================================
+-- Inline #tag search (LIKE-scan v1)
+--
+-- Candidate scan for `GET /tags/{slug}/refs`: restrict to docs the requester
+-- can view, then LIKE-match the latest snapshot's doc_json for the tag node's
+-- serialized slug ("tag":"<slug>"). This is a *candidate* filter — false
+-- positives are confirmed in Python by walking the materialized live doc for a
+-- real `tag` node (and live steps not yet snapshotted are picked up there too).
+-- A derived inline-tag index table is the documented follow-up if this scan
+-- becomes a hotspot (see todos/tags/07-tag-search.md).
+-- ============================================================================
+
+-- name: selectTagRefCandidatesScoped :rows -> Doc
+SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name, d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at, d.kind, d.locked
+FROM _datasette_paper_doc d
+JOIN _datasette_paper_snapshot s ON s.doc_id = d.id
+WHERE d.id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
+  )
+  AND s.version = (
+    SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id
+  )
+  AND s.doc_json LIKE $like::text
+ORDER BY d.updated_at DESC;
