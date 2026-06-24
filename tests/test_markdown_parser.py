@@ -302,6 +302,14 @@ class TestInlineNodes:
         assert [n["type"] for n in content] == ["mention"]
         assert content[0]["attrs"]["actorId"] == "team/eng dept"
 
+    def test_mention_reads_canonical_from_link_title(self):
+        # Ticket 04: real href + canonical in the title — the parser reads the
+        # title first, ignoring the (human-facing) href entirely.
+        doc = parse_and_validate('[@Lois](/-/profile/lois "paper:/actor/lois")\n')
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["mention"]
+        assert content[0]["attrs"]["actorId"] == "lois"
+
     def test_ordinary_link_is_not_a_mention(self):
         doc = parse_and_validate("see [docs](https://example.com/y)\n")
         content = doc["content"][0]["content"]
@@ -379,10 +387,27 @@ class TestInlineEmbed:
         assert [n["type"] for n in content] == ["inline_embed"]
         assert content[0]["attrs"]["ref"] == "/db/t with space/1"
 
+    def test_ref_reads_canonical_from_link_title(self):
+        # Ticket 04: real provider href + canonical (with the real kind) in the
+        # title; the parser reads the ref from the title.
+        doc = parse_and_validate(
+            '[Acme list](/-/places/list/5 "paper:/embed/place-list/-/places/list/5")\n'
+        )
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["inline_embed"]
+        assert content[0]["attrs"]["ref"] == "/-/places/list/5"
+
     def test_ordinary_link_is_not_a_ref(self):
         doc = parse_and_validate("see [docs](https://example.com/y)\n")
         content = doc["content"][0]["content"]
         assert all(n["type"] != "inline_embed" for n in content)
+
+    def test_plain_link_with_nonpaper_title_is_left_alone(self):
+        # A plain external link with a title that isn't paper:/ stays a link.
+        doc = parse_and_validate('[x](https://example.com "see this")\n')
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "inline_embed" for n in content)
+        assert content[0]["marks"][0]["attrs"]["href"] == "https://example.com"
 
 
 class TestBlockEmbed:
@@ -652,6 +677,11 @@ ROUNDTRIP_STABLE = [
     "see [@Lois](paper:/actor/lois)\n",
     "see [#roadmap](paper:/tag/roadmap)\n",
     "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)\n",
+    # ticket 04: real href + canonical ref in the link title (title-first parse).
+    # Note: the visible label/href aren't reconstructed on serialize (no
+    # resolver in this round-trip), so only the bare-canonical forms above are
+    # byte-stable here; the title form is round-tripped via the parser test
+    # below + the doc→md→doc resolver test in test_markdown.py.
     # an embed ref with multiple slashes (split-once gotcha)
     "see [/db/t/row/1](paper:/embed/datasette/db/t/row/1)\n",
     # block embed: paper-embed JSON fence (sorted keys, all three attrs)

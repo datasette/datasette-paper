@@ -541,6 +541,81 @@ def test_inline_embed_serializes_as_paper_embed_scheme_link():
     )
 
 
+# ---------------------------------------------------------------------------
+# Ticket 04: resource_url resolver → real href + canonical ref in link title
+# ---------------------------------------------------------------------------
+
+
+def _resolver(mapping):
+    """A resource_url resolver from a {(type, value): (kind, url)} mapping."""
+    return lambda ref_type, value: mapping.get((ref_type, value))
+
+
+def test_mention_with_resolver_emits_href_and_title():
+    md = doc_to_markdown(
+        _doc(_para({"type": "mention", "attrs": {"actorId": "lois"}})),
+        resource_url=_resolver({("actor", "lois"): (None, "/-/profile/lois")}),
+    )
+    assert md == '[@lois](/-/profile/lois "paper:/actor/lois")\n'
+
+
+def test_tag_with_resolver_emits_href_and_title():
+    md = doc_to_markdown(
+        _doc(_para({"type": "tag", "attrs": {"tag": "q3"}})),
+        resource_url=_resolver({("tag", "q3"): (None, "/-/paper/tag/q3")}),
+    )
+    assert md == '[#q3](/-/paper/tag/q3 "paper:/tag/q3")\n'
+
+
+def test_inline_embed_with_provider_resolver_uses_real_kind_and_href():
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                {"type": "inline_embed", "attrs": {"ref": "/-/places/list/5"}},
+            )
+        ),
+        resource_url=_resolver(
+            {("embed", "/-/places/list/5"): ("place-list", "/-/places/list/5")}
+        ),
+    )
+    # kind is the provider's kind (NOT datasette); href is the real URL, the
+    # canonical paper:/embed/<kind>/<ref> ref sits in the title.
+    assert md == (
+        "[/-/places/list/5](/-/places/list/5 "
+        '"paper:/embed/place-list/-/places/list/5")\n'
+    )
+
+
+def test_inline_embed_provider_without_url_emits_bare_canonical():
+    # A provider matched (kind set) but no resource_url → bare canonical href.
+    md = doc_to_markdown(
+        _doc(_para({"type": "inline_embed", "attrs": {"ref": "/-/places/list/5"}})),
+        resource_url=_resolver({("embed", "/-/places/list/5"): ("place-list", None)}),
+    )
+    assert md == "[/-/places/list/5](paper:/embed/place-list/-/places/list/5)\n"
+
+
+def test_resolver_that_raises_falls_back_to_bare_canonical():
+    def boom(ref_type, value):
+        raise RuntimeError("provider blew up")
+
+    md = doc_to_markdown(
+        _doc(_para({"type": "mention", "attrs": {"actorId": "lois"}})),
+        resource_url=boom,
+    )
+    assert md == "[@lois](paper:/actor/lois)\n"
+
+
+def test_resolver_title_keeps_canonical_wellformed():
+    # An awkward ref char (`"`) is percent-encoded in the canonical so the
+    # markdown title stays well-formed; the visible label keeps the raw ref.
+    md = doc_to_markdown(
+        _doc(_para({"type": "inline_embed", "attrs": {"ref": '/a"b'}})),
+        resource_url=_resolver({("embed", '/a"b'): ("datasette", "/real")}),
+    )
+    assert md == '[/a"b](/real "paper:/embed/datasette/a%22b")\n'
+
+
 def test_block_embed_serializes_as_paper_embed_json_fence():
     md = doc_to_markdown(
         _doc({"type": "block_embed", "attrs": {"ref": "/fixtures/facetable"}})
