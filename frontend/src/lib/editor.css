@@ -928,10 +928,16 @@
 }
 .editor-host .pm-block-embed-footer-link,
 .editor-host .pm-block-embed-footer-link:visited {
-  /* Float "open in Datasette" to the right edge of the footer. */
-  margin-left: auto;
+  /* "open in Datasette" sits at the left edge (mirrors the SQL block). */
   color: #6429a8;
   text-decoration: none;
+}
+.editor-host .pm-block-embed-footer-link:hover {
+  text-decoration: underline;
+}
+.editor-host .pm-block-embed-footer-info {
+  /* Push the row-count + page-size control to the right edge. */
+  margin-left: auto;
 }
 .editor-host .pm-block-embed-fields {
   display: grid;

@@ -509,7 +509,15 @@ export class BlockEmbedView implements NodeView {
     const footer = document.createElement("div");
     footer.className = "pm-block-embed-footer";
 
-    // "showing [25] of 1,234 rows" — the count number is the limit dropdown.
+    // Left: "open in Datasette" (matches the SQL block's footer layout).
+    const link = document.createElement("a");
+    link.className = "pm-block-embed-footer-link";
+    link.href = payload.href;
+    link.textContent = "open in Datasette ↗";
+    footer.appendChild(link);
+
+    // Right (margin-left:auto on the info span pushes it over): "showing [25]
+    // of 1,234 rows" — the count number is the limit dropdown.
     const info = document.createElement("span");
     info.className = "pm-block-embed-footer-info";
     info.append("showing ", this.rowLimitSelect());
@@ -519,12 +527,6 @@ export class BlockEmbedView implements NodeView {
       info.append(" rows");
     }
     footer.appendChild(info);
-
-    const link = document.createElement("a");
-    link.className = "pm-block-embed-footer-link";
-    link.href = payload.href;
-    link.textContent = "open in Datasette ↗";
-    footer.appendChild(link);
     this.dom.appendChild(footer);
   }
 
@@ -588,16 +590,17 @@ export class BlockEmbedView implements NodeView {
 
     const footer = document.createElement("div");
     footer.className = "pm-block-embed-footer";
-    const info = document.createElement("span");
-    info.className = "pm-block-embed-footer-info";
-    const n = payload.tables.length;
-    info.textContent = `${n} table${n === 1 ? "" : "s"}`;
-    footer.appendChild(info);
+    // Link left, count right — same layout as the table footer.
     const link = document.createElement("a");
     link.className = "pm-block-embed-footer-link";
     link.href = payload.href;
     link.textContent = "open in Datasette ↗";
     footer.appendChild(link);
+    const info = document.createElement("span");
+    info.className = "pm-block-embed-footer-info";
+    const n = payload.tables.length;
+    info.textContent = `${n} table${n === 1 ? "" : "s"}`;
+    footer.appendChild(info);
     this.dom.appendChild(footer);
   }
 
