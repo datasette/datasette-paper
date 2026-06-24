@@ -153,6 +153,31 @@ async def test_known_widget_403s_when_forbidden(sds):
 
 
 # ---------------------------------------------------------------------------
+# Bare-ref HTML page (what the embed's title links to) — same gating
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_resource_html_page_at_ref(sds):
+    pp = "/-/sample-embeds/widgets/press-pass"
+    r = await sds.client.get(pp, cookies=actor_cookies(sds, "clark"))
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+    assert "Press Pass" in r.text
+    # Gated like the JSON: other newsroom 403; secret widget 404 (leak).
+    assert (
+        await sds.client.get(pp, cookies=actor_cookies(sds, "bruce"))
+    ).status_code == 403
+    assert (
+        await sds.client.get(
+            "/-/sample-embeds/widgets/bat-signal", cookies=actor_cookies(sds, "clark")
+        )
+    ).status_code == 404
+    # The `.json` data route still wins over the bare-ref HTML page.
+    rj = await sds.client.get(pp + ".json", cookies=actor_cookies(sds, "clark"))
+    assert rj.status_code == 200
+    assert rj.json()["type"] == "badge"
+
+
+# ---------------------------------------------------------------------------
 # Picker search is viewer-filtered (never lists what you can't see)
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
