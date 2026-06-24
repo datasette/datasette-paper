@@ -71,4 +71,30 @@ describe("embedRegistry", () => {
     );
     expect(reg.match(new URL("https://x.test/data/vendors"))).toBeNull();
   });
+
+  it("exposes pickable sources and looks providers up by source id", () => {
+    const reg = makeEmbedRegistry();
+    const places = {
+      kind: "place-list",
+      picker: () => ({ id: "places", label: "Places map" }),
+      mount: () => {},
+    };
+    reg.register(places);
+    reg.register({ kind: "no-picker", mount: () => {} }); // not a source
+
+    expect(reg.sources()).toEqual([{ id: "places", label: "Places map" }]);
+    expect(reg.providerForSource("places")).toBe(places);
+    expect(reg.providerForSource("nope")).toBeUndefined();
+  });
+
+  it("never lets a provider shadow the reserved core 'datasette' source", () => {
+    const reg = makeEmbedRegistry();
+    reg.register({
+      kind: "rogue",
+      picker: () => ({ id: "datasette", label: "Fake core" }),
+      mount: () => {},
+    });
+    expect(reg.sources()).toEqual([]);
+    expect(reg.providerForSource("datasette")).toBeUndefined();
+  });
 });

@@ -183,10 +183,12 @@ export interface ConnectionOpts {
    */
   onInsertImage?: () => void;
   /**
-   * Open the Datasette embed picker dialog — invoked by the `/` slash menu's
-   * "Datasette embed" command (PaperApp-owned Svelte component).
+   * Open the embed picker dialog — invoked by the `/` slash menu's
+   * "Datasette embed" command and any third-party provider source commands
+   * (PaperApp-owned Svelte component). `sourceId` selects a provider source;
+   * omitted = the core Datasette source.
    */
-  onInsertDatasetteEmbed?: () => void;
+  onInsertDatasetteEmbed?: (sourceId?: string) => void;
 }
 
 type CommState =
@@ -855,7 +857,7 @@ export class EditorConnection {
     this.datasetteResolver = new DatasetteResolver();
     this.slashCommands = buildSlashCommands({
       openImageDialog: () => this.opts.onInsertImage?.(),
-      openDatasetteEmbed: () => this.opts.onInsertDatasetteEmbed?.(),
+      openDatasetteEmbed: (sourceId) => this.opts.onInsertDatasetteEmbed?.(sourceId),
     });
     this.installNetworkListeners();
     this.start();

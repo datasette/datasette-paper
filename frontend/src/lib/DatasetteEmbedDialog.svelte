@@ -1,32 +1,59 @@
 <script lang="ts">
   /**
-   * Searchable picker for inserting a Datasette embed. Reused by the `/` slash
-   * menu (ticket 09). Search visible databases/tables/views by name, or paste a
-   * full ref path (including a row, e.g. `/db/table/42`). The chosen ref + mode
-   * is handed back via `oninsert`; the caller turns it into a `block_embed`
-   * node (see datasetteEmbed.ts `insertDatasetteEmbed`).
+   * Searchable picker for inserting an embed. Reused by the `/` slash menu.
+   * Two modes, by the `source` prop:
+   *   - undefined (core Datasette): search visible databases/tables/views by
+   *     name via the native `.json` API (datasetteEmbed.ts `searchResources`).
+   *   - a third-party provider source id: delegate search to that provider's
+   *     registered `search()` (embedRegistry.ts) — the provider owns its
+   *     permission filtering + leak discipline.
+   * A full ref path can also be typed directly (incl. a row, `/db/table/42`).
+   * The chosen ref + mode is handed back via `oninsert`; the caller turns it
+   * into a `block_embed` node (datasetteEmbed.ts `insertDatasetteEmbed`).
    */
-  import { searchResources, type SearchResult } from "./datasetteEmbed";
+  import { searchResources } from "./datasetteEmbed";
+  import { embedRegistry, type PaperEmbedSource } from "./embedRegistry";
+  import { ensureProvider, manifestKindForSource } from "./embedProviders";
 
   let {
     open = $bindable(false),
+    source = undefined,
     oninsert,
   }: {
     open?: boolean;
+    source?: string;
     oninsert: (ref: string, mode: string) => void;
   } = $props();
+
+  /** Normalized display row for both core and provider results. */
+  type DisplayResult = {
+    ref: string;
+    label: string;
+    kind?: string;
+    secondary?: string;
+  };
 
   let dialogEl: HTMLDialogElement | undefined = $state();
   let query = $state("");
   let manualRef = $state("");
   let mode = $state("table");
-  let results = $state<SearchResult[]>([]);
+  let results = $state<DisplayResult[]>([]);
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // The active provider source spec — populated only once the provider's bundle
+  // is loaded (a provider source is lazy: its picker()/search() don't exist
+  // until then). Core source (no `source`) leaves it undefined.
+  let sourceSpec = $state<PaperEmbedSource | undefined>(undefined);
+  let providerLoading = $state(false);
+
+  const title = $derived(
+    sourceSpec ? `Insert ${sourceSpec.label}` : "Insert Datasette embed",
+  );
 
   function reset() {
     query = "";
     manualRef = "";
-    mode = "table";
+    mode = sourceSpec?.mode ?? "table";
     results = [];
   }
 
@@ -36,14 +63,50 @@
     if (!el) return;
     if (open && !el.open) {
       el.showModal();
-      void runSearch("");
+      void openSource();
     } else if (!open && el.open) {
       el.close();
     }
   });
 
+  // On open: a provider source lazy-injects its bundle (so the doc only pulls
+  // provider JS the author actually reaches for), then reads its picker() spec;
+  // the core source needs no load. Then runs an initial empty search.
+  async function openSource() {
+    if (source) {
+      const kind = manifestKindForSource(source);
+      if (kind) {
+        providerLoading = true;
+        await ensureProvider(kind);
+        providerLoading = false;
+      }
+      sourceSpec = embedRegistry().providerForSource(source)?.picker?.();
+    } else {
+      sourceSpec = undefined;
+    }
+    mode = sourceSpec?.mode ?? "table";
+    await runSearch("");
+  }
+
   async function runSearch(q: string) {
-    results = await searchResources(q, 20);
+    if (source) {
+      const provider = embedRegistry().providerForSource(source);
+      const hits = (await provider?.search?.(q, 20)) ?? [];
+      results = hits.map((h) => ({
+        ref: h.ref,
+        label: h.label,
+        kind: h.kind,
+        secondary: h.detail,
+      }));
+      return;
+    }
+    const hits = await searchResources(q, 20);
+    results = hits.map((h) => ({
+      ref: h.ref,
+      label: h.label,
+      kind: h.kind,
+      secondary: h.db,
+    }));
   }
 
   function onQueryInput() {
@@ -75,7 +138,7 @@
   }}
 >
   <div class="ds-embed-dialog__head">
-    <strong>Insert Datasette embed</strong>
+    <strong>{title}</strong>
     <button type="button" class="ds-embed-dialog__x" aria-label="Close" onclick={cancel}
       >×</button
     >
@@ -84,23 +147,27 @@
   <input
     class="ds-embed-search"
     type="text"
-    placeholder="Search tables, views, databases…"
+    placeholder={sourceSpec ? `Search ${sourceSpec.label}…` : "Search tables, views, databases…"}
     bind:value={query}
     oninput={onQueryInput}
   />
 
   <ul class="ds-embed-results">
-    {#each results as r (r.ref)}
-      <li>
-        <button type="button" class="ds-embed-result" onclick={() => choose(r.ref)}>
-          <span class="ds-embed-result-kind">{r.kind}</span>
-          <span class="ds-embed-result-label">{r.label}</span>
-          <span class="ds-embed-result-db">{r.db}</span>
-        </button>
-      </li>
+    {#if providerLoading}
+      <li class="ds-embed-empty">Loading…</li>
     {:else}
-      <li class="ds-embed-empty">No matches</li>
-    {/each}
+      {#each results as r (r.ref)}
+        <li>
+          <button type="button" class="ds-embed-result" onclick={() => choose(r.ref)}>
+            {#if r.kind}<span class="ds-embed-result-kind">{r.kind}</span>{/if}
+            <span class="ds-embed-result-label">{r.label}</span>
+            {#if r.secondary}<span class="ds-embed-result-db">{r.secondary}</span>{/if}
+          </button>
+        </li>
+      {:else}
+        <li class="ds-embed-empty">No matches</li>
+      {/each}
+    {/if}
   </ul>
 
   <div class="ds-embed-manual">

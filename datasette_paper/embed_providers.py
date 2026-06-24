@@ -44,12 +44,17 @@ def provider_manifest(datasette):
             "kind": "place-list",          # stable id; matches the bundle's exported kind
             "label": "Place list",         # human label (defaults to kind)
             "js": [...urls], "css": [...urls],
-            "ref_prefixes": ["/-/places/"] # stored-ref namespaces this provider owns
+            "ref_prefixes": ["/-/places/"],# stored-ref namespaces this provider owns
+            "sources": [                   # browsable `/`-menu insert sources
+                {"id": "place-list", "label": "Places", "icon": "geo-alt"},
+            ],
         }
 
     ``ref_prefixes`` is how paper decides, *server-knowably*, that a stored ref
     like ``/-/places/list/5`` belongs to this provider — so it can inject the
     bundle on demand without first running the provider's in-bundle ``matchRef``.
+    ``sources`` mirrors the provider's JS ``picker()`` sources so the ``/`` menu
+    can list them *before* the bundle loads; picking one injects the bundle.
 
     A provider with no ``kind`` is skipped (the kind ties the manifest entry to
     the bundle's default-exported provider ``kind``). A provider whose ``frontend_assets``
@@ -85,6 +90,29 @@ def provider_manifest(datasette):
                 "js": list(assets.get("js") or []),
                 "css": list(assets.get("css") or []),
                 "ref_prefixes": list(getattr(provider, "ref_prefixes", None) or []),
+                "sources": _normalize_sources(getattr(provider, "sources", None)),
             }
         )
+    return out
+
+
+def _normalize_sources(sources):
+    """Coerce a provider's declared `/`-menu sources to manifest dicts.
+
+    Each must have an ``id``; ``label`` defaults to it; ``icon`` / ``mode`` are
+    carried through when present. Malformed entries are dropped (not fatal).
+    """
+    out = []
+    for s in sources or []:
+        if not isinstance(s, dict):
+            continue
+        sid = s.get("id")
+        if not sid:
+            continue
+        entry = {"id": sid, "label": s.get("label") or sid}
+        if s.get("icon"):
+            entry["icon"] = s["icon"]
+        if s.get("mode"):
+            entry["mode"] = s["mode"]
+        out.append(entry)
     return out

@@ -27,6 +27,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
 import { insertTable } from "./tables";
+import { manifestSources } from "./embedProviders";
 
 export interface SlashCommand {
   id: string;
@@ -317,8 +318,28 @@ export function slashMenuPopupPlugin(commands: SlashCommand[]): Plugin {
 export interface SlashCommandCallbacks {
   /** Open the image insert dialog (PaperApp-owned Svelte component). */
   openImageDialog?: () => void;
-  /** Open the Datasette embed picker dialog (PaperApp-owned). */
-  openDatasetteEmbed?: () => void;
+  /**
+   * Open the embed picker dialog (PaperApp-owned). `sourceId` selects a
+   * third-party provider source; omitted/undefined = the core Datasette source.
+   */
+  openDatasetteEmbed?: (sourceId?: string) => void;
+}
+
+/**
+ * One slash command per third-party provider source, read from the **manifest**
+ * (page_data) — not the live registry — so a provider appears in the `/` menu
+ * without its bundle being loaded. Picking a source opens the dialog, which
+ * lazy-injects that provider's bundle before searching (see embedProviders.ts /
+ * DatasetteEmbedDialog).
+ */
+export function providerSlashCommands(cb: SlashCommandCallbacks): SlashCommand[] {
+  return manifestSources().map((source) => ({
+    id: `embed_source:${source.id}`,
+    label: source.label,
+    keywords: ["embed", "insert", source.id, source.label.toLowerCase()],
+    icon: source.icon && source.icon in TOOLBAR_ICONS ? source.icon : "database",
+    run: () => cb.openDatasetteEmbed?.(source.id),
+  }));
 }
 
 function runCommand(cmd: Command): (view: EditorView) => void {
@@ -420,6 +441,8 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "database",
       run: () => cb.openDatasetteEmbed?.(),
     },
+    // Third-party provider sources (e.g. "Places map"), if any are registered.
+    ...providerSlashCommands(cb),
   ];
   return commands;
 }

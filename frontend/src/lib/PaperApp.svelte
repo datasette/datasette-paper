@@ -25,6 +25,9 @@
   // dialog is opened by the slash menu and context-aware paste.
   let imageDialogOpen = $state(false);
   let embedDialogOpen = $state(false);
+  // Which embed source the picker is scoped to: undefined = core Datasette,
+  // otherwise a third-party provider source id.
+  let embedSource = $state<string | undefined>(undefined);
 
   let editorEl: HTMLDivElement | undefined = $state(undefined);
 
@@ -96,7 +99,8 @@
         onInsertImage: () => {
           imageDialogOpen = true;
         },
-        onInsertDatasetteEmbed: () => {
+        onInsertDatasetteEmbed: (sourceId) => {
+          embedSource = sourceId;
           embedDialogOpen = true;
         },
       },
@@ -247,7 +251,11 @@
   <div class="editor-host" bind:this={editorEl}></div>
   <LinksPanel {docId} />
   <ImageDialog bind:open={imageDialogOpen} oninsert={onImageInsert} />
-  <DatasetteEmbedDialog bind:open={embedDialogOpen} oninsert={onEmbedInsert} />
+  <DatasetteEmbedDialog
+    bind:open={embedDialogOpen}
+    source={embedSource}
+    oninsert={onEmbedInsert}
+  />
 </div>
 
 <style>
