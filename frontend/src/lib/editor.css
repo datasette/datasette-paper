@@ -837,7 +837,8 @@
 .editor-host .pm-block-embed-menu--open {
   display: block;
 }
-.editor-host .pm-block-embed-menu-item {
+.editor-host .pm-block-embed-menu-item,
+.editor-host a.pm-block-embed-menu-item:visited {
   display: block;
   width: 100%;
   text-align: left;
@@ -847,6 +848,7 @@
   font: inherit;
   font-size: 13px;
   color: #333;
+  text-decoration: none;
   padding: 6px 8px;
   border-radius: 4px;
 }

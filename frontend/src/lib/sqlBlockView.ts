@@ -23,11 +23,10 @@ import { cellText, iconMarkup } from "./datasetteEmbed";
 import {
   listQueryableDatabases,
   queryHref,
-  rowsToCsv,
-  rowsToJson,
   runSqlQuery,
   type SqlResult,
 } from "./sqlQuery";
+import { rowsToCsv, rowsToJson } from "./tableExport";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 100];
 const DEFAULT_PAGE_SIZE = 10;
