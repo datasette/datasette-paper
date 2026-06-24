@@ -23,7 +23,14 @@ from conftest import make_datasette
 
 class _Provider:
     def __init__(
-        self, kind=None, label=None, js=None, css=None, ref_prefixes=None, raises=False
+        self,
+        kind=None,
+        label=None,
+        js=None,
+        css=None,
+        ref_prefixes=None,
+        sources=None,
+        raises=False,
     ):
         if kind is not None:
             self.kind = kind
@@ -31,6 +38,8 @@ class _Provider:
             self.label = label
         if ref_prefixes is not None:
             self.ref_prefixes = ref_prefixes
+        if sources is not None:
+            self.sources = sources
         self._js = js or []
         self._css = css or []
         self._raises = raises
@@ -76,6 +85,7 @@ def test_manifest_describes_each_provider():
             js=["/places.js"],
             css=["/places.css"],
             ref_prefixes=["/-/places/"],
+            sources=[{"id": "place-list", "label": "Places", "icon": "geo-alt"}],
         ),
         _Provider(kind="sheet", js=["/sheet.js"]),
     )
@@ -87,6 +97,7 @@ def test_manifest_describes_each_provider():
                 "js": ["/places.js"],
                 "css": ["/places.css"],
                 "ref_prefixes": ["/-/places/"],
+                "sources": [{"id": "place-list", "label": "Places", "icon": "geo-alt"}],
             },
             {
                 "kind": "sheet",
@@ -94,6 +105,7 @@ def test_manifest_describes_each_provider():
                 "js": ["/sheet.js"],
                 "css": [],
                 "ref_prefixes": [],
+                "sources": [],
             },
         ]
     finally:
@@ -119,6 +131,30 @@ def test_dedupes_by_kind_first_wins():
     try:
         manifest = provider_manifest(ds)
         assert [e["js"] for e in manifest] == [["/first.js"]]
+    finally:
+        _unregister(shim)
+
+
+def test_sources_are_normalized_and_malformed_dropped():
+    ds = make_datasette()
+    shim = _register(
+        _Provider(
+            kind="p",
+            js=["/p.js"],
+            sources=[
+                {"id": "s1", "label": "S1", "icon": "geo-alt", "mode": "map"},
+                {"id": "s2"},  # label defaults to id; no icon/mode emitted
+                {"label": "no id"},  # dropped — no id
+                "not-a-dict",  # dropped
+            ],
+        )
+    )
+    try:
+        [entry] = provider_manifest(ds)
+        assert entry["sources"] == [
+            {"id": "s1", "label": "S1", "icon": "geo-alt", "mode": "map"},
+            {"id": "s2", "label": "s2"},
+        ]
     finally:
         _unregister(shim)
 

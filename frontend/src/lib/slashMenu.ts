@@ -27,7 +27,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
 import { insertTable } from "./tables";
-import { embedRegistry } from "./embedRegistry";
+import { manifestSources } from "./embedProviders";
 
 export interface SlashCommand {
   id: string;
@@ -326,21 +326,20 @@ export interface SlashCommandCallbacks {
 }
 
 /**
- * One slash command per third-party provider that opted into the picker
- * (`picker()` → a browsable source). Read from the registry at build time;
- * a provider whose bundle registers after the editor loads won't appear until
- * the next reload (acceptable — bundles inject via `extra_js_urls` up front).
+ * One slash command per third-party provider source, read from the **manifest**
+ * (page_data) — not the live registry — so a provider appears in the `/` menu
+ * without its bundle being loaded. Picking a source opens the dialog, which
+ * lazy-injects that provider's bundle before searching (see embedProviders.ts /
+ * DatasetteEmbedDialog).
  */
 export function providerSlashCommands(cb: SlashCommandCallbacks): SlashCommand[] {
-  return embedRegistry()
-    .sources()
-    .map((source) => ({
-      id: `embed_source:${source.id}`,
-      label: source.label,
-      keywords: ["embed", "insert", source.id, source.label.toLowerCase()],
-      icon: source.icon && source.icon in TOOLBAR_ICONS ? source.icon : "database",
-      run: () => cb.openDatasetteEmbed?.(source.id),
-    }));
+  return manifestSources().map((source) => ({
+    id: `embed_source:${source.id}`,
+    label: source.label,
+    keywords: ["embed", "insert", source.id, source.label.toLowerCase()],
+    icon: source.icon && source.icon in TOOLBAR_ICONS ? source.icon : "database",
+    run: () => cb.openDatasetteEmbed?.(source.id),
+  }));
 }
 
 function runCommand(cmd: Command): (view: EditorView) => void {

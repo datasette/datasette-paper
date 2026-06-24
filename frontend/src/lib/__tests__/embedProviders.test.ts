@@ -12,6 +12,8 @@ import {
   setProviderManifest,
   manifestKindForRef,
   manifestEntryForRef,
+  manifestSources,
+  manifestKindForSource,
   ensureProvider,
   ensureProviderForRef,
   _resetProvidersForTest,
@@ -47,6 +49,32 @@ describe("manifest ref matching", () => {
   it("treats a missing/empty manifest as owning nothing", () => {
     setProviderManifest(undefined);
     expect(manifestKindForRef("/-/places/list/5")).toBeUndefined();
+  });
+});
+
+describe("manifest sources", () => {
+  afterEach(() => _resetProvidersForTest());
+
+  it("flattens sources across providers, tagging each with its kind", () => {
+    setProviderManifest([
+      {
+        kind: "places",
+        sources: [
+          { id: "place-list", label: "Places" },
+          { id: "place-map", label: "Map" },
+        ],
+      },
+      { kind: "sheet", sources: [{ id: "grid", label: "Grid" }] },
+      { kind: "no-source" },
+    ]);
+    expect(manifestSources()).toEqual([
+      { id: "place-list", label: "Places", kind: "places" },
+      { id: "place-map", label: "Map", kind: "places" },
+      { id: "grid", label: "Grid", kind: "sheet" },
+    ]);
+    expect(manifestKindForSource("grid")).toBe("sheet");
+    expect(manifestKindForSource("place-map")).toBe("places");
+    expect(manifestKindForSource("nope")).toBeUndefined();
   });
 });
 

@@ -34,6 +34,9 @@ class PlacesEmbedProvider:
     kind = "place-list"               # MUST equal the bundle's exported `kind`
     label = "Place list"              # shown in the / menu (optional)
     ref_prefixes = ["/-/places/"]     # stored-ref namespaces this provider owns
+    sources = [                       # browsable / menu insert sources (optional)
+        {"id": "place-list", "label": "Places", "icon": "geo-alt"},
+    ]
 
     def frontend_assets(self, datasette):
         return {
@@ -57,6 +60,9 @@ def paper_embed_provider(datasette):
   the URL's path under one of these prefixes** (paper can't run your in-bundle
   `matchUrl` until the bundle is loaded).
 - `label` (optional) is the `/`-menu label; defaults to `kind`.
+- `sources` (optional) mirrors your JS `picker()` sources (`id` / `label` /
+  `icon` / `mode`) so the `/` menu can list them **before** your bundle loads.
+  Each needs an `id`; picking one injects your bundle, then runs its `search()`.
 - `frontend_assets(datasette) -> {"js": [...], "css": [...]}` supplies the
   bundle URLs. Both keys optional. They are folded into the doc page's
   `page_data` manifest and lazy-injected — **never** added to every page.
@@ -111,6 +117,8 @@ export default {
 | `matchUrl(url)` | optional | Claim a pasted **same-origin** URL → ref to store. |
 | `resolve(ref)` | recommended | Inline-pill identity + denied/not_found. Omit → a generic ref-labelled pill. |
 | `mount(host, ctx)` | yes | Render the block body. `ctx = { ref, mode }`. Return a cleanup fn. |
+| `picker()` | optional | Browsable `/`-menu source spec `{ id, label, icon?, mode? }`. Mirror it in the backend `sources` so it shows before the bundle loads. |
+| `search(q, limit)` | with `picker` | Viewer-filtered hits `{ ref, label, kind?, detail? }` for the picker dialog. |
 
 ## Rules
 
@@ -128,4 +136,4 @@ export default {
 Drive `resolve` with a stubbed `fetch` and assert the denied/not_found mapping;
 mount into a detached `host` div and assert the DOM + that the cleanup fn runs.
 See `frontend/src/lib/__tests__/embedRegistry.test.ts` and the provider
-delegation cases in `datasetteResolver.test.ts` / `datasetteEmbedView.test.ts`.
+delegation cases in `datasetteResolver.test.ts` / `blockEmbedView.test.ts`.

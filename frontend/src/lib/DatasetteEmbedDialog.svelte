@@ -13,6 +13,7 @@
    */
   import { searchResources } from "./datasetteEmbed";
   import { embedRegistry, type PaperEmbedSource } from "./embedRegistry";
+  import { ensureProvider, manifestKindForSource } from "./embedProviders";
 
   let {
     open = $bindable(false),
@@ -39,10 +40,12 @@
   let results = $state<DisplayResult[]>([]);
   let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
-  // The active provider source spec, when `source` names a registered provider.
-  const sourceSpec = $derived<PaperEmbedSource | undefined>(
-    source ? embedRegistry().providerForSource(source)?.picker?.() : undefined,
-  );
+  // The active provider source spec — populated only once the provider's bundle
+  // is loaded (a provider source is lazy: its picker()/search() don't exist
+  // until then). Core source (no `source`) leaves it undefined.
+  let sourceSpec = $state<PaperEmbedSource | undefined>(undefined);
+  let providerLoading = $state(false);
+
   const title = $derived(
     sourceSpec ? `Insert ${sourceSpec.label}` : "Insert Datasette embed",
   );
@@ -59,13 +62,31 @@
     const el = dialogEl;
     if (!el) return;
     if (open && !el.open) {
-      mode = sourceSpec?.mode ?? "table";
       el.showModal();
-      void runSearch("");
+      void openSource();
     } else if (!open && el.open) {
       el.close();
     }
   });
+
+  // On open: a provider source lazy-injects its bundle (so the doc only pulls
+  // provider JS the author actually reaches for), then reads its picker() spec;
+  // the core source needs no load. Then runs an initial empty search.
+  async function openSource() {
+    if (source) {
+      const kind = manifestKindForSource(source);
+      if (kind) {
+        providerLoading = true;
+        await ensureProvider(kind);
+        providerLoading = false;
+      }
+      sourceSpec = embedRegistry().providerForSource(source)?.picker?.();
+    } else {
+      sourceSpec = undefined;
+    }
+    mode = sourceSpec?.mode ?? "table";
+    await runSearch("");
+  }
 
   async function runSearch(q: string) {
     if (source) {
@@ -132,17 +153,21 @@
   />
 
   <ul class="ds-embed-results">
-    {#each results as r (r.ref)}
-      <li>
-        <button type="button" class="ds-embed-result" onclick={() => choose(r.ref)}>
-          {#if r.kind}<span class="ds-embed-result-kind">{r.kind}</span>{/if}
-          <span class="ds-embed-result-label">{r.label}</span>
-          {#if r.secondary}<span class="ds-embed-result-db">{r.secondary}</span>{/if}
-        </button>
-      </li>
+    {#if providerLoading}
+      <li class="ds-embed-empty">Loading…</li>
     {:else}
-      <li class="ds-embed-empty">No matches</li>
-    {/each}
+      {#each results as r (r.ref)}
+        <li>
+          <button type="button" class="ds-embed-result" onclick={() => choose(r.ref)}>
+            {#if r.kind}<span class="ds-embed-result-kind">{r.kind}</span>{/if}
+            <span class="ds-embed-result-label">{r.label}</span>
+            {#if r.secondary}<span class="ds-embed-result-db">{r.secondary}</span>{/if}
+          </button>
+        </li>
+      {:else}
+        <li class="ds-embed-empty">No matches</li>
+      {/each}
+    {/if}
   </ul>
 
   <div class="ds-embed-manual">

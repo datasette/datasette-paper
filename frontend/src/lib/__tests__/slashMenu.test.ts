@@ -16,7 +16,7 @@ import {
   providerSlashCommands,
   type SlashCommand,
 } from "../slashMenu";
-import { embedRegistry } from "../embedRegistry";
+import { setProviderManifest, _resetProvidersForTest } from "../embedProviders";
 
 const commands = buildSlashCommands();
 
@@ -169,17 +169,18 @@ describe("commitSlashSelection", () => {
 
 describe("providerSlashCommands (third-party sources)", () => {
   afterEach(() => {
-    delete window.datasettePaperEmbeds;
+    _resetProvidersForTest();
   });
 
-  it("builds one command per provider that implements picker()", () => {
-    embedRegistry().register({
-      kind: "place-list",
-      picker: () => ({ id: "places", label: "Places map", icon: "globe" }),
-      mount: () => {},
-    });
-    // A provider with no picker() contributes no command.
-    embedRegistry().register({ kind: "no-picker", mount: () => {} });
+  it("builds one command per manifest source (no bundle needed)", () => {
+    setProviderManifest([
+      {
+        kind: "place-list",
+        sources: [{ id: "places", label: "Places map", icon: "globe" }],
+      },
+      // A provider that contributes no source adds no command.
+      { kind: "no-source" },
+    ]);
 
     const open = vi.fn();
     const cmds = providerSlashCommands({ openDatasetteEmbed: open });
@@ -191,20 +192,19 @@ describe("providerSlashCommands (third-party sources)", () => {
   });
 
   it("falls back to the database icon for an unknown icon name", () => {
-    embedRegistry().register({
-      kind: "place-list",
-      picker: () => ({ id: "places", label: "Places", icon: "not-a-real-icon" }),
-      mount: () => {},
-    });
+    setProviderManifest([
+      {
+        kind: "place-list",
+        sources: [{ id: "places", label: "Places", icon: "not-a-real-icon" }],
+      },
+    ]);
     expect(providerSlashCommands({})[0].icon).toBe("database");
   });
 
   it("is included in buildSlashCommands output", () => {
-    embedRegistry().register({
-      kind: "place-list",
-      picker: () => ({ id: "places", label: "Places map" }),
-      mount: () => {},
-    });
+    setProviderManifest([
+      { kind: "place-list", sources: [{ id: "places", label: "Places map" }] },
+    ]);
     const ids = buildSlashCommands().map((c) => c.id);
     expect(ids).toContain("embed_source:places");
   });

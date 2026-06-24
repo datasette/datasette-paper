@@ -20,6 +20,14 @@
 import { embedRegistry, _resetEmbedRegistryForTest } from "./embedRegistry";
 import type { PaperEmbedProvider } from "./embedRegistry";
 
+/** A `/`-menu insert source declared by a provider (mirrors its JS picker()). */
+export interface ProviderManifestSource {
+  id: string;
+  label: string;
+  icon?: string;
+  mode?: string;
+}
+
 export interface ProviderManifestEntry {
   /** Stable id; equals the bundle's default-exported provider `kind`. */
   kind: string;
@@ -29,6 +37,13 @@ export interface ProviderManifestEntry {
   css?: string[];
   /** Stored-ref namespaces this provider owns, e.g. ["/-/places/"]. */
   ref_prefixes?: string[];
+  /** Browsable `/`-menu sources this provider contributes. */
+  sources?: ProviderManifestSource[];
+}
+
+/** A manifest source paired with its owning provider kind (for lazy-load). */
+export interface ManifestSource extends ProviderManifestSource {
+  kind: string;
 }
 
 let manifest: ProviderManifestEntry[] = [];
@@ -78,6 +93,18 @@ export function manifestEntryForRef(
 /** The provider `kind` that owns this ref per the manifest, if any. */
 export function manifestKindForRef(ref: string): string | undefined {
   return manifestEntryForRef(ref)?.kind;
+}
+
+/** All `/`-menu sources across providers, each tagged with its provider kind. */
+export function manifestSources(): ManifestSource[] {
+  return manifest.flatMap((e) =>
+    (e.sources ?? []).map((s) => ({ ...s, kind: e.kind })),
+  );
+}
+
+/** The provider `kind` that owns this `/`-menu source id, if any. */
+export function manifestKindForSource(id: string): string | undefined {
+  return manifestSources().find((s) => s.id === id)?.kind;
 }
 
 /**
