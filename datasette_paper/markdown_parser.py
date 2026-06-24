@@ -35,6 +35,20 @@ _MARK_OPEN_CLOSE = {
     "link_open": ("link_close", "link"),
 }
 
+# Cap on the length of an inline `data:` image `src`. A multi-MB base64 blob
+# rides the append-only step log + every snapshot + the SSE broadcast, so an
+# oversized inline image is dropped here (its `alt` is kept as plain text where
+# possible). Ordinary `http(s)` refs are cheap pointers and pass through
+# untouched — the limit is specifically about inlined bytes. Mirrors the
+# browser-side `MAX_IMAGE_BYTES` guard in `frontend/src/lib/image.ts`; the
+# string length is the on-the-wire cost so we compare it directly.
+MAX_INLINE_IMAGE_BYTES = 8 * 1024 * 1024
+
+
+def _is_oversized_data_src(src: str) -> bool:
+    return src.startswith("data:") and len(src) > MAX_INLINE_IMAGE_BYTES
+
+
 # Block-level node types — used to decide whether table-cell content needs a
 # paragraph wrapper. Mirror of pm_schema's `block` group.
 _BLOCK_TYPES = {
@@ -364,16 +378,24 @@ def _inline_to_pm(inline_token) -> list[dict]:
 
         elif t == "image":
             attrs = dict(c.attrs or {})
-            raw.append(
-                {
-                    "type": "image",
-                    "attrs": {
-                        "src": attrs.get("src", ""),
-                        "alt": _image_alt_text(c) or attrs.get("alt", ""),
-                        "title": attrs.get("title"),
-                    },
-                }
-            )
+            src = attrs.get("src", "")
+            alt = _image_alt_text(c) or attrs.get("alt", "")
+            if _is_oversized_data_src(src):
+                # Drop the oversized inline image but keep its alt as plain
+                # text so the surrounding prose isn't silently mangled.
+                if alt:
+                    push_text(alt)
+            else:
+                raw.append(
+                    {
+                        "type": "image",
+                        "attrs": {
+                            "src": src,
+                            "alt": alt,
+                            "title": attrs.get("title"),
+                        },
+                    }
+                )
 
         elif t == "html_inline":
             # With html=False the only html_inline tokens are the tasklist

@@ -16,7 +16,11 @@ import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { tableRowDragPlugin } from "./tableRowDrag";
 import { linkTooltipPlugin } from "./linkTooltip";
-import { handleImagePaste, handleImageDrop } from "./image";
+import {
+  handleImagePaste,
+  handleImageDrop,
+  stripOversizedPastedImages,
+} from "./image";
 import {
   wikiLinkSuggestPlugin,
   wikiLinkSuggestPopupPlugin,
@@ -1211,8 +1215,20 @@ export class EditorConnection {
       // becomes a link, regardless of whether the source was plain text,
       // a markdown round-trip, or rich HTML. Runs after clipboardTextParser
       // so already-marked links (e.g. from a `[text](url)` paste) pass
-      // through untouched.
-      transformPasted: linkifyPastedSlice,
+      // through untouched. We also strip oversized inline `data:` images
+      // first — a screenshot pasted as HTML lands here (not via
+      // handleImagePaste, which only fires for clipboard image *files*), and
+      // a multi-MB data URI would otherwise ride the step log / SSE broadcast.
+      transformPasted: (slice) =>
+        linkifyPastedSlice(
+          stripOversizedPastedImages(slice, (count) => {
+            window.alert(
+              count === 1
+                ? "An image was too large and was not pasted (maximum 8 MB)."
+                : `${count} images were too large and were not pasted (maximum 8 MB).`,
+            );
+          }),
+        ),
       // Image files on the clipboard / dropped in become inline data-URI
       // images. Returning false (no image files) lets the default text/HTML
       // paste path run. This is what makes image paste work in Safari, which

@@ -234,6 +234,28 @@ class TestInlineNodes:
         img = doc["content"][0]["content"][0]
         assert img["attrs"]["title"] is None
 
+    def test_oversized_data_image_is_dropped(self):
+        from datasette_paper.markdown_parser import MAX_INLINE_IMAGE_BYTES
+
+        big = "data:image/png;base64," + "A" * (MAX_INLINE_IMAGE_BYTES + 10)
+        doc = parse_and_validate(f"before ![cap]({big}) after\n")
+        para = doc["content"][0]
+        # No image node survived; the alt is kept as plain text in context.
+        assert all(n["type"] != "image" for n in para["content"])
+        assert para["content"][0]["text"] == "before cap after"
+
+    def test_small_and_remote_images_survive_size_guard(self):
+        doc = parse_and_validate(
+            "![small](data:image/png;base64,AAAA)\n\n![ok](https://example.com/y.png)\n"
+        )
+        srcs = [
+            n["attrs"]["src"]
+            for blk in doc["content"]
+            for n in blk.get("content", [])
+            if n["type"] == "image"
+        ]
+        assert srcs == ["data:image/png;base64,AAAA", "https://example.com/y.png"]
+
     def test_text_coalescing(self):
         """Adjacent text nodes with identical marks should be merged."""
         # Soft break produces three tokens (text, softbreak-as-space, text)
