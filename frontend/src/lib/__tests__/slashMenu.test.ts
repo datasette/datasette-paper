@@ -14,7 +14,10 @@ import {
   commitSlashSelection,
   buildSlashCommands,
   providerSlashCommands,
+  SLASH_GROUPS,
+  GROUP_ORDER,
   type SlashCommand,
+  type SlashGroupKey,
 } from "../slashMenu";
 import { setProviderManifest, _resetProvidersForTest } from "../embedProviders";
 
@@ -106,18 +109,51 @@ describe("filterSlashCommands", () => {
 
   it("excludes commands whose enabled() is false", () => {
     const custom: SlashCommand[] = [
-      { id: "on", label: "On", keywords: [], icon: "table", run: () => {} },
+      { id: "on", label: "On", keywords: [], icon: "table", group: "media", run: () => {} },
       {
         id: "off",
         label: "Off",
         keywords: [],
         icon: "table",
+        group: "media",
         run: () => {},
         enabled: () => false,
       },
     ];
     const state = stateWith([schema.node("paragraph")], 1, "/", custom);
     expect(filterSlashCommands(custom, state, "").map((c) => c.id)).toEqual(["on"]);
+  });
+});
+
+describe("section taxonomy (group tags)", () => {
+  it("tags every built-in command with a known group", () => {
+    const known = new Set<SlashGroupKey>(GROUP_ORDER);
+    for (const c of buildSlashCommands()) {
+      expect(known.has(c.group)).toBe(true);
+    }
+  });
+
+  it("places commands in the expected groups", () => {
+    const byId = new Map(buildSlashCommands().map((c) => [c.id, c.group]));
+    expect(byId.get("h1")).toBe("styling");
+    expect(byId.get("divider")).toBe("styling");
+    expect(byId.get("table")).toBe("media");
+    expect(byId.get("image")).toBe("media");
+    expect(byId.get("sql_block")).toBe("datasette");
+    expect(byId.get("block_embed")).toBe("datasette");
+  });
+
+  it("tags provider sources with the embeds group", () => {
+    setProviderManifest([
+      { kind: "place-list", sources: [{ id: "places", label: "Places map" }] },
+    ]);
+    expect(providerSlashCommands({})[0].group).toBe("embeds");
+    _resetProvidersForTest();
+  });
+
+  it("exports SLASH_GROUPS labels in GROUP_ORDER", () => {
+    expect(SLASH_GROUPS.map((g) => g.key)).toEqual(GROUP_ORDER);
+    expect(SLASH_GROUPS.find((g) => g.key === "embeds")?.label).toBe("Embeds");
   });
 });
 

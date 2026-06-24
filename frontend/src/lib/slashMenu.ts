@@ -30,11 +30,32 @@ import { insertTable } from "./tables";
 import { insertSqlBlock } from "./sqlQuery";
 import { manifestSources } from "./embedProviders";
 
+/**
+ * Section taxonomy for the `/` menu. Display order = array order; the chosen
+ * grouping (Option A) renders one non-interactive header per non-empty group,
+ * top-to-bottom in this order. Every `SlashCommand` carries a `group` key into
+ * this list. Provider sources (3rd-party embeds) all land in `embeds`; if a
+ * future provider wants its own section, extend `ProviderManifestSource`
+ * (embedProviders.ts) with an optional group field — out of scope here.
+ */
+export const SLASH_GROUPS = [
+  { key: "styling", label: "Styling" },
+  { key: "media", label: "Media" },
+  { key: "datasette", label: "Datasette" },
+  { key: "embeds", label: "Embeds" },
+] as const;
+
+export type SlashGroupKey = (typeof SLASH_GROUPS)[number]["key"];
+
+/** Render/sort order of groups, keyed by `SlashGroupKey`. */
+export const GROUP_ORDER: SlashGroupKey[] = SLASH_GROUPS.map((g) => g.key);
+
 export interface SlashCommand {
   id: string;
   label: string;
   keywords: string[];
   icon: string; // a TOOLBAR_ICONS key
+  group: SlashGroupKey;
   run: (view: EditorView) => void;
   enabled?: (state: EditorState) => boolean;
 }
@@ -339,6 +360,7 @@ export function providerSlashCommands(cb: SlashCommandCallbacks): SlashCommand[]
     label: source.label,
     keywords: ["embed", "insert", source.id, source.label.toLowerCase()],
     icon: source.icon && source.icon in TOOLBAR_ICONS ? source.icon : "database",
+    group: "embeds" as const,
     run: () => cb.openDatasetteEmbed?.(source.id),
   }));
 }
@@ -357,6 +379,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Heading 1",
       keywords: ["title", "h1", "heading"],
       icon: "h1",
+      group: "styling",
       run: runCommand(setBlockType(heading, { level: 1 })),
     },
     {
@@ -364,6 +387,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Heading 2",
       keywords: ["h2", "heading", "subtitle"],
       icon: "h2",
+      group: "styling",
       run: runCommand(setBlockType(heading, { level: 2 })),
     },
     {
@@ -371,6 +395,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Heading 3",
       keywords: ["h3", "heading"],
       icon: "h3",
+      group: "styling",
       run: runCommand(setBlockType(heading, { level: 3 })),
     },
     {
@@ -378,6 +403,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Bullet list",
       keywords: ["ul", "unordered", "list", "bullet"],
       icon: "listUl",
+      group: "styling",
       run: runCommand(wrapInList(bullet_list)),
     },
     {
@@ -385,6 +411,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Numbered list",
       keywords: ["ol", "ordered", "numbered", "list"],
       icon: "listOl",
+      group: "styling",
       run: runCommand(wrapInList(ordered_list)),
     },
     {
@@ -392,6 +419,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Task list",
       keywords: ["todo", "checklist", "task", "checkbox"],
       icon: "taskList",
+      group: "styling",
       run: runCommand(wrapInList(task_list)),
     },
     {
@@ -399,6 +427,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Quote",
       keywords: ["blockquote", "quote", "citation"],
       icon: "quote",
+      group: "styling",
       run: runCommand(wrapIn(blockquote)),
     },
     {
@@ -406,6 +435,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Code block",
       keywords: ["code", "pre", "monospace"],
       icon: "codeBlock",
+      group: "styling",
       run: runCommand(setBlockType(code_block)),
     },
     {
@@ -413,6 +443,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "SQL query",
       keywords: ["sql", "query", "database", "datasette", "data"],
       icon: "database",
+      group: "datasette",
       // Inserts an empty block; the NodeView defaults the database and the
       // header <select> lets the user change it.
       run: runCommand(insertSqlBlock()),
@@ -422,6 +453,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Table",
       keywords: ["grid", "table", "spreadsheet", "data"],
       icon: "table",
+      group: "media",
       // The slash menu only fires in an empty top-level paragraph, so a table
       // is always insertable here — no canInsertTable gate needed.
       run: runCommand(insertTable(3, 3)),
@@ -431,6 +463,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Divider",
       keywords: ["hr", "rule", "separator", "divider", "line"],
       icon: "hr",
+      group: "styling",
       run: (view) => {
         view.dispatch(
           view.state.tr.replaceSelectionWith(horizontal_rule.create()).scrollIntoView(),
@@ -442,6 +475,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Image",
       keywords: ["img", "picture", "photo", "image"],
       icon: "image",
+      group: "media",
       run: () => cb.openImageDialog?.(),
     },
     {
@@ -449,6 +483,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       label: "Datasette embed",
       keywords: ["datasette", "table", "data", "embed", "database", "query"],
       icon: "database",
+      group: "datasette",
       run: () => cb.openDatasetteEmbed?.(),
     },
     // Third-party provider sources (e.g. "Places map"), if any are registered.
