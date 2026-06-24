@@ -2,9 +2,10 @@
  * Tests for the `/` slash command menu: trigger gating, query filtering,
  * commit (clear /query then run command), and enabled() gating.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { EditorState, TextSelection } from "prosemirror-state";
-import type { EditorView } from "prosemirror-view";
+import { keymap } from "prosemirror-keymap";
+import { EditorView } from "prosemirror-view";
 
 import { schema } from "../schema";
 import {
@@ -14,6 +15,8 @@ import {
   commitSlashSelection,
   buildSlashCommands,
   providerSlashCommands,
+  slashMenuPopupPlugin,
+  slashKeymap,
   SLASH_GROUPS,
   GROUP_ORDER,
   type SlashCommand,
@@ -157,6 +160,50 @@ describe("section taxonomy (group tags)", () => {
   });
 });
 
+describe("filterSlashCommands group ordering (Option A)", () => {
+  it("orders the empty-query list by GROUP_ORDER, natural within group", () => {
+    const state = stateWith([schema.node("paragraph")], 1, "/");
+    const groups = filterSlashCommands(commands, state, "").map((c) => c.group);
+    // De-dupe consecutive groups → the section sequence. Must be contiguous
+    // (each group appears once) and in GROUP_ORDER.
+    const seen: SlashGroupKey[] = [];
+    for (const g of groups) if (seen[seen.length - 1] !== g) seen.push(g);
+    expect(new Set(seen).size).toBe(seen.length);
+    expect(seen).toEqual(
+      seen.slice().sort((a, b) => GROUP_ORDER.indexOf(a) - GROUP_ORDER.indexOf(b)),
+    );
+    // Within styling: registration order preserved (h1 < h2 < divider).
+    const ids = filterSlashCommands(commands, state, "").map((c) => c.id);
+    expect(ids.indexOf("h1")).toBeLessThan(ids.indexOf("h2"));
+    expect(ids.indexOf("h2")).toBeLessThan(ids.indexOf("divider"));
+  });
+
+  it("stays group-ordered while searching (headers survive a query)", () => {
+    setProviderManifest([
+      { kind: "place-list", sources: [{ id: "places", label: "Places map" }] },
+    ]);
+    const cmds = buildSlashCommands();
+    const state = stateWith([schema.node("paragraph")], 1, "/data", cmds);
+    const ranks = filterSlashCommands(cmds, state, "data").map((c) =>
+      GROUP_ORDER.indexOf(c.group),
+    );
+    expect(ranks.length).toBeGreaterThan(1);
+    for (let i = 1; i < ranks.length; i++) {
+      expect(ranks[i]).toBeGreaterThanOrEqual(ranks[i - 1]);
+    }
+    _resetProvidersForTest();
+  });
+
+  it("still returns a flat array (length === item count, no headers in data)", () => {
+    const state = stateWith([schema.node("paragraph")], 1, "/");
+    const filtered = filterSlashCommands(commands, state, "");
+    expect(Array.isArray(filtered)).toBe(true);
+    expect(filtered).toHaveLength(commands.length);
+    // Every element is a real command (headers are render-only, not in data).
+    expect(filtered.every((c) => typeof c.run === "function")).toBe(true);
+  });
+});
+
 function fakeView(state: EditorState): {
   view: EditorView;
   get: () => EditorState;
@@ -252,5 +299,95 @@ describe("providerSlashCommands (third-party sources)", () => {
     ]);
     const ids = buildSlashCommands().map((c) => c.id);
     expect(ids).toContain("embed_source:places");
+  });
+});
+
+describe("popup renders non-interactive section headers (real EditorView)", () => {
+  let view: EditorView;
+  let host: HTMLDivElement;
+
+  beforeEach(() => {
+    setProviderManifest([
+      { kind: "place-list", sources: [{ id: "places", label: "Places map" }] },
+    ]);
+    const cmds = buildSlashCommands();
+    host = document.createElement("div");
+    host.className = "editor-host";
+    document.body.appendChild(host);
+    const place = document.createElement("div");
+    host.appendChild(place);
+    const state = EditorState.create({
+      schema,
+      plugins: [
+        createSlashSuggestPlugin(cmds),
+        slashMenuPopupPlugin(cmds),
+        keymap(slashKeymap(cmds)),
+      ],
+    });
+    view = new EditorView(place, { state });
+  });
+
+  afterEach(() => {
+    view.destroy();
+    host.remove();
+    _resetProvidersForTest();
+  });
+
+  function menu(): HTMLElement {
+    return host.querySelector(".pm-slash-menu") as HTMLElement;
+  }
+
+  it("renders one header per non-empty group, in GROUP_ORDER", () => {
+    view.dispatch(view.state.tr.insertText("/"));
+    const labels = [...menu().querySelectorAll(".pm-slash-header")].map(
+      (h) => h.textContent,
+    );
+    // All four groups have at least one command (provider registered → Embeds).
+    expect(labels).toEqual(["Styling", "Media", "Datasette", "Embeds"]);
+  });
+
+  it("header count + item count account for every rendered child", () => {
+    view.dispatch(view.state.tr.insertText("/"));
+    const root = menu();
+    const headers = root.querySelectorAll(".pm-slash-header").length;
+    const items = root.querySelectorAll(".pm-slash-item").length;
+    expect(headers + items).toBe(root.children.length);
+    const cmds = buildSlashCommands();
+    expect(items).toBe(filterSlashCommands(cmds, view.state, "").length);
+  });
+
+  it("keeps the active highlight on an item, never a header", () => {
+    view.dispatch(view.state.tr.insertText("/"));
+    const root = menu();
+    // The single active element is a .pm-slash-item (the first command).
+    const actives = root.querySelectorAll(".pm-slash-item--active");
+    expect(actives).toHaveLength(1);
+    expect(actives[0].classList.contains("pm-slash-header")).toBe(false);
+    expect(root.querySelector(".pm-slash-header.pm-slash-item--active")).toBeNull();
+  });
+
+  it("a mousedown on a header does nothing (only items are interactive)", () => {
+    view.dispatch(view.state.tr.insertText("/"));
+    const header = menu().querySelector(".pm-slash-header") as HTMLElement;
+    const before = view.state.doc.toString();
+    header.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(view.state.doc.toString()).toBe(before);
+  });
+
+  it("hides the Embeds header when no provider is registered", () => {
+    _resetProvidersForTest();
+    view.destroy();
+    const cmds = buildSlashCommands();
+    const place = host.querySelector("div") as HTMLElement;
+    const state = EditorState.create({
+      schema,
+      plugins: [createSlashSuggestPlugin(cmds), slashMenuPopupPlugin(cmds)],
+    });
+    view = new EditorView(place, { state });
+    view.dispatch(view.state.tr.insertText("/"));
+    const labels = [...menu().querySelectorAll(".pm-slash-header")].map(
+      (h) => h.textContent,
+    );
+    expect(labels).toEqual(["Styling", "Media", "Datasette"]);
   });
 });

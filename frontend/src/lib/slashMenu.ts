@@ -50,6 +50,10 @@ export type SlashGroupKey = (typeof SLASH_GROUPS)[number]["key"];
 /** Render/sort order of groups, keyed by `SlashGroupKey`. */
 export const GROUP_ORDER: SlashGroupKey[] = SLASH_GROUPS.map((g) => g.key);
 
+const GROUP_LABELS: Record<SlashGroupKey, string> = Object.fromEntries(
+  SLASH_GROUPS.map((g) => [g.key, g.label]),
+) as Record<SlashGroupKey, string>;
+
 export interface SlashCommand {
   id: string;
   label: string;
@@ -83,7 +87,21 @@ function clampIndex(index: number, len: number): number {
   return Math.max(0, Math.min(index, len - 1));
 }
 
-/** The visible, context-enabled, query-filtered command list (prefix-first). */
+function groupRank(group: SlashGroupKey): number {
+  const i = GROUP_ORDER.indexOf(group);
+  return i === -1 ? GROUP_ORDER.length : i;
+}
+
+/**
+ * The visible, context-enabled, query-filtered command list.
+ *
+ * Always group-ordered (primary key = `GROUP_ORDER` position) so the render
+ * step can emit a header at each group boundary — including while searching
+ * ("keep grouped", ticket 06). Within a group: natural (registration) order
+ * for an empty query, prefix-first for a non-empty query. Returns a **flat**
+ * array; headers are derived at render time from `group` transitions, so the
+ * keyboard `index` / `clampIndex` / commit all stay flat and untouched.
+ */
 export function filterSlashCommands(
   commands: SlashCommand[],
   state: EditorState,
@@ -98,12 +116,21 @@ export function filterSlashCommands(
           c.keywords.some((k) => k.toLowerCase().includes(q)),
       )
     : enabled;
-  if (!q) return matched;
-  return [...matched].sort(
-    (a, b) =>
-      Number(b.label.toLowerCase().startsWith(q)) -
-      Number(a.label.toLowerCase().startsWith(q)),
-  );
+  // Stable sort: primary = group order; secondary (query only) = prefix-first.
+  // `Array.prototype.sort` is stable, so ties preserve registration order.
+  const withIndex = matched.map((c, i) => ({ c, i }));
+  withIndex.sort((a, b) => {
+    const byGroup = groupRank(a.c.group) - groupRank(b.c.group);
+    if (byGroup !== 0) return byGroup;
+    if (q) {
+      const byPrefix =
+        Number(b.c.label.toLowerCase().startsWith(q)) -
+        Number(a.c.label.toLowerCase().startsWith(q));
+      if (byPrefix !== 0) return byPrefix;
+    }
+    return a.i - b.i;
+  });
+  return withIndex.map((x) => x.c);
 }
 
 function recompute(prev: SlashState, newState: EditorState): SlashState {
@@ -304,10 +331,26 @@ class SlashPopupView {
       return;
     }
     const active = clampIndex(ss.index, filtered.length);
+    let lastGroup: SlashGroupKey | null = null;
+    const activeRef: { el: HTMLElement | null } = { el: null };
     filtered.forEach((command, i) => {
+      // Group boundary → a non-interactive header before the first item of the
+      // group. Headers are derived from `group` transitions in the flat,
+      // group-ordered filtered array; they are NOT counted in `index`.
+      if (command.group !== lastGroup) {
+        lastGroup = command.group;
+        const header = document.createElement("div");
+        header.className = "pm-slash-header";
+        header.setAttribute("aria-hidden", "true");
+        header.textContent = GROUP_LABELS[command.group] ?? command.group;
+        root.appendChild(header);
+      }
       const item = document.createElement("div");
       item.className = "pm-slash-item";
-      if (i === active) item.classList.add("pm-slash-item--active");
+      if (i === active) {
+        item.classList.add("pm-slash-item--active");
+        activeRef.el = item;
+      }
       const icon = document.createElement("span");
       icon.className = "pm-slash-icon";
       icon.setAttribute("aria-hidden", "true");
@@ -321,6 +364,12 @@ class SlashPopupView {
       });
       root.appendChild(item);
     });
+    // Keep the highlighted *item* in view (never a header). jsdom doesn't
+    // implement scrollIntoView, so guard the call.
+    const activeItem = activeRef.el;
+    if (activeItem && typeof activeItem.scrollIntoView === "function") {
+      activeItem.scrollIntoView({ block: "nearest" });
+    }
   }
 
   destroy(): void {
