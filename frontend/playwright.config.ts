@@ -47,7 +47,10 @@ export default defineConfig({
     // names) — but NOT paper-manage, so the share dialog opens read-only
     // (canManage false). Per-paper ownership / manage gating is covered by
     // backend tests, not the playwright suite.
-    command: `rm -f ${INTERNAL_DB} ${DATA_DB} && ${SETUP_DATA_DB} && uv run --prerelease=allow datasette --internal ${INTERNAL_DB} ${DATA_DB} --secret '${E2E_SECRET}' -s permissions.datasette-paper-create true -s permissions.paper-view true -s permissions.paper-edit true -p ${PORT}`,
+    // `--plugins-dir ../tests/sample-plugin` loads the sample embed providers
+    // (playlist/widget) so sample-embeds.spec.ts can exercise the JS render +
+    // permission path. Harmless to the other specs (they don't use it).
+    command: `rm -f ${INTERNAL_DB} ${DATA_DB} && ${SETUP_DATA_DB} && uv run --prerelease=allow datasette --internal ${INTERNAL_DB} ${DATA_DB} --plugins-dir ../tests/sample-plugin --secret '${E2E_SECRET}' -s permissions.datasette-paper-create true -s permissions.paper-view true -s permissions.paper-edit true -p ${PORT}`,
     env: { DATASETTE_PAPER_E2E_SECRET: E2E_SECRET },
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,

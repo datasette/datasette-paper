@@ -178,6 +178,7 @@ dev *flags:
         --with llm-openrouter \
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
+            --plugins-dir tests/sample-plugin \
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
             -s permissions.profile_access true \
