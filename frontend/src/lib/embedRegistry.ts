@@ -4,22 +4,22 @@
  * Since the embed feature reads Datasette's native browser JSON API directly
  * (no paper backend resolve/render — see datasetteEmbed.ts), a third-party
  * provider is **entirely client-side**: a sibling plugin (e.g. datasette-places)
- * ships a small bundle — injected into the paper editor page by its
- * `paper_embed_provider.frontend_assets` (the only backend seam) — that calls
- * `window.datasettePaperEmbeds.register({...})` to claim a ref namespace and
- * supply both the inline-pill identity (`resolve`) and the block-card body
- * (`mount`). The provider fetches its own data from its own endpoints with the
- * viewer's `ds_actor` cookie, so per-viewer permissions + leak discipline are
- * the provider's responsibility, exactly as for core refs.
+ * ships a small **ES module** whose `export default` is a provider object (or a
+ * factory returning one — see embedProviders.ts). Paper's lazy loader
+ * `import()`s that module on demand and registers the provider, which supplies
+ * both the inline-pill identity (`resolve`) and the block-card body (`mount`).
+ * The provider fetches its own data from its own endpoints with the viewer's
+ * `ds_actor` cookie, so per-viewer permissions + leak discipline are the
+ * provider's responsibility, exactly as for core refs.
  *
  *   inline pill (inline_embed) → datasetteResolver delegates to `resolve(ref)`
  *   block card  (block_embed)  → blockEmbedView delegates to `mount(host)`
  *   paste of a same-origin URL → datasettePaste asks `match(url)` to claim it
  *
- * The registry lives on `window` so paper and the external bundle (separate
- * builds, arbitrary load order) share one instance. Both create it with the
- * same idempotent shape — keep `PaperEmbedRegistry` stable; the external side
- * replicates this shim.
+ * The registry is a paper-internal singleton (this module). Providers never
+ * touch it directly — paper imports a bundle and calls `register()` itself — so
+ * there is no shared `window` global and no cross-build load-order problem: the
+ * import promise resolving *is* the readiness signal.
  */
 import type { DatasetteStatus } from "./datasetteResolver";
 
@@ -75,12 +75,6 @@ export interface PaperEmbedRegistry {
   all(): PaperEmbedProvider[];
 }
 
-declare global {
-  interface Window {
-    datasettePaperEmbeds?: PaperEmbedRegistry;
-  }
-}
-
 export function makeEmbedRegistry(): PaperEmbedRegistry {
   const byKind: Record<string, PaperEmbedProvider> = {};
   return {
@@ -111,12 +105,15 @@ export function makeEmbedRegistry(): PaperEmbedRegistry {
   };
 }
 
-/** The shared registry, created on first access. Returns a standalone one off
- *  the DOM (tests/SSR) so callers never crash. */
+/** The shared paper-internal registry, created on first access. */
+let singleton: PaperEmbedRegistry | undefined;
+
 export function embedRegistry(): PaperEmbedRegistry {
-  if (typeof window === "undefined") return makeEmbedRegistry();
-  if (!window.datasettePaperEmbeds) {
-    window.datasettePaperEmbeds = makeEmbedRegistry();
-  }
-  return window.datasettePaperEmbeds;
+  if (!singleton) singleton = makeEmbedRegistry();
+  return singleton;
+}
+
+/** Test-only: drop the shared registry so each test starts from empty. */
+export function _resetEmbedRegistryForTest(): void {
+  singleton = undefined;
 }

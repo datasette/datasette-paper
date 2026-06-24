@@ -41,7 +41,7 @@ def provider_manifest(datasette):
     Each entry is::
 
         {
-            "kind": "place-list",          # stable id; matches the JS register() kind
+            "kind": "place-list",          # stable id; matches the bundle's exported kind
             "label": "Place list",         # human label (defaults to kind)
             "js": [...urls], "css": [...urls],
             "ref_prefixes": ["/-/places/"] # stored-ref namespaces this provider owns
@@ -52,7 +52,7 @@ def provider_manifest(datasette):
     bundle on demand without first running the provider's in-bundle ``matchRef``.
 
     A provider with no ``kind`` is skipped (the kind ties the manifest entry to
-    the bundle's ``register({kind})`` call). A provider whose ``frontend_assets``
+    the bundle's default-exported provider ``kind``). A provider whose ``frontend_assets``
     raises is logged and skipped — one bad plugin can't break the editor page.
     De-duplicated by ``kind`` (first wins).
     """

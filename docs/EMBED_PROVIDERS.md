@@ -31,7 +31,7 @@ bundle only when the doc actually uses it (an embed under the provider's
 from datasette import hookimpl
 
 class PlacesEmbedProvider:
-    kind = "place-list"               # MUST equal the JS register({kind}) call
+    kind = "place-list"               # MUST equal the bundle's exported `kind`
     label = "Place list"              # shown in the / menu (optional)
     ref_prefixes = ["/-/places/"]     # stored-ref namespaces this provider owns
 
@@ -49,7 +49,7 @@ def paper_embed_provider(datasette):
 - Return a single provider or a list. The hook is registered on Datasette's own
   plugin manager, so any installed plugin can implement it.
 - `kind` (**required**) ties the manifest entry to your bundle's
-  `register({kind})` call. A provider without it is skipped.
+  exported provider's `kind`. A provider without it is skipped.
 - `ref_prefixes` (optional, but needed for lazy-loading) lists the stored-ref
   namespaces you own, e.g. `["/-/places/"]`. When a doc contains an embed whose
   ref starts with one of them, paper injects your bundle and lets it render.
@@ -65,13 +65,11 @@ def paper_embed_provider(datasette):
 
 ## Frontend: register a renderer
 
-Your bundle registers a provider on the shared `window.datasettePaperEmbeds`
-registry:
+Your bundle is an **ES module**. Its `export default` is the provider object —
+paper `import()`s the bundle on demand and registers it for you. 
 
 ```js
-window.datasettePaperEmbeds ||= /* the same makeEmbedRegistry shim paper ships */;
-
-window.datasettePaperEmbeds.register({
+export default {
   kind: "place-list",
 
   // Claim a stored ref (checked before paper's native .json resolution).
@@ -101,7 +99,7 @@ window.datasettePaperEmbeds.register({
     host.appendChild(el);
     return () => el.remove();
   },
-});
+};
 ```
 
 ### Interface reference

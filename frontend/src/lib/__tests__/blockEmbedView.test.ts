@@ -9,7 +9,7 @@ import { EditorState } from "prosemirror-state";
 
 import { schema } from "../schema";
 import { BlockEmbedView } from "../blockEmbedView";
-import { embedRegistry } from "../embedRegistry";
+import { embedRegistry, _resetEmbedRegistryForTest } from "../embedRegistry";
 
 type NativeInit = { ok?: boolean; status?: number };
 
@@ -240,7 +240,7 @@ describe("BlockEmbedView", () => {
       expect(host!.textContent).toBe("custom body");
       expect(mount).toHaveBeenCalledTimes(1);
     } finally {
-      delete window.datasettePaperEmbeds;
+      _resetEmbedRegistryForTest();
     }
   });
 
@@ -261,7 +261,7 @@ describe("BlockEmbedView", () => {
       expect(view.dom.textContent).not.toContain("secret");
       expect(view.dom.querySelector(".pm-block-embed-external")).toBeNull();
     } finally {
-      delete window.datasettePaperEmbeds;
+      _resetEmbedRegistryForTest();
     }
   });
 

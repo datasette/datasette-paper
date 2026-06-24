@@ -9,7 +9,7 @@ import {
   resolveRef,
   type DatasetteStatus,
 } from "../datasetteResolver";
-import { embedRegistry } from "../embedRegistry";
+import { embedRegistry, _resetEmbedRegistryForTest } from "../embedRegistry";
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
@@ -153,7 +153,7 @@ describe("resolveRef (native .json)", () => {
 
 describe("resolveRef (third-party provider delegation)", () => {
   afterEach(() => {
-    delete window.datasettePaperEmbeds;
+    _resetEmbedRegistryForTest();
     vi.unstubAllGlobals();
   });
 

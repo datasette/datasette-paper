@@ -2,18 +2,27 @@
  * Tests for the third-party embed JS API registry.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { embedRegistry, makeEmbedRegistry } from "../embedRegistry";
+import {
+  embedRegistry,
+  makeEmbedRegistry,
+  _resetEmbedRegistryForTest,
+} from "../embedRegistry";
 
 afterEach(() => {
-  delete window.datasettePaperEmbeds;
+  _resetEmbedRegistryForTest();
 });
 
 describe("embedRegistry", () => {
-  it("is a singleton on window, created on first access", () => {
+  it("returns a stable singleton across calls", () => {
     const a = embedRegistry();
     const b = embedRegistry();
     expect(a).toBe(b);
-    expect(window.datasettePaperEmbeds).toBe(a);
+  });
+
+  it("hands out a fresh registry after a reset", () => {
+    const a = embedRegistry();
+    _resetEmbedRegistryForTest();
+    expect(embedRegistry()).not.toBe(a);
   });
 
   it("registers and looks up providers by kind", () => {

@@ -64,7 +64,7 @@ export function parseDatasetteRef(
 }
 
 /**
- * Ask registered third-party embed providers (window.datasettePaperEmbeds) to
+ * Ask registered third-party embed providers (the embed registry) to
  * claim a pasted same-origin URL, returning the ref path to store. Lets a
  * plugin like datasette-places turn its own `/-/places/list/5` link into an
  * embed without paper hard-coding that URL scheme. Same-origin only in v1

@@ -14,7 +14,7 @@ import {
   chooseDatasetteSurface,
   handleDatasettePaste,
 } from "../datasettePaste";
-import { embedRegistry } from "../embedRegistry";
+import { embedRegistry, _resetEmbedRegistryForTest } from "../embedRegistry";
 import { setProviderManifest, _resetProvidersForTest } from "../embedProviders";
 
 const ORIGIN = "http://localhost";
@@ -76,7 +76,7 @@ describe("parseDatasetteRef", () => {
 
 describe("matchExternalRef", () => {
   afterEach(() => {
-    delete window.datasettePaperEmbeds;
+    _resetEmbedRegistryForTest();
   });
 
   it("lets a registered provider claim a same-origin plugin URL", () => {
@@ -234,7 +234,7 @@ describe("handleDatasettePaste", () => {
       expect(getDoc().doc.firstChild!.type.name).toBe("block_embed");
       expect(getDoc().doc.firstChild!.attrs.ref).toBe("/-/places/list/5");
     } finally {
-      delete window.datasettePaperEmbeds;
+      _resetEmbedRegistryForTest();
     }
   });
 });
