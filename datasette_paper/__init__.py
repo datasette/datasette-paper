@@ -114,12 +114,7 @@ def _is_doc_page(request) -> bool:
 
 @hookimpl
 def extra_js_urls(datasette, request):
-    """Include the <datasette-acl-share-dialog> JS bundle on the doc page only.
-
-    Third-party ``paper_embed_provider`` bundles are NOT injected here — the
-    editor lazy-loads them per provider from the ``embed_providers`` manifest
-    (see ``embed_providers.py`` / ``frontend/src/lib/embedProviders.ts``), so a
-    doc only pulls the provider JS it actually uses."""
+    """Include the <datasette-acl-share-dialog> JS bundle on the doc page only."""
     if not _is_doc_page(request):
         return []
     return _share_assets(datasette)["js"]
@@ -127,9 +122,7 @@ def extra_js_urls(datasette, request):
 
 @hookimpl
 def extra_css_urls(datasette, request):
-    """Include the <datasette-acl-share-dialog> CSS on the doc page only.
-
-    Provider CSS is lazy-loaded with the provider bundle, not injected here."""
+    """Include the <datasette-acl-share-dialog> CSS on the doc page only."""
     if not _is_doc_page(request):
         return []
     return _share_assets(datasette)["css"]
