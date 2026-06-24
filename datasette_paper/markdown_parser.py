@@ -20,6 +20,7 @@ Public API:
 
 from __future__ import annotations
 
+import json
 import re
 from urllib.parse import unquote
 
@@ -211,22 +212,28 @@ def _tokens_to_doc(tokens) -> dict:
             text = tok.content or ""
             if text.endswith("\n"):
                 text = text[:-1]
-            # A fence whose info string is `datasette-embed` is a block embed,
-            # not a code block: first line = ref path, optional `mode: <mode>`
-            # line. (Indented code_block tokens carry no info string.)
+            # A fence whose info string is `paper-embed` is a block embed, not a
+            # code block: the body is one JSON object `{ref, mode, config}`
+            # mirroring the node attrs. (Indented code_block tokens carry no
+            # info string.) Be defensive — a hand-edited / malformed body must
+            # never raise; fall back to an empty/`table` embed.
             info = (getattr(tok, "info", "") or "").strip()
-            if t == "fence" and info == "datasette-embed":
-                lines = text.split("\n")
-                ref = lines[0].strip() if lines else ""
-                mode = "table"
-                for line in lines[1:]:
-                    stripped = line.strip()
-                    if stripped.startswith("mode:"):
-                        mode = stripped[len("mode:") :].strip() or "table"
+            if t == "fence" and info == "paper-embed":
+                try:
+                    data = json.loads(text)
+                    if not isinstance(data, dict):
+                        raise ValueError
+                except (ValueError, TypeError):
+                    data = {}
+                config = data.get("config")
                 append(
                     {
                         "type": "block_embed",
-                        "attrs": {"ref": ref or None, "mode": mode},
+                        "attrs": {
+                            "ref": data.get("ref") or None,
+                            "mode": data.get("mode") or "table",
+                            "config": config if isinstance(config, dict) else {},
+                        },
                     }
                 )
                 continue

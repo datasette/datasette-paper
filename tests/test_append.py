@@ -99,8 +99,8 @@ async def test_append_inline_and_block_embed_roundtrip(ds):
     doc_id = await _make_doc(ds)
     content = (
         "See [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable) here.\n\n"
-        "```datasette-embed\n/fixtures/facetable\n```\n\n"
-        "```datasette-embed\n/fixtures/vendors/42\nmode: row\n```\n"
+        '```paper-embed\n{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```\n\n'
+        '```paper-embed\n{"config":{},"mode":"row","ref":"/fixtures/vendors/42"}\n```\n'
     )
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append", json={"content": content}
@@ -108,8 +108,14 @@ async def test_append_inline_and_block_embed_roundtrip(ds):
     assert resp.status_code == 200
     md = await _document_markdown(ds, doc_id)
     assert "[/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)" in md
-    assert "```datasette-embed\n/fixtures/facetable\n```" in md
-    assert "```datasette-embed\n/fixtures/vendors/42\nmode: row\n```" in md
+    assert (
+        '```paper-embed\n{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```'
+        in md
+    )
+    assert (
+        '```paper-embed\n{"config": {}, "mode": "row", "ref": "/fixtures/vendors/42"}\n```'
+        in md
+    )
 
 
 @pytest.mark.asyncio

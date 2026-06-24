@@ -536,17 +536,23 @@ def test_inline_embed_serializes_as_paper_embed_scheme_link():
     # The ref keeps its slashes (it doubles as the label) and is the
     # authoritative identity after the `paper:/embed/<kind>/` prefix. Kind is
     # the ticket-02 `datasette` placeholder (ticket 04 supplies the real kind).
-    assert md == "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)\n"
+    assert (
+        md == "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)\n"
+    )
 
 
-def test_block_embed_serializes_as_fenced_block():
+def test_block_embed_serializes_as_paper_embed_json_fence():
     md = doc_to_markdown(
         _doc({"type": "block_embed", "attrs": {"ref": "/fixtures/facetable"}})
     )
-    assert md == "```datasette-embed\n/fixtures/facetable\n```\n"
+    # Sorted-key JSON body with all three attrs (config defaults to {}).
+    assert md == (
+        "```paper-embed\n"
+        '{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```\n'
+    )
 
 
-def test_block_embed_non_default_mode_emits_mode_line():
+def test_block_embed_non_default_mode_in_json_body():
     md = doc_to_markdown(
         _doc(
             {
@@ -555,7 +561,31 @@ def test_block_embed_non_default_mode_emits_mode_line():
             }
         )
     )
-    assert md == "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
+    assert md == (
+        "```paper-embed\n"
+        '{"config": {}, "mode": "row", "ref": "/fixtures/facetable/1"}\n```\n'
+    )
+
+
+def test_block_embed_non_empty_config_in_json_body():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "block_embed",
+                "attrs": {
+                    "ref": "/fixtures/facetable",
+                    "mode": "row",
+                    "config": {"sort": "-created", "columns": ["name", "id"]},
+                },
+            }
+        )
+    )
+    # sort_keys gives a stable diff regardless of attr insertion order.
+    assert md == (
+        "```paper-embed\n"
+        '{"config": {"columns": ["name", "id"], "sort": "-created"}, '
+        '"mode": "row", "ref": "/fixtures/facetable"}\n```\n'
+    )
 
 
 def test_sql_block_serializes_as_sql_fence():

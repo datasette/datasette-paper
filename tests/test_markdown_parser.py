@@ -386,22 +386,55 @@ class TestInlineEmbed:
 
 
 class TestBlockEmbed:
-    def test_embed_fence_default_mode(self):
-        doc = parse_and_validate("```datasette-embed\n/fixtures/facetable\n```\n")
-        block = doc["content"][0]
-        assert block["type"] == "block_embed"
-        assert block["attrs"] == {"ref": "/fixtures/facetable", "mode": "table"}
-
-    def test_embed_fence_with_mode_line(self):
+    def test_paper_embed_fence_default(self):
         doc = parse_and_validate(
-            "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
+            '```paper-embed\n{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```\n'
         )
         block = doc["content"][0]
         assert block["type"] == "block_embed"
-        assert block["attrs"] == {"ref": "/fixtures/facetable/1", "mode": "row"}
+        assert block["attrs"] == {
+            "ref": "/fixtures/facetable",
+            "mode": "table",
+            "config": {},
+        }
+
+    def test_paper_embed_fence_with_mode_and_config(self):
+        doc = parse_and_validate(
+            "```paper-embed\n"
+            '{"config":{"columns":["name"]},"mode":"row","ref":"/fixtures/facetable/1"}\n```\n'
+        )
+        block = doc["content"][0]
+        assert block["type"] == "block_embed"
+        assert block["attrs"] == {
+            "ref": "/fixtures/facetable/1",
+            "mode": "row",
+            "config": {"columns": ["name"]},
+        }
+
+    def test_malformed_paper_embed_body_is_safe_default(self):
+        # A hand-edited / non-JSON body must not raise — fall back to an
+        # empty/`table` embed.
+        doc = parse_and_validate("```paper-embed\nnot json at all\n```\n")
+        block = doc["content"][0]
+        assert block["type"] == "block_embed"
+        assert block["attrs"] == {"ref": None, "mode": "table", "config": {}}
+
+    def test_paper_embed_body_non_object_is_safe_default(self):
+        doc = parse_and_validate("```paper-embed\n[1, 2, 3]\n```\n")
+        block = doc["content"][0]
+        assert block["attrs"] == {"ref": None, "mode": "table", "config": {}}
+
+    def test_paper_embed_non_dict_config_falls_back_to_empty(self):
+        doc = parse_and_validate('```paper-embed\n{"ref":"/r","config":"oops"}\n```\n')
+        assert doc["content"][0]["attrs"]["config"] == {}
 
     def test_plain_fence_stays_code_block(self):
         doc = parse_and_validate("```\n/fixtures/facetable\n```\n")
+        assert doc["content"][0]["type"] == "code_block"
+
+    def test_no_datasette_embed_handling_remains(self):
+        # The old `datasette-embed` info string is now an ordinary code block.
+        doc = parse_and_validate("```datasette-embed\n/fixtures/facetable\n```\n")
         assert doc["content"][0]["type"] == "code_block"
 
     def test_other_info_string_stays_code_block(self):
@@ -621,8 +654,11 @@ ROUNDTRIP_STABLE = [
     "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)\n",
     # an embed ref with multiple slashes (split-once gotcha)
     "see [/db/t/row/1](paper:/embed/datasette/db/t/row/1)\n",
-    "```datasette-embed\n/fixtures/facetable\n```\n",
-    "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n",
+    # block embed: paper-embed JSON fence (sorted keys, all three attrs)
+    '```paper-embed\n{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```\n',
+    '```paper-embed\n{"config": {}, "mode": "row", "ref": "/fixtures/facetable/1"}\n```\n',
+    '```paper-embed\n{"config": {"columns": ["name", "id"]}, '
+    '"mode": "table", "ref": "/fixtures/facetable"}\n```\n',
     # markdown-significant chars in plain text (re-parsed as markup unescaped)
     "literal star \\* and underscore \\_ and bracket \\[x\\]\n",
     "a backslash \\\\ in text\n",
@@ -726,7 +762,10 @@ def test_inline_embed_roundtrips_through_serializer():
 
 
 def test_block_embed_roundtrips_through_serializer():
-    src = "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
+    src = (
+        "```paper-embed\n"
+        '{"config": {"columns": ["a"]}, "mode": "row", "ref": "/fixtures/facetable/1"}\n```\n'
+    )
     doc1 = parse_and_validate(src)
     md1 = doc_to_markdown(doc1)
     doc2 = markdown_to_doc(md1)

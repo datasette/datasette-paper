@@ -8,6 +8,7 @@ may differ.
 """
 
 import contextvars
+import json
 import re
 from typing import List, Optional
 from urllib.parse import quote
@@ -91,13 +92,17 @@ def _render_block(node: dict) -> str:
         return _render_table(node)
     if t == "block_embed":
         attrs = node.get("attrs") or {}
-        ref = attrs.get("ref") or ""
-        mode = attrs.get("mode") or "table"
-        # A fenced block with info string `datasette-embed`: the first body
-        # line is the authoritative ref path; a non-default mode goes on a
-        # second `mode: <mode>` line (ticket 05 parses it back).
-        body = ref if mode == "table" else f"{ref}\nmode: {mode}"
-        return "```datasette-embed\n" + body + "\n```\n"
+        payload = {
+            "ref": attrs.get("ref") or "",
+            "mode": attrs.get("mode") or "table",
+            "config": attrs.get("config") or {},
+        }
+        # A fenced block with info string `paper-embed`: the body is one JSON
+        # object whose keys are exactly the node attrs. sort_keys → stable
+        # diffs; ensure_ascii=False keeps unicode readable. The parser reads it
+        # back in markdown_parser.py.
+        body = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        return "```paper-embed\n" + body + "\n```\n"
     if t == "list_item":
         # list_item is rendered by _render_list with markers; calling here
         # returns the bare child blocks.
