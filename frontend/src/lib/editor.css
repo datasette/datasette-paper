@@ -24,10 +24,24 @@
 }
 /* Keep a large pasted/inserted image from overflowing the document. The
  * image node is inline; constrain to the content width and preserve aspect
- * ratio. ProseMirror's selected-node outline still shows on click. */
+ * ratio. */
 .editor-host .ProseMirror img {
   max-width: 100%;
   height: auto;
+  /* Broken-image fallback: if the src 404s / is unreachable, the bare browser
+   * glyph looks like doc corruption. Give it a framed box that surfaces the
+   * alt text legibly instead. These only show when the image fails to render;
+   * a loaded image paints over them. */
+  min-height: 1.2em;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 0.85em;
+  font-style: italic;
+}
+/* Make a click-selected image visible (there's no image NodeView). */
+.editor-host .ProseMirror img.ProseMirror-selectednode {
+  outline: 2px solid #4d90fe;
+  outline-offset: 1px;
 }
 .editor-host .ProseMirror h1 {
   font-size: 1.9em;
