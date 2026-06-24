@@ -619,6 +619,60 @@ def test_image_roundtrips_through_serializer():
     assert doc1 == doc2
 
 
+def _image_node(src, alt="", title=None):
+    return {
+        "type": "doc",
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {
+                        "type": "image",
+                        "attrs": {"src": src, "alt": alt, "title": title},
+                    }
+                ],
+            }
+        ],
+    }
+
+
+@pytest.mark.parametrize(
+    "src,alt,title",
+    [
+        # alt with bracket / other inline-markup chars (would truncate the
+        # image syntax and drop the image entirely without escaping).
+        ("https://x/y.png", "a]b", None),
+        ("https://x/y.png", "x[y]z", None),
+        ("https://x/y.png", "star * under _ tick `x`", None),
+        # title containing the `"` delimiter.
+        ("https://x/y.png", "a", 'q"r'),
+        # src with balanced and unbalanced parens (angle-bracket form).
+        ("https://x/a(b).png", "alt", None),
+        ("https://x/a(b.png", "alt", None),
+        # plain reference — must survive untouched.
+        ("https://example.com/x.png", "alt", None),
+        ("https://example.com/x.png", "alt", "a title"),
+    ],
+)
+def test_image_attrs_roundtrip_with_special_chars(src, alt, title):
+    doc1 = _image_node(src, alt, title)
+    schema.node_from_json(doc1).check()
+    md = doc_to_markdown(doc1)
+    doc2 = markdown_to_doc(md)
+    assert doc1 == doc2, md
+
+
+def test_image_src_with_space_survives_roundtrip():
+    # markdown-it percent-encodes the space when normalizing the URL, so the
+    # src is not byte-identical — the key guarantee is the image is NOT lost.
+    doc1 = _image_node("https://x/with space.png", alt="a")
+    md = doc_to_markdown(doc1)
+    doc2 = markdown_to_doc(md)
+    node = doc2["content"][0].get("content")
+    assert node and node[0]["type"] == "image", md
+    assert node[0]["attrs"]["alt"] == "a"
+
+
 def test_mention_roundtrips_through_serializer():
     src = "Hi [@Alice](actor:alice-id) there\n"
     doc1 = parse_and_validate(src)

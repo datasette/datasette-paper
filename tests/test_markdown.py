@@ -375,6 +375,43 @@ def test_image_with_title():
     )
 
 
+def test_image_alt_with_brackets_is_escaped():
+    # An unescaped `]` in alt would truncate the image syntax and drop it.
+    assert (
+        doc_to_markdown(_doc(_para(_img("https://x/y.png", alt="a]b"))))
+        == "![a\\]b](https://x/y.png)\n"
+    )
+
+
+def test_image_title_with_quote_is_escaped():
+    assert (
+        doc_to_markdown(_doc(_para(_img("https://x/y.png", alt="a", title='q"r'))))
+        == '![a](https://x/y.png "q\\"r")\n'
+    )
+
+
+def test_image_src_with_space_is_angle_bracketed():
+    assert (
+        doc_to_markdown(_doc(_para(_img("https://x/with space.png", alt="a"))))
+        == "![a](<https://x/with space.png>)\n"
+    )
+
+
+def test_image_src_with_parens_is_angle_bracketed():
+    assert (
+        doc_to_markdown(_doc(_para(_img("https://x/a(b).png", alt="a"))))
+        == "![a](<https://x/a(b).png>)\n"
+    )
+
+
+def test_plain_image_not_over_escaped():
+    # A plain http(s) src with no special chars must be byte-identical.
+    assert (
+        doc_to_markdown(_doc(_para(_img("https://x/y.png", alt="a"))))
+        == "![a](https://x/y.png)\n"
+    )
+
+
 def test_markup_chars_in_text_are_escaped():
     # A literal asterisk / underscore / bracket must not re-parse as markup.
     md = doc_to_markdown(_doc(_para(_text("a * b _ c [d]"))))

@@ -301,6 +301,28 @@ def _tokens_to_doc(tokens) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _image_alt_text(image_token) -> str:
+    """Reconstruct an image's literal alt text from its child tokens.
+
+    markdown-it keeps the *raw* (still-escaped) alt in ``token.content``, so a
+    serialized ``![a\\]b](u)`` would otherwise read back as the literal
+    ``a\\]b``. The image token's children carry the parsed inline run, where
+    ``text`` / ``text_special`` nodes already hold the un-escaped characters —
+    concatenating those recovers what the serializer's ``_escape_image_alt``
+    encoded, so the round-trip is lossless.
+    """
+    children = getattr(image_token, "children", None)
+    if not children:
+        return image_token.content or ""
+    parts: list[str] = []
+    for tok in children:
+        if tok.type in ("text", "text_special", "code_inline"):
+            parts.append(tok.content)
+        elif tok.type in ("softbreak", "hardbreak"):
+            parts.append(" ")
+    return "".join(parts)
+
+
 def _inline_to_pm(inline_token) -> list[dict]:
     """Convert an ``inline`` token's children into a list of PM inline nodes."""
     raw: list[dict] = []
@@ -347,7 +369,7 @@ def _inline_to_pm(inline_token) -> list[dict]:
                     "type": "image",
                     "attrs": {
                         "src": attrs.get("src", ""),
-                        "alt": c.content or attrs.get("alt", ""),
+                        "alt": _image_alt_text(c) or attrs.get("alt", ""),
                         "title": attrs.get("title"),
                     },
                 }
