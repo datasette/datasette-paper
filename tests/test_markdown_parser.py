@@ -93,6 +93,30 @@ class TestBlocks:
         assert cb["type"] == "code_block"
         assert cb["content"] == [{"type": "text", "text": "indented code"}]
 
+    def test_sql_block_from_sql_db_fence(self):
+        doc = parse_and_validate("```sql db=data\nselect 1 as n\n```\n")
+        sb = doc["content"][0]
+        assert sb["type"] == "sql_block"
+        assert sb["attrs"] == {"db": "data", "hidden": False}
+        assert sb["content"] == [{"type": "text", "text": "select 1 as n"}]
+
+    def test_sql_block_hidden_token(self):
+        doc = parse_and_validate("```sql db=data hidden\nselect 1\n```\n")
+        sb = doc["content"][0]
+        assert sb["type"] == "sql_block"
+        assert sb["attrs"] == {"db": "data", "hidden": True}
+
+    def test_plain_sql_fence_without_db_stays_code_block(self):
+        # The `db=` token is the discriminator: a plain ```sql fence is just a
+        # syntax-display code block, not a runnable SQL query block.
+        doc = parse_and_validate("```sql\nselect 1\n```\n")
+        cb = doc["content"][0]
+        assert cb["type"] == "code_block"
+
+    def test_sql_block_round_trips(self):
+        md = "```sql db=data hidden\nselect * from t\n```\n"
+        assert doc_to_markdown(parse_and_validate(md)) == md
+
     def test_blockquote(self):
         doc = parse_and_validate("> quote\n")
         assert types_only(doc) == "doc[blockquote[paragraph[text]]]"

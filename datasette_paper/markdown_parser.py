@@ -45,6 +45,7 @@ _BLOCK_TYPES = {
     "ordered_list",
     "task_list",
     "code_block",
+    "sql_block",
     "horizontal_rule",
     "table",
 }
@@ -214,6 +215,26 @@ def _tokens_to_doc(tokens) -> dict:
                         "attrs": {"ref": ref or None, "mode": mode},
                     }
                 )
+                continue
+            # A fence whose info string is `sql db=NAME [hidden]` is an
+            # editable SQL query block. The `db=` token is the discriminator:
+            # a plain ```sql fence (no db=) stays a normal code block.
+            if t == "fence" and info.startswith("sql") and "db=" in info:
+                db = None
+                hidden = False
+                for token in info.split():
+                    if token.startswith("db="):
+                        db = token[len("db=") :] or None
+                    elif token == "hidden":
+                        hidden = True
+                sql_block: dict = {
+                    "type": "sql_block",
+                    "attrs": {"db": db, "hidden": hidden},
+                    "content": [],
+                }
+                if text:
+                    sql_block["content"].append({"type": "text", "text": text})
+                append(sql_block)
                 continue
             cb: dict = {"type": "code_block", "content": []}
             if text:

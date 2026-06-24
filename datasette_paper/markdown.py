@@ -57,6 +57,20 @@ def _render_block(node: dict) -> str:
     if t == "code_block":
         text = "".join(c.get("text", "") for c in content)
         return "```\n" + text + "\n```\n"
+    if t == "sql_block":
+        # An editable SQL query fenced with an info string of `sql db=NAME`
+        # (+ a trailing `hidden` when the editor is collapsed). The `db=`
+        # token is what distinguishes this from a plain ```sql code block
+        # (markdown_parser.py keys off it).
+        attrs = node.get("attrs") or {}
+        db = attrs.get("db") or ""
+        text = "".join(c.get("text", "") for c in content)
+        info = "sql"
+        if db:
+            info += f" db={db}"
+        if attrs.get("hidden"):
+            info += " hidden"
+        return "```" + info + "\n" + text + "\n```\n"
     if t == "blockquote":
         inner_parts: List[str] = []
         for i, child in enumerate(content):

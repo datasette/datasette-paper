@@ -198,6 +198,43 @@ const blockEmbedNode: NodeSpec = {
   ],
 };
 
+// Block node for an editable SQL query run against a named Datasette
+// database. Unlike `block_embed` (an atom holding only a `ref`), the query is
+// editable text content — it collaborates via the step log like any
+// paragraph. `db` names the target database; `hidden` collapses the editor to
+// a results-only view. Results are fetched per-viewer by a NodeView
+// (sqlBlockView.ts) and never persisted. Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as a ```sql db=NAME fence.
+const sqlBlockNode: NodeSpec = {
+  group: "block",
+  content: "text*",
+  marks: "",
+  code: true,
+  defining: true,
+  selectable: true,
+  attrs: { db: { default: null }, hidden: { default: false } },
+  parseDOM: [
+    {
+      tag: "pre[data-sql-block]",
+      preserveWhitespace: "full",
+      getAttrs: (el) => ({
+        db: (el as HTMLElement).getAttribute("data-sql-db") || null,
+        hidden: (el as HTMLElement).getAttribute("data-sql-hidden") === "true",
+      }),
+    },
+  ],
+  toDOM: (node) => [
+    "pre",
+    {
+      "data-sql-block": "true",
+      "data-sql-db": String(node.attrs.db ?? ""),
+      "data-sql-hidden": String(!!node.attrs.hidden),
+      class: "pm-sql-block",
+    },
+    ["code", 0],
+  ],
+};
+
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
     group: "block",
@@ -264,6 +301,7 @@ export const schema = new Schema({
     .append({ tag: tagNode })
     .append({ inline_embed: inlineEmbedNode })
     .append({ block_embed: blockEmbedNode })
+    .append({ sql_block: sqlBlockNode })
     .append(taskNodes)
     .append({ ...tNodes, table: tableWithName }),
   marks: baseMarks,

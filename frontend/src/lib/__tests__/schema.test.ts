@@ -181,3 +181,53 @@ describe("block_embed node", () => {
     expect(inserted.attrs.ref).toBe("/fixtures/facetable");
   });
 });
+
+describe("sql_block node", () => {
+  it("exists as a block code node with editable text content", () => {
+    const t = schema.nodes.sql_block;
+    expect(t).toBeDefined();
+    expect(t.isBlock).toBe(true);
+    expect(t.isTextblock).toBe(true);
+    expect(t.spec.code).toBe(true);
+    // Unlike block_embed it is NOT an atom — the SQL is editable content.
+    expect(t.isAtom).toBe(false);
+  });
+
+  it("round-trips through JSON with db + hidden attrs and text content", () => {
+    const node = schema.nodes.sql_block.create({ db: "data", hidden: false }, [
+      schema.text("select 1 as n"),
+    ]);
+    const json = node.toJSON();
+    expect(json).toEqual({
+      type: "sql_block",
+      attrs: { db: "data", hidden: false },
+      content: [{ type: "text", text: "select 1 as n" }],
+    });
+    const back = schema.nodeFromJSON(json);
+    expect(back.attrs.db).toBe("data");
+    expect(back.textContent).toBe("select 1 as n");
+    expect(back.type).toBe(schema.nodes.sql_block);
+  });
+
+  it("toDOM emits data-sql-block / data-sql-db / data-sql-hidden", () => {
+    const node = schema.nodes.sql_block.create({ db: "data", hidden: true });
+    const dom = node.type.spec.toDOM!(node) as [string, Record<string, string>, unknown];
+    expect(dom[0]).toBe("pre");
+    expect(dom[1]["data-sql-block"]).toBe("true");
+    expect(dom[1]["data-sql-db"]).toBe("data");
+    expect(dom[1]["data-sql-hidden"]).toBe("true");
+  });
+
+  it("can be inserted at the top level of the doc", () => {
+    const doc = schema.node("doc", null, [schema.node("paragraph")]);
+    const state = EditorState.create({ doc });
+    const sql = schema.nodes.sql_block.create({ db: "data" }, [schema.text("select 1")]);
+    const tr = state.tr.insert(state.doc.content.size, sql);
+    const next = state.apply(tr);
+
+    const inserted = next.doc.lastChild!;
+    expect(inserted.type.name).toBe("sql_block");
+    expect(inserted.attrs.db).toBe("data");
+    expect(inserted.textContent).toBe("select 1");
+  });
+});

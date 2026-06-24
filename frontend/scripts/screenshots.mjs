@@ -268,6 +268,21 @@ const BLOCK_DB = "# Vendors database\n\n```datasette-embed\n/data\n```\n";
 const BLOCK_TABLE = "# Vendors table\n\n```datasette-embed\n/data/vendors\n```\n";
 const BLOCK_ROW = "# Featured vendor\n\n```datasette-embed\n/data/vendors/5\n```\n";
 
+// SQL query block: an editable query run against the `data` database, with the
+// results rendered live. The `db=data` token marks it as a runnable SQL block
+// (a plain ```sql fence stays a code block). One doc shows the editor + results
+// expanded; the `_HIDDEN` variant ships with the query collapsed (the "report"
+// look) via the trailing `hidden` token.
+const SQL_BLOCK =
+  "# Q2 vendor report\n\nLive numbers, straight from the warehouse — edit the " +
+  "query and hit Run. Results page 10 at a time (configurable to 25/100).\n\n" +
+  "```sql db=data\nselect id, name, region from vendors order by id\n```\n";
+const SQL_BLOCK_HIDDEN =
+  "# Q2 vendor report\n\nThe SQL is tucked away — readers see just the result " +
+  "table, and can click Show SQL to reveal the query.\n\n```sql db=data hidden\n" +
+  "select region, count(*) as vendors\nfrom vendors\ngroup by region\n" +
+  "order by vendors desc\n```\n";
+
 async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -318,6 +333,8 @@ async function seed(ctx) {
   const blockDbId = await create("Vendors database", ACTOR, BLOCK_DB);
   const blockTableId = await create("Vendors table", ACTOR, BLOCK_TABLE);
   const blockRowId = await create("Featured vendor (block)", ACTOR, BLOCK_ROW);
+  const sqlBlockId = await create("Q2 vendor report", ACTOR, SQL_BLOCK);
+  const sqlBlockHiddenId = await create("Q2 vendor report (hidden)", ACTOR, SQL_BLOCK_HIDDEN);
   return {
     richId,
     mentionId,
@@ -330,6 +347,8 @@ async function seed(ctx) {
     blockDbId,
     blockTableId,
     blockRowId,
+    sqlBlockId,
+    sqlBlockHiddenId,
   };
 }
 
@@ -407,6 +426,8 @@ function buildShots(ctx, ids) {
     blockDbId,
     blockTableId,
     blockRowId,
+    sqlBlockId,
+    sqlBlockHiddenId,
   } = ids;
   // Stability CSS is injected on the context via addInitScript (see main), so
   // it survives every navigation — addStyleTag here would be discarded by the
@@ -449,6 +470,18 @@ function buildShots(ctx, ids) {
       needle,
       { timeout: 10_000 },
     );
+    await freezeVolatile(page);
+    await page.screenshot({ path: out(file) });
+    await page.close();
+  };
+
+  // SQL query block shot: open a pre-seeded doc and wait for the NodeView's
+  // auto-run (on mount) to render the results table, then full-page capture.
+  const sqlBlockShot = (id, file) => async () => {
+    const page = await newPage();
+    await gotoEditor(page, id);
+    await page.locator(".pm-sql-block").waitFor({ state: "visible", timeout: 10_000 });
+    await page.locator(".pm-sql-block table").waitFor({ state: "visible", timeout: 10_000 });
     await freezeVolatile(page);
     await page.screenshot({ path: out(file) });
     await page.close();
@@ -574,6 +607,11 @@ function buildShots(ctx, ids) {
     "block-embed-database": blockEmbedShot(blockDbId, "block-embed-database", "vendors"),
     "block-embed-table": blockEmbedShot(blockTableId, "block-embed-table", "Vendor 1"),
     "block-embed-row": blockEmbedShot(blockRowId, "block-embed-row", "Vendor 5"),
+
+    // SQL query block: editable query + Run + live results, and the collapsed
+    // ("Show SQL") report view.
+    "sql-block": sqlBlockShot(sqlBlockId, "sql-block"),
+    "sql-block-hidden": sqlBlockShot(sqlBlockHiddenId, "sql-block-hidden"),
 
     tables: async () => {
       const page = await newPage();

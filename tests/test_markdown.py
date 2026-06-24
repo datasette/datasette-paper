@@ -518,3 +518,29 @@ def test_block_embed_non_default_mode_emits_mode_line():
         )
     )
     assert md == "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
+
+
+def test_sql_block_serializes_as_sql_fence():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "sql_block",
+                "attrs": {"db": "data", "hidden": False},
+                "content": [{"type": "text", "text": "select 1 as n"}],
+            }
+        )
+    )
+    assert md == "```sql db=data\nselect 1 as n\n```\n"
+
+
+def test_sql_block_hidden_emits_hidden_token():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "sql_block",
+                "attrs": {"db": "data", "hidden": True},
+                "content": [{"type": "text", "text": "select 1"}],
+            }
+        )
+    )
+    assert md == "```sql db=data hidden\nselect 1\n```\n"

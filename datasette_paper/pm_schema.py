@@ -227,6 +227,34 @@ _block_embed_spec = {
     ],
 }
 
+# Block node for an editable SQL query — mirrors the JS schema in
+# frontend/src/lib/schema.ts. Unlike block_embed (an atom), the query is
+# editable text content; `db` names the target database and `hidden` collapses
+# the editor. Results are fetched per-viewer by the NodeView and never
+# persisted. markdown round-trips as a ```sql db=NAME fence via
+# datasette_paper/markdown.py. toDOM is never rendered server-side but must be
+# structurally valid for node_from_json/Step.apply.
+_sql_block_spec = {
+    "group": "block",
+    "content": "text*",
+    "marks": "",
+    "code": True,
+    "defining": True,
+    "selectable": True,
+    "attrs": {"db": {"default": None}, "hidden": {"default": False}},
+    "parseDOM": [{"tag": "pre[data-sql-block]", "preserveWhitespace": "full"}],
+    "toDOM": lambda node: [
+        "pre",
+        {
+            "data-sql-block": "true",
+            "data-sql-db": str(node.attrs.get("db") or ""),
+            "data-sql-hidden": str(bool(node.attrs.get("hidden"))).lower(),
+            "class": "pm-sql-block",
+        },
+        ["code", 0],
+    ],
+}
+
 _nodes = {
     **_list_nodes,
     "placeholder": _placeholder_spec,
@@ -235,6 +263,7 @@ _nodes = {
     "tag": _tag_spec,
     "inline_embed": _inline_embed_spec,
     "block_embed": _block_embed_spec,
+    "sql_block": _sql_block_spec,
     "task_list": _task_list_spec,
     "task_item": _task_item_spec,
     "table": _table_spec,

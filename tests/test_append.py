@@ -113,6 +113,25 @@ async def test_append_inline_and_block_embed_roundtrip(ds):
 
 
 @pytest.mark.asyncio
+async def test_append_sql_block_roundtrip(ds):
+    """A ```sql db=NAME fence survives the full append → step-apply →
+    materialize → serialize path (proves the sql_block schema lock-step holds
+    end-to-end through the markdown API)."""
+    doc_id = await _make_doc(ds)
+    content = (
+        "```sql db=data\nselect 1 as n\n```\n\n"
+        "```sql db=data hidden\nselect * from t\n```\n"
+    )
+    resp = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/append", json={"content": content}
+    )
+    assert resp.status_code == 200
+    md = await _document_markdown(ds, doc_id)
+    assert "```sql db=data\nselect 1 as n\n```" in md
+    assert "```sql db=data hidden\nselect * from t\n```" in md
+
+
+@pytest.mark.asyncio
 async def test_append_empty_markdown_is_noop(ds):
     doc_id = await _make_doc(ds)
     # Bump the version once so we can assert it doesn't move.

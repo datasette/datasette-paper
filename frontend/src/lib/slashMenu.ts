@@ -27,6 +27,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
 import { insertTable } from "./tables";
+import { insertSqlBlock } from "./sqlQuery";
 import { manifestSources } from "./embedProviders";
 
 export interface SlashCommand {
@@ -406,6 +407,15 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       keywords: ["code", "pre", "monospace"],
       icon: "codeBlock",
       run: runCommand(setBlockType(code_block)),
+    },
+    {
+      id: "sql_block",
+      label: "SQL query",
+      keywords: ["sql", "query", "database", "datasette", "data"],
+      icon: "database",
+      // Inserts an empty block; the NodeView defaults the database and the
+      // header <select> lets the user change it.
+      run: runCommand(insertSqlBlock()),
     },
     {
       id: "table",

@@ -922,6 +922,7 @@
 }
 .editor-host .pm-block-embed--denied .pm-block-embed-placeholder {
   color: #8a5a00;
+}
 
 /* Inline-atom placeholder visual — pill, monospace key, blue tint.
  * Rendered by the placeholder node in schema.ts (class `pm-placeholder`). */
@@ -938,5 +939,263 @@
   line-height: 1.4;
   white-space: nowrap;
   cursor: default;
+}
+
+/* SQL query block — an editable query (contentDOM) + Run/Show-Hide chrome +
+ * a per-viewer results table. Mirrors the block-embed card visuals; rendered
+ * by sqlBlockView.ts. */
+.editor-host .pm-sql-block {
+  position: relative;
+  margin: 0 0 0.75em;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  background: #fbfbfd;
+  overflow: hidden;
+}
+.editor-host .pm-sql-block.ProseMirror-selectednode {
+  outline: 2px solid #6429a8;
+  outline-offset: 1px;
+}
+.editor-host .pm-sql-block-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #ececf0;
+  background: #f4f4f7;
+  font-size: 12px;
+  color: #555;
+}
+.editor-host .pm-sql-block-icon {
+  display: inline-flex;
+  color: #6429a8;
+}
+.editor-host .pm-sql-block-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.editor-host .pm-sql-block-db {
+  font: inherit;
+  font-size: 12px;
+  padding: 1px 4px;
+  border: 1px solid #d4d4d4;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+}
+.editor-host .pm-sql-block-spacer {
+  margin-left: auto;
+}
+.editor-host .pm-sql-block-toggle {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #777;
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.editor-host .pm-sql-block-toggle:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+}
+.editor-host .pm-sql-block-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  /* Quiet/"in sync" state: results match the current SQL, nothing to run. */
+  border: 1px solid #d4d4d4;
+  background: #fff;
+  color: #999;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+/* Stale: the SQL was edited since the last run — light up to prompt a refresh. */
+.editor-host .pm-sql-block-run--stale {
+  border-color: #6429a8;
+  background: #6429a8;
+  color: #fff;
+}
+.editor-host .pm-sql-block-run--stale:hover {
+  background: #532289;
+}
+.editor-host .pm-sql-block-btn-icon {
+  display: inline-flex;
+}
+.editor-host .pm-sql-block-btn-icon svg {
+  width: 11px;
+  height: 11px;
+  display: block;
+}
+/* Export overflow menu (⋮) — mirrors the block-embed overflow menu. */
+.editor-host .pm-sql-block-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.editor-host .pm-sql-block-menu-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #777;
+  padding: 2px;
+  display: inline-flex;
+  border-radius: 4px;
+}
+.editor-host .pm-sql-block-menu-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+}
+.editor-host .pm-sql-block-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 12;
+  min-width: 160px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.editor-host .pm-sql-block-menu--open {
+  display: block;
+}
+.editor-host .pm-sql-block-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: #333;
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+.editor-host .pm-sql-block-menu-item:hover {
+  background: #f1ecf8;
+  color: #6429a8;
+}
+.editor-host .pm-sql-block-code {
+  margin: 0;
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  background: #fff;
+  color: #1f2328;
+}
+/* Hidden = collapse the editor to the Show-SQL toggle; results stay visible. */
+.editor-host .pm-sql-block.is-hidden .pm-sql-block-code {
+  display: none;
+}
+.editor-host .pm-sql-block-results {
+  border-top: 1px solid #ececf0;
+}
+.editor-host .pm-sql-block-scroll {
+  overflow: auto;
+  max-height: 320px;
+}
+.editor-host .pm-sql-block table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.editor-host .pm-sql-block th,
+.editor-host .pm-sql-block td {
+  border: 1px solid #ececf0;
+  padding: 4px 8px;
+  text-align: left;
+  white-space: nowrap;
+}
+.editor-host .pm-sql-block th {
+  background: #f4f6f8;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.editor-host .pm-sql-block-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #777;
+  font-variant-numeric: tabular-nums;
+}
+.editor-host .pm-sql-block-rows {
+  font: inherit;
+  font-size: 12px;
+  padding: 0 1px;
+  margin: 0 1px;
+  vertical-align: baseline;
+}
+.editor-host .pm-sql-block-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.editor-host .pm-sql-block-page-btn {
+  border: 1px solid #d4d4d4;
+  background: #fff;
+  color: #555;
+  cursor: pointer;
+  border-radius: 4px;
+  width: 20px;
+  height: 20px;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.editor-host .pm-sql-block-page-btn:hover:not(:disabled) {
+  background: #f1ecf8;
+  color: #6429a8;
+}
+.editor-host .pm-sql-block-page-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.editor-host .pm-sql-block-footer-link,
+.editor-host .pm-sql-block-footer-link:visited {
+  /* "open in Datasette" sits at the left edge of the footer. */
+  color: #6429a8;
+  text-decoration: none;
+}
+.editor-host .pm-sql-block-footer-link:hover {
+  text-decoration: underline;
+}
+.editor-host .pm-sql-block-footer-info {
+  /* Push the row-count + pager to the right edge. */
+  margin-left: auto;
+}
+.editor-host .pm-sql-block-warn {
+  color: #8a5a00;
+  cursor: help;
+}
+.editor-host .pm-sql-block-status {
+  padding: 12px;
+  font-size: 13px;
+  color: #888;
+}
+.editor-host .pm-sql-block-status.pm-sql-block-denied {
+  color: #8a5a00;
+}
+.editor-host .pm-sql-block-status.pm-sql-block-error {
+  color: #b3261e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
 }
 

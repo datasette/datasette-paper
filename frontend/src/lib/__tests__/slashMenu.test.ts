@@ -95,6 +95,15 @@ describe("filterSlashCommands", () => {
     expect(filtered.some((c) => c.id === "task_list")).toBe(true);
   });
 
+  it("includes a SQL query command that inserts a sql_block", () => {
+    const sql = commands.find((c) => c.id === "sql_block");
+    expect(sql).toBeDefined();
+    const state = stateWith([schema.node("paragraph")], 1, "/sql");
+    expect(filterSlashCommands(commands, state, "sql").some((c) => c.id === "sql_block")).toBe(
+      true,
+    );
+  });
+
   it("excludes commands whose enabled() is false", () => {
     const custom: SlashCommand[] = [
       { id: "on", label: "On", keywords: [], icon: "table", run: () => {} },
