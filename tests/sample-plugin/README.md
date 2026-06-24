@@ -7,9 +7,9 @@ datasette-paper editor — exercising both halves of the contract:
   two providers (`playlist`, `widget`) with `kind` / `label` / `ref_prefixes` /
   `sources` / `frontend_assets`, and serves their JS bundles + per-viewer JSON
   from its own routes.
-- **frontend** — vanilla JS bundles (`playlists.js`, `widgets.js`) that
-  `window.datasettePaperEmbeds.register({...})` with `resolve` (inline pill),
-  `mount` (rich block card), `matchRef` / `matchUrl`, and `picker` / `search`.
+- **frontend** — vanilla-JS ES-module bundles (`playlists.js`, `widgets.js`)
+  that `export default` a provider with `resolve` (inline pill), `mount` (rich
+  block card), `matchRef` / `matchUrl`, and `picker` / `search`.
 
 See `../../docs/EMBED_PROVIDERS.md` for the full contract.
 

@@ -79,7 +79,7 @@ async def test_js_bundles_are_served(sds):
         r = await sds.client.get(url)
         assert r.status_code == 200
         assert "javascript" in r.headers["content-type"]
-        assert "datasettePaperEmbeds" in r.text
+        assert "export default" in r.text
 
 
 # ---------------------------------------------------------------------------

@@ -5,9 +5,9 @@ feature:
 
   * the backend ``paper_embed_provider`` hook (manifest: kind / label /
     ``ref_prefixes`` / ``sources`` / ``frontend_assets``), and
-  * the ``window.datasettePaperEmbeds`` JS API (``resolve`` / ``mount`` /
+  * the ``export default`` provider JS API (``resolve`` / ``mount`` /
     ``matchRef`` / ``matchUrl`` / ``picker`` / ``search``) — see the sibling
-    ``playlists.js`` / ``widgets.js`` bundles this plugin serves.
+    ``playlists.js`` / ``widgets.js`` ES-module bundles this plugin serves.
 
 Two providers, both with rich vanilla-JS rendering and *interesting* per-viewer
 permissions:
