@@ -139,7 +139,7 @@ _paper_link_spec = {
 
 # Inline atom for @mentions — mirrors the JS schema in
 # frontend/src/lib/schema.ts. id-only (`actorId`); markdown round-trips as
-# `[@label](actor:id)` via datasette_paper/markdown.py. toDOM is never
+# `[@label](paper:/actor/<id>)` via datasette_paper/markdown.py. toDOM is never
 # rendered server-side but must be structurally valid for
 # node_from_json/Step.apply.
 _mention_spec = {
@@ -162,7 +162,7 @@ _mention_spec = {
 
 # Inline atom for #tags — mirrors the JS schema in
 # frontend/src/lib/schema.ts. value-only (`tag`); markdown round-trips as
-# `[#label](tag:slug)` via datasette_paper/markdown.py. No async resolver
+# `[#label](paper:/tag/<slug>)` via datasette_paper/markdown.py. No async resolver
 # (the tag is its own label). toDOM must be structurally valid for
 # node_from_json/Step.apply but is never rendered server-side.
 _tag_spec = {
@@ -185,7 +185,7 @@ _tag_spec = {
 
 # Inline atom for references to a Datasette resource — mirrors the JS schema
 # in frontend/src/lib/schema.ts. identity-only (`ref`, a Datasette URL path);
-# markdown round-trips as `[label](datasette:<path>)` via
+# markdown round-trips as `[label](paper:/embed/<kind>/<ref>)` via
 # datasette_paper/markdown.py. The display label is resolved per-viewer by the
 # NodeView and never persisted. toDOM is never rendered server-side but must be
 # structurally valid for node_from_json/Step.apply.

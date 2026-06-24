@@ -140,7 +140,8 @@ const tagNode: NodeSpec = {
 // authored via context-aware URL paste and rendered by a NodeView
 // (inlineEmbedView.ts) that resolves a live display label. The toDOM here is
 // a static fallback. Mirrors datasette_paper/pm_schema.py;
-// datasette_paper/markdown.py round-trips it as `[label](datasette:<path>)`.
+// datasette_paper/markdown.py round-trips it as
+// `[label](paper:/embed/<kind>/<ref>)`.
 const inlineEmbedNode: NodeSpec = {
   group: "inline",
   inline: true,

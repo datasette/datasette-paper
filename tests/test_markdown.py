@@ -492,7 +492,7 @@ def test_mention_without_name_map_falls_back_to_actor_id():
     md = doc_to_markdown(
         _doc(_para(_text("Hi "), {"type": "mention", "attrs": {"actorId": "alice"}}))
     )
-    assert md == "Hi [@alice](actor:alice)\n"
+    assert md == "Hi [@alice](paper:/actor/alice)\n"
 
 
 def test_mention_with_name_map_uses_display_name():
@@ -500,31 +500,31 @@ def test_mention_with_name_map_uses_display_name():
         _doc(_para({"type": "mention", "attrs": {"actorId": "alice"}})),
         actor_names={"alice": "Alice Smith"},
     )
-    assert md == "[@Alice Smith](actor:alice)\n"
+    assert md == "[@Alice Smith](paper:/actor/alice)\n"
 
 
 def test_mention_percent_encodes_awkward_actor_ids():
     md = doc_to_markdown(
         _doc(_para({"type": "mention", "attrs": {"actorId": "team/eng dept"}}))
     )
-    assert md == "[@team/eng dept](actor:team%2Feng%20dept)\n"
+    assert md == "[@team/eng dept](paper:/actor/team%2Feng%20dept)\n"
 
 
-def test_tag_serializes_as_tag_scheme_link():
+def test_tag_serializes_as_paper_scheme_link():
     md = doc_to_markdown(
         _doc(_para(_text("Our "), {"type": "tag", "attrs": {"tag": "roadmap"}}))
     )
-    assert md == "Our [#roadmap](tag:roadmap)\n"
+    assert md == "Our [#roadmap](paper:/tag/roadmap)\n"
 
 
 def test_tag_percent_encodes_nested_slug():
     md = doc_to_markdown(
         _doc(_para({"type": "tag", "attrs": {"tag": "inbox/to-read"}}))
     )
-    assert md == "[#inbox/to-read](tag:inbox%2Fto-read)\n"
+    assert md == "[#inbox/to-read](paper:/tag/inbox%2Fto-read)\n"
 
 
-def test_inline_embed_serializes_as_datasette_scheme_link():
+def test_inline_embed_serializes_as_paper_embed_scheme_link():
     md = doc_to_markdown(
         _doc(
             _para(
@@ -533,9 +533,10 @@ def test_inline_embed_serializes_as_datasette_scheme_link():
             )
         )
     )
-    # The path keeps its slashes (it doubles as the label) and is the
-    # authoritative identity after the `datasette:` scheme.
-    assert md == "see [/fixtures/facetable](datasette:/fixtures/facetable)\n"
+    # The ref keeps its slashes (it doubles as the label) and is the
+    # authoritative identity after the `paper:/embed/<kind>/` prefix. Kind is
+    # the ticket-02 `datasette` placeholder (ticket 04 supplies the real kind).
+    assert md == "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)\n"
 
 
 def test_block_embed_serializes_as_fenced_block():

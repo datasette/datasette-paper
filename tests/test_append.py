@@ -98,7 +98,7 @@ async def test_append_inline_and_block_embed_roundtrip(ds):
     lock-step holds end-to-end through the markdown API)."""
     doc_id = await _make_doc(ds)
     content = (
-        "See [/fixtures/facetable](datasette:/fixtures/facetable) here.\n\n"
+        "See [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable) here.\n\n"
         "```datasette-embed\n/fixtures/facetable\n```\n\n"
         "```datasette-embed\n/fixtures/vendors/42\nmode: row\n```\n"
     )
@@ -107,7 +107,7 @@ async def test_append_inline_and_block_embed_roundtrip(ds):
     )
     assert resp.status_code == 200
     md = await _document_markdown(ds, doc_id)
-    assert "[/fixtures/facetable](datasette:/fixtures/facetable)" in md
+    assert "[/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)" in md
     assert "```datasette-embed\n/fixtures/facetable\n```" in md
     assert "```datasette-embed\n/fixtures/vendors/42\nmode: row\n```" in md
 

@@ -494,33 +494,44 @@ def _render_inlines(nodes: list) -> str:
         elif t == "mention":
             actor_id = (n.get("attrs") or {}).get("actorId") or ""
             label = _actor_names.get().get(actor_id) or actor_id
-            # `[@Name](actor:<id>)` — `@` inside the link text so it renders
-            # as a single "@Name" link; the `actor:` scheme lets the parser
-            # detect mentions unambiguously. Escape `]` in the label and
-            # percent-encode the id so the link form stays well-formed.
+            # `[@Name](paper:/actor/<id>)` — `@` inside the link text so it
+            # renders as a single "@Name" link; the `paper:/actor/` scheme lets
+            # the parser detect mentions unambiguously. Escape `]` in the label
+            # and percent-encode the id so the link form stays well-formed.
             safe_label = label.replace("]", "\\]")
-            out.append(f"[@{safe_label}](actor:{quote(actor_id, safe='')})")
+            out.append(f"[@{safe_label}](paper:/actor/{quote(actor_id, safe='')})")
         elif t == "tag":
             tag = (n.get("attrs") or {}).get("tag") or ""
-            # `[#tag](tag:<slug>)` — `#` inside the link text so it renders as
-            # a single "#tag" link; the `tag:` scheme lets the parser detect
-            # inline tags unambiguously (a bare `#tag` would collide with ATX
-            # headings). Slugs are normalized at every input path (editor
-            # trigger, doc-tag normalize_tag, and the md parser) so `]` can't
-            # occur; the escape is defense-in-depth against an unvalidated
-            # collab step, mirroring the mention case above. Percent-encode
-            # the slug for the href.
+            # `[#tag](paper:/tag/<slug>)` — `#` inside the link text so it
+            # renders as a single "#tag" link; the `paper:/tag/` scheme lets the
+            # parser detect inline tags unambiguously (a bare `#tag` would
+            # collide with ATX headings). Slugs are normalized at every input
+            # path (editor trigger, doc-tag normalize_tag, and the md parser) so
+            # `]` can't occur; the escape is defense-in-depth against an
+            # unvalidated collab step. Percent-encode the slug for the href.
             safe_tag = tag.replace("]", "\\]")
-            out.append(f"[#{safe_tag}](tag:{quote(tag, safe='')})")
+            out.append(f"[#{safe_tag}](paper:/tag/{quote(tag, safe='')})")
         elif t == "inline_embed":
             ref = (n.get("attrs") or {}).get("ref") or ""
-            # `[label](datasette:<path>)` — the `datasette:` scheme lets the
-            # parser detect refs unambiguously. There is no resolved label at
-            # serialize time, so the path doubles as the label (like paper_link
-            # rendering `[[id]]`). The path is authoritative; keep its slashes
-            # intact (don't percent-encode), only escape `]` in the label.
+            # `[label](paper:/embed/<kind>/<ref>)` — the `paper:/embed/` scheme
+            # lets the parser detect refs unambiguously. There is no resolved
+            # label at serialize time, so the ref doubles as the label (like
+            # paper_link rendering `[[id]]`). In the href the ref's slashes stay
+            # raw (`safe='/'`) so the path is readable, but spaces / `%` / other
+            # awkward chars are percent-encoded so the markdown link destination
+            # round-trips losslessly; the parser `unquote`s it back. Only escape
+            # `]` in the visible label.
+            #
+            # PROVIDER-KIND SEAM (ticket 04): `kind` is the owning provider's
+            # kind. Until ticket 04 wires the provider lookup, hardcode
+            # "datasette". The ref begins with "/", so the concatenation
+            # `paper:/embed/<kind>` + ref yields a valid path
+            # (paper:/embed/datasette/fixtures/facetable).
+            kind = "datasette"
+            ref_path = ref if ref.startswith("/") else "/" + ref
+            encoded_ref = quote(ref_path, safe="/")
             safe = ref.replace("]", "\\]")
-            out.append(f"[{safe}](datasette:{ref})")
+            out.append(f"[{safe}](paper:/embed/{kind}{encoded_ref})")
 
     close_through(0)
     return "".join(out)

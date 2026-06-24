@@ -287,8 +287,8 @@ class TestInlineNodes:
         links = [n for n in content if n["type"] == "paper_link"]
         assert [link["attrs"]["docId"] for link in links] == [1, 2]
 
-    def test_mention_from_actor_scheme_link(self):
-        doc = parse_and_validate("Hi [@Alice Smith](actor:alice-id) there\n")
+    def test_mention_from_paper_actor_scheme_link(self):
+        doc = parse_and_validate("Hi [@Alice Smith](paper:/actor/alice-id) there\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["text", "mention", "text"]
         assert content[0]["text"] == "Hi "
@@ -297,7 +297,7 @@ class TestInlineNodes:
         assert content[2]["text"] == " there"
 
     def test_mention_percent_decodes_actor_id(self):
-        doc = parse_and_validate("[@Team](actor:team%2Feng%20dept)\n")
+        doc = parse_and_validate("[@Team](paper:/actor/team%2Feng%20dept)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["mention"]
         assert content[0]["attrs"]["actorId"] == "team/eng dept"
@@ -309,8 +309,8 @@ class TestInlineNodes:
         link = content[-1]
         assert link["marks"][0]["attrs"]["href"] == "https://example.com/y"
 
-    def test_tag_from_tag_scheme_link(self):
-        doc = parse_and_validate("Our [#roadmap](tag:roadmap) plan\n")
+    def test_tag_from_paper_tag_scheme_link(self):
+        doc = parse_and_validate("Our [#roadmap](paper:/tag/roadmap) plan\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["text", "tag", "text"]
         assert content[0]["text"] == "Our "
@@ -319,7 +319,7 @@ class TestInlineNodes:
         assert content[2]["text"] == " plan"
 
     def test_tag_percent_decodes_slug(self):
-        doc = parse_and_validate("[#nested](tag:inbox%2Fto-read)\n")
+        doc = parse_and_validate("[#nested](paper:/tag/inbox%2Fto-read)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["tag"]
         assert content[0]["attrs"]["tag"] == "inbox/to-read"
@@ -335,7 +335,7 @@ class TestInlineNodes:
         # A hand-authored href with chars the editor could never type
         # (uppercase, `]`) is normalized to the canonical slug rule, so the
         # stored tag never contains `]`.
-        doc = parse_and_validate("[#x](tag:Foo%5DBar)\n")
+        doc = parse_and_validate("[#x](paper:/tag/Foo%5DBar)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["tag"]
         assert content[0]["attrs"]["tag"] == "foobar"
@@ -343,7 +343,7 @@ class TestInlineNodes:
     def test_unnormalizable_tag_slug_drops_atom(self):
         # A slug that normalizes to empty produces no tag atom (lossy, like
         # other out-of-schema content) rather than an invalid empty tag.
-        doc = parse_and_validate("[#x](tag:%5D%5D)\n")
+        doc = parse_and_validate("[#x](paper:/tag/%5D%5D)\n")
         content = doc["content"][0]["content"]
         assert all(n["type"] != "tag" for n in content)
 
@@ -354,8 +354,10 @@ class TestInlineNodes:
 
 
 class TestInlineEmbed:
-    def test_ref_from_datasette_scheme_link(self):
-        doc = parse_and_validate("see [x](datasette:/fixtures/facetable) ok\n")
+    def test_ref_from_paper_embed_scheme_link(self):
+        doc = parse_and_validate(
+            "see [x](paper:/embed/datasette/fixtures/facetable) ok\n"
+        )
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["text", "inline_embed", "text"]
         assert content[0]["text"] == "see "
@@ -363,8 +365,16 @@ class TestInlineEmbed:
         assert "marks" not in content[1]
         assert content[2]["text"] == " ok"
 
+    def test_ref_with_many_slashes_is_not_split(self):
+        # The ref keeps every slash after the <kind> segment — only the kind is
+        # split off (split-once gotcha).
+        doc = parse_and_validate("[x](paper:/embed/datasette/db/t/row/1)\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["inline_embed"]
+        assert content[0]["attrs"]["ref"] == "/db/t/row/1"
+
     def test_ref_percent_decodes_path(self):
-        doc = parse_and_validate("[x](datasette:/db/t%20with%20space/1)\n")
+        doc = parse_and_validate("[x](paper:/embed/datasette/db/t%20with%20space/1)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["inline_embed"]
         assert content[0]["attrs"]["ref"] == "/db/t with space/1"
@@ -605,8 +615,12 @@ ROUNDTRIP_STABLE = [
     # images (were dropped on serialize)
     "![alt](https://example.com/x.png)\n",
     '![alt](https://example.com/x.png "a title")\n',
-    # datasette inline ref + block embed
-    "see [/fixtures/facetable](datasette:/fixtures/facetable)\n",
+    # paper:/ inline ref (mention / tag / embed) + block embed fence
+    "see [@Lois](paper:/actor/lois)\n",
+    "see [#roadmap](paper:/tag/roadmap)\n",
+    "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)\n",
+    # an embed ref with multiple slashes (split-once gotcha)
+    "see [/db/t/row/1](paper:/embed/datasette/db/t/row/1)\n",
     "```datasette-embed\n/fixtures/facetable\n```\n",
     "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n",
     # markdown-significant chars in plain text (re-parsed as markup unescaped)
@@ -696,7 +710,7 @@ def test_image_src_with_space_survives_roundtrip():
 
 
 def test_mention_roundtrips_through_serializer():
-    src = "Hi [@Alice](actor:alice-id) there\n"
+    src = "Hi [@Alice](paper:/actor/alice-id) there\n"
     doc1 = parse_and_validate(src)
     md1 = doc_to_markdown(doc1)
     doc2 = markdown_to_doc(md1)
@@ -704,7 +718,7 @@ def test_mention_roundtrips_through_serializer():
 
 
 def test_inline_embed_roundtrips_through_serializer():
-    src = "see [/fixtures/facetable](datasette:/fixtures/facetable) ok\n"
+    src = "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable) ok\n"
     doc1 = parse_and_validate(src)
     md1 = doc_to_markdown(doc1)
     doc2 = markdown_to_doc(md1)

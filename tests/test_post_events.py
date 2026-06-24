@@ -455,5 +455,5 @@ async def test_post_inline_and_block_embed_apply(ds_paper):
     doc = await ds.client.get(f"/-/paper/api/docs/{doc_id}/document")
     assert doc.status_code == 200
     md = doc.json()["content_markdown"]
-    assert "[/fixtures/facetable](datasette:/fixtures/facetable)" in md
+    assert "[/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)" in md
     assert "```datasette-embed\n/fixtures/facetable\n```" in md
