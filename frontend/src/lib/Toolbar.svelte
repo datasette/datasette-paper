@@ -430,19 +430,4 @@
     text-overflow: ellipsis;
     max-width: 130px;
   }
-  /* Inline-atom placeholder visual — pill, monospace key, blue tint. */
-  :global(.pm-placeholder) {
-    display: inline;
-    padding: 1px 6px;
-    margin: 0 1px;
-    background: #e6f0ff;
-    color: #0b3b8a;
-    border: 1px solid #b9d0f5;
-    border-radius: 4px;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 0.9em;
-    line-height: 1.4;
-    white-space: nowrap;
-    cursor: default;
-  }
 </style>
