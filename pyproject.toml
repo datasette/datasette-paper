@@ -18,6 +18,7 @@ dependencies = [
     "datasette-vite>=0.0.1a4",
     "markdown-it-py[plugins]>=3.0",
     "prosemirror>=0.6.1",
+    "pydantic>=2",
     "sqlite-migrate>=0.1b0",
     "sqlite-utils>=3.38",
 ]

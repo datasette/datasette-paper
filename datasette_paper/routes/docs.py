@@ -2,8 +2,10 @@
 
 import datetime
 import json
+from typing import Annotated
 
 from datasette import Forbidden, Response
+from datasette_plugin_router import Body
 
 from ..router import router
 from ..embed_providers import provider_manifest
@@ -26,9 +28,16 @@ from ..permissions import (
     seed_owner_manager_grant,
     viewable_doc_ids,
 )
+from ..schemas import (
+    AppendDocBody,
+    CreateDocBody,
+    IdsBody,
+    RenameDocBody,
+    ReplaceDocTagsBody,
+    TagBody,
+)
 from ..template_params import build_context, substitute_placeholders
 from ..util import (
-    read_json_body,
     actor_id,
     normalize_tag,
     paper_db,
@@ -223,12 +232,10 @@ async def _resolve_map(datasette, actor, ids):
 
 
 @router.POST(r"^/-/paper/api/links/resolve$")
-async def resolve_links(datasette, request):
+async def resolve_links(datasette, request, body: Annotated[IdsBody, Body()]):
     # Ungated — non-viewable ids resolve to {"status": "denied"} (acl-filtered).
-    body = await read_json_body(request)
-    raw = body.get("ids") or []
     ids = []
-    for i in raw[:200]:
+    for i in body.ids[:200]:
         try:
             ids.append(int(i))
         except (TypeError, ValueError):
@@ -261,14 +268,12 @@ async def mention_search(datasette, request, doc_id: int):
 
 
 @router.POST(r"^/-/paper/api/actors/resolve$")
-async def resolve_actors(datasette, request):
+async def resolve_actors(datasette, request, body: Annotated[IdsBody, Body()]):
     # Name + avatar are profile data, so the lookup is gated on
     # user-profiles' `profile_access` action. Rather than 403 (which wedges
     # mention chips on "loading"), we degrade like resolve_links: without it,
     # each id echoes back as its own name — the caller already supplied it.
-    body = await read_json_body(request)
-    raw = body.get("ids") or []
-    ids = [str(i) for i in raw[:200] if i]
+    ids = [str(i) for i in body.ids[:200] if i]
     may_resolve = await datasette.allowed(action="profile_access", actor=request.actor)
     profiles = await resolve_actor_profiles(datasette, ids) if may_resolve else {}
     out = {}
@@ -303,7 +308,9 @@ async def list_doc_tags(datasette, request, doc_id: int):
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/add$")
-async def add_doc_tag(datasette, request, doc_id: int):
+async def add_doc_tag(
+    datasette, request, doc_id: int, body: Annotated[TagBody, Body()]
+):
     """Add one tag to a document. Manager-only (``paper-manage``).
 
     Body ``{"tag": "..."}``; the tag is normalized and a duplicate is a
@@ -313,8 +320,7 @@ async def add_doc_tag(datasette, request, doc_id: int):
     doc = await _ensure_owner(datasette, request, doc_id)
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
-    body = await read_json_body(request)
-    tag = normalize_tag(body.get("tag"))
+    tag = normalize_tag(body.tag)
     if tag is None:
         return Response.json({"error": "invalid tag"}, status=400)
     db = paper_db(datasette)
@@ -323,7 +329,9 @@ async def add_doc_tag(datasette, request, doc_id: int):
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/remove$")
-async def remove_doc_tag(datasette, request, doc_id: int):
+async def remove_doc_tag(
+    datasette, request, doc_id: int, body: Annotated[TagBody, Body()]
+):
     """Remove one tag from a document. Manager-only (``paper-manage``).
 
     Body ``{"tag": "..."}``. → 200 ``{"tags": [...]}``; 400 invalid tag;
@@ -333,9 +341,8 @@ async def remove_doc_tag(datasette, request, doc_id: int):
     doc = await _ensure_owner(datasette, request, doc_id)
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
-    body = await read_json_body(request)
     # Normalize so a client sending the display form removes the stored row.
-    tag = normalize_tag(body.get("tag"))
+    tag = normalize_tag(body.tag)
     if tag is None:
         return Response.json({"error": "invalid tag"}, status=400)
     db = paper_db(datasette)
@@ -344,7 +351,9 @@ async def remove_doc_tag(datasette, request, doc_id: int):
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/tags/replace$")
-async def replace_doc_tags(datasette, request, doc_id: int):
+async def replace_doc_tags(
+    datasette, request, doc_id: int, body: Annotated[ReplaceDocTagsBody, Body()]
+):
     """Replace a document's entire tag set. Manager-only (``paper-manage``).
 
     Body ``{"tags": [...]}`` — normalized, deduped (order preserved),
@@ -354,11 +363,9 @@ async def replace_doc_tags(datasette, request, doc_id: int):
     doc = await _ensure_owner(datasette, request, doc_id)
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
-    body = await read_json_body(request)
-    raw = body.get("tags") or []
     # Normalize + dedupe (preserve order); silently drop invalid entries.
     tags = []
-    for r in raw:
+    for r in body.tags:
         t = normalize_tag(r)
         if t and t not in tags:
             tags.append(t)
@@ -484,17 +491,16 @@ async def links_graph(datasette, request):
 
 
 @router.POST(r"^/-/paper/api/docs$")
-async def create_doc(datasette, request):
+async def create_doc(datasette, request, body: Annotated[CreateDocBody, Body()]):
     await ensure_paper_create(datasette, request)
     db = paper_db(datasette)
-    body = await read_json_body(request)
-    name = body.get("name", "Untitled")
-    template_id_raw = body.get("template_id")
+    name = body.name
+    template_id_raw = body.template_id
     # Templates always materialize into a new ``kind='doc'`` row — you
     # use a template, you don't become one. To create a brand-new
     # template, the client sends ``{"kind": "template"}`` with no
     # template_id (and writes content via the editor afterwards).
-    kind = body.get("kind", "doc")
+    kind = body.kind
     if kind not in VALID_KINDS:
         return Response.json(
             {"error": f"kind must be one of: {', '.join(VALID_KINDS)}"},
@@ -510,7 +516,7 @@ async def create_doc(datasette, request):
     # version-0 snapshot). It's an alternative seed source to ``template_id``
     # — supplying both is ambiguous. Unlike template_id, content works for
     # either kind, so you can seed a brand-new template from markdown too.
-    content = body.get("content")
+    content = body.content
     if content is not None:
         if template_id_raw is not None:
             return Response.json(
@@ -519,7 +525,7 @@ async def create_doc(datasette, request):
             )
         if not isinstance(content, str):
             return Response.json({"error": "content must be a string"}, status=400)
-        content_type = (body.get("content_type") or "markdown").lower()
+        content_type = (body.content_type or "markdown").lower()
         if content_type != "markdown":
             return Response.json(
                 {"error": "content_type must be 'markdown'"}, status=400
@@ -821,11 +827,12 @@ async def get_table_by_name(datasette, request, doc_id: int, name: str):
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/rename$")
-async def rename_doc(datasette, request, doc_id: int):
+async def rename_doc(
+    datasette, request, doc_id: int, body: Annotated[RenameDocBody, Body()]
+):
     await ensure_paper_edit(datasette, request, doc_id)
     db = paper_db(datasette)
-    body = await read_json_body(request)
-    new_name = (body.get("name") or "").strip()
+    new_name = (body.name or "").strip()
     if not new_name:
         return Response.json({"error": "name is required"}, status=400)
     doc = await db.update_doc_name(doc_id=doc_id, name=new_name)
@@ -843,7 +850,9 @@ async def rename_doc(datasette, request, doc_id: int):
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/append$")
-async def append_doc(datasette, request, doc_id: int):
+async def append_doc(
+    datasette, request, doc_id: int, body: Annotated[AppendDocBody, Body()]
+):
     """Append markdown content to the end of a doc as a single collab step.
 
     Body: ``{"content": "<markdown>", "content_type": "markdown"}``
@@ -861,11 +870,10 @@ async def append_doc(datasette, request, doc_id: int):
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
 
-    body = await read_json_body(request)
-    content = body.get("content")
+    content = body.content
     if not isinstance(content, str):
         return Response.json({"error": "content (string) is required"}, status=400)
-    content_type = (body.get("content_type") or "markdown").lower()
+    content_type = (body.content_type or "markdown").lower()
     if content_type != "markdown":
         return Response.json({"error": "content_type must be 'markdown'"}, status=400)
 

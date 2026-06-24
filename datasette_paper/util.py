@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 
 from datasette_user_profiles import resolve_profile_actors
@@ -12,11 +11,6 @@ from .db import PaperDB
 MAX_TAG_LEN = 64
 _TAG_ALLOWED = re.compile(r"[^a-z0-9/_-]+")
 _TAG_WS = re.compile(r"\s+")
-
-
-async def read_json_body(request) -> dict:
-    """Parse the request body as JSON and return a dict."""
-    return json.loads(await request.post_body())
 
 
 def normalize_tag(raw) -> str | None:

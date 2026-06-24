@@ -212,17 +212,19 @@
       return;
     }
     saving = true;
-    const resp = await fetch(`/-/paper/api/docs/${docId}/rename`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: next }),
-    });
+    const { data, error: err } = await client.POST(
+      "/-/paper/api/docs/{doc_id}/rename",
+      {
+        params: { path: { doc_id: Number(docId) } },
+        body: { name: next } as never,
+      },
+    );
     saving = false;
-    if (!resp.ok) {
+    if (err || !data) {
       titleInput = meta.name;
       return;
     }
-    const updated = await resp.json();
+    const updated = data as { name: string; updated_at: string };
     meta = { ...meta, name: updated.name, updated_at: updated.updated_at };
     savedRecently = true;
     setTimeout(() => (savedRecently = false), 1500);

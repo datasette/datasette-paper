@@ -1,8 +1,10 @@
 """Route handlers for the collaborative events (steps) API."""
 
 import asyncio
+from typing import Annotated
 
 from datasette import Response
+from datasette_plugin_router import Body
 
 from ..router import router
 from ..instance import get_registry
@@ -13,7 +15,8 @@ from ..errors import (
     InvalidStepError,
 )
 from ..permissions import can_paper_view, ensure_paper_edit, ensure_paper_view
-from ..util import read_json_body, actor_id, paper_db
+from ..schemas import EventsBody, PresenceBody
+from ..util import actor_id, paper_db
 from .. import sse
 from ..sse import format_event, format_heartbeat
 
@@ -178,7 +181,9 @@ async def sse_events(datasette, request, send, receive):
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/presence$")
-async def post_presence(datasette, request, doc_id: str):
+async def post_presence(
+    datasette, request, doc_id: str, body: Annotated[PresenceBody, Body()]
+):
     """Record a client's caret/selection and broadcast to other subscribers."""
     doc_id_int = int(doc_id)
     await ensure_paper_view(datasette, request, doc_id_int)
@@ -186,29 +191,24 @@ async def post_presence(datasette, request, doc_id: str):
     doc = await db.select_doc_by_id(doc_id_int)
     if doc is None:
         return Response("Not found", status=404)
-    body = await read_json_body(request)
-    try:
-        client_id = int(body["clientID"])
-        anchor = int(body["anchor"])
-        head = int(body["head"])
-    except (KeyError, TypeError, ValueError):
-        return Response.json({"error": "invalid presence body"}, status=400)
     registry = get_registry(datasette)
     instance = await registry.get(db, doc_id_int)
     me = actor_id(request)
     # Cache the display name before broadcasting so the payload carries it.
     await instance.ensure_actor_name(datasette, me)
     instance.update_presence(
-        client_id=client_id,
+        client_id=body.client_id,
         actor_id=me,
-        anchor=anchor,
-        head=head,
+        anchor=body.anchor,
+        head=body.head,
     )
     return Response("", status=204)
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/events$")
-async def post_events(datasette, request, doc_id: str):
+async def post_events(
+    datasette, request, doc_id: str, body: Annotated[EventsBody, Body()]
+):
     doc_id_int = int(doc_id)
     await ensure_paper_edit(datasette, request, doc_id_int)
     db = paper_db(datasette)
@@ -222,13 +222,12 @@ async def post_events(datasette, request, doc_id: str):
     registry = get_registry(datasette)
     instance = await registry.get(db, doc_id_int)
 
-    body = await read_json_body(request)
     try:
         new_version = await instance.add_events(
-            version=body["version"],
-            client_id=body["clientID"],
+            version=body.version,
+            client_id=body.client_id,
             actor_id=actor_id(request),
-            steps=body["steps"],
+            steps=body.steps,
         )
     except ConflictError:
         return Response("Version not current", status=409)

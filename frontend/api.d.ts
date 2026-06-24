@@ -37,7 +37,37 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Name
+                         * @default Untitled
+                         */
+                        name?: string;
+                        /**
+                         * Kind
+                         * @default doc
+                         */
+                        kind?: string;
+                        /**
+                         * Template Id
+                         * @default null
+                         */
+                        template_id?: unknown | null;
+                        /**
+                         * Content
+                         * @default null
+                         */
+                        content?: unknown | null;
+                        /**
+                         * Content Type
+                         * @default null
+                         */
+                        content_type?: string | null;
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -103,7 +133,17 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Ids
+                         * @default []
+                         */
+                        ids?: unknown[];
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -171,7 +211,17 @@ export interface paths {
                 path?: never;
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Ids
+                         * @default []
+                         */
+                        ids?: unknown[];
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -241,7 +291,17 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Tag
+                         * @default null
+                         */
+                        tag?: unknown;
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -276,7 +336,17 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Tag
+                         * @default null
+                         */
+                        tag?: unknown;
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -311,7 +381,17 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Tags
+                         * @default []
+                         */
+                        tags?: unknown[];
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -693,7 +773,17 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Name
+                         * @default null
+                         */
+                        name?: string | null;
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -728,7 +818,22 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /**
+                         * Content
+                         * @default null
+                         */
+                        content?: unknown | null;
+                        /**
+                         * Content Type
+                         * @default null
+                         */
+                        content_type?: string | null;
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -1214,7 +1319,18 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Clientid */
+                        clientID: number;
+                        /** Anchor */
+                        anchor: number;
+                        /** Head */
+                        head: number;
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
@@ -1249,7 +1365,18 @@ export interface paths {
                 };
                 cookie?: never;
             };
-            requestBody?: never;
+            requestBody: {
+                content: {
+                    "application/json": {
+                        /** Version */
+                        version: number;
+                        /** Clientid */
+                        clientID: number;
+                        /** Steps */
+                        steps: unknown[];
+                    };
+                };
+            };
             responses: {
                 /** @description OK */
                 200: {
