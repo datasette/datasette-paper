@@ -685,6 +685,24 @@
   color: #888;
   font-style: italic;
 }
+/* Non-interactive section header. No hover, no pointer events; a muted,
+   uppercase micro-label that separates the grouped commands. Width stays
+   stable (same horizontal padding as items). */
+.editor-host .pm-slash-header {
+  padding: 6px 12px 2px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #8a8a8a;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+/* The first header sits flush with the menu's own top padding. */
+.editor-host .pm-slash-header:first-child {
+  padding-top: 2px;
+}
 
 /* Inline Datasette ref pill — mirrors .pm-paper-link / .pm-mention. */
 .editor-host .pm-inline-embed {
