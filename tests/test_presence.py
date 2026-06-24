@@ -169,14 +169,6 @@ async def test_post_presence_unknown_doc_403(ds):
     assert resp.status_code == 403
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="Body is now validated by datasette-plugin-router's Body() injection; "
-    "a malformed body returns 400 only once the router catches pydantic "
-    "ValidationError (currently it bubbles to 500). Unblocks when the router's "
-    "ValidationError->400 release ships and the pin is bumped — then remove this "
-    "marker. See plans/ handoff for the router change.",
-)
 @pytest.mark.asyncio
 async def test_post_presence_400_invalid_body(ds):
     create = await ds.client.post("/-/paper/api/docs", json={"name": "P"})
