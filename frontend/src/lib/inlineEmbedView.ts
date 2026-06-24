@@ -16,8 +16,7 @@
  */
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
-import { TOOLBAR_ICONS } from "./icons";
-import { kindIcon, safeHref } from "./datasetteEmbed";
+import { embedIconMarkup, iconMarkup, safeHref } from "./datasetteEmbed";
 import type { DatasetteResolver, DatasetteStatus } from "./datasetteResolver";
 
 /**
@@ -70,13 +69,13 @@ export class InlineEmbedView implements NodeView {
     );
   }
 
-  private setBody(iconName: string | null, text: string): void {
+  private setBody(iconSvg: string | null, text: string): void {
     this.dom.replaceChildren();
-    if (iconName) {
+    if (iconSvg) {
       const span = document.createElement("span");
       span.className = "pm-inline-embed-icon";
       span.setAttribute("aria-hidden", "true");
-      span.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS[iconName as keyof typeof TOOLBAR_ICONS] ?? ""}</svg>`;
+      span.innerHTML = iconSvg; // bundled icon, or a provider's raw `<svg>`
       this.dom.appendChild(span);
     }
     this.dom.appendChild(document.createTextNode(text));
@@ -92,14 +91,14 @@ export class InlineEmbedView implements NodeView {
     } else if (status.status === "denied") {
       this.dom.removeAttribute("href");
       this.dom.classList.add("pm-inline-embed--denied");
-      this.setBody("lock", "Permission denied"); // NEVER a label here
+      this.setBody(iconMarkup("lock"), "Permission denied"); // NEVER a label here
     } else if (status.status === "not_found") {
       this.dom.removeAttribute("href");
       this.dom.classList.add("pm-inline-embed--missing");
       this.setBody(null, raw); // NEVER a label here
     } else {
       this.dom.setAttribute("href", safeHref(status.href));
-      this.setBody(kindIcon(status.kind), inlineEmbedLabel(status));
+      this.setBody(embedIconMarkup(status), inlineEmbedLabel(status));
     }
   }
 

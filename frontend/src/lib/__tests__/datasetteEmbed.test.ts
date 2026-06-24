@@ -11,8 +11,11 @@ import {
   searchResources,
   cellText,
   kindIcon,
+  iconMarkup,
+  embedIconMarkup,
   safeHref,
 } from "../datasetteEmbed";
+import { TOOLBAR_ICONS } from "../icons";
 
 function emptyState(): EditorState {
   const doc = schema.node("doc", null, [schema.node("paragraph")]);
@@ -83,6 +86,41 @@ describe("cellText + kindIcon", () => {
     expect(kindIcon("row")).toBe("fileText");
     expect(kindIcon("table")).toBe("table");
     expect(kindIcon(undefined)).toBe("table");
+  });
+});
+
+describe("iconMarkup", () => {
+  it("wraps a bundled icon's inner paths in a 16-viewBox svg", () => {
+    const m = iconMarkup("database");
+    expect(m.startsWith("<svg")).toBe(true);
+    expect(m).toContain('viewBox="0 0 16 16"');
+    expect(m).toContain(TOOLBAR_ICONS.database);
+  });
+
+  it("still emits a valid (empty) svg for an unknown name", () => {
+    expect(iconMarkup("no-such-icon")).toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"></svg>',
+    );
+  });
+});
+
+describe("embedIconMarkup", () => {
+  it("returns a provider's raw svg verbatim (not sanitized, not re-wrapped)", () => {
+    const svg = '<svg viewBox="0 0 16 16"><path d="M0 0h16v16H0z"/></svg>';
+    expect(
+      embedIconMarkup({ status: "ok", kind: "playlist", label: "x", href: "/x", icon: svg }),
+    ).toBe(svg);
+  });
+
+  it("falls back to the wrapped kind icon when the provider sets no icon", () => {
+    const m = embedIconMarkup({ status: "ok", kind: "database", label: "x", href: "/x" });
+    expect(m).toContain("<svg");
+    expect(m).toContain(TOOLBAR_ICONS.database);
+  });
+
+  it("uses the generic table icon for an unknown kind with no icon", () => {
+    const m = embedIconMarkup({ status: "ok", kind: "playlist", label: "x", href: "/x" });
+    expect(m).toContain(TOOLBAR_ICONS.table);
   });
 });
 

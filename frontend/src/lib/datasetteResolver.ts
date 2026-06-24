@@ -26,6 +26,11 @@ export type DatasetteStatus =
       kind: string;
       label: string;
       href: string;
+      /** Optional raw inline-`<svg>` markup for the header/pill icon. A
+       *  third-party provider may set this to override the kind-derived default
+       *  (rendered as-is — trusted plugin JS, see embedIconMarkup). Core refs
+       *  leave it unset and get `kindIcon(kind)`. */
+      icon?: string;
       db?: string;
       table?: string;
       pk?: string;

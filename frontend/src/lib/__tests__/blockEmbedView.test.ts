@@ -220,6 +220,7 @@ describe("BlockEmbedView", () => {
         kind: "place-list",
         label: "My places",
         href: ref,
+        icon: '<svg data-prov="1"><path d="M0 0h1v1H0z"/></svg>',
       }),
       mount,
     });
@@ -235,6 +236,10 @@ describe("BlockEmbedView", () => {
       expect(view.dom.querySelector(".pm-block-embed-label")!.textContent).toBe(
         "My places",
       );
+      // The provider's raw icon svg is rendered into the header icon slot.
+      expect(
+        view.dom.querySelector(".pm-block-embed-icon svg[data-prov]"),
+      ).not.toBeNull();
       const host = view.dom.querySelector(".pm-block-embed-external");
       expect(host).not.toBeNull();
       expect(host!.textContent).toBe("custom body");

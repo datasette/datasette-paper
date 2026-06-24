@@ -10,6 +10,17 @@
 
 const PREFIX = "/-/sample-embeds/playlists/";
 
+// Raw inline-SVG (bootstrap-icons/music-note-list) for the pill + card header.
+// Providers ship their own icon markup — paper renders it as-is (trusted plugin
+// JS) and CSS clamps it to the chrome size.
+const ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">' +
+  '<path d="M12 13c0 1.105-1.12 2-2.5 2S7 14.105 7 13s1.12-2 2.5-2 2.5.895 2.5 2"/>' +
+  '<path fill-rule="evenodd" d="M12 3v10h-1V3z"/>' +
+  '<path d="M11 2.82a1 1 0 0 1 .804-.98l3-.6A1 1 0 0 1 16 2.22V4l-5 1z"/>' +
+  '<path fill-rule="evenodd" d="M0 11.5a.5.5 0 0 1 .5-.5H4a.5.5 0 0 1 0 1H.5a.5.5 0 0 1-.5-.5m0-3a.5.5 0 0 1 .5-.5H8a.5.5 0 0 1 0 1H.5a.5.5 0 0 1-.5-.5m0-3a.5.5 0 0 1 .5-.5H8a.5.5 0 0 1 0 1H.5a.5.5 0 0 1-.5-.5m0-3A.5.5 0 0 1 .5 2H8a.5.5 0 0 1 0 1H.5a.5.5 0 0 1-.5-.5"/>' +
+  "</svg>";
+
 export default {
   kind: "playlist",
 
@@ -28,7 +39,14 @@ export default {
         if (res.status === 403) return { status: "denied" };
         if (!res.ok) return { status: "not_found" };
         return res.json().then(function (pl) {
-          return { status: "ok", kind: "playlist", label: pl.title, href: ref };
+          // `icon` (raw SVG) overrides paper's generic kind icon.
+          return {
+            status: "ok",
+            kind: "playlist",
+            label: pl.title,
+            href: ref,
+            icon: ICON,
+          };
         });
       })
       .catch(function () {

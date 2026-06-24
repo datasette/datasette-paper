@@ -15,10 +15,11 @@
  */
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
-import { TOOLBAR_ICONS } from "./icons";
 import {
   cellText,
+  embedIconMarkup,
   fetchEmbed,
+  iconMarkup,
   kindIcon,
   safeHref,
   type EmbedPayload,
@@ -140,7 +141,7 @@ export class BlockEmbedView implements NodeView {
   ): void {
     this.dom.replaceChildren();
     this.dom.appendChild(
-      this.header(kindIcon(status.kind), status.label, status.href),
+      this.header(embedIconMarkup(status), status.label, status.href),
     );
     const host = document.createElement("div");
     host.className = "pm-block-embed-external";
@@ -171,23 +172,29 @@ export class BlockEmbedView implements NodeView {
     this.cleanupExternal = null;
   }
 
-  private svgIcon(name: string): HTMLSpanElement {
+  /** An icon span from raw `<svg>` markup (a bundled icon, or a provider's). */
+  private iconSpan(markup: string): HTMLSpanElement {
     const span = document.createElement("span");
     span.className = "pm-block-embed-icon";
     span.setAttribute("aria-hidden", "true");
-    span.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS[name as keyof typeof TOOLBAR_ICONS] ?? ""}</svg>`;
+    span.innerHTML = markup;
     return span;
   }
 
+  private svgIcon(name: string): HTMLSpanElement {
+    return this.iconSpan(iconMarkup(name));
+  }
+
   /**
-   * Header chrome: kind icon + db/label + a refresh control. The label is a
-   * link to the resource's Datasette page when `href` is known (so the title
-   * is clickable, per design); the "open in Datasette" link lives in the footer.
+   * Header chrome: icon + db/label + a refresh control. `iconSvg` is full
+   * `<svg>` markup (paper's bundled kind icon, or a provider's own). The label
+   * is a link to the resource's Datasette page when `href` is known (so the
+   * title is clickable, per design); the "open in Datasette" link is in the footer.
    */
-  private header(iconName: string, label: string, href?: string): HTMLElement {
+  private header(iconSvg: string, label: string, href?: string): HTMLElement {
     const head = document.createElement("div");
     head.className = "pm-block-embed-head";
-    head.appendChild(this.svgIcon(iconName));
+    head.appendChild(this.iconSpan(iconSvg));
 
     let labelEl: HTMLElement;
     if (href) {
@@ -380,7 +387,7 @@ export class BlockEmbedView implements NodeView {
   ): void {
     this.dom.replaceChildren();
     this.dom.appendChild(
-      this.header(kindIcon(payload.kind), `${payload.db}/${payload.label}`, payload.href),
+      this.header(iconMarkup(kindIcon(payload.kind)), `${payload.db}/${payload.label}`, payload.href),
     );
 
     const scroll = document.createElement("div");
@@ -441,7 +448,7 @@ export class BlockEmbedView implements NodeView {
       payload.table && payload.pk
         ? `${payload.db}/${payload.table}/${payload.pk}`
         : `${payload.db}/${payload.label}`;
-    this.dom.appendChild(this.header("fileText", title, payload.href));
+    this.dom.appendChild(this.header(iconMarkup("fileText"), title, payload.href));
     const dl = document.createElement("dl");
     dl.className = "pm-block-embed-fields";
     for (const field of payload.fields) {
@@ -459,7 +466,7 @@ export class BlockEmbedView implements NodeView {
     payload: Extract<EmbedPayload, { kind: "database" }>,
   ): void {
     this.dom.replaceChildren();
-    this.dom.appendChild(this.header(kindIcon("database"), payload.db, payload.href));
+    this.dom.appendChild(this.header(iconMarkup(kindIcon("database")), payload.db, payload.href));
 
     if (payload.tables.length === 0) {
       const empty = document.createElement("div");

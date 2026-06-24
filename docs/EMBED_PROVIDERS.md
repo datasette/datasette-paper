@@ -94,7 +94,17 @@ export default {
     if (res.status === 403) return { status: "denied" };   // NEVER a label here
     if (!res.ok) return { status: "not_found" };
     const j = await res.json();
-    return { status: "ok", kind: "place-list", label: j.name, href: ref };
+    // `icon` (optional): raw inline-`<svg>` markup for the pill + block-card
+    // header, rendered as-is (see the icon note under Rules). Omit it to get
+    // paper's generic kind icon. Best as a 16-viewBox, `currentColor` SVG —
+    // paper's CSS clamps it to ~14px so it fits the chrome.
+    return {
+      status: "ok",
+      kind: "place-list",
+      label: j.name,
+      href: ref,
+      icon: '<svg viewBox="0 0 16 16" fill="currentColor"><path d="…"/></svg>',
+    };
   },
 
   // Block card body. Paper owns the header (icon + label link + refresh + ⋮);
@@ -115,7 +125,7 @@ export default {
 | `kind` | yes | Stable registry key. Re-registering the same kind replaces the prior provider. |
 | `matchRef(ref)` | for embeds | Does this provider own this stored ref path? Core refs are left unclaimed. |
 | `matchUrl(url)` | optional | Claim a pasted **same-origin** URL → ref to store. |
-| `resolve(ref)` | recommended | Inline-pill identity + denied/not_found. Omit → a generic ref-labelled pill. |
+| `resolve(ref)` | recommended | Inline-pill identity + denied/not_found. The `ok` status may carry an optional `icon` (raw inline-`<svg>` markup) for the pill/header. Omit `resolve` → a generic ref-labelled pill. |
 | `mount(host, ctx)` | yes | Render the block body. `ctx = { ref, mode }`. Return a cleanup fn. |
 | `picker()` | optional | Browsable `/`-menu source spec `{ id, label, icon?, mode? }`. Mirror it in the backend `sources` so it shows before the bundle loads. |
 | `search(q, limit)` | with `picker` | Viewer-filtered hits `{ ref, label, kind?, detail? }` for the picker dialog. |
@@ -127,6 +137,11 @@ export default {
   DOM — never inject untrusted strings as HTML; prefer `textContent` and
   attributes. Paper sanitizes the header `href` (`safeHref`: relative paths and
   `http(s)` only), but anything you build inside `host` is on you.
+- **`icon` is rendered as raw HTML and is NOT sanitized.** It is trusted exactly
+  like the rest of your bundle (paper `import()`s and runs your JS, and you own
+  the whole `mount` body), so a raw `<svg>` grants you nothing you couldn't
+  already do. The corollary: build the `icon` from your own static markup —
+  never interpolate resource data or any untrusted value into it.
 - **Same-origin only (v1).** `matchUrl` sees same-origin URLs. Rendering
   arbitrary external-web URLs (GitHub, etc.) needs a server-side fetch layer and
   is a separate, future feature.

@@ -1024,6 +1024,13 @@
     vertical-align: -2px;
     margin-right: 2px;
   }
+  /* Clamp icon size: a provider may supply its own raw <svg>, so don't trust
+     its width/height attrs to match paper's chrome. */
+  .editor-host :global(.pm-inline-embed-icon svg) {
+    width: 14px;
+    height: 14px;
+    display: block;
+  }
 
   /* Block Datasette embed card. */
   .editor-host :global(.pm-block-embed) {
@@ -1051,6 +1058,12 @@
   .editor-host :global(.pm-block-embed-icon) {
     display: inline-flex;
     color: #6429a8;
+  }
+  /* Clamp icon size: a provider-supplied raw <svg> must fit paper's chrome. */
+  .editor-host :global(.pm-block-embed-icon svg) {
+    width: 14px;
+    height: 14px;
+    display: block;
   }
   .editor-host :global(.pm-block-embed-label) {
     font-weight: 600;

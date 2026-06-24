@@ -20,6 +20,8 @@
  */
 import { schema } from "./schema";
 import type { Command } from "prosemirror-state";
+import { TOOLBAR_ICONS } from "./icons";
+import type { DatasetteStatus } from "./datasetteResolver";
 
 /** Default capped row count for a table embed when the caller gives none. */
 export const DEFAULT_EMBED_LIMIT = 25;
@@ -85,6 +87,31 @@ export function kindIcon(kind: string | undefined): string {
     default:
       return "table";
   }
+}
+
+/** Paper's standard 14px inline-SVG envelope (currentColor, 16-unit viewBox). */
+const ICON_SVG_OPEN =
+  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">';
+
+/** Full `<svg>` markup for a bundled icon name (its inner paths, wrapped). */
+export function iconMarkup(name: string): string {
+  return `${ICON_SVG_OPEN}${TOOLBAR_ICONS[name as keyof typeof TOOLBAR_ICONS] ?? ""}</svg>`;
+}
+
+/**
+ * The icon `<svg>` markup to render for a resolved (ok) status. A third-party
+ * provider may set `status.icon` to a raw inline-`<svg>` string, rendered as-is
+ * in paper's header/pill chrome. This is intentionally NOT sanitized: a provider
+ * bundle is trusted plugin JS that paper already `import()`s and runs (it owns
+ * the whole block-card body via `mount`), so a raw icon SVG grants it nothing it
+ * couldn't already do — see docs/EMBED_PROVIDERS.md. CSS clamps the rendered
+ * size so an off-spec SVG can't blow out the chrome. Core refs leave `icon`
+ * unset and get the kind's bundled icon.
+ */
+export function embedIconMarkup(
+  status: Extract<DatasetteStatus, { status: "ok" }>,
+): string {
+  return status.icon ?? iconMarkup(kindIcon(status.kind));
 }
 
 /**
