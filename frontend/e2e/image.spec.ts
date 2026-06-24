@@ -50,6 +50,51 @@ test.describe("image insert dialog", () => {
   });
 });
 
+test.describe("oversized paste guard", () => {
+  test("an oversized inline data: image pasted as HTML is not inserted", async ({
+    page,
+  }) => {
+    const doc = await createPaper(page);
+    await gotoPaper(page, doc.url);
+
+    // Suppress the "image too large" alert so it doesn't block the test, and
+    // record that it fired.
+    await page.addInitScript(() => {
+      (window as unknown as { __alerts: string[] }).__alerts = [];
+      window.alert = (msg?: string) => {
+        (window as unknown as { __alerts: string[] }).__alerts.push(String(msg));
+      };
+    });
+    await page.reload();
+    await page.locator(".ProseMirror").click();
+
+    // Dispatch a synthetic paste carrying HTML with an oversized data: image
+    // (> the 8 MB MAX_IMAGE_BYTES cap) — this drives the real transformPasted
+    // guard wired in collab.ts.
+    const removed = await page.evaluate(() => {
+      const editable = document.querySelector(".ProseMirror") as HTMLElement;
+      editable.focus();
+      const bigSrc = "data:image/png;base64," + "A".repeat(9 * 1024 * 1024);
+      const html = `<p>hello <img src="${bigSrc}"> world</p>`;
+      const dt = new DataTransfer();
+      dt.setData("text/html", html);
+      const evt = new ClipboardEvent("paste", {
+        clipboardData: dt,
+        bubbles: true,
+        cancelable: true,
+      });
+      editable.dispatchEvent(evt);
+      return (window as unknown as { __alerts: string[] }).__alerts.length;
+    });
+
+    // No oversized image node landed in the document.
+    const img = page.locator(".ProseMirror img:not(.ProseMirror-separator)");
+    await expect(img).toHaveCount(0);
+    // The user was told the image was too large.
+    expect(removed).toBeGreaterThanOrEqual(1);
+  });
+});
+
 test.describe("large image overflow", () => {
   test("a wide image is constrained to the document width", async ({ page }) => {
     const doc = await createPaper(page);
