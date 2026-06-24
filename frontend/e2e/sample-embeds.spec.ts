@@ -69,10 +69,13 @@ test.describe("third-party custom embeds (sample plugin)", () => {
     await expect(playlist).toBeVisible({ timeout: 15000 });
     await expect(playlist).toContainText("Stop the Presses");
 
-    // Block widget card renders the gauge.
-    await expect(
-      page.locator(".pm-block-embed .sample-widget-gauge"),
-    ).toContainText("Newsstand Sales", { timeout: 15000 });
+    // Block widget card renders the gauge — title in the card header (paper's
+    // chrome), the metric value in the provider-rendered body.
+    const widget = page.locator(".pm-block-embed", {
+      has: page.locator(".sample-widget-gauge"),
+    });
+    await expect(widget).toContainText("Newsstand Sales", { timeout: 15000 });
+    await expect(widget.locator(".sample-widget-gauge")).toContainText("42%");
   });
 
   test("an owner-only playlist renders a permission message for a non-member", async ({

@@ -79,11 +79,14 @@ function renderWidget(host, w) {
   host.replaceChildren();
   injectStylesOnce();
   if (w.type === "badge") {
+    const wrap = document.createElement("div");
+    wrap.className = "sample-widget-badge-wrap";
     const badge = document.createElement("span");
     badge.className = "sample-widget-badge";
     badge.style.background = w.color || "#374151";
     badge.textContent = w.holder || w.title;
-    host.appendChild(badge);
+    wrap.appendChild(badge);
+    host.appendChild(wrap);
     return;
   }
   // gauge
@@ -92,7 +95,9 @@ function renderWidget(host, w) {
   const label = document.createElement("div");
   label.className = "sample-widget-gauge-label";
   const v = Math.max(0, Math.min(100, Number(w.value) || 0));
-  label.textContent = w.title + " — " + v + "%";
+  // The card header already shows the widget title; the body just states the
+  // metric value (no redundant title).
+  label.textContent = v + "%";
   const track = document.createElement("div");
   track.className = "sample-widget-gauge-track";
   const fill = document.createElement("div");
@@ -118,12 +123,13 @@ function injectStylesOnce() {
   const s = document.createElement("style");
   s.id = "sample-widget-styles";
   s.textContent =
+    ".sample-widget-badge-wrap{padding:10px}" +
     ".sample-widget-badge{display:inline-block;padding:5px 12px;border-radius:999px;" +
     "color:#fff;font-size:13px;font-weight:600;letter-spacing:.02em}" +
-    ".sample-widget-gauge{display:flex;flex-direction:column;gap:6px;padding:4px 2px}" +
-    ".sample-widget-gauge-label{font-size:13px;color:#333;font-variant-numeric:tabular-nums}" +
+    ".sample-widget-gauge{display:flex;flex-direction:column;gap:6px;padding:10px}" +
+    ".sample-widget-gauge-label{font-size:13px;color:#333;font-weight:600;font-variant-numeric:tabular-nums}" +
     ".sample-widget-gauge-track{background:#eef1f5;border-radius:999px;height:10px;overflow:hidden}" +
     ".sample-widget-gauge-fill{height:100%;background:#059669;border-radius:999px}" +
-    ".sample-widget-msg{color:#9a3412;font-size:13px;padding:6px 2px}";
+    ".sample-widget-msg{color:#9a3412;font-size:13px;padding:10px}";
   document.head.appendChild(s);
 }

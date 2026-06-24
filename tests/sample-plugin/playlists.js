@@ -134,13 +134,15 @@ function injectStylesOnce() {
   const s = document.createElement("style");
   s.id = "sample-playlist-styles";
   s.textContent =
-    ".sample-playlist{display:flex;flex-direction:column;gap:6px;padding:4px 2px}" +
-    ".sample-playlist-row{display:grid;grid-template-columns:1fr 120px auto;" +
-    "align-items:center;gap:10px;font-size:13px}" +
+    ".sample-playlist{display:flex;flex-direction:column;gap:7px;padding:10px}" +
+    // Fixed track widths (not `auto`) so every row shares the same columns —
+    // otherwise a wider "1,840 plays" shrinks that row's 1fr and shifts the bar.
+    ".sample-playlist-row{display:grid;grid-template-columns:1fr 120px 84px;" +
+    "align-items:center;gap:12px;font-size:13px}" +
     ".sample-playlist-track{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
     ".sample-playlist-barwrap{background:#eef1f5;border-radius:999px;height:8px;overflow:hidden}" +
     ".sample-playlist-bar{display:block;height:100%;background:#1d4ed8;border-radius:999px}" +
-    ".sample-playlist-plays{color:#888;font-variant-numeric:tabular-nums;white-space:nowrap}" +
-    ".sample-playlist-msg{color:#9a3412;font-size:13px;padding:6px 2px}";
+    ".sample-playlist-plays{color:#888;font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}" +
+    ".sample-playlist-msg{color:#9a3412;font-size:13px;padding:10px}";
   document.head.appendChild(s);
 }
