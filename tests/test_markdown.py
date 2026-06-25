@@ -687,3 +687,60 @@ def test_sql_block_hidden_emits_hidden_token():
         )
     )
     assert md == "```sql db=data hidden\nselect 1\n```\n"
+
+
+# ---------------------------------------------------------------------------
+# Ticket 05: combined fixture exercising ALL reference types in one doc.
+# Catches interaction bugs the per-type tests miss (e.g. the paper: converter
+# vs _split_paper_links ordering, the embed split-once gotcha next to a
+# normalized tag, the JSON fence beside inline refs).
+# ---------------------------------------------------------------------------
+
+
+def test_all_reference_types_roundtrip_in_one_doc():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    doc = _doc(
+        _para(
+            _text("Ping "),
+            {"type": "mention", "attrs": {"actorId": "lois"}},
+            _text(" re "),
+            {"type": "tag", "attrs": {"tag": "q3"}},
+            _text(" see "),
+            {"type": "inline_embed", "attrs": {"ref": "/fixtures/facetable/1"}},
+            _text(" and doc "),
+            {"type": "paper_link", "attrs": {"docId": 42}},
+        ),
+        {
+            "type": "block_embed",
+            "attrs": {
+                "ref": "/fixtures/facetable",
+                "mode": "row",
+                "config": {"columns": ["name", "id"], "sort": "-created"},
+            },
+        },
+    )
+    # No resolver → bare canonical hrefs, which round-trip byte-identically.
+    md = doc_to_markdown(doc)
+    back = markdown_to_doc(md)
+    assert back == doc
+
+
+def test_uppercase_hand_authored_tag_is_renormalized():
+    # A hand-authored paper:/tag/<UPPER CASE> ref is re-normalized on parse.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    back = markdown_to_doc("[#X](paper:/tag/Roadmap%20Q3)\n")
+    tags = [n for n in back["content"][0]["content"] if n["type"] == "tag"]
+    assert len(tags) == 1
+    assert tags[0]["attrs"]["tag"] == "roadmap-q3"
+
+
+def test_plain_external_link_is_never_a_ref():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    back = markdown_to_doc("see [the docs](https://example.com/page)\n")
+    content = back["content"][0]["content"]
+    assert all(n["type"] not in ("mention", "tag", "inline_embed") for n in content)
+    link = content[-1]
+    assert link["marks"][0]["attrs"]["href"] == "https://example.com/page"
