@@ -73,17 +73,21 @@ test.describe("slash menu + datasette embed", () => {
 
     // Export menu (ticket 01): the ⋮ menu offers native streaming downloads.
     await embed.locator(".pm-block-embed-menu-btn").click();
-    const menu = embed.locator(".pm-block-embed-menu");
-    await expect(menu).toHaveClass(/pm-block-embed-menu--open/);
+    const exportMenu = embed.locator(".pm-block-embed-menu");
+    await expect(exportMenu).toHaveClass(/pm-block-embed-menu--open/);
     await expect(
-      menu.locator(".pm-block-embed-menu-item", { hasText: "Download CSV" }),
-    ).toHaveAttribute("href", /\/data\/vendors\.csv\?_stream=on/);
+      exportMenu.locator(".pm-block-embed-menu-item", {
+        hasText: "Download CSV",
+      }),
+    ).toHaveAttribute("href", /\/vendors\.csv\?_stream=on/);
     await expect(
-      menu.locator(".pm-block-embed-menu-item", { hasText: "Download JSON" }),
-    ).toHaveAttribute("href", /\/data\/vendors\.json\?_shape=array/);
+      exportMenu.locator(".pm-block-embed-menu-item", {
+        hasText: "Download JSON",
+      }),
+    ).toHaveAttribute("href", /\/vendors\.json\?_shape=array/);
     // Copy is honestly labelled as the visible page (30 rows total, 10 held).
     await expect(
-      menu.locator(".pm-block-embed-menu-item", { hasText: "Copy as CSV" }),
+      exportMenu.locator(".pm-block-embed-menu-item", { hasText: "Copy as CSV" }),
     ).toContainText("page");
     // Close the menu before continuing.
     await page.keyboard.press("Escape");
