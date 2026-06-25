@@ -149,6 +149,13 @@ async function startServer() {
       "-s",
       "permissions.paper-view",
       "true",
+      // Mentions resolve live display names via /api/actors/resolve, which
+      // gates on datasette-user-profiles' `profile_access` action; without the
+      // grant the resolver degrades to {} and the pills stay bare ids
+      // (`@alice` instead of `@Alice Ada`), hanging the mentions shot.
+      "-s",
+      "permissions.profile_access",
+      "true",
       "-p",
       String(PORT),
     ],
@@ -224,8 +231,8 @@ live over SSE, and the header shows who's *currently* online.
 // separate from RICH so the other shots' framing is unaffected.
 const MENTIONS = `# Standup — June 22
 
-[@alice](actor:alice) shipped the collaborative editor. [@bob](actor:bob) is
-writing the markdown docs, and [@carol](actor:carol) is reviewing the launch
+[@alice](paper:/actor/alice) shipped the collaborative editor. [@bob](paper:/actor/bob) is
+writing the markdown docs, and [@carol](paper:/actor/carol) is reviewing the launch
 checklist.
 
 Type \`@\` anywhere to mention a teammate — the pill resolves to their live
@@ -236,8 +243,8 @@ display name and links straight to their profile.
 // namespace from the document-level metadata tags.
 const INLINE_TAGS = `# Release notes
 
-This work spans [#roadmap](tag:roadmap) and [#q3-planning](tag:q3-planning),
-with follow-ups filed under [#tech-debt](tag:tech-debt).
+This work spans [#roadmap](paper:/tag/roadmap) and [#q3-planning](paper:/tag/q3-planning),
+with follow-ups filed under [#tech-debt](paper:/tag/tech-debt).
 
 Type \`#\` anywhere in the body to drop an inline tag — an in-document anchor,
 distinct from a paper's metadata tags shown on the index.
@@ -258,29 +265,34 @@ Ship-blocking work tracked against the [#roadmap](tag:roadmap).
 `;
 
 // Docs for the embed element shots. Each `inline_embed` pill is authored with
-// the \`datasette:\` link scheme (`[label](datasette:<path>)`); each
-// `block_embed` is a fenced \`datasette-embed\` block whose body is the ref
-// path. One doc per resolved kind so the inline/block element shots stay
-// single-purpose. (Block bodies use plain strings to avoid escaping the fence
-// backticks inside a template literal.)
+// the canonical \`paper:/embed/<provider-kind>/<ref>\` link scheme
+// (`[label](paper:/embed/datasette/<path>)`); each `block_embed` is a fenced
+// \`paper-embed\` block whose body is a JSON object `{config, mode, ref}`
+// mirroring the node attrs (key order matches the serializer's sort_keys=True
+// output in datasette_paper/markdown.py). One doc per resolved kind so the
+// inline/block element shots stay single-purpose. (Block bodies use plain
+// strings to avoid escaping the fence backticks inside a template literal.)
 const INLINE_DB = `# Vendor database
 
-The whole [vendors database](datasette:/data) is addressable as an inline
+The whole [vendors database](paper:/embed/datasette/data) is addressable as an inline
 reference pill — it resolves to the database's name and links straight to it.
 `;
 const INLINE_TABLE = `# Vendor directory
 
-Our canonical list lives in the [vendors table](datasette:/data/vendors).
+Our canonical list lives in the [vendors table](paper:/embed/datasette/data/vendors).
 Paste any Datasette URL into the editor to drop a reference pill like that one.
 `;
 const INLINE_ROW = `# Featured vendor
 
-This week we're highlighting [vendor #5](datasette:/data/vendors/5) — an inline
+This week we're highlighting [vendor #5](paper:/embed/datasette/data/vendors/5) — an inline
 reference pill that resolves to a single row.
 `;
-const BLOCK_DB = "# Vendors database\n\n```datasette-embed\n/data\n```\n";
-const BLOCK_TABLE = "# Vendors table\n\n```datasette-embed\n/data/vendors\n```\n";
-const BLOCK_ROW = "# Featured vendor\n\n```datasette-embed\n/data/vendors/5\n```\n";
+const BLOCK_DB =
+  '# Vendors database\n\n```paper-embed\n{"config": {}, "mode": "table", "ref": "/data"}\n```\n';
+const BLOCK_TABLE =
+  '# Vendors table\n\n```paper-embed\n{"config": {}, "mode": "table", "ref": "/data/vendors"}\n```\n';
+const BLOCK_ROW =
+  '# Featured vendor\n\n```paper-embed\n{"config": {}, "mode": "table", "ref": "/data/vendors/5"}\n```\n';
 
 // SQL query block: an editable query run against the `data` database, with the
 // results rendered live. The `db=data` token marks it as a runnable SQL block
