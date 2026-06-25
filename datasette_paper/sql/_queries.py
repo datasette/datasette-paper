@@ -602,14 +602,24 @@ def select_tag_ref_candidates_scoped(
     sql = """\
 SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name, d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at, d.kind, d.locked
 FROM _datasette_paper_doc d
-JOIN _datasette_paper_snapshot s ON s.doc_id = d.id
 WHERE d.id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
   )
-  AND s.version = (
-    SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id
+  AND (
+    EXISTS (
+      SELECT 1 FROM _datasette_paper_snapshot s
+      WHERE s.doc_id = d.id
+        AND s.version = (
+          SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id
+        )
+        AND s.doc_json LIKE $like::text
+    )
+    OR EXISTS (
+      SELECT 1 FROM _datasette_paper_step st
+      WHERE st.doc_id = d.id
+        AND st.step_json LIKE $like::text
+    )
   )
-  AND s.doc_json LIKE $like::text
 ORDER BY d.updated_at DESC;
 """
     params = {"viewable_json::text": viewable_json, "like::text": like}

@@ -4,9 +4,10 @@ GET /-/paper/api/tags/{slug}/refs — docs whose BODY contains the inline `#slug
 tag node, ACL-filtered to the requester's viewable set. Separate namespace from
 the doc-level `?tag=` filter / `_datasette_paper_doc_tag` table.
 
-LIKE-scan v1: candidate docs are matched by a LIKE over the latest snapshot,
-then confirmed in Python by walking the materialized doc for a real `tag` node.
-Tests plant synthetic snapshots and force a registry re-hydrate.
+LIKE-scan v1: candidate docs are matched by a LIKE over the latest snapshot OR
+the step log (so live, unsnapshotted edits are seen), then confirmed in Python
+by walking the materialized doc for a real `tag` node. Tests plant synthetic
+snapshots and force a registry re-hydrate.
 """
 
 import json
@@ -109,6 +110,41 @@ async def test_tag_refs_normalizes_query_slug():
     body = resp.json()
     assert body["tag"] == "alpha"
     assert {d["id"] for d in body["docs"]} == {doc_id}
+
+
+@pytest.mark.asyncio
+async def test_tag_refs_finds_tag_only_in_live_steps_no_snapshot():
+    """A tag typed into a doc with no matching snapshot is still found.
+
+    Regression: a freshly-edited doc (well under SNAPSHOT_THRESHOLD steps) has
+    no snapshot reflecting the new tag — it may have no snapshot at all — so a
+    candidate scan over snapshots only would silently miss it. The candidate
+    scan must also LIKE-match the step log so live, unsnapshotted content is a
+    candidate; the Python confirmation then walks the materialized live doc.
+    """
+    ds, _ = await setup_paper_datasette()
+    db = paper_db(ds)
+
+    doc_id = await _create_doc(ds, "Typed Alpha", "alice")
+    # No snapshot is planted — _create_doc with no content writes none.
+    registry = get_registry(ds)
+    instance = await registry.get(db, doc_id)
+    # Append a `tag` node the way live editing would: a step, not a snapshot.
+    await instance.append_fragment(
+        [
+            {
+                "type": "paragraph",
+                "content": [{"type": "tag", "attrs": {"tag": "alpha"}}],
+            }
+        ],
+        actor_id="alice",
+    )
+
+    resp = await ds.client.get("/-/paper/api/tags/alpha/refs")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert {d["id"] for d in body["docs"]} == {doc_id}
+    assert body["docs"][0]["occurrences"] == 1
 
 
 @pytest.mark.asyncio

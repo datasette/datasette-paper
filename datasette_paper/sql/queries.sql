@@ -356,23 +356,37 @@ LIMIT 1;
 -- Inline #tag search (LIKE-scan v1)
 --
 -- Candidate scan for `GET /tags/{slug}/refs`: restrict to docs the requester
--- can view, then LIKE-match the latest snapshot's doc_json for the tag node's
--- serialized slug ("tag":"<slug>"). This is a *candidate* filter — false
--- positives are confirmed in Python by walking the materialized live doc for a
--- real `tag` node (and live steps not yet snapshotted are picked up there too).
--- A derived inline-tag index table is the documented follow-up if this scan
--- becomes a hotspot (see todos/tags/07-tag-search.md).
+-- can view, then LIKE-match either the latest snapshot's doc_json OR any step's
+-- step_json for the tag node's serialized slug ("tag":"<slug>"). Scanning the
+-- step log too is load-bearing: a doc edited fewer than SNAPSHOT_THRESHOLD
+-- steps ago (e.g. a tag just typed) has no snapshot reflecting that content —
+-- it may have no snapshot at all — so a snapshot-only candidate scan would
+-- silently miss it. This is a *candidate* filter — false positives are
+-- confirmed in Python by walking the materialized live doc (snapshot + live
+-- steps) for a real `tag` node. A derived inline-tag index table is the
+-- documented follow-up if this scan becomes a hotspot (see
+-- todos/tags/07-tag-search.md).
 -- ============================================================================
 
 -- name: selectTagRefCandidatesScoped :rows -> Doc
 SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name, d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at, d.kind, d.locked
 FROM _datasette_paper_doc d
-JOIN _datasette_paper_snapshot s ON s.doc_id = d.id
 WHERE d.id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
   )
-  AND s.version = (
-    SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id
+  AND (
+    EXISTS (
+      SELECT 1 FROM _datasette_paper_snapshot s
+      WHERE s.doc_id = d.id
+        AND s.version = (
+          SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id
+        )
+        AND s.doc_json LIKE $like::text
+    )
+    OR EXISTS (
+      SELECT 1 FROM _datasette_paper_step st
+      WHERE st.doc_id = d.id
+        AND st.step_json LIKE $like::text
+    )
   )
-  AND s.doc_json LIKE $like::text
 ORDER BY d.updated_at DESC;
