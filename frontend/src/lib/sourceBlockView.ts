@@ -23,7 +23,7 @@ import type { SourceStore, SourceState } from "./sourceStore";
 /** Light normalization so a name is referenceable as `${{name.col}}`:
  *  lowercase, non-word chars → `_`. The Sources panel does the canonical
  *  enforcement + duplicate detection; this just keeps typed names sane. */
-function normalizeSourceName(raw: string): string {
+export function normalizeSourceName(raw: string): string {
   return raw
     .trim()
     .toLowerCase()

@@ -14,6 +14,7 @@
   import Toolbar from "./Toolbar.svelte";
   import DocHeader from "./DocHeader.svelte";
   import LinksPanel from "./LinksPanel.svelte";
+  import SourcesPanel from "./SourcesPanel.svelte";
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
   import { insertImage } from "./image";
@@ -259,6 +260,9 @@
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
   <LinksPanel {docId} />
+  {#if canEdit && mode === "edit"}
+    <SourcesPanel {view} />
+  {/if}
   <ImageDialog bind:open={imageDialogOpen} oninsert={onImageInsert} />
   <DatasetteEmbedDialog
     bind:open={embedDialogOpen}

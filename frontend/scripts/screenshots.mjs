@@ -739,6 +739,22 @@ function buildShots(ctx, ids) {
       await page.close();
     },
 
+    // The doc-level Sources panel (list + add/edit/delete + Test).
+    "sources-panel": async () => {
+      const page = await newPage();
+      await gotoEditor(page, inlineValueId);
+      const toggle = page.locator(".sources-panel-toggle");
+      await toggle.waitFor({ state: "visible", timeout: 10_000 });
+      await toggle.click();
+      await page.locator(".sources-panel-item").first().waitFor({
+        state: "visible",
+        timeout: 10_000,
+      });
+      await freezeVolatile(page);
+      await page.locator(".sources-panel").screenshot({ path: out("sources-panel") });
+      await page.close();
+    },
+
     // The source card (named query) that feeds those chips — element capture.
     "source-card": async () => {
       const page = await newPage();
