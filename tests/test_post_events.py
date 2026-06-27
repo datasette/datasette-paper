@@ -178,6 +178,41 @@ async def test_post_invalid_step_422_with_step_index(ds_paper):
 
 
 @pytest.mark.asyncio
+async def test_post_oversized_step_rejected_422(ds_paper):
+    """A single step over MAX_STEP_BYTES is rejected before any write.
+
+    The markdown-parser / browser-paste guards never see a step POSTed
+    straight to the events route, so the size cap in `_validate_steps` is
+    the backstop against a multi-MB image node (or other bloat) injected
+    directly. Build an oversized-but-otherwise-valid `replace` step.
+    """
+    from datasette_paper.instance import MAX_STEP_BYTES
+
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    huge = insert_at(1, "x" * (MAX_STEP_BYTES + 1024))
+    assert len(huge) > MAX_STEP_BYTES
+
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    resp = await ds.client.post(
+        url,
+        json={"version": 0, "clientID": 1, "steps": [huge]},
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["error"] == "invalid_step"
+    assert body["step_index"] == 0
+    assert "too large" in body["message"]
+
+    # Nothing written; version unchanged.
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert steps == []
+    doc = await paper_db.select_doc_by_id(doc_id)
+    assert doc.current_version == 0
+
+
+@pytest.mark.asyncio
 async def test_post_invalid_step_is_atomic_across_batch(ds_paper):
     """A batch with some valid steps before a bad one rolls back the whole batch."""
     ds, paper_db = ds_paper

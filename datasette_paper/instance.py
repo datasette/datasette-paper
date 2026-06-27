@@ -57,6 +57,16 @@ logger = logging.getLogger("datasette_paper.instance")
 MAX_INSTANCES = 20
 MAX_TAIL = 10000
 SNAPSHOT_THRESHOLD = 100
+
+# Hard cap on a single step's serialized JSON size. The markdown-parser and
+# browser-paste guards strip oversized inline `data:` images on the two normal
+# entry paths, but a malicious or buggy client can POST an arbitrary
+# ``ReplaceStep`` carrying a multi-MB image node straight to the events route,
+# bypassing both. Every step rides the append-only log + snapshots + the SSE
+# broadcast, so reject anything over this as the broadest backstop — it also
+# caps non-image step abuse. Sized comfortably above a legitimate inline image
+# (~8 MB raw → ~11 MB base64) plus step framing.
+MAX_STEP_BYTES = 12 * 1024 * 1024
 # How long a resolved display name stays cached before the next presence
 # POST re-resolves it, so a profile rename surfaces without re-hydrating.
 ACTOR_NAME_TTL_SECONDS = 300
@@ -276,6 +286,15 @@ class Instance:
             raise InvalidStepError(0, f"materialized doc invalid: {exc}") from exc
 
         for i, step_json in enumerate(step_jsons):
+            # Broadest backstop: a step over the size cap is rejected before
+            # we even parse it. Catches an oversized inline `data:` image (or
+            # any other bloat) POSTed directly, which the markdown-parser and
+            # browser-paste guards never see.
+            if len(step_json) > MAX_STEP_BYTES:
+                raise InvalidStepError(
+                    i,
+                    f"step too large ({len(step_json)} bytes; max {MAX_STEP_BYTES})",
+                )
             try:
                 step = Step.from_json(schema, json.loads(step_json))
             except Exception as exc:

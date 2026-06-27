@@ -328,6 +328,35 @@ def _escape_text(text: str) -> str:
     return _ESCAPE_RE.sub(r"\\\1", text)
 
 
+def _escape_image_alt(alt: str) -> str:
+    """Escape an image's alt text for the `![alt](...)` link-text slot.
+
+    Reuses the inline escaper: its set (``\\ ` * _ [ ]``) is a superset of
+    what the alt slot needs — unescaped `[`/`]` would otherwise truncate or
+    break the image syntax and drop the image on the round-trip.
+    """
+    return _escape_text(alt)
+
+
+def _escape_image_src(src: str) -> str:
+    """Escape an image destination for `![](dest)`.
+
+    Per CommonMark, a bare destination cannot contain spaces and must have
+    balanced parens. Wrapping in ``<...>`` sidesteps both, so angle-bracket
+    any src containing whitespace or a paren (escaping literal ``<``/``>``);
+    otherwise emit it bare and untouched so plain URLs are byte-identical.
+    """
+    if any(ch.isspace() for ch in src) or "(" in src or ")" in src:
+        inner = src.replace("\\", "\\\\").replace("<", "\\<").replace(">", "\\>")
+        return f"<{inner}>"
+    return src
+
+
+def _escape_image_title(title: str) -> str:
+    """Escape an image title for the `"..."`-delimited title slot."""
+    return title.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def _same_mark(a: dict, b: dict) -> bool:
     return a.get("type") == b.get("type") and a.get("attrs") == b.get("attrs")
 
@@ -446,10 +475,13 @@ def _render_inlines(nodes: list) -> str:
             out.append("\\\n")
         elif t == "image":
             attrs = n.get("attrs") or {}
-            alt = attrs.get("alt") or ""
-            src = attrs.get("src") or ""
+            alt = _escape_image_alt(attrs.get("alt") or "")
+            src = _escape_image_src(attrs.get("src") or "")
             title = attrs.get("title")
-            out.append(f'![{alt}]({src} "{title}")' if title else f"![{alt}]({src})")
+            if title:
+                out.append(f'![{alt}]({src} "{_escape_image_title(title)}")')
+            else:
+                out.append(f"![{alt}]({src})")
         elif t == "placeholder":
             # Round-trip placeholders as `{{key}}` so the markdown export of
             # a template is self-documenting: anyone reading the markdown can

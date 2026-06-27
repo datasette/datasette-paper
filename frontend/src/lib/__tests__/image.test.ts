@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { EditorState } from "prosemirror-state";
 import type { Transaction } from "prosemirror-state";
+import { Slice, Fragment } from "prosemirror-model";
 import { schema } from "../schema";
 import {
   readImageFile,
   imageFilesFromDataTransfer,
   insertImage,
+  isOversizedDataUrl,
+  stripOversizedPastedImages,
   MAX_IMAGE_BYTES,
   ImageTooLargeError,
 } from "../image";
@@ -83,6 +86,77 @@ describe("readImageFile", () => {
       type: "image/png",
     });
     await expect(readImageFile(big)).rejects.toBeInstanceOf(ImageTooLargeError);
+  });
+});
+
+describe("isOversizedDataUrl", () => {
+  it("flags an oversized data: URL", () => {
+    const big = "data:image/png;base64," + "A".repeat(MAX_IMAGE_BYTES + 1);
+    expect(isOversizedDataUrl(big)).toBe(true);
+  });
+
+  it("passes a small data: URL", () => {
+    expect(isOversizedDataUrl(PNG_DATA_URL)).toBe(false);
+  });
+
+  it("never flags an http(s) ref regardless of length", () => {
+    const longRef = "https://example.com/" + "x".repeat(MAX_IMAGE_BYTES);
+    expect(isOversizedDataUrl(longRef)).toBe(false);
+  });
+
+  it("handles null/undefined", () => {
+    expect(isOversizedDataUrl(null)).toBe(false);
+    expect(isOversizedDataUrl(undefined)).toBe(false);
+  });
+});
+
+describe("stripOversizedPastedImages", () => {
+  const bigSrc = "data:image/png;base64," + "A".repeat(MAX_IMAGE_BYTES + 1);
+
+  function sliceWith(...srcs: string[]): Slice {
+    const nodes = srcs.map((src) => schema.nodes.image.create({ src }));
+    // Wrap in a paragraph so the slice is a realistic pasted block.
+    const para = schema.nodes.paragraph.create(null, Fragment.fromArray(nodes));
+    return new Slice(Fragment.fromArray([para]), 0, 0);
+  }
+
+  function imageSrcs(slice: Slice): string[] {
+    const out: string[] = [];
+    slice.content.descendants((node) => {
+      if (node.type === schema.nodes.image) out.push(node.attrs.src as string);
+    });
+    return out;
+  }
+
+  it("drops an oversized data: image and notifies once", () => {
+    let notified = 0;
+    let count = 0;
+    const result = stripOversizedPastedImages(sliceWith(bigSrc), (n) => {
+      notified += 1;
+      count = n;
+    });
+    expect(imageSrcs(result)).toEqual([]);
+    expect(notified).toBe(1);
+    expect(count).toBe(1);
+  });
+
+  it("keeps small inline images and http(s) refs", () => {
+    const result = stripOversizedPastedImages(
+      sliceWith(bigSrc, PNG_DATA_URL, "https://example.com/y.png"),
+    );
+    expect(imageSrcs(result)).toEqual([PNG_DATA_URL, "https://example.com/y.png"]);
+  });
+
+  it("returns the same slice (and no notice) when nothing is oversized", () => {
+    let notified = false;
+    const slice = sliceWith(PNG_DATA_URL);
+    const result = stripOversizedPastedImages(slice, () => (notified = true));
+    expect(result).toBe(slice);
+    expect(notified).toBe(false);
+  });
+
+  it("passes an empty slice through untouched", () => {
+    expect(stripOversizedPastedImages(Slice.empty)).toBe(Slice.empty);
   });
 });
 
