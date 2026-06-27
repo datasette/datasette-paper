@@ -589,6 +589,31 @@
   font-style: italic;
   border-top: 1px solid #eee;
 }
+/* Inline SQL values — a live computed value spliced into prose. Neutral
+   slate so it reads as data, not a mention/tag/link. Rendered by valueView.ts;
+   states: loading (muted), error/denied (red), ok (the value). */
+.editor-host .pm-value {
+  display: inline;
+  white-space: nowrap;
+  color: #1e293b;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(100, 116, 139, 0.12);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  user-select: none;
+  cursor: default;
+}
+.editor-host .pm-value--loading {
+  color: #94a3b8;
+  background: rgba(100, 116, 139, 0.08);
+}
+.editor-host .pm-value--error,
+.editor-host .pm-value--denied {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.1);
+}
+
 /* Inline #tags — a distinct teal accent so they don't read as
    @mentions (blue) or [[links]]. Rendered by the schema toDOM. */
 .editor-host .pm-tag {

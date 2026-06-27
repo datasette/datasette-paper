@@ -309,6 +309,15 @@ const SQL_BLOCK_HIDDEN =
   "select region, count(*) as vendors\nfrom vendors\ngroup by region\n" +
   "order by vendors desc\n```\n";
 
+// Inline SQL values: a `source` (named query) feeds `${{name.column}}` chips
+// spliced straight into prose. The chips fetch live per-viewer from `data`.
+const INLINE_VALUE =
+  "# Vendor snapshot\n\n" +
+  "```source name=vendors db=data\n" +
+  "select count(*) as n, count(distinct region) as regions from vendors\n```\n\n" +
+  "We currently track ${{vendors.n}} vendors across ${{vendors.regions}} " +
+  "regions — and the numbers update themselves whenever the warehouse changes.\n";
+
 async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -364,6 +373,7 @@ async function seed(ctx) {
   const blockRowId = await create("Featured vendor (block)", ACTOR, BLOCK_ROW);
   const sqlBlockId = await create("Q2 vendor report", ACTOR, SQL_BLOCK);
   const sqlBlockHiddenId = await create("Q2 vendor report (hidden)", ACTOR, SQL_BLOCK_HIDDEN);
+  const inlineValueId = await create("Vendor snapshot", ACTOR, INLINE_VALUE);
   return {
     richId,
     mentionId,
@@ -378,6 +388,7 @@ async function seed(ctx) {
     blockRowId,
     sqlBlockId,
     sqlBlockHiddenId,
+    inlineValueId,
   };
 }
 
@@ -457,6 +468,7 @@ function buildShots(ctx, ids) {
     blockRowId,
     sqlBlockId,
     sqlBlockHiddenId,
+    inlineValueId,
   } = ids;
   // Stability CSS is injected on the context via addInitScript (see main), so
   // it survives every navigation — addStyleTag here would be discarded by the
@@ -511,6 +523,27 @@ function buildShots(ctx, ids) {
     await gotoEditor(page, id);
     await page.locator(".pm-sql-block").waitFor({ state: "visible", timeout: 10_000 });
     await page.locator(".pm-sql-block table").waitFor({ state: "visible", timeout: 10_000 });
+    await freezeVolatile(page);
+    await page.screenshot({ path: out(file) });
+    await page.close();
+  };
+
+  // Inline SQL value shot: open a doc with `${{…}}` chips and wait for the
+  // source store to resolve them (leave the loading state), then capture.
+  const inlineValueShot = (id, file) => async () => {
+    const page = await newPage();
+    await gotoEditor(page, id);
+    await page.locator(".pm-value").first().waitFor({ state: "visible", timeout: 10_000 });
+    await page.waitForFunction(
+      () => {
+        const els = document.querySelectorAll(".pm-value");
+        return (
+          els.length > 0 &&
+          [...els].every((e) => !e.classList.contains("pm-value--loading"))
+        );
+      },
+      { timeout: 10_000 },
+    );
     await freezeVolatile(page);
     await page.screenshot({ path: out(file) });
     await page.close();
@@ -658,6 +691,9 @@ function buildShots(ctx, ids) {
     // ("Show SQL") report view.
     "sql-block": sqlBlockShot(sqlBlockId, "sql-block"),
     "sql-block-hidden": sqlBlockShot(sqlBlockHiddenId, "sql-block-hidden"),
+
+    // Inline SQL value chips resolved live from a source query.
+    "inline-value": inlineValueShot(inlineValueId, "inline-value"),
 
     tables: async () => {
       const page = await newPage();
