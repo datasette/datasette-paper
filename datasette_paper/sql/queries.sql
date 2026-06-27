@@ -389,4 +389,7 @@ WHERE d.id IN (
         AND st.step_json LIKE $like::text
     )
   )
-ORDER BY d.updated_at DESC;
+-- id is a deterministic tie-break: updated_at has second resolution, so docs
+-- touched in the same second would otherwise order arbitrarily (flaky results
+-- page + flaky screenshot diffs).
+ORDER BY d.updated_at DESC, d.id DESC;
