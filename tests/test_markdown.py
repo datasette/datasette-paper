@@ -744,3 +744,63 @@ def test_plain_external_link_is_never_a_ref():
     assert all(n["type"] not in ("mention", "tag", "inline_embed") for n in content)
     link = content[-1]
     assert link["marks"][0]["attrs"]["href"] == "https://example.com/page"
+
+
+def test_source_serializes_as_source_fence():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "source",
+                "attrs": {"name": "revenue", "db": "data"},
+                "content": [
+                    {"type": "text", "text": "select sum(amount) as total from t"}
+                ],
+            }
+        )
+    )
+    assert (
+        md
+        == "```source name=revenue db=data\nselect sum(amount) as total from t\n```\n"
+    )
+
+
+def test_value_serializes_as_dollar_braces():
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                _text("revenue is "),
+                {
+                    "type": "value",
+                    "attrs": {
+                        "source": "revenue",
+                        "column": "total",
+                        "format": None,
+                    },
+                },
+                _text("."),
+            )
+        )
+    )
+    assert md == "revenue is ${{revenue.total}}.\n"
+
+
+def test_value_and_placeholder_coexist_in_one_paragraph():
+    # The `$` prefix keeps value (`${{src.col}}`) disjoint from a placeholder's
+    # bare `{{key}}`; both must serialize side by side without interference.
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                {"type": "placeholder", "attrs": {"key": "today", "label": None}},
+                _text(" — "),
+                {
+                    "type": "value",
+                    "attrs": {
+                        "source": "revenue",
+                        "column": "total",
+                        "format": None,
+                    },
+                },
+            )
+        )
+    )
+    assert md == "{{today}} — ${{revenue.total}}\n"

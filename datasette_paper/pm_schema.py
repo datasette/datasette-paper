@@ -183,6 +183,37 @@ _tag_spec = {
     ],
 }
 
+# Inline atom for a single computed SQL value — mirrors the JS schema in
+# frontend/src/lib/schema.ts. A reference (`source` name + `column`) plus an
+# optional `format` config; the value is fetched live per-viewer by the
+# NodeView and never persisted. markdown round-trips as `${{source.column}}`
+# (optionally `| kind:arg`) via datasette_paper/markdown.py. toDOM is never
+# rendered server-side but must be structurally valid for
+# node_from_json/Step.apply.
+_value_spec = {
+    "group": "inline",
+    "inline": True,
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {
+        "source": {"default": None},
+        "column": {"default": None},
+        "format": {"default": None},
+    },
+    "parseDOM": [{"tag": "span[data-value]"}],
+    "toDOM": lambda node: [
+        "span",
+        {
+            "data-value": "true",
+            "data-source": str(node.attrs.get("source") or ""),
+            "data-column": str(node.attrs.get("column") or ""),
+            "class": "pm-value",
+        },
+        str(node.attrs.get("column") or "?"),
+    ],
+}
+
 # Inline atom for references to a Datasette resource — mirrors the JS schema
 # in frontend/src/lib/schema.ts. identity-only (`ref`, a Datasette URL path);
 # markdown round-trips as `[label](paper:/embed/<kind>/<ref>)` via
@@ -267,15 +298,44 @@ _sql_block_spec = {
     ],
 }
 
+# Block node defining a named, parameterless SQL query — mirrors the JS schema
+# in frontend/src/lib/schema.ts. Same shape as sql_block (the SQL is editable
+# text content) plus a `name` attr that inline `value` atoms reference; renders
+# no results table. markdown round-trips as a ```source name=NAME db=DB fence
+# via datasette_paper/markdown.py. toDOM is never rendered server-side but must
+# be structurally valid for node_from_json/Step.apply.
+_source_spec = {
+    "group": "block",
+    "content": "text*",
+    "marks": "",
+    "code": True,
+    "defining": True,
+    "selectable": True,
+    "attrs": {"name": {"default": None}, "db": {"default": None}},
+    "parseDOM": [{"tag": "pre[data-source-block]", "preserveWhitespace": "full"}],
+    "toDOM": lambda node: [
+        "pre",
+        {
+            "data-source-block": "true",
+            "data-source-name": str(node.attrs.get("name") or ""),
+            "data-source-db": str(node.attrs.get("db") or ""),
+            "class": "pm-source-card",
+        },
+        ["code", 0],
+    ],
+}
+
 _nodes = {
     **_list_nodes,
     "placeholder": _placeholder_spec,
     "paper_link": _paper_link_spec,
     "mention": _mention_spec,
     "tag": _tag_spec,
+    "value": _value_spec,
     "inline_embed": _inline_embed_spec,
     "block_embed": _block_embed_spec,
     "sql_block": _sql_block_spec,
+    "source": _source_spec,
     "task_list": _task_list_spec,
     "task_item": _task_item_spec,
     "table": _table_spec,

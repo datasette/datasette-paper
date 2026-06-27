@@ -117,6 +117,54 @@ class TestBlocks:
         md = "```sql db=data hidden\nselect * from t\n```\n"
         assert doc_to_markdown(parse_and_validate(md)) == md
 
+    def test_source_from_source_fence(self):
+        doc = parse_and_validate(
+            "```source name=revenue db=data\nselect 1 as total\n```\n"
+        )
+        sb = doc["content"][0]
+        assert sb["type"] == "source"
+        assert sb["attrs"] == {"name": "revenue", "db": "data"}
+        assert sb["content"] == [{"type": "text", "text": "select 1 as total"}]
+
+    def test_source_round_trips(self):
+        md = "```source name=revenue db=data\nselect sum(x) as total from t\n```\n"
+        assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_plain_sql_fence_not_shadowed_by_source(self):
+        # `source` discriminator is the leading token, not a substring; a
+        # `sql db=` fence still parses as a sql_block.
+        doc = parse_and_validate("```sql db=data\nselect 1\n```\n")
+        assert doc["content"][0]["type"] == "sql_block"
+
+    def test_value_from_dollar_braces(self):
+        doc = parse_and_validate("revenue is ${{revenue.total}}.\n")
+        para = doc["content"][0]
+        kinds = [c["type"] for c in para["content"]]
+        assert "value" in kinds
+        val = next(c for c in para["content"] if c["type"] == "value")
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": "total",
+            "format": None,
+        }
+
+    def test_value_round_trips(self):
+        md = "revenue is ${{revenue.total}} today.\n"
+        assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_bare_braces_stay_literal_text(self):
+        # A bare `{{key}}` (placeholder syntax, no `$`) must NOT be parsed as a
+        # value — it stays literal text on the way in.
+        doc = parse_and_validate("see {{notavalue}} here\n")
+        para = doc["content"][0]
+        assert all(c["type"] != "value" for c in para["content"])
+        assert doc_to_markdown(doc) == "see {{notavalue}} here\n"
+
+    def test_half_typed_value_stays_literal(self):
+        doc = parse_and_validate("a ${{ incomplete\n")
+        para = doc["content"][0]
+        assert all(c["type"] != "value" for c in para["content"])
+
     def test_blockquote(self):
         doc = parse_and_validate("> quote\n")
         assert types_only(doc) == "doc[blockquote[paragraph[text]]]"

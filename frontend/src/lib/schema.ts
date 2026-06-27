@@ -135,6 +135,52 @@ const tagNode: NodeSpec = {
   ],
 };
 
+// Inline atom for a single computed SQL value spliced into prose — a
+// reference (`source` name + `column`) plus an optional `format` config.
+// The value itself is fetched live per-viewer by a NodeView (valueView.ts)
+// from the named `source` block's query; the toDOM here is a static fallback
+// (the column name). Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as `${{source.column}}` (the `$`
+// prefix keeps it disjoint from the `placeholder` node's bare `{{key}}`).
+const valueNode: NodeSpec = {
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: { source: { default: null }, column: { default: null }, format: { default: null } },
+  parseDOM: [
+    {
+      tag: "span[data-value]",
+      getAttrs: (el) => {
+        const dom = el as HTMLElement;
+        let format: unknown = null;
+        try {
+          format = JSON.parse(dom.getAttribute("data-format") || "null");
+        } catch {
+          format = null;
+        }
+        return {
+          source: dom.getAttribute("data-source") || null,
+          column: dom.getAttribute("data-column") || null,
+          format,
+        };
+      },
+    },
+  ],
+  toDOM: (node) => [
+    "span",
+    {
+      "data-value": "true",
+      "data-source": String(node.attrs.source ?? ""),
+      "data-column": String(node.attrs.column ?? ""),
+      "data-format": JSON.stringify(node.attrs.format ?? null),
+      class: "pm-value",
+    },
+    String(node.attrs.column ?? "?"),
+  ],
+};
+
 // Inline atom for references to a Datasette resource (db/table/view/row or a
 // sibling-plugin resource) — identity-only (`ref`, a Datasette URL path),
 // authored via context-aware URL paste and rendered by a NodeView
@@ -261,6 +307,43 @@ const sqlBlockNode: NodeSpec = {
   ],
 };
 
+// Block node defining a named, parameterless SQL query — a "source" that
+// inline `value` atoms reference by `name`. Same shape as `sql_block` (the SQL
+// is editable text content, collaborating via the step log) plus a `name`
+// attr; unlike `sql_block` it renders no results table (its results feed the
+// inline chips, deduped through sourceStore.ts). Rendered by a NodeView
+// (sourceBlockView.ts). Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as a ```source name=NAME db=DB fence.
+const sourceNode: NodeSpec = {
+  group: "block",
+  content: "text*",
+  marks: "",
+  code: true,
+  defining: true,
+  selectable: true,
+  attrs: { name: { default: null }, db: { default: null } },
+  parseDOM: [
+    {
+      tag: "pre[data-source-block]",
+      preserveWhitespace: "full",
+      getAttrs: (el) => ({
+        name: (el as HTMLElement).getAttribute("data-source-name") || null,
+        db: (el as HTMLElement).getAttribute("data-source-db") || null,
+      }),
+    },
+  ],
+  toDOM: (node) => [
+    "pre",
+    {
+      "data-source-block": "true",
+      "data-source-name": String(node.attrs.name ?? ""),
+      "data-source-db": String(node.attrs.db ?? ""),
+      class: "pm-source-card",
+    },
+    ["code", 0],
+  ],
+};
+
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
     group: "block",
@@ -325,9 +408,11 @@ export const schema = new Schema({
     .append({ paper_link: paperLinkNode })
     .append({ mention: mentionNode })
     .append({ tag: tagNode })
+    .append({ value: valueNode })
     .append({ inline_embed: inlineEmbedNode })
     .append({ block_embed: blockEmbedNode })
     .append({ sql_block: sqlBlockNode })
+    .append({ source: sourceNode })
     .append(taskNodes)
     .append({ ...tNodes, table: tableWithName }),
   marks: baseMarks,

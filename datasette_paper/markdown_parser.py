@@ -61,6 +61,7 @@ _BLOCK_TYPES = {
     "task_list",
     "code_block",
     "sql_block",
+    "source",
     "horizontal_rule",
     "table",
 }
@@ -236,6 +237,27 @@ def _tokens_to_doc(tokens) -> dict:
                         },
                     }
                 )
+                continue
+            # A fence whose info string starts with `source` is a named SQL
+            # query ("source") that inline `value` atoms reference by name.
+            # The leading `source` token is the discriminator (checked before
+            # the `sql` branch so neither shadows the other).
+            if t == "fence" and info.split()[:1] == ["source"]:
+                name = None
+                db = None
+                for token in info.split()[1:]:
+                    if token.startswith("name="):
+                        name = token[len("name=") :] or None
+                    elif token.startswith("db="):
+                        db = token[len("db=") :] or None
+                source_block: dict = {
+                    "type": "source",
+                    "attrs": {"name": name, "db": db},
+                    "content": [],
+                }
+                if text:
+                    source_block["content"].append({"type": "text", "text": text})
+                append(source_block)
                 continue
             # A fence whose info string is `sql db=NAME [hidden]` is an
             # editable SQL query block. The `db=` token is the discriminator:
@@ -442,7 +464,9 @@ def _inline_to_pm(inline_token) -> list[dict]:
         # Unknown inline token kinds are dropped — better silent than crashing
         # in a converter that runs over arbitrary user input.
 
-    return _coalesce_text(_split_paper_links(_convert_paper_refs(raw)))
+    return _coalesce_text(
+        _split_sql_values(_split_paper_links(_convert_paper_refs(raw)))
+    )
 
 
 def _coalesce_text(nodes: list[dict]) -> list[dict]:
@@ -596,6 +620,60 @@ def _split_paper_links(nodes: list[dict]) -> list[dict]:
                     seg["marks"] = marks
                 out.append(seg)
             out.append({"type": "paper_link", "attrs": {"docId": int(m.group(1))}})
+            last = m.end()
+        if not matched:
+            out.append(node)
+            continue
+        if last < len(text):
+            seg = {"type": "text", "text": text[last:]}
+            if marks:
+                seg["marks"] = marks
+            out.append(seg)
+    return out
+
+
+# `${{source.column}}` — the leading `$` is what keeps this disjoint from the
+# `placeholder` node's bare `{{key}}` (which markdown.py emits but never parses
+# back), so the two never collide. Only the strict `name.column` shape matches;
+# a bare `{{key}}` or a half-typed `${{` stays literal text. The optional
+# `| kind:arg` format suffix is handled in a later ticket.
+_SQL_VALUE_RE = re.compile(r"\$\{\{\s*(\w+)\.(\w+)\s*\}\}")
+
+
+def _split_sql_values(nodes: list[dict]) -> list[dict]:
+    """Split `${{source.column}}` occurrences inside text nodes into `value`
+    atoms.
+
+    markdown-it has no notion of our `${{…}}` syntax, so it arrives as literal
+    text; we post-process here, mirroring `_split_paper_links`. Surrounding
+    text keeps its marks; the `value` atom carries none.
+    """
+    out: list[dict] = []
+    for node in nodes:
+        if node.get("type") != "text":
+            out.append(node)
+            continue
+        text = node["text"]
+        marks = node.get("marks")
+        last = 0
+        matched = False
+        for m in _SQL_VALUE_RE.finditer(text):
+            matched = True
+            if m.start() > last:
+                seg = {"type": "text", "text": text[last : m.start()]}
+                if marks:
+                    seg["marks"] = marks
+                out.append(seg)
+            out.append(
+                {
+                    "type": "value",
+                    "attrs": {
+                        "source": m.group(1),
+                        "column": m.group(2),
+                        "format": None,
+                    },
+                }
+            )
             last = m.end()
         if not matched:
             out.append(node)

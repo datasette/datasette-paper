@@ -137,6 +137,21 @@ def _render_block(node: dict) -> str:
         if attrs.get("hidden"):
             info += " hidden"
         return "```" + info + "\n" + text + "\n```\n"
+    if t == "source":
+        # A named SQL query (a "source") fenced with an info string of
+        # `source name=NAME db=DB`. The leading `source` token + `name=` are
+        # the discriminators (markdown_parser.py keys off `source`). Inline
+        # `value` atoms reference it by name as `${{name.column}}`.
+        attrs = node.get("attrs") or {}
+        name = attrs.get("name") or ""
+        db = attrs.get("db") or ""
+        text = "".join(c.get("text", "") for c in content)
+        info = "source"
+        if name:
+            info += f" name={name}"
+        if db:
+            info += f" db={db}"
+        return "```" + info + "\n" + text + "\n```\n"
     if t == "blockquote":
         inner_parts: List[str] = []
         for i, child in enumerate(content):
@@ -603,6 +618,16 @@ def _render_inlines(nodes: list) -> str:
             kind = kind or "datasette"
             canonical = f"paper:/embed/{kind}{encoded_ref}"
             out.append(_ref_link(ref, canonical, url))
+        elif t == "value":
+            # An inline computed SQL value, referencing a `source` block by
+            # name. Round-trips as `${{source.column}}`. The leading `$` keeps
+            # it disjoint from the `placeholder` node's bare `{{key}}` above, so
+            # the parser can tell the two apart unambiguously. The optional
+            # `| kind:arg` format suffix is added in a later ticket.
+            attrs = n.get("attrs") or {}
+            source = str(attrs.get("source") or "")
+            column = str(attrs.get("column") or "")
+            out.append("${{" + source + "." + column + "}}")
 
     close_through(0)
     return "".join(out)
