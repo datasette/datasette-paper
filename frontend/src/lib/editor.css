@@ -613,6 +613,56 @@
   color: #b91c1c;
   background: rgba(185, 28, 28, 0.1);
 }
+/* Click-to-edit popover on a value chip — column + format. Anchored below the
+   chip; outside-click teardown lives in valueView.ts (same pattern as the
+   sql-block export menu). */
+.editor-host .pm-value-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 12;
+  min-width: 180px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  font: 13px/1.4 system-ui, sans-serif;
+  font-weight: 400;
+  color: #1e293b;
+  user-select: none;
+  cursor: default;
+  white-space: normal;
+}
+.editor-host .pm-value-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.editor-host .pm-value-popover-row:last-child {
+  margin-bottom: 0;
+}
+.editor-host .pm-value-popover-label {
+  flex: 0 0 64px;
+  color: #64748b;
+  font-size: 12px;
+}
+.editor-host .pm-value-popover-select,
+.editor-host .pm-value-popover-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+  color: #1e293b;
+}
+.editor-host .pm-value-popover-opts:empty {
+  display: none;
+}
 
 /* Source card — a named query that feeds inline ${{name.col}} chips. A
    compact sibling of .pm-sql-block: name input + db select + SQL editor +

@@ -719,6 +719,26 @@ function buildShots(ctx, ids) {
       await page.close();
     },
 
+    // The click-to-edit popover on a value chip (column + format config).
+    "value-popover": async () => {
+      const page = await newPage();
+      await gotoEditor(page, inlineValueId);
+      const chip = page.locator(".pm-value").first();
+      await chip.waitFor({ state: "visible", timeout: 10_000 });
+      await page.waitForFunction(
+        () => {
+          const els = document.querySelectorAll(".pm-value");
+          return els.length > 0 && ![...els].some((e) => e.classList.contains("pm-value--loading"));
+        },
+        { timeout: 10_000 },
+      );
+      await chip.click();
+      await page.locator(".pm-value-popover").waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("value-popover") });
+      await page.close();
+    },
+
     // The source card (named query) that feeds those chips — element capture.
     "source-card": async () => {
       const page = await newPage();

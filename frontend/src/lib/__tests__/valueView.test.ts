@@ -10,6 +10,7 @@ import type { EditorView } from "prosemirror-view";
 import { schema } from "../schema";
 import { ValueView } from "../valueView";
 import type { SourceStore, SourceState } from "../sourceStore";
+import type { ValueFormat } from "../formatValue";
 
 function fakeStore(state: SourceState): SourceStore {
   return {
@@ -20,6 +21,18 @@ function fakeStore(state: SourceState): SourceStore {
     getState: () => state,
     sync() {},
   } as unknown as SourceStore;
+}
+
+/** A view stub recording dispatched transactions (mirrors sqlBlockView.test). */
+function fakeView(dispatched: unknown[]): EditorView {
+  return {
+    state: {
+      tr: {
+        setNodeMarkup: (_pos: number, _type: unknown, attrs: unknown) => ({ attrs }),
+      },
+    },
+    dispatch: (tr: unknown) => dispatched.push(tr),
+  } as unknown as EditorView;
 }
 
 function buildView(
@@ -105,5 +118,48 @@ describe("ValueView", () => {
     const view = buildView({ source: "s", column: "a" }, okState(["a"], [1]));
     expect(view.ignoreMutation()).toBe(true);
     expect(view.stopEvent()).toBe(false);
+  });
+
+  it("renders a formatted value through formatValue (currency)", () => {
+    const view = buildView(
+      { source: "revenue", column: "total", format: { kind: "currency", currency: "USD" } },
+      okState(["total"], [1284.5]),
+    );
+    expect(view.dom.textContent).toBe("$1,284.50");
+    // No element children when the popover is closed (XSS / no-HTML guarantee).
+    expect(view.dom.children.length).toBe(0);
+  });
+
+  it("clicking the chip opens a popover with the source's columns + format kinds", () => {
+    const view = buildView({ source: "revenue", column: "total" }, okState(["total", "n"], [1, 2]));
+    expect(view.dom.querySelector(".pm-value-popover")).toBeNull();
+    view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    const pop = view.dom.querySelector(".pm-value-popover");
+    expect(pop).not.toBeNull();
+    const selects = pop!.querySelectorAll("select");
+    const colOpts = [...selects[0].options].map((o) => o.value);
+    expect(colOpts).toEqual(["total", "n"]);
+    const kindOpts = [...selects[1].options].map((o) => o.value);
+    expect(kindOpts).toEqual(["", "number", "currency", "percent", "date", "text"]);
+    // A second click toggles it shut.
+    view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    expect(view.dom.querySelector(".pm-value-popover")).toBeNull();
+    view.destroy();
+  });
+
+  it("changing the format dispatches a setNodeMarkup with the new format + column", () => {
+    const dispatched: unknown[] = [];
+    const node = schema.nodes.value.create({ source: "revenue", column: "total", format: null });
+    const view = new ValueView(node, fakeView(dispatched), () => 3, fakeStore(okState(["total"], [1])));
+    view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    const pop = view.dom.querySelector(".pm-value-popover")!;
+    const kindSel = pop.querySelectorAll("select")[1];
+    kindSel.value = "currency";
+    kindSel.dispatchEvent(new Event("change"));
+    expect(dispatched).toHaveLength(1);
+    const attrs = (dispatched[0] as { attrs: { column: string; format: ValueFormat } }).attrs;
+    expect(attrs.column).toBe("total");
+    expect(attrs.format).toEqual({ kind: "currency" });
+    view.destroy();
   });
 });

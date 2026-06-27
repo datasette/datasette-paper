@@ -635,9 +635,45 @@ def _split_paper_links(nodes: list[dict]) -> list[dict]:
 # `${{source.column}}` — the leading `$` is what keeps this disjoint from the
 # `placeholder` node's bare `{{key}}` (which markdown.py emits but never parses
 # back), so the two never collide. Only the strict `name.column` shape matches;
-# a bare `{{key}}` or a half-typed `${{` stays literal text. The optional
-# `| kind:arg` format suffix is handled in a later ticket.
-_SQL_VALUE_RE = re.compile(r"\$\{\{\s*(\w+)\.(\w+)\s*\}\}")
+# a bare `{{key}}` or a half-typed `${{` stays literal text. An optional
+# `| kind:arg` suffix carries the per-value `format` (decoded by
+# `_decode_value_format`).
+_SQL_VALUE_RE = re.compile(r"\$\{\{\s*(\w+)\.(\w+)\s*(?:\|\s*([^}]+?))?\s*\}\}")
+
+_VALID_DATE_STYLES = {"iso", "medium", "long"}
+
+
+def _decode_value_format(s):
+    """Decode a `value` node's `| kind:arg` markdown suffix into a `format`
+    dict. Inverse of `_encode_value_format` in `markdown.py` and mirror of
+    `decodeFormat` in `frontend/src/lib/formatValue.ts` — keep the three in
+    lock-step. Unknown/malformed → None (the caller keeps the ref, drops the
+    format)."""
+    if s is None:
+        return None
+    trimmed = s.strip()
+    if trimmed == "":
+        return None
+    kind, sep, arg = trimmed.partition(":")
+    kind = kind.strip()
+    arg = arg.strip()
+    if kind in ("number", "percent"):
+        if arg == "":
+            return {"kind": kind}
+        if not arg.isdigit():
+            return None
+        return {"kind": kind, "decimals": int(arg)}
+    if kind == "currency":
+        return {"kind": "currency", "currency": arg} if arg else {"kind": "currency"}
+    if kind == "date":
+        if arg == "":
+            return {"kind": "date"}
+        if arg not in _VALID_DATE_STYLES:
+            return None
+        return {"kind": "date", "style": arg}
+    if kind == "text":
+        return {"kind": "text"}
+    return None
 
 
 def _split_sql_values(nodes: list[dict]) -> list[dict]:
@@ -670,7 +706,7 @@ def _split_sql_values(nodes: list[dict]) -> list[dict]:
                     "attrs": {
                         "source": m.group(1),
                         "column": m.group(2),
-                        "format": None,
+                        "format": _decode_value_format(m.group(3)),
                     },
                 }
             )

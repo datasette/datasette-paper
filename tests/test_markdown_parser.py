@@ -152,6 +152,40 @@ class TestBlocks:
         md = "revenue is ${{revenue.total}} today.\n"
         assert doc_to_markdown(parse_and_validate(md)) == md
 
+    def test_value_format_parsed(self):
+        doc = parse_and_validate("x ${{revenue.total | currency:USD}}\n")
+        para = doc["content"][0]
+        val = next(c for c in para["content"] if c["type"] == "value")
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": "total",
+            "format": {"kind": "currency", "currency": "USD"},
+        }
+
+    def test_value_with_format_round_trips(self):
+        for spec in ("currency:USD", "number:0", "percent:1", "date:medium", "text"):
+            md = "revenue is ${{revenue.total | " + spec + "}} today.\n"
+            assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_value_malformed_format_drops_to_none_keeps_ref(self):
+        # A `${{src.col | …}}` whose format doesn't decode keeps the ref but
+        # drops the format (→ None), serializing back to the bare form.
+        doc = parse_and_validate("x ${{revenue.total | bogus}}\n")
+        para = doc["content"][0]
+        val = next(c for c in para["content"] if c["type"] == "value")
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": "total",
+            "format": None,
+        }
+
+    def test_value_with_format_and_placeholder_coexist(self):
+        md = "{{today}} — ${{revenue.total | currency:USD}}\n"
+        out = doc_to_markdown(parse_and_validate(md))
+        # The placeholder is write-only (never parsed back), so it survives as
+        # literal text; the value round-trips with its format intact.
+        assert "${{revenue.total | currency:USD}}" in out
+
     def test_bare_braces_stay_literal_text(self):
         # A bare `{{key}}` (placeholder syntax, no `$`) must NOT be parsed as a
         # value — it stays literal text on the way in.
