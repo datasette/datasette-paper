@@ -694,6 +694,31 @@ function buildShots(ctx, ids) {
 
     // Inline SQL value chips resolved live from a source query.
     "inline-value": inlineValueShot(inlineValueId, "inline-value"),
+    // The `${{` autocomplete: type a source name + dot to reach the column
+    // stage, where the source's columns are offered.
+    "inline-value-popup": async () => {
+      const page = await newPage();
+      await gotoEditor(page, inlineValueId);
+      // Wait for the source to run so its columns are available to the popup.
+      await page.waitForFunction(
+        () => {
+          const p = document.querySelector(".pm-source-card-probe");
+          return p && /columns?:/.test(p.textContent || "");
+        },
+        { timeout: 10_000 },
+      );
+      await page.locator(".ProseMirror p").last().click();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" ${{vendors.");
+      await page.locator(".pm-value-popup .pm-value-item").first().waitFor({
+        state: "visible",
+        timeout: 10_000,
+      });
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("inline-value-popup") });
+      await page.close();
+    },
+
     // The source card (named query) that feeds those chips — element capture.
     "source-card": async () => {
       const page = await newPage();

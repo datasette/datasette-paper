@@ -701,6 +701,44 @@
   color: #b91c1c;
 }
 
+/* `${{` autocomplete — typing decoration + popup (mirrors .pm-tag-*). */
+.editor-host .pm-value-typing {
+  background: rgba(100, 116, 139, 0.1);
+  border-bottom: 1px solid rgba(100, 116, 139, 0.5);
+  border-radius: 2px;
+}
+.editor-host .pm-value-popup {
+  position: absolute;
+  z-index: 11;
+  min-width: 180px;
+  max-width: 320px;
+  background: #fff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  font-size: 13px;
+}
+.editor-host .pm-value-item {
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #1e293b;
+}
+.editor-host .pm-value-item:hover,
+.editor-host .pm-value-item--active {
+  background: rgba(100, 116, 139, 0.14);
+}
+.editor-host .pm-value-empty {
+  padding: 4px 8px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 /* Inline #tags — a distinct teal accent so they don't read as
    @mentions (blue) or [[links]]. Rendered by the schema toDOM. */
 .editor-host .pm-tag {
