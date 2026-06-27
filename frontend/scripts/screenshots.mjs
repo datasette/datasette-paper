@@ -243,6 +243,20 @@ Type \`#\` anywhere in the body to drop an inline tag — an in-document anchor,
 distinct from a paper's metadata tags shown on the index.
 `;
 
+// Extra docs that also carry the inline \`#roadmap\` tag in their body, so the
+// tag results page (\`/-/paper/tag/roadmap\`) lists more than one row. Owned by
+// ACTOR (like "Release notes") so they survive the refs endpoint's acl filter;
+// the varied occurrence counts exercise the "N mention(s)" pluralization.
+const TAG_PAGE_A = `# Q3 roadmap review
+
+Sprint planning notes filed under [#roadmap](tag:roadmap). We revisit the
+[#roadmap](tag:roadmap) priorities at the end of every cycle.
+`;
+const TAG_PAGE_B = `# Launch checklist
+
+Ship-blocking work tracked against the [#roadmap](tag:roadmap).
+`;
+
 // Docs for the embed element shots. Each `inline_embed` pill is authored with
 // the \`datasette:\` link scheme (`[label](datasette:<path>)`); each
 // `block_embed` is a fenced \`datasette-embed\` block whose body is the ref
@@ -316,6 +330,9 @@ async function seed(ctx) {
   const richId = await create("Q3 Planning", ACTOR, RICH);
   const mentionId = await create("Standup", ACTOR, MENTIONS);
   const inlineTagId = await create("Release notes", ACTOR, INLINE_TAGS);
+  // Two more #roadmap-tagged docs so the tag results-page shot has a real list.
+  await create("Q3 roadmap review", ACTOR, TAG_PAGE_A);
+  await create("Launch checklist", ACTOR, TAG_PAGE_B);
   // Document-level tags: populate a vocabulary so the index shows per-row tag
   // chips + the filter bar, and the owner-only tag editor has content.
   await tagDoc(roadmapId, ["roadmap", "q3"], "bob");
@@ -562,6 +579,23 @@ function buildShots(ctx, ids) {
       await page.locator(".pm-tag-popup").waitFor({ state: "visible", timeout: 10_000 });
       await freezeVolatile(page);
       await page.screenshot({ path: out("inline-tag-popup") });
+      await page.close();
+    },
+
+    // The standalone results page reached by clicking an inline #tag — lists
+    // every viewable doc whose body contains that tag (here `#roadmap`, seeded
+    // into three ACTOR-owned docs above). Fetched client-side, so wait for the
+    // rows to render before capturing the framed `.tag-page` column.
+    "tag-page": async () => {
+      const page = await newPage();
+      await page.goto(`${PAPER}/tag/roadmap`);
+      await page.locator(".tag-page-list").waitFor({ state: "visible", timeout: 10_000 });
+      await page.waitForFunction(
+        () => document.querySelectorAll(".tag-page-row").length >= 3,
+        { timeout: 10_000 },
+      );
+      await freezeVolatile(page);
+      await page.locator(".tag-page").screenshot({ path: out("tag-page") });
       await page.close();
     },
 

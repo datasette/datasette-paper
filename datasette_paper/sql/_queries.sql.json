@@ -1839,6 +1839,132 @@
         }
       ],
       "result_class": "Snapshot"
+    },
+    {
+      "name": "selectTagRefCandidatesScoped",
+      "result_type": "Rows",
+      "sql": "SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name, d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at, d.kind, d.locked\nFROM _datasette_paper_doc d\nWHERE d.id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)\n  )\n  AND (\n    EXISTS (\n      SELECT 1 FROM _datasette_paper_snapshot s\n      WHERE s.doc_id = d.id\n        AND s.version = (\n          SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id\n        )\n        AND s.doc_json LIKE $like::text\n    )\n    OR EXISTS (\n      SELECT 1 FROM _datasette_paper_step st\n      WHERE st.doc_id = d.id\n        AND st.step_json LIKE $like::text\n    )\n  )\n-- id is a deterministic tie-break: updated_at has second resolution, so docs\n-- touched in the same second would otherwise order arbitrarily (flaky results\n-- page + flaky screenshot diffs).\nORDER BY d.updated_at DESC, d.id DESC;",
+      "parameters": [
+        {
+          "full_name": "$viewable_json::text",
+          "name": "viewable_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$like::text",
+          "name": "like",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "Doc"
     }
   ]
 }

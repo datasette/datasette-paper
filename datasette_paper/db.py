@@ -238,6 +238,25 @@ class PaperDB:
         return await self.database.execute_write_fn(read)
 
     # ------------------------------------------------------------------
+    # Inline #tag search
+    # ------------------------------------------------------------------
+
+    async def tag_ref_candidates(
+        self, *, like: str, viewable_ids: list[int]
+    ) -> list[_queries.Doc]:
+        # LIKE-scan v1 candidate filter: viewable docs whose latest snapshot's
+        # doc_json matches the serialized tag slug. Confirmation (a real `tag`
+        # node) happens in Python against the materialized live doc.
+        viewable_json = json.dumps(viewable_ids)
+
+        def read(conn):
+            return _queries.select_tag_ref_candidates_scoped(
+                conn, viewable_json=viewable_json, like=like
+            )
+
+        return await self.database.execute_write_fn(read)
+
+    # ------------------------------------------------------------------
     # Document tags
     # ------------------------------------------------------------------
 
