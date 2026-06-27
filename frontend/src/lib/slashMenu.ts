@@ -27,7 +27,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
 import { insertTable } from "./tables";
-import { insertSqlBlock } from "./sqlQuery";
+import { insertSqlBlock, insertSource } from "./sqlQuery";
 import { embedInsertSources, type EmbedInsertSource } from "./embedProviders";
 
 /**
@@ -525,6 +525,27 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       // Inserts an empty block; the NodeView defaults the database and the
       // header <select> lets the user change it.
       run: runCommand(insertSqlBlock()),
+    },
+    {
+      id: "source",
+      label: "Data source",
+      keywords: ["source", "sql", "query", "value", "metric", "data", "inline"],
+      icon: "database",
+      group: "datasette",
+      // A named query that inline ${{name.column}} values reference.
+      run: runCommand(insertSource()),
+    },
+    {
+      id: "value",
+      label: "Inline value",
+      keywords: ["value", "metric", "inline", "sql", "number", "stat"],
+      icon: "code",
+      group: "datasette",
+      // Drop the `${{` trigger so the source → column picker opens in place.
+      run: (view) => {
+        view.dispatch(view.state.tr.insertText("${{"));
+        view.focus();
+      },
     },
     {
       id: "table",
