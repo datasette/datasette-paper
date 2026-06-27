@@ -694,6 +694,23 @@ function buildShots(ctx, ids) {
 
     // Inline SQL value chips resolved live from a source query.
     "inline-value": inlineValueShot(inlineValueId, "inline-value"),
+    // The source card (named query) that feeds those chips — element capture.
+    "source-card": async () => {
+      const page = await newPage();
+      await gotoEditor(page, inlineValueId);
+      const card = page.locator(".pm-source-card");
+      await card.waitFor({ state: "visible", timeout: 10_000 });
+      await page.waitForFunction(
+        () => {
+          const p = document.querySelector(".pm-source-card-probe");
+          return p && p.textContent && p.textContent !== "running…";
+        },
+        { timeout: 10_000 },
+      );
+      await freezeVolatile(page);
+      await card.screenshot({ path: out("source-card") });
+      await page.close();
+    },
 
     tables: async () => {
       const page = await newPage();

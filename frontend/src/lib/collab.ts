@@ -71,6 +71,7 @@ import { SqlBlockView } from "./sqlBlockView";
 import { TagView } from "./tagView";
 import { SourceStore } from "./sourceStore";
 import { ValueView } from "./valueView";
+import { SourceBlockView } from "./sourceBlockView";
 import { handleDatasettePaste } from "./datasettePaste";
 import {
   buildSlashCommands,
@@ -1211,6 +1212,13 @@ export class EditorConnection {
         tag: (node, view) => new TagView(node, view),
         value: (node, view, getPos) =>
           new ValueView(
+            node,
+            view,
+            getPos as () => number | undefined,
+            this.sourceStore,
+          ),
+        source: (node, view, getPos) =>
+          new SourceBlockView(
             node,
             view,
             getPos as () => number | undefined,
