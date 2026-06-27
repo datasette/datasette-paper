@@ -593,6 +593,9 @@
    slate so it reads as data, not a mention/tag/link. Rendered by valueView.ts;
    states: loading (muted), error/denied (red), ok (the value). */
 .editor-host .pm-value {
+  /* relative so the click-to-edit popover (position:absolute) anchors to the
+     chip, not a far-up positioned ancestor. */
+  position: relative;
   display: inline;
   white-space: nowrap;
   color: #1e293b;
