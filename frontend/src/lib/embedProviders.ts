@@ -60,7 +60,14 @@ type ProviderModule = { default?: ProviderExport };
 type ModuleImporter = (url: string) => Promise<ProviderModule>;
 
 const defaultImporter: ModuleImporter = (url) =>
-  import(/* @vite-ignore */ url) as Promise<ProviderModule>;
+  // Resolve the (root-relative) bundle URL against the *document* origin, not
+  // this module's. Datasette serves the provider route; under `dev-with-hmr`
+  // this module is served by the Vite dev server on a different origin, so a
+  // bare `import("/-/…")` would resolve to Vite (wrong MIME / blocked) instead
+  // of Datasette. Absolute URLs pass through `new URL` unchanged; in a normal
+  // single-origin build `document.baseURI` is the same origin, so this is a
+  // no-op there.
+  import(/* @vite-ignore */ new URL(url, document.baseURI).href) as Promise<ProviderModule>;
 
 // Indirection so tests can stub the dynamic import (jsdom can't fetch a real
 // bundle URL). Production always uses `defaultImporter`.
