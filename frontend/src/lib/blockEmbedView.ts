@@ -509,26 +509,32 @@ export class BlockEmbedView implements NodeView {
     scroll.appendChild(table);
     this.dom.appendChild(scroll);
 
-    const footer = document.createElement("div");
-    footer.className = "pm-block-embed-footer";
-
-    // Left: "open in Datasette" (matches the SQL block's footer layout).
-    const link = document.createElement("a");
-    link.className = "pm-block-embed-footer-link";
-    link.href = payload.href;
-    link.textContent = "open in Datasette ↗";
-    footer.appendChild(link);
-
     // Right (margin-left:auto on the info span pushes it over): "showing [25]
     // of 1,234 rows" — the count number is the limit dropdown.
     const info = document.createElement("span");
-    info.className = "pm-block-embed-footer-info";
     info.append("showing ", this.rowLimitSelect());
     if (payload.count != null) {
       info.append(` of ${payload.count} row${payload.count === 1 ? "" : "s"}`);
     } else {
       info.append(" rows");
     }
+    this.appendFooter(payload.href, info);
+  }
+
+  /**
+   * Append the shared block-embed footer: an "open in Datasette" link on the
+   * left (matching the SQL block's footer layout) and the caller's info span on
+   * the right.
+   */
+  private appendFooter(href: string, info: HTMLElement): void {
+    const footer = document.createElement("div");
+    footer.className = "pm-block-embed-footer";
+    const link = document.createElement("a");
+    link.className = "pm-block-embed-footer-link";
+    link.href = href;
+    link.textContent = "open in Datasette ↗";
+    footer.appendChild(link);
+    info.className = "pm-block-embed-footer-info";
     footer.appendChild(info);
     this.dom.appendChild(footer);
   }
@@ -591,20 +597,10 @@ export class BlockEmbedView implements NodeView {
     }
     this.dom.appendChild(list);
 
-    const footer = document.createElement("div");
-    footer.className = "pm-block-embed-footer";
-    // Link left, count right — same layout as the table footer.
-    const link = document.createElement("a");
-    link.className = "pm-block-embed-footer-link";
-    link.href = payload.href;
-    link.textContent = "open in Datasette ↗";
-    footer.appendChild(link);
     const info = document.createElement("span");
-    info.className = "pm-block-embed-footer-info";
     const n = payload.tables.length;
     info.textContent = `${n} table${n === 1 ? "" : "s"}`;
-    footer.appendChild(info);
-    this.dom.appendChild(footer);
+    this.appendFooter(payload.href, info);
   }
 
   update(node: PMNode): boolean {

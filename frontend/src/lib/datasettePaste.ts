@@ -27,6 +27,36 @@ export interface RefParseContext {
 }
 
 /**
+ * Parse pasted text into a same-origin URL, or null if it isn't one. Must be a
+ * single token that already looks like a URL or absolute path — we never coerce
+ * plain words (`new URL("hello", origin)` would otherwise succeed).
+ */
+function sameOriginUrl(text: string, origin: string): URL | null {
+  const trimmed = text.trim();
+  if (!trimmed || /\s/.test(trimmed)) return null;
+  if (!/^(https?:\/\/|\/)/.test(trimmed)) return null;
+  let url: URL;
+  try {
+    url = new URL(trimmed, origin);
+  } catch {
+    return null;
+  }
+  return url.origin === origin ? url : null;
+}
+
+/** The base_url-relative pathname of a same-origin URL, or null. */
+function sameOriginPath(text: string, ctx: RefParseContext): string | null {
+  const url = sameOriginUrl(text, ctx.origin);
+  if (!url) return null;
+  let path = url.pathname;
+  const base = ctx.baseUrl && ctx.baseUrl !== "/" ? ctx.baseUrl : null;
+  if (base && path.startsWith(base)) {
+    path = "/" + path.slice(base.length);
+  }
+  return path;
+}
+
+/**
  * Parse pasted text into a Datasette ref path (`/db`, `/db/table`,
  * `/db/table/pk`), or null if it isn't a same-origin Datasette resource URL.
  * The path is returned base_url-relative; table-vs-view is resolved server-side.
@@ -35,25 +65,8 @@ export function parseDatasetteRef(
   text: string,
   ctx: RefParseContext,
 ): string | null {
-  const trimmed = text.trim();
-  // Must be a single token that already looks like a URL or absolute path —
-  // never coerce plain words (`new URL("hello", origin)` would otherwise).
-  if (!trimmed || /\s/.test(trimmed)) return null;
-  if (!/^(https?:\/\/|\/)/.test(trimmed)) return null;
-
-  let url: URL;
-  try {
-    url = new URL(trimmed, ctx.origin);
-  } catch {
-    return null;
-  }
-  if (url.origin !== ctx.origin) return null; // external → plain link
-
-  let path = url.pathname;
-  const base = ctx.baseUrl && ctx.baseUrl !== "/" ? ctx.baseUrl : null;
-  if (base && path.startsWith(base)) {
-    path = "/" + path.slice(base.length);
-  }
+  const path = sameOriginPath(text, ctx);
+  if (path == null) return null;
 
   const segments = path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
   if (segments.length < 1 || segments.length > 3) return null;
@@ -71,17 +84,8 @@ export function parseDatasetteRef(
  * (external-web link cards are a separate, server-side feature).
  */
 export function matchExternalRef(text: string, origin: string): string | null {
-  const trimmed = text.trim();
-  if (!trimmed || /\s/.test(trimmed)) return null;
-  if (!/^(https?:\/\/|\/)/.test(trimmed)) return null;
-  let url: URL;
-  try {
-    url = new URL(trimmed, origin);
-  } catch {
-    return null;
-  }
-  if (url.origin !== origin) return null;
-  return embedRegistry().match(url);
+  const url = sameOriginUrl(text, origin);
+  return url ? embedRegistry().match(url) : null;
 }
 
 /**
@@ -97,21 +101,8 @@ export function matchManifestRef(
   text: string,
   ctx: RefParseContext,
 ): string | null {
-  const trimmed = text.trim();
-  if (!trimmed || /\s/.test(trimmed)) return null;
-  if (!/^(https?:\/\/|\/)/.test(trimmed)) return null;
-  let url: URL;
-  try {
-    url = new URL(trimmed, ctx.origin);
-  } catch {
-    return null;
-  }
-  if (url.origin !== ctx.origin) return null;
-  let path = url.pathname;
-  const base = ctx.baseUrl && ctx.baseUrl !== "/" ? ctx.baseUrl : null;
-  if (base && path.startsWith(base)) {
-    path = "/" + path.slice(base.length);
-  }
+  const path = sameOriginPath(text, ctx);
+  if (path == null) return null;
   return manifestEntryForRef(path) ? path : null;
 }
 
