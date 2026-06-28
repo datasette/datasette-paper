@@ -7,7 +7,7 @@
  *     tag survives the markdown/snapshot round-trip), then click the rendered
  *     `.pm-tag` chip → lands on `/-/paper/tag/alpha`, which lists the doc.
  *
- *  2. Rendering. A doc seeded (create-from-markdown) with `[#alpha](tag:alpha)`
+ *  2. Rendering. A doc seeded (create-from-markdown) with `[#alpha](paper:/tag/alpha)`
  *     opens with a `.pm-tag` chip whose TagView href points at the results
  *     page — deterministic, no suggest timing.
  *
@@ -26,7 +26,7 @@ test.describe("inline #tags", () => {
     const resp = await page.request.post(`${BASE}/api/docs`, {
       data: {
         name: "Tag Render Target",
-        content: "Our [#alpha](tag:alpha) plan",
+        content: "Our [#alpha](paper:/tag/alpha) plan",
         content_type: "markdown",
       },
     });
