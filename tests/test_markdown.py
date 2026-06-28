@@ -744,3 +744,104 @@ def test_plain_external_link_is_never_a_ref():
     assert all(n["type"] not in ("mention", "tag", "inline_embed") for n in content)
     link = content[-1]
     assert link["marks"][0]["attrs"]["href"] == "https://example.com/page"
+
+
+def test_source_serializes_as_source_fence():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "source",
+                "attrs": {"name": "revenue", "db": "data"},
+                "content": [
+                    {"type": "text", "text": "select sum(amount) as total from t"}
+                ],
+            }
+        )
+    )
+    assert (
+        md
+        == "```source name=revenue db=data\nselect sum(amount) as total from t\n```\n"
+    )
+
+
+def test_value_serializes_as_dollar_braces():
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                _text("revenue is "),
+                {
+                    "type": "value",
+                    "attrs": {
+                        "source": "revenue",
+                        "column": "total",
+                        "format": None,
+                    },
+                },
+                _text("."),
+            )
+        )
+    )
+    assert md == "revenue is ${{revenue.total}}.\n"
+
+
+def test_value_serializes_with_format_suffix():
+    cases = [
+        ({"kind": "currency", "currency": "USD"}, "${{revenue.total | currency:USD}}"),
+        ({"kind": "number", "decimals": 0}, "${{revenue.total | number:0}}"),
+        ({"kind": "number"}, "${{revenue.total | number}}"),
+        ({"kind": "percent", "decimals": 1}, "${{revenue.total | percent:1}}"),
+        ({"kind": "date", "style": "medium"}, "${{revenue.total | date:medium}}"),
+        ({"kind": "text"}, "${{revenue.total | text}}"),
+    ]
+    for fmt, expected in cases:
+        md = doc_to_markdown(
+            _doc(
+                _para(
+                    {
+                        "type": "value",
+                        "attrs": {
+                            "source": "revenue",
+                            "column": "total",
+                            "format": fmt,
+                        },
+                    }
+                )
+            )
+        )
+        assert md == expected + "\n"
+
+
+def test_value_with_null_format_emits_bare_form():
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                {
+                    "type": "value",
+                    "attrs": {"source": "revenue", "column": "total", "format": None},
+                }
+            )
+        )
+    )
+    assert md == "${{revenue.total}}\n"
+
+
+def test_value_and_placeholder_coexist_in_one_paragraph():
+    # The `$` prefix keeps value (`${{src.col}}`) disjoint from a placeholder's
+    # bare `{{key}}`; both must serialize side by side without interference.
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                {"type": "placeholder", "attrs": {"key": "today", "label": None}},
+                _text(" — "),
+                {
+                    "type": "value",
+                    "attrs": {
+                        "source": "revenue",
+                        "column": "total",
+                        "format": None,
+                    },
+                },
+            )
+        )
+    )
+    assert md == "{{today}} — ${{revenue.total}}\n"

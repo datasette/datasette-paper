@@ -40,7 +40,16 @@ comments at the relevant code site.
    side gets the table specs from `prosemirror-tables`'s `tableNodes`
    helper; `prosemirror-py` ships no equivalent, so `pm_schema.py`
    hand-ports the same specs (incl. `colspan` / `rowspan` / `colwidth`
-   on cells and a custom `name` attr on `table`).
+   on cells and a custom `name` attr on `table`). Beyond those four
+   groups, several custom nodes are in the same lock-step and must be
+   mirrored across all four files: the inline atoms `placeholder` /
+   `paper_link` / `mention` / `tag` / `inline_embed` / `value`, and the
+   blocks `block_embed` / `sql_block` / `source`. Note the inline-value
+   pair: a `source` block is a named SQL query (markdown
+   ` ```source name=NAME db=DB `) and a `value` inline atom references it
+   as `${{source.column}}` (the leading `$` keeps it disjoint from a
+   `placeholder`'s bare `{{key}}`; the markdown value parser requires
+   the `$`-prefixed `name.column` shape).
 2. **Migrations are append-only.** Schema lives in
    `datasette_paper/migrations.py`; add a new `m00N_` step, never edit a
    past one.

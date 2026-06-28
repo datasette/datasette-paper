@@ -545,3 +545,23 @@ what exercises the real share path.
     `dependencies` and imported unconditionally — no `try/except ImportError`
     guards, no `None` fallbacks. (datasette-agent stays optional: its tools hook
     self-registers only when installed.)
+
+## 13. SQL in documents (SQL blocks & inline values) — Datasette's gate, not paper's
+
+The `sql_block` node and the inline-value feature (`source` nodes +
+`${{source.column}}` `value` atoms) run SQL against named Datasette databases.
+**Paper does not gate or execute these queries.** Each is fetched **client-side,
+per viewer**, from Datasette's native `/{db}/-/query.json` API with that viewer's
+own cookie — so Datasette enforces *their* `execute-sql` permission on that
+database (`frontend/src/lib/sqlQuery.ts`). Consequences:
+
+- A viewer without `execute-sql` on the referenced database sees a leak-free
+  "no access" state (a `denied` chip / placeholder), never rows or column names.
+- Different readers of the same doc may therefore see a value, an error, or "no
+  access" depending on their own database permissions — the rendered value is
+  **not** part of the doc's shared state. Only the *reference* (db name, SQL,
+  `source`/`column`) collaborates and round-trips; results are ephemeral and
+  re-fetched on every mount.
+- This deliberately sidesteps paper's per-doc ACL model: editing a doc
+  (`paper-edit`) lets you *author* a query, but running it still requires the
+  viewer's own Datasette `execute-sql`.

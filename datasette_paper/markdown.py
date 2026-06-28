@@ -137,6 +137,21 @@ def _render_block(node: dict) -> str:
         if attrs.get("hidden"):
             info += " hidden"
         return "```" + info + "\n" + text + "\n```\n"
+    if t == "source":
+        # A named SQL query (a "source") fenced with an info string of
+        # `source name=NAME db=DB`. The leading `source` token + `name=` are
+        # the discriminators (markdown_parser.py keys off `source`). Inline
+        # `value` atoms reference it by name as `${{name.column}}`.
+        attrs = node.get("attrs") or {}
+        name = attrs.get("name") or ""
+        db = attrs.get("db") or ""
+        text = "".join(c.get("text", "") for c in content)
+        info = "source"
+        if name:
+            info += f" name={name}"
+        if db:
+            info += f" db={db}"
+        return "```" + info + "\n" + text + "\n```\n"
     if t == "blockquote":
         inner_parts: List[str] = []
         for i, child in enumerate(content):
@@ -475,6 +490,32 @@ def _mark_delims(mark: dict) -> tuple[str, str]:
     return "", ""
 
 
+def _encode_value_format(fmt) -> str:
+    """Encode a `value` node's `format` attr into its `| kind:arg` markdown
+    suffix (the part after the pipe). Mirror of `encodeFormat` in
+    `frontend/src/lib/formatValue.ts` — keep the two in lock-step. `fallback`
+    is intentionally not encoded; the markdown grammar carries only
+    `kind[:arg]`. Returns "" for a null/unknown format."""
+    if not fmt:
+        return ""
+    kind = fmt.get("kind")
+    if kind == "number":
+        d = fmt.get("decimals")
+        return f"number:{d}" if d is not None else "number"
+    if kind == "currency":
+        c = fmt.get("currency")
+        return f"currency:{c}" if c else "currency"
+    if kind == "percent":
+        d = fmt.get("decimals")
+        return f"percent:{d}" if d is not None else "percent"
+    if kind == "date":
+        s = fmt.get("style")
+        return f"date:{s}" if s else "date"
+    if kind == "text":
+        return "text"
+    return ""
+
+
 def _render_inlines(nodes: list) -> str:
     """Serialize a list of inline nodes, tracking open marks across nodes.
 
@@ -603,6 +644,19 @@ def _render_inlines(nodes: list) -> str:
             kind = kind or "datasette"
             canonical = f"paper:/embed/{kind}{encoded_ref}"
             out.append(_ref_link(ref, canonical, url))
+        elif t == "value":
+            # An inline computed SQL value, referencing a `source` block by
+            # name. Round-trips as `${{source.column}}`. The leading `$` keeps
+            # it disjoint from the `placeholder` node's bare `{{key}}` above, so
+            # the parser can tell the two apart unambiguously. An optional
+            # `| kind:arg` suffix carries the per-value `format` (see
+            # `_encode_value_format`); a null format emits the bare form.
+            attrs = n.get("attrs") or {}
+            source = str(attrs.get("source") or "")
+            column = str(attrs.get("column") or "")
+            fmt = _encode_value_format(attrs.get("format"))
+            suffix = f" | {fmt}" if fmt else ""
+            out.append("${{" + source + "." + column + suffix + "}}")
 
     close_through(0)
     return "".join(out)

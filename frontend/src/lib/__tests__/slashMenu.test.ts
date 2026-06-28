@@ -257,6 +257,34 @@ describe("commitSlashSelection", () => {
     );
     expect(commitSlashSelection(commands)(view.state, view.dispatch, view)).toBe(false);
   });
+
+  it("inserts a source node from the Data source command", () => {
+    const { view, get } = fakeView(stateWith([schema.node("paragraph")], 1, "/source"));
+    commitSlashSelection(commands)(view.state, view.dispatch, view);
+    let hasSource = false;
+    get().doc.descendants((n) => {
+      if (n.type.name === "source") hasSource = true;
+    });
+    expect(hasSource).toBe(true);
+  });
+
+  it("Inline value command drops the ${{ trigger text", () => {
+    // "stat" is a keyword unique to the Inline value command, so index 0 is it.
+    const { view, get } = fakeView(stateWith([schema.node("paragraph")], 1, "/stat"));
+    commitSlashSelection(commands)(view.state, view.dispatch, view);
+    expect(get().doc.textContent).toContain("${{");
+  });
+});
+
+describe("inline-value slash commands", () => {
+  it("offers Data source and Inline value, filterable by keyword", () => {
+    expect(commands.some((c) => c.id === "source")).toBe(true);
+    expect(commands.some((c) => c.id === "value")).toBe(true);
+    const state = stateWith([schema.node("paragraph")], 1, "/metric");
+    expect(filterSlashCommands(commands, state, "metric").some((c) => c.id === "value")).toBe(
+      true,
+    );
+  });
 });
 
 describe("providerSlashCommands (third-party sources)", () => {

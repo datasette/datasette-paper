@@ -589,6 +589,209 @@
   font-style: italic;
   border-top: 1px solid #eee;
 }
+/* Inline SQL values — a live computed value spliced into prose. Neutral
+   slate so it reads as data, not a mention/tag/link. Rendered by valueView.ts;
+   states: loading (muted), error/denied (red), ok (the value). */
+.editor-host .pm-value {
+  /* relative so the click-to-edit popover (position:absolute) anchors to the
+     chip, not a far-up positioned ancestor. */
+  position: relative;
+  display: inline;
+  white-space: nowrap;
+  color: #1e293b;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(100, 116, 139, 0.12);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  user-select: none;
+  cursor: default;
+}
+.editor-host .pm-value--loading {
+  color: #94a3b8;
+  background: rgba(100, 116, 139, 0.08);
+}
+.editor-host .pm-value--error,
+.editor-host .pm-value--denied {
+  color: #b91c1c;
+  background: rgba(185, 28, 28, 0.1);
+}
+/* Click-to-edit popover on a value chip — column + format. Anchored below the
+   chip; outside-click teardown lives in valueView.ts (same pattern as the
+   sql-block export menu). */
+.editor-host .pm-value-popover {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 12;
+  min-width: 180px;
+  padding: 8px;
+  background: #fff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  font: 13px/1.4 system-ui, sans-serif;
+  font-weight: 400;
+  color: #1e293b;
+  user-select: none;
+  cursor: default;
+  white-space: normal;
+}
+.editor-host .pm-value-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.editor-host .pm-value-popover-row:last-child {
+  margin-bottom: 0;
+}
+.editor-host .pm-value-popover-label {
+  flex: 0 0 64px;
+  color: #64748b;
+  font-size: 12px;
+}
+.editor-host .pm-value-popover-select,
+.editor-host .pm-value-popover-input {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 2px 5px;
+  font: inherit;
+  font-size: 12px;
+  background: #fff;
+  color: #1e293b;
+}
+.editor-host .pm-value-popover-opts:empty {
+  display: none;
+}
+
+/* Source card — a named query that feeds inline ${{name.col}} chips. A
+   compact sibling of .pm-sql-block: name input + db select + SQL editor +
+   a one-line column probe; no results table. */
+.editor-host .pm-source-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin: 12px 0;
+  background: #f8fafc;
+  overflow: hidden;
+}
+.editor-host .pm-source-card-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  background: #f1f5f9;
+  font-size: 13px;
+}
+.editor-host .pm-source-card-icon {
+  display: inline-flex;
+  color: #64748b;
+}
+.editor-host .pm-source-card-icon svg {
+  width: 15px;
+  height: 15px;
+}
+.editor-host .pm-source-card-sigil {
+  color: #94a3b8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  user-select: none;
+}
+.editor-host .pm-source-card-name {
+  width: 10ch;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font: 500 13px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #1e293b;
+  background: #fff;
+}
+.editor-host .pm-source-card-db {
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 12px;
+  background: #fff;
+}
+.editor-host .pm-source-card-spacer {
+  flex: 1;
+}
+.editor-host .pm-source-card-toggle {
+  border: none;
+  background: transparent;
+  color: #475569;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.editor-host .pm-source-card-toggle:hover {
+  color: #1e293b;
+}
+.editor-host .pm-source-card-code {
+  margin: 0;
+  padding: 8px 10px;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #0f172a;
+}
+.editor-host .pm-source-card.is-collapsed .pm-source-card-code {
+  display: none;
+}
+.editor-host .pm-source-card-probe {
+  padding: 5px 10px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.editor-host .pm-source-card-probe.is-error {
+  color: #b91c1c;
+}
+
+/* `${{` autocomplete — typing decoration + popup (mirrors .pm-tag-*). */
+.editor-host .pm-value-typing {
+  background: rgba(100, 116, 139, 0.1);
+  border-bottom: 1px solid rgba(100, 116, 139, 0.5);
+  border-radius: 2px;
+}
+.editor-host .pm-value-popup {
+  position: absolute;
+  z-index: 11;
+  min-width: 180px;
+  max-width: 320px;
+  background: #fff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px;
+  font-size: 13px;
+}
+.editor-host .pm-value-item {
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #1e293b;
+}
+.editor-host .pm-value-item:hover,
+.editor-host .pm-value-item--active {
+  background: rgba(100, 116, 139, 0.14);
+}
+.editor-host .pm-value-empty {
+  padding: 4px 8px;
+  color: #94a3b8;
+  font-size: 12px;
+}
+
 /* Inline #tags — a distinct teal accent so they don't read as
    @mentions (blue) or [[links]]. Rendered by the schema toDOM. */
 .editor-host .pm-tag {

@@ -232,3 +232,99 @@ describe("sql_block node", () => {
     expect(inserted.textContent).toBe("select 1");
   });
 });
+
+describe("value node", () => {
+  it("exists on the schema as an inline atom leaf", () => {
+    const t = schema.nodes.value;
+    expect(t).toBeDefined();
+    expect(t.isInline).toBe(true);
+    expect(t.isAtom).toBe(true);
+    expect(t.isLeaf).toBe(true);
+  });
+
+  it("round-trips through JSON", () => {
+    const node = schema.nodes.value.create({ source: "revenue", column: "total" });
+    const json = node.toJSON();
+    expect(json).toEqual({
+      type: "value",
+      attrs: { source: "revenue", column: "total", format: null },
+    });
+    const back = schema.nodeFromJSON(json);
+    expect(back.attrs.source).toBe("revenue");
+    expect(back.attrs.column).toBe("total");
+    expect(back.type).toBe(schema.nodes.value);
+  });
+
+  it("toDOM emits data-value / data-source / data-column with column fallback text", () => {
+    const node = schema.nodes.value.create({ source: "revenue", column: "total" });
+    const dom = node.type.spec.toDOM!(node) as [string, Record<string, string>, string];
+    expect(dom[0]).toBe("span");
+    expect(dom[1]["data-value"]).toBe("true");
+    expect(dom[1]["data-source"]).toBe("revenue");
+    expect(dom[1]["data-column"]).toBe("total");
+    expect(dom[2]).toBe("total");
+  });
+
+  it("can be inserted into a paragraph via replaceSelectionWith", () => {
+    const doc = schema.node("doc", null, [schema.node("paragraph")]);
+    let state = EditorState.create({ doc });
+    state = state.apply(state.tr.setSelection(TextSelection.atStart(state.doc)));
+
+    const val = schema.nodes.value.create({ source: "revenue", column: "n" });
+    const next = state.apply(state.tr.replaceSelectionWith(val));
+
+    const inserted = next.doc.firstChild!.firstChild!;
+    expect(inserted.type.name).toBe("value");
+    expect(inserted.attrs.source).toBe("revenue");
+  });
+});
+
+describe("source node", () => {
+  it("exists as a block code node with editable text content", () => {
+    const t = schema.nodes.source;
+    expect(t).toBeDefined();
+    expect(t.isBlock).toBe(true);
+    expect(t.isTextblock).toBe(true);
+    expect(t.spec.code).toBe(true);
+    expect(t.isAtom).toBe(false);
+  });
+
+  it("round-trips through JSON with name + db attrs and text content", () => {
+    const node = schema.nodes.source.create({ name: "revenue", db: "data" }, [
+      schema.text("select 1 as total"),
+    ]);
+    const json = node.toJSON();
+    expect(json).toEqual({
+      type: "source",
+      attrs: { name: "revenue", db: "data" },
+      content: [{ type: "text", text: "select 1 as total" }],
+    });
+    const back = schema.nodeFromJSON(json);
+    expect(back.attrs.name).toBe("revenue");
+    expect(back.textContent).toBe("select 1 as total");
+    expect(back.type).toBe(schema.nodes.source);
+  });
+
+  it("toDOM emits data-source-block / data-source-name / data-source-db", () => {
+    const node = schema.nodes.source.create({ name: "revenue", db: "data" });
+    const dom = node.type.spec.toDOM!(node) as [string, Record<string, string>, unknown];
+    expect(dom[0]).toBe("pre");
+    expect(dom[1]["data-source-block"]).toBe("true");
+    expect(dom[1]["data-source-name"]).toBe("revenue");
+    expect(dom[1]["data-source-db"]).toBe("data");
+  });
+
+  it("can be inserted at the top level of the doc", () => {
+    const doc = schema.node("doc", null, [schema.node("paragraph")]);
+    const state = EditorState.create({ doc });
+    const src = schema.nodes.source.create({ name: "revenue", db: "data" }, [
+      schema.text("select 1"),
+    ]);
+    const next = state.apply(state.tr.insert(state.doc.content.size, src));
+
+    const inserted = next.doc.lastChild!;
+    expect(inserted.type.name).toBe("source");
+    expect(inserted.attrs.name).toBe("revenue");
+    expect(inserted.textContent).toBe("select 1");
+  });
+});

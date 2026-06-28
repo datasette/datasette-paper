@@ -36,6 +36,11 @@ import {
   tagSuggestPopupPlugin,
   tagKeymap,
 } from "./tagSuggest";
+import {
+  valueSuggestPlugin,
+  valueSuggestPopupPlugin,
+  valueKeymap,
+} from "./valueSuggest";
 import { keymap } from "prosemirror-keymap";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap } from "prosemirror-example-setup";
@@ -69,6 +74,9 @@ import { InlineEmbedView } from "./inlineEmbedView";
 import { BlockEmbedView } from "./blockEmbedView";
 import { SqlBlockView } from "./sqlBlockView";
 import { TagView } from "./tagView";
+import { SourceStore } from "./sourceStore";
+import { ValueView } from "./valueView";
+import { SourceBlockView } from "./sourceBlockView";
 import { handleDatasettePaste } from "./datasettePaste";
 import {
   buildSlashCommands,
@@ -811,6 +819,10 @@ export class EditorConnection {
   private actorResolver: ActorResolver;
   // One datasette resolver per connection (inline_embed pills subscribe).
   private datasetteResolver: DatasetteResolver;
+  // One source store per connection: scans the doc for `source` nodes, runs
+  // each query once (deduped), and feeds `value` chips + the source card/panel.
+  // Re-synced from the doc on every change.
+  private sourceStore: SourceStore;
   // The `/` slash command registry, built once with the dialog callbacks.
   private slashCommands: SlashCommand[];
 
@@ -861,6 +873,7 @@ export class EditorConnection {
     this.accessChecker = new AccessChecker(opts.docId);
     this.actorResolver = new ActorResolver();
     this.datasetteResolver = new DatasetteResolver();
+    this.sourceStore = new SourceStore();
     this.slashCommands = buildSlashCommands({
       openImageDialog: () => this.opts.onInsertImage?.(),
       openDatasetteEmbed: (sourceId) => this.opts.onInsertDatasetteEmbed?.(sourceId),
@@ -1105,6 +1118,10 @@ export class EditorConnection {
         // returning-false contract; the `@`/`#`/`[[` popups never open at
         // once (distinct triggers).
         keymap(tagKeymap()),
+        // The `${{`-value keymap precedes baseKeymap so Enter/Arrow/Escape
+        // drive the source→column picker while it's open (same
+        // compose-by-returning-false contract; distinct `${{` trigger).
+        keymap(valueKeymap()),
         // The `/` slash-menu keymap likewise precedes baseKeymap so
         // Enter/Tab/Arrow/Escape drive the command popup while it's open.
         // Same compose-by-returning-false contract; the `/` popup only opens
@@ -1143,6 +1160,11 @@ export class EditorConnection {
         // suggestion list from the instance-wide tag vocabulary.
         tagSuggestPlugin,
         tagSuggestPopupPlugin(),
+        // `${{`-triggered inline-value autocomplete: stage A lists the doc's
+        // source names, stage B lists the chosen source's columns (from the
+        // source store), committing a `value` node.
+        valueSuggestPlugin,
+        valueSuggestPopupPlugin(this.sourceStore),
         // `/`-triggered slash command menu: the state plugin tracks the
         // in-progress `/query` in an empty top-level block, the popup renders
         // the static command list and commits the chosen insert command.
@@ -1202,6 +1224,20 @@ export class EditorConnection {
         sql_block: (node, view, getPos) =>
           new SqlBlockView(node, view, getPos as () => number | undefined),
         tag: (node, view) => new TagView(node, view),
+        value: (node, view, getPos) =>
+          new ValueView(
+            node,
+            view,
+            getPos as () => number | undefined,
+            this.sourceStore,
+          ),
+        source: (node, view, getPos) =>
+          new SourceBlockView(
+            node,
+            view,
+            getPos as () => number | undefined,
+            this.sourceStore,
+          ),
       },
       // Returning null falls through to ProseMirror's default; the cast
       // exists because the upstream type insists on `Slice`.
@@ -1242,6 +1278,10 @@ export class EditorConnection {
       handleDrop: (view, event) => handleImageDrop(view, event as DragEvent),
       dispatchTransaction: (tr) => this.dispatchTransaction(tr),
     });
+
+    // Seed the source store from the bootstrapped doc so value chips resolve
+    // on first paint (the NodeViews subscribe as they mount).
+    this.sourceStore.sync(this.view.state.doc);
 
     // Fire-and-forget — markdown paste works after the chunk lands.
     void preloadMarkdownParser();
@@ -1419,6 +1459,11 @@ export class EditorConnection {
     if (!this.view) return;
     const newState = this.view.state.apply(tr);
     this.view.updateState(newState);
+
+    // Keep the source store in sync so value chips react to source edits
+    // (locally or via remote steps routed through dispatch). Cheap: re-runs
+    // only sources whose (db, sql) actually changed.
+    if (tr.docChanged) this.sourceStore.sync(newState.doc);
 
     // If there are pending steps and we're not already sending, kick off send
     if (

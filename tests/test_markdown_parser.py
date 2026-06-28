@@ -117,6 +117,88 @@ class TestBlocks:
         md = "```sql db=data hidden\nselect * from t\n```\n"
         assert doc_to_markdown(parse_and_validate(md)) == md
 
+    def test_source_from_source_fence(self):
+        doc = parse_and_validate(
+            "```source name=revenue db=data\nselect 1 as total\n```\n"
+        )
+        sb = doc["content"][0]
+        assert sb["type"] == "source"
+        assert sb["attrs"] == {"name": "revenue", "db": "data"}
+        assert sb["content"] == [{"type": "text", "text": "select 1 as total"}]
+
+    def test_source_round_trips(self):
+        md = "```source name=revenue db=data\nselect sum(x) as total from t\n```\n"
+        assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_plain_sql_fence_not_shadowed_by_source(self):
+        # `source` discriminator is the leading token, not a substring; a
+        # `sql db=` fence still parses as a sql_block.
+        doc = parse_and_validate("```sql db=data\nselect 1\n```\n")
+        assert doc["content"][0]["type"] == "sql_block"
+
+    def test_value_from_dollar_braces(self):
+        doc = parse_and_validate("revenue is ${{revenue.total}}.\n")
+        para = doc["content"][0]
+        kinds = [c["type"] for c in para["content"]]
+        assert "value" in kinds
+        val = next(c for c in para["content"] if c["type"] == "value")
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": "total",
+            "format": None,
+        }
+
+    def test_value_round_trips(self):
+        md = "revenue is ${{revenue.total}} today.\n"
+        assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_value_format_parsed(self):
+        doc = parse_and_validate("x ${{revenue.total | currency:USD}}\n")
+        para = doc["content"][0]
+        val = next(c for c in para["content"] if c["type"] == "value")
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": "total",
+            "format": {"kind": "currency", "currency": "USD"},
+        }
+
+    def test_value_with_format_round_trips(self):
+        for spec in ("currency:USD", "number:0", "percent:1", "date:medium", "text"):
+            md = "revenue is ${{revenue.total | " + spec + "}} today.\n"
+            assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_value_malformed_format_drops_to_none_keeps_ref(self):
+        # A `${{src.col | …}}` whose format doesn't decode keeps the ref but
+        # drops the format (→ None), serializing back to the bare form.
+        doc = parse_and_validate("x ${{revenue.total | bogus}}\n")
+        para = doc["content"][0]
+        val = next(c for c in para["content"] if c["type"] == "value")
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": "total",
+            "format": None,
+        }
+
+    def test_value_with_format_and_placeholder_coexist(self):
+        md = "{{today}} — ${{revenue.total | currency:USD}}\n"
+        out = doc_to_markdown(parse_and_validate(md))
+        # The placeholder is write-only (never parsed back), so it survives as
+        # literal text; the value round-trips with its format intact.
+        assert "${{revenue.total | currency:USD}}" in out
+
+    def test_bare_braces_stay_literal_text(self):
+        # A bare `{{key}}` (placeholder syntax, no `$`) must NOT be parsed as a
+        # value — it stays literal text on the way in.
+        doc = parse_and_validate("see {{notavalue}} here\n")
+        para = doc["content"][0]
+        assert all(c["type"] != "value" for c in para["content"])
+        assert doc_to_markdown(doc) == "see {{notavalue}} here\n"
+
+    def test_half_typed_value_stays_literal(self):
+        doc = parse_and_validate("a ${{ incomplete\n")
+        para = doc["content"][0]
+        assert all(c["type"] != "value" for c in para["content"])
+
     def test_blockquote(self):
         doc = parse_and_validate("> quote\n")
         assert types_only(doc) == "doc[blockquote[paragraph[text]]]"

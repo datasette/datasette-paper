@@ -99,3 +99,13 @@ export function runInsertSqlBlock(view: EditorView, db: string | null = null): v
   insertSqlBlock(db)(view.state, view.dispatch);
   view.focus();
 }
+
+/** A command that inserts an empty `source` (named query) at the selection.
+ *  The NodeView defaults the database and exposes name + SQL inputs. */
+export function insertSource(db: string | null = null): Command {
+  return (state, dispatch) => {
+    const node = schema.nodes.source.create({ name: null, db });
+    if (dispatch) dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
+    return true;
+  };
+}
