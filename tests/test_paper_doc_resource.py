@@ -8,8 +8,8 @@ grants written via acl's :func:`datasette_acl.grants.grant` helper.
 """
 
 import pytest
-from datasette.app import Datasette
 
+from conftest import build_ds, create_doc
 from datasette_paper.db import PaperDB
 from datasette_paper.permissions import (
     PAPER_DOC_ACTIONS,
@@ -19,31 +19,6 @@ from datasette_paper.permissions import (
 )
 
 
-async def _make_ds():
-    """Datasette with paper-list/create granted + acl auto-loaded via entrypoint."""
-    ds = Datasette(
-        memory=True,
-        config={
-            "permissions": {
-                "datasette-paper-create": True,
-            }
-        },
-    )
-    await ds.invoke_startup()
-    return ds
-
-
-def _actor_cookie(ds, actor_id):
-    return ds.sign({"a": {"id": actor_id}}, "actor")
-
-
-async def _create_doc(ds, actor_id="alice"):
-    cookies = {"ds_actor": _actor_cookie(ds, actor_id)}
-    r = await ds.client.post("/-/paper/api/docs", json={"name": "P"}, cookies=cookies)
-    assert r.status_code == 201, r.text
-    return r.json()["id"]
-
-
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -51,7 +26,7 @@ async def _create_doc(ds, actor_id="alice"):
 
 @pytest.mark.asyncio
 async def test_new_actions_registered():
-    ds = await _make_ds()
+    ds = await build_ds()
     for action in PAPER_DOC_ACTIONS:
         assert action in ds.actions, f"{action} not registered"
         assert ds.actions[action].resource_class is PaperDocResource
@@ -68,7 +43,7 @@ async def test_roles_registered():
     # three paper-doc roles via the registry builder.
     from datasette_acl.roles import build_roles_registry
 
-    ds = await _make_ds()
+    ds = await build_ds()
     registry = build_roles_registry(ds)
     roles = registry.get(PAPER_DOC_RESOURCE_TYPE)
     assert roles, "paper-doc roles not in acl registry"
@@ -102,7 +77,7 @@ async def test_roles_registered():
 
 @pytest.mark.asyncio
 async def test_resources_sql_lists_docs():
-    ds = await _make_ds()
+    ds = await build_ds()
     paper = PaperDB(ds.get_internal_database())
     doc_a = await paper.insert_doc(name="A", created_by="alice")
     doc_b = await paper.insert_doc(name="B", created_by="bob")
@@ -130,7 +105,7 @@ async def test_resource_construction_parent_child():
 async def test_build_resource_roundtrips_via_acl():
     from datasette_acl.utils import build_resource
 
-    ds = await _make_ds()
+    ds = await build_ds()
     res = build_resource(ds, PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, "7")
     assert isinstance(res, PaperDocResource)
     assert res.parent == PAPER_DOCS_PARENT
@@ -146,8 +121,8 @@ async def test_build_resource_roundtrips_via_acl():
 async def test_editor_grant_allows_view_and_edit():
     from datasette_acl.grants import grant, Principal
 
-    ds = await _make_ds()
-    doc_id = await _create_doc(ds)
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
     res = PaperDocResource(doc_id)
 
     # Before any grant, bob has nothing.
@@ -176,8 +151,8 @@ async def test_editor_grant_allows_view_and_edit():
 async def test_viewer_grant_allows_view_not_edit():
     from datasette_acl.grants import grant, Principal
 
-    ds = await _make_ds()
-    doc_id = await _create_doc(ds)
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
     res = PaperDocResource(doc_id)
 
     await grant(
@@ -200,8 +175,8 @@ async def test_viewer_grant_allows_view_not_edit():
 async def test_manager_grant_allows_all_three():
     from datasette_acl.grants import grant, Principal
 
-    ds = await _make_ds()
-    doc_id = await _create_doc(ds)
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
     res = PaperDocResource(doc_id)
 
     await grant(
@@ -225,9 +200,9 @@ async def test_grant_scoped_to_specific_doc():
     """A grant on one doc must not leak to another doc."""
     from datasette_acl.grants import grant, Principal
 
-    ds = await _make_ds()
-    doc_a = await _create_doc(ds)
-    doc_b = await _create_doc(ds)
+    ds = await build_ds()
+    doc_a = await create_doc(ds, "P")
+    doc_b = await create_doc(ds, "P")
 
     await grant(
         ds,

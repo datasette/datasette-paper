@@ -15,40 +15,11 @@ from datasette_agent.tools import (
 )
 
 from datasette_paper.agent_tools import get_paper_agent_tools
-from datasette_paper.permissions import PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT
 
-from conftest import make_datasette
+from conftest import grant_role, make_datasette, revoke_role
 
 ALICE = {"id": "alice"}
 BOB = {"id": "bob"}
-
-
-async def _grant_acl(ds, doc_id, actor_id, role):
-    """Grant ``actor_id`` an acl role (Viewer/Editor/Manager) on the doc."""
-    from datasette_acl.grants import grant, Principal
-
-    await grant(
-        ds,
-        PAPER_DOC_RESOURCE_TYPE,
-        PAPER_DOCS_PARENT,
-        str(doc_id),
-        principal=Principal.actor(actor_id),
-        role=role,
-        by_actor="alice",
-    )
-
-
-async def _revoke_acl(ds, doc_id, actor_id):
-    from datasette_acl.grants import revoke, Principal
-
-    await revoke(
-        ds,
-        PAPER_DOC_RESOURCE_TYPE,
-        PAPER_DOCS_PARENT,
-        str(doc_id),
-        principal=Principal.actor(actor_id),
-        by_actor="alice",
-    )
 
 
 def _tools():
@@ -288,11 +259,11 @@ async def test_read_allowed_only_with_grant():
     denied = await _call("read_paper", ds, BOB, doc_id=doc_id)
     assert denied["error"] == "Permission denied"
     # Viewer grant → can read.
-    await _grant_acl(ds, doc_id, "bob", "Viewer")
+    await grant_role(ds, doc_id, "bob", "Viewer")
     out = await _call("read_paper", ds, BOB, doc_id=doc_id)
     assert out["content_markdown"] == "hi bob\n"
     # Revoke → denied again.
-    await _revoke_acl(ds, doc_id, "bob")
+    await revoke_role(ds, doc_id, "bob")
     again = await _call("read_paper", ds, BOB, doc_id=doc_id)
     assert again["error"] == "Permission denied"
 
@@ -303,7 +274,7 @@ async def test_viewer_grant_can_read_but_not_write():
     ds = await _ds()
     created = await _call("create_paper", ds, ALICE, name="RO", content="line one\n")
     doc_id = created["doc_id"]
-    await _grant_acl(ds, doc_id, "bob", "Viewer")
+    await grant_role(ds, doc_id, "bob", "Viewer")
     # Read works.
     assert "content_markdown" in await _call("read_paper", ds, BOB, doc_id=doc_id)
     # Every write tool is denied for the read-only actor.
@@ -328,7 +299,7 @@ async def test_editor_grant_can_read_and_write():
     ds = await _ds()
     created = await _call("create_paper", ds, ALICE, name="RW", content="alpha\n")
     doc_id = created["doc_id"]
-    await _grant_acl(ds, doc_id, "bob", "Editor")
+    await grant_role(ds, doc_id, "bob", "Editor")
     assert "content_markdown" in await _call("read_paper", ds, BOB, doc_id=doc_id)
     appended = await _call("append_to_paper", ds, BOB, doc_id=doc_id, content="beta\n")
     assert appended["appended_blocks"] == 1

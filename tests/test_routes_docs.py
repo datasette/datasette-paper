@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from conftest import plant_snapshot
+
 
 @pytest.mark.asyncio
 async def test_create_doc_then_list(ds):
@@ -467,13 +469,7 @@ async def test_get_document_markdown_accept(ds_paper):
             },
         ],
     }
-    await paper_db.insert_snapshot(
-        doc_id=doc_id, version=0, doc_json=json.dumps(rich_doc), actor_id=None
-    )
-    from datasette_paper.instance import get_registry
-
-    registry = get_registry(ds)
-    registry._instances.pop(doc_id, None)
+    await plant_snapshot(ds, doc_id, rich_doc)
 
     resp = await ds.client.get(
         f"/-/paper/api/docs/{doc_id}/document",
@@ -531,13 +527,7 @@ async def test_get_tasks_endpoint(ds_paper):
             },
         ],
     }
-    await paper_db.insert_snapshot(
-        doc_id=doc_id, version=0, doc_json=json.dumps(snapshot), actor_id=None
-    )
-    from datasette_paper.instance import get_registry
-
-    registry = get_registry(ds)
-    registry._instances.pop(doc_id, None)
+    await plant_snapshot(ds, doc_id, snapshot)
 
     resp = await ds.client.get(f"/-/paper/api/docs/{doc_id}/tasks")
     assert resp.status_code == 200
@@ -603,13 +593,7 @@ async def test_get_tasks_groups_by_heading_section(ds_paper):
             {"type": "task_list", "content": [_item("c", checked=True)]},
         ],
     }
-    await paper_db.insert_snapshot(
-        doc_id=doc_id, version=0, doc_json=json.dumps(snapshot), actor_id=None
-    )
-    from datasette_paper.instance import get_registry
-
-    registry = get_registry(ds)
-    registry._instances.pop(doc_id, None)
+    await plant_snapshot(ds, doc_id, snapshot)
 
     resp = await ds.client.get(f"/-/paper/api/docs/{doc_id}/tasks")
     assert resp.status_code == 200

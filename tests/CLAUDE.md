@@ -11,7 +11,9 @@ cross-cutting fixtures and patterns.
   `ds.client.get/post` monkey-patched to inject a default `alice`
   actor cookie. Without the cookie, anonymous actors hit the per-paper
   permission gate and get denied.
-- `ds_paper` — `ds` + a freshly-created paper. Returns `(ds, doc_id)`.
+- `ds_paper` — `ds` + a `PaperDB` handle. Returns `(ds, PaperDB)`
+  (no doc is created). Use `ds_with_doc` → `(ds, PaperDB, doc_id)` when
+  you need one blank alice-owned doc up front.
 
 A handful of tests bypass the fixtures and build `Datasette` directly
 to exercise denial paths (`test_permissions.py`, the anonymous-creation

@@ -16,34 +16,10 @@ The JSON ``links`` object is keyed by STRING dst doc ids — assert with str(P).
 
 import pytest
 
-from conftest import setup_paper_datasette
+from conftest import create_doc, grant_role, setup_paper_datasette
 from datasette_acl.grants import grant, Principal
 from datasette_paper.db import PaperDB
 from datasette_paper.permissions import PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT
-
-
-async def _create_doc(ds, name, actor_id):
-    """Create a doc as ``actor_id`` and return its new id."""
-    cookie = ds.sign({"a": {"id": actor_id}}, "actor")
-    resp = await ds.client.post(
-        "/-/paper/api/docs",
-        json={"name": name},
-        cookies={"ds_actor": cookie},
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["id"]
-
-
-async def _grant_viewer(ds, doc_id, actor_id):
-    await grant(
-        ds,
-        PAPER_DOC_RESOURCE_TYPE,
-        PAPER_DOCS_PARENT,
-        str(doc_id),
-        principal=Principal.actor(actor_id),
-        role="Viewer",
-        by_actor="alice",
-    )
 
 
 @pytest.mark.asyncio
@@ -51,10 +27,10 @@ async def test_gap_when_named_viewer_cannot_view_target():
     ds, _ = await setup_paper_datasette()
     db = PaperDB(ds.get_internal_database())
 
-    d = await _create_doc(ds, "Doc D", "alice")
-    p = await _create_doc(ds, "Paper P", "alice")
+    d = await create_doc(ds, "Doc D", actor_id="alice")
+    p = await create_doc(ds, "Paper P", actor_id="alice")
     # bob is a named collaborator of D, but has NO grant on P.
-    await _grant_viewer(ds, d, "bob")
+    await grant_role(ds, d, "bob")
     await db.replace_links(src_doc_id=d, src_version=1, edges={p: 1})
 
     resp = await ds.client.get(f"/-/paper/api/docs/{d}/link-access-check")
@@ -70,12 +46,12 @@ async def test_no_gap_when_named_viewer_can_view_target():
     ds, _ = await setup_paper_datasette()
     db = PaperDB(ds.get_internal_database())
 
-    d = await _create_doc(ds, "Doc D", "alice")
-    p = await _create_doc(ds, "Paper P", "alice")
+    d = await create_doc(ds, "Doc D", actor_id="alice")
+    p = await create_doc(ds, "Paper P", actor_id="alice")
     # bob can view D but not P (a genuine gap); carol can view BOTH.
-    await _grant_viewer(ds, d, "bob")
-    await _grant_viewer(ds, d, "carol")
-    await _grant_viewer(ds, p, "carol")
+    await grant_role(ds, d, "bob")
+    await grant_role(ds, d, "carol")
+    await grant_role(ds, p, "carol")
     await db.replace_links(src_doc_id=d, src_version=1, edges={p: 1})
 
     resp = await ds.client.get(f"/-/paper/api/docs/{d}/link-access-check")
@@ -92,8 +68,8 @@ async def test_open_audience_flag_on_wildcard_grant():
     ds, _ = await setup_paper_datasette()
     db = PaperDB(ds.get_internal_database())
 
-    d = await _create_doc(ds, "Doc D", "alice")
-    p = await _create_doc(ds, "Paper P", "alice")
+    d = await create_doc(ds, "Doc D", actor_id="alice")
+    p = await create_doc(ds, "Paper P", actor_id="alice")
     # Public-audience viewer on D: audience can't be enumerated → open_audience.
     await grant(
         ds,
@@ -116,7 +92,7 @@ async def test_link_access_check_403_for_non_editor():
     ds, _ = await setup_paper_datasette()
     # alice owns D; bob has the global list+create grants (fixture) but no
     # edit grant on D → not an editor → 403.
-    d = await _create_doc(ds, "Doc D", "alice")
+    d = await create_doc(ds, "Doc D", actor_id="alice")
 
     bob_cookie = ds.sign({"a": {"id": "bob"}}, "actor")
     resp = await ds.client.get(

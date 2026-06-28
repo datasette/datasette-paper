@@ -10,11 +10,9 @@ by walking the materialized doc for a real `tag` node. Tests plant synthetic
 snapshots and force a registry re-hydrate.
 """
 
-import json
-
 import pytest
 
-from conftest import setup_paper_datasette
+from conftest import create_doc, plant_snapshot, setup_paper_datasette
 from datasette_paper.db import PaperDB
 from datasette_paper.instance import get_registry
 from datasette_paper.util import paper_db
@@ -29,38 +27,19 @@ def _doc_with_tag(slug, *, repeats=1):
     return {"type": "doc", "content": [{"type": "paragraph", "content": content}]}
 
 
-async def _create_doc(ds, name, actor_id):
-    cookie = ds.sign({"a": {"id": actor_id}}, "actor")
-    resp = await ds.client.post(
-        "/-/paper/api/docs",
-        json={"name": name},
-        cookies={"ds_actor": cookie},
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["id"]
-
-
-async def _plant_snapshot(ds, doc_id, doc_json):
-    db = paper_db(ds)
-    await db.insert_snapshot(
-        doc_id=doc_id, version=0, doc_json=json.dumps(doc_json), actor_id=None
-    )
-    get_registry(ds)._instances.pop(doc_id, None)  # force re-hydrate
-
-
 @pytest.mark.asyncio
 async def test_tag_refs_returns_only_docs_containing_the_tag():
     ds, _ = await setup_paper_datasette()
 
-    tagged = await _create_doc(ds, "Has Alpha", "alice")
-    untagged = await _create_doc(ds, "No Tags", "alice")
-    other_tag = await _create_doc(ds, "Has Beta", "alice")
+    tagged = await create_doc(ds, "Has Alpha", actor_id="alice")
+    untagged = await create_doc(ds, "No Tags", actor_id="alice")
+    other_tag = await create_doc(ds, "Has Beta", actor_id="alice")
 
-    await _plant_snapshot(ds, tagged, _doc_with_tag("alpha", repeats=2))
-    await _plant_snapshot(
+    await plant_snapshot(ds, tagged, _doc_with_tag("alpha", repeats=2))
+    await plant_snapshot(
         ds, untagged, {"type": "doc", "content": [{"type": "paragraph"}]}
     )
-    await _plant_snapshot(ds, other_tag, _doc_with_tag("beta"))
+    await plant_snapshot(ds, other_tag, _doc_with_tag("beta"))
 
     resp = await ds.client.get("/-/paper/api/tags/alpha/refs")
     assert resp.status_code == 200, resp.text
@@ -76,11 +55,11 @@ async def test_tag_refs_returns_only_docs_containing_the_tag():
 async def test_tag_refs_excludes_non_viewable_docs():
     ds, _ = await setup_paper_datasette()
 
-    alice_doc = await _create_doc(ds, "Alice Alpha", "alice")
-    carol_doc = await _create_doc(ds, "Carol Alpha", "carol")
+    alice_doc = await create_doc(ds, "Alice Alpha", actor_id="alice")
+    carol_doc = await create_doc(ds, "Carol Alpha", actor_id="carol")
 
-    await _plant_snapshot(ds, alice_doc, _doc_with_tag("alpha"))
-    await _plant_snapshot(ds, carol_doc, _doc_with_tag("alpha"))
+    await plant_snapshot(ds, alice_doc, _doc_with_tag("alpha"))
+    await plant_snapshot(ds, carol_doc, _doc_with_tag("alpha"))
 
     # Default fixture actor is alice; carol's doc is not in her viewable set.
     resp = await ds.client.get("/-/paper/api/tags/alpha/refs")
@@ -101,8 +80,8 @@ async def test_tag_refs_400_on_slug_that_normalizes_to_none():
 @pytest.mark.asyncio
 async def test_tag_refs_normalizes_query_slug():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Alpha", "alice")
-    await _plant_snapshot(ds, doc_id, _doc_with_tag("alpha"))
+    doc_id = await create_doc(ds, "Alpha", actor_id="alice")
+    await plant_snapshot(ds, doc_id, _doc_with_tag("alpha"))
 
     # Mixed-case / spaced query normalizes to "alpha" and still matches.
     resp = await ds.client.get("/-/paper/api/tags/Alpha/refs")
@@ -125,7 +104,7 @@ async def test_tag_refs_finds_tag_only_in_live_steps_no_snapshot():
     ds, _ = await setup_paper_datasette()
     db = paper_db(ds)
 
-    doc_id = await _create_doc(ds, "Typed Alpha", "alice")
+    doc_id = await create_doc(ds, "Typed Alpha", actor_id="alice")
     # No snapshot is planted — _create_doc with no content writes none.
     registry = get_registry(ds)
     instance = await registry.get(db, doc_id)
@@ -153,10 +132,10 @@ async def test_tag_ref_candidates_db_helper_like_scan():
     ds, _ = await setup_paper_datasette()
     db = PaperDB(ds.get_internal_database())
 
-    a = await _create_doc(ds, "A", "alice")
-    b = await _create_doc(ds, "B", "alice")
-    await _plant_snapshot(ds, a, _doc_with_tag("gamma"))
-    await _plant_snapshot(ds, b, {"type": "doc", "content": [{"type": "paragraph"}]})
+    a = await create_doc(ds, "A", actor_id="alice")
+    b = await create_doc(ds, "B", actor_id="alice")
+    await plant_snapshot(ds, a, _doc_with_tag("gamma"))
+    await plant_snapshot(ds, b, {"type": "doc", "content": [{"type": "paragraph"}]})
 
     cands = await db.tag_ref_candidates(like="%gamma%", viewable_ids=[a, b])
     ids = {c.id for c in cands}

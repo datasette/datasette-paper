@@ -12,25 +12,13 @@ by string ids (e.g. "12", not 12) — assertions use ``str(id)``.
 
 import pytest
 
-from conftest import setup_paper_datasette
-
-
-async def _create_doc(ds, name, actor_id):
-    """Create a doc as ``actor_id`` and return its new id."""
-    cookie = ds.sign({"a": {"id": actor_id}}, "actor")
-    resp = await ds.client.post(
-        "/-/paper/api/docs",
-        json={"name": name},
-        cookies={"ds_actor": cookie},
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["id"]
+from conftest import create_doc, setup_paper_datasette
 
 
 @pytest.mark.asyncio
 async def test_resolve_ok_active():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Active Doc", "alice")
+    doc_id = await create_doc(ds, "Active Doc", actor_id="alice")
 
     resp = await ds.client.post("/-/paper/api/links/resolve", json={"ids": [doc_id]})
     assert resp.status_code == 200, resp.text
@@ -48,7 +36,7 @@ async def test_resolve_ok_active():
 @pytest.mark.asyncio
 async def test_resolve_archived_doc_is_ok():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Archived Doc", "alice")
+    doc_id = await create_doc(ds, "Archived Doc", actor_id="alice")
     # alice owns it — the fixture binds alice.
     resp = await ds.client.post(f"/-/paper/api/docs/{doc_id}/archive")
     assert resp.status_code == 200, resp.text
@@ -63,7 +51,7 @@ async def test_resolve_archived_doc_is_ok():
 @pytest.mark.asyncio
 async def test_resolve_trashed_doc_is_ok():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Trashed Doc", "alice")
+    doc_id = await create_doc(ds, "Trashed Doc", actor_id="alice")
     resp = await ds.client.post(f"/-/paper/api/docs/{doc_id}/trash")
     assert resp.status_code == 200, resp.text
 
@@ -79,7 +67,7 @@ async def test_resolve_trashed_doc_is_ok():
 async def test_resolve_denied_has_no_title():
     ds, _ = await setup_paper_datasette()
     # carol's private doc — alice cannot view it.
-    doc_id = await _create_doc(ds, "Carol Private", "carol")
+    doc_id = await create_doc(ds, "Carol Private", actor_id="carol")
 
     resp = await ds.client.post("/-/paper/api/links/resolve", json={"ids": [doc_id]})
     assert resp.status_code == 200, resp.text

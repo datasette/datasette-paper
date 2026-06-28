@@ -6,10 +6,8 @@ import datetime
 import json
 
 import pytest
-from datasette.app import Datasette
 
-from datasette_paper.db import PaperDB
-from datasette_paper.instance import get_registry
+from conftest import actor_cookie, build_ds, plant_snapshot
 from datasette_paper.template_params import (
     BUILTIN_RESOLVERS,
     build_context,
@@ -203,48 +201,21 @@ def test_substitute_walks_nested_content():
 # ---------------------------------------------------------------------------
 
 
-def _cookie(ds, actor_id):
-    return {"ds_actor": ds.sign({"a": {"id": actor_id}}, "actor")}
-
-
-async def _make_ds():
-    ds = Datasette(
-        memory=True,
-        config={
-            "permissions": {
-                "datasette-paper-create": True,
-            }
-        },
-    )
-    await ds.invoke_startup()
-    return ds
-
-
 @pytest.mark.asyncio
 async def test_create_from_template_substitutes_placeholders():
     """The new doc has no placeholder nodes left — keys are resolved
     against the creating actor's context."""
-    ds = await _make_ds()
+    ds = await build_ds()
     # Create the template via the API, then plant a doc with
     # placeholders as its seed snapshot.
     r = await ds.client.post(
         "/-/paper/api/docs",
         json={"name": "Standup", "kind": "template"},
-        cookies=_cookie(ds, "alice"),
+        cookies=actor_cookie(ds, "alice"),
     )
     template_id = r.json()["id"]
-    paper = PaperDB(ds.get_internal_database())
     template_doc = _doc_with_placeholders()
-    await ds.get_internal_database().execute_write(
-        "DELETE FROM _datasette_paper_snapshot WHERE doc_id = ?", [template_id]
-    )
-    await paper.insert_snapshot(
-        doc_id=template_id,
-        version=0,
-        doc_json=json.dumps(template_doc),
-        actor_id="alice",
-    )
-    get_registry(ds)._instances.pop(template_id, None)
+    await plant_snapshot(ds, template_id, template_doc, actor_id="alice", replace=True)
 
     # Open the template to bob via an acl Viewer grant so we can
     # demonstrate the resolver pulls from the *creator's* context,
@@ -269,13 +240,13 @@ async def test_create_from_template_substitutes_placeholders():
     r2 = await ds.client.post(
         "/-/paper/api/docs",
         json={"name": "Today", "template_id": template_id},
-        cookies=_cookie(ds, "bob"),
+        cookies=actor_cookie(ds, "bob"),
     )
     assert r2.status_code == 201, r2.text
     new_id = r2.json()["id"]
 
     boot = await ds.client.get(
-        f"/-/paper/api/docs/{new_id}", cookies=_cookie(ds, "bob")
+        f"/-/paper/api/docs/{new_id}", cookies=actor_cookie(ds, "bob")
     )
     body = boot.json()
     # No placeholder nodes anywhere in the resulting doc.
@@ -291,9 +262,9 @@ async def test_create_from_template_substitutes_placeholders():
 @pytest.mark.asyncio
 async def test_template_params_endpoint():
     """GET /-/paper/api/template_params lists built-ins with samples."""
-    ds = await _make_ds()
+    ds = await build_ds()
     r = await ds.client.get(
-        "/-/paper/api/template_params", cookies=_cookie(ds, "alice")
+        "/-/paper/api/template_params", cookies=actor_cookie(ds, "alice")
     )
     assert r.status_code == 200
     body = r.json()
