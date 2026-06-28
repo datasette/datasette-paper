@@ -60,7 +60,14 @@ type ProviderModule = { default?: ProviderExport };
 type ModuleImporter = (url: string) => Promise<ProviderModule>;
 
 const defaultImporter: ModuleImporter = (url) =>
-  import(/* @vite-ignore */ url) as Promise<ProviderModule>;
+  // Resolve the (root-relative) bundle URL against the *document* origin, not
+  // this module's. Datasette serves the provider route; under `dev-with-hmr`
+  // this module is served by the Vite dev server on a different origin, so a
+  // bare `import("/-/…")` would resolve to Vite (wrong MIME / blocked) instead
+  // of Datasette. Absolute URLs pass through `new URL` unchanged; in a normal
+  // single-origin build `document.baseURI` is the same origin, so this is a
+  // no-op there.
+  import(/* @vite-ignore */ new URL(url, document.baseURI).href) as Promise<ProviderModule>;
 
 // Indirection so tests can stub the dynamic import (jsdom can't fetch a real
 // bundle URL). Production always uses `defaultImporter`.
@@ -105,6 +112,35 @@ export function manifestSources(): ManifestSource[] {
 /** The provider `kind` that owns this `/`-menu source id, if any. */
 export function manifestKindForSource(id: string): string | undefined {
   return manifestSources().find((s) => s.id === id)?.kind;
+}
+
+/**
+ * One insertable embed source for a picker launcher. The `/` slash menu and
+ * the toolbar dropdown both consume `embedInsertSources()` — the single source
+ * of truth, so the two entry points can't drift (same labels, same native
+ * entry, same provider set + order).
+ */
+export interface EmbedInsertSource {
+  /** Source id passed to the picker; undefined = native Datasette. */
+  id?: string;
+  label: string;
+  /** TOOLBAR_ICONS key; callers fall back to "database" if absent/unknown. */
+  icon?: string;
+  mode?: string;
+}
+
+/** Native Datasette (always first) followed by every manifest provider
+ *  source, in manifest order. Synchronous — reads the already-set manifest. */
+export function embedInsertSources(): EmbedInsertSource[] {
+  return [
+    { label: "Datasette embed", icon: "database" }, // native; id undefined
+    ...manifestSources().map((s) => ({
+      id: s.id,
+      label: s.label,
+      icon: s.icon,
+      mode: s.mode,
+    })),
+  ];
 }
 
 /**

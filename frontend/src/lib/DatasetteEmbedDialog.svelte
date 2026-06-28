@@ -13,7 +13,11 @@
    */
   import { searchResources } from "./datasetteEmbed";
   import { embedRegistry, type PaperEmbedSource } from "./embedRegistry";
-  import { ensureProvider, manifestKindForSource } from "./embedProviders";
+  import {
+    ensureProvider,
+    manifestKindForSource,
+    manifestSources,
+  } from "./embedProviders";
 
   let {
     open = $bindable(false),
@@ -45,9 +49,24 @@
   // until then). Core source (no `source`) leaves it undefined.
   let sourceSpec = $state<PaperEmbedSource | undefined>(undefined);
   let providerLoading = $state(false);
+  // Set when a provider source was requested but its bundle never registered
+  // (failed import, malformed export, or unknown source). We show this instead
+  // of silently falling back to the core Datasette picker — which would search
+  // a provider that isn't there ("No matches" forever) under a misleading title.
+  let loadError = $state<string | null>(null);
+
+  // The provider source's manifest label — known before its bundle loads, so we
+  // can title the dialog correctly during the load and in the error state.
+  const sourceLabel = $derived(
+    source ? (manifestSources().find((s) => s.id === source)?.label ?? source) : "",
+  );
 
   const title = $derived(
-    sourceSpec ? `Insert ${sourceSpec.label}` : "Insert Datasette embed",
+    sourceSpec
+      ? `Insert ${sourceSpec.label}`
+      : source
+        ? `Insert ${sourceLabel}`
+        : "Insert Datasette embed",
   );
 
   function reset() {
@@ -55,6 +74,7 @@
     manualRef = "";
     mode = sourceSpec?.mode ?? "table";
     results = [];
+    loadError = null;
   }
 
   // Drive the native <dialog> from the bound `open` prop.
@@ -73,6 +93,7 @@
   // provider JS the author actually reaches for), then reads its picker() spec;
   // the core source needs no load. Then runs an initial empty search.
   async function openSource() {
+    loadError = null;
     if (source) {
       const kind = manifestKindForSource(source);
       if (kind) {
@@ -81,6 +102,13 @@
         providerLoading = false;
       }
       sourceSpec = embedRegistry().providerForSource(source)?.picker?.();
+      if (!sourceSpec) {
+        // Bundle didn't register — surface it rather than impersonating the
+        // core picker. (Common cause: the provider route is served by a
+        // different origin than this module under `dev-with-hmr`.)
+        loadError = `Couldn't load the ${sourceLabel} embed provider. Reload the page and try again.`;
+        return;
+      }
     } else {
       sourceSpec = undefined;
     }
@@ -144,6 +172,12 @@
     >
   </div>
 
+  {#if loadError}
+    <p class="ds-embed-error">{loadError}</p>
+    <div class="ds-embed-dialog__foot">
+      <button type="button" class="ds-embed-cancel-btn" onclick={cancel}>Close</button>
+    </div>
+  {:else}
   <input
     class="ds-embed-search"
     type="text"
@@ -202,6 +236,7 @@
       onclick={insertManual}>Insert ref</button
     >
   </div>
+  {/if}
 </dialog>
 
 <style>
@@ -232,6 +267,14 @@
     cursor: pointer;
     color: #666;
     padding: 0 4px;
+  }
+  .ds-embed-error {
+    margin: 4px 0 12px;
+    padding: 10px 12px;
+    border-radius: 6px;
+    background: #fef2f2;
+    color: #b91c1c;
+    font-size: 14px;
   }
   .ds-embed-search,
   .ds-embed-manual-input {

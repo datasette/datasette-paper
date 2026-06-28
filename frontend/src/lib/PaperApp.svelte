@@ -247,7 +247,15 @@
     <div class="status-banner status-{status.state}">{status.message}</div>
   {/if}
   {#if canEdit && mode === "edit"}
-    <Toolbar {view} {kind} onInsertImage={() => (imageDialogOpen = true)} />
+    <Toolbar
+      {view}
+      {kind}
+      onInsertImage={() => (imageDialogOpen = true)}
+      onInsertEmbed={(sourceId) => {
+        embedSource = sourceId;
+        embedDialogOpen = true;
+      }}
+    />
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
   <LinksPanel {docId} />

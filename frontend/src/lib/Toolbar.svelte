@@ -7,6 +7,7 @@
   import { schema } from "./schema";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { canInsertTable, insertTable } from "./tables";
+  import { embedInsertSources } from "./embedProviders";
   // The in-table action bar (add/delete row/col, name input) is owned
   // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). Only the
   // initial Insert-table button lives in the toolbar.
@@ -15,13 +16,69 @@
     view,
     kind = "doc",
     onInsertImage,
+    onInsertEmbed,
   }: {
     view: EditorView | null;
     kind?: "doc" | "template";
     // Opens the (PaperApp-owned) image insert dialog. Shared with the `/`
     // slash menu so there is only ever one ImageDialog instance.
     onInsertImage?: () => void;
+    // Opens the (PaperApp-owned) embed picker dialog for `sourceId`
+    // (undefined = native Datasette). Same callback shape as the `/` menu's
+    // openDatasetteEmbed.
+    onInsertEmbed?: (sourceId?: string) => void;
   } = $props();
+
+  // ─── embed dropdown ─────────────────────────────────────────────────────────
+  // Launcher for the existing embed picker. Items come from the shared
+  // `embedInsertSources()` (the same list the `/` menu uses) so the two entry
+  // points never drift. Synchronous/in-memory — no fetch, no loading state.
+  let embedOpen = $state(false);
+  let embedRoot: HTMLDivElement | undefined = $state();
+
+  /** Resolve each source's TOOLBAR_ICONS key, falling back to "database" for an
+   *  absent/unknown manifest icon. Pure so it can be unit-tested without DOM. */
+  function embedDropdownItems(): { id?: string; label: string; icon: ToolbarIconName }[] {
+    return embedInsertSources().map((s) => ({
+      id: s.id,
+      label: s.label,
+      icon: (s.icon && s.icon in TOOLBAR_ICONS ? s.icon : "database") as ToolbarIconName,
+    }));
+  }
+
+  let embedItems = $state(embedDropdownItems());
+
+  function onEmbedTriggerClick() {
+    const items = embedDropdownItems();
+    // Single source (no third-party providers — the default install): a
+    // one-item menu is noise, so open the native dialog directly.
+    if (items.length <= 1) {
+      embedOpen = false;
+      onInsertEmbed?.(undefined);
+      return;
+    }
+    embedItems = items;
+    embedOpen = !embedOpen;
+  }
+
+  // Close the embed dropdown on outside-click / Escape (mirrors the
+  // placeholder dropdown effect below).
+  $effect(() => {
+    if (!embedOpen) return;
+    const onClick = (evt: MouseEvent) => {
+      if (!embedRoot) return;
+      if (!embedRoot.contains(evt.target as Node)) embedOpen = false;
+    };
+    const onKey = (evt: KeyboardEvent) => {
+      if (evt.key === "Escape") embedOpen = false;
+    };
+    window.addEventListener("click", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  });
 
   // Lazy-loaded list of built-in placeholder keys with sample values.
   // Fetched once on demand (when the dropdown opens for the first
@@ -275,6 +332,47 @@
     undefined,
     !canTable,
   )}
+  <!-- Embed launcher. Reuses the bundled `database` icon; opens the existing
+       picker dialog. NOT gated on `kind` — available for both doc & template
+       (unlike the placeholder dropdown, which is template-only). -->
+  <div class="tb-embed-wrap" bind:this={embedRoot}>
+    <button
+      type="button"
+      class="tb-btn"
+      class:active={embedOpen}
+      aria-haspopup="menu"
+      aria-expanded={embedOpen}
+      aria-label="Insert embed"
+      title="Insert Datasette embed"
+      onclick={onEmbedTriggerClick}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+        {@html TOOLBAR_ICONS["database"]}
+      </svg>
+    </button>
+    {#if embedOpen}
+      <div class="tb-embed-menu" role="menu">
+        {#each embedItems as src (src.label)}
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-embed-item"
+            onclick={() => {
+              embedOpen = false;
+              onInsertEmbed?.(src.id);
+            }}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+              <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+              {@html TOOLBAR_ICONS[src.icon]}
+            </svg>
+            <span>{src.label}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  </div>
   {#if kind === "template"}
     <span class="tb-sep" aria-hidden="true"></span>
     <div class="tb-placeholder-wrap" bind:this={placeholderRoot}>
@@ -366,6 +464,44 @@
     height: 18px;
     background: #ccc;
     margin: 0 4px;
+  }
+  .tb-embed-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .tb-embed-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    min-width: 200px;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+  }
+  .tb-embed-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    font: inherit;
+    text-align: left;
+    color: #222;
+    cursor: pointer;
+  }
+  .tb-embed-item:hover {
+    background: #f0f3f6;
+  }
+  .tb-embed-item svg {
+    flex: 0 0 auto;
+    color: #555;
   }
   .tb-placeholder-wrap {
     position: relative;
