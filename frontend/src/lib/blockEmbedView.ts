@@ -53,6 +53,9 @@ export class BlockEmbedView implements NodeView {
   // (Copy page serializes its held rows; Download links target its db/table).
   // Cleared on any non-table render so the menu can't export stale data.
   private tablePayload: Extract<EmbedPayload, { kind: "table" | "view" }> | null = null;
+  // The full (pre-projection) column set of the last table/view render — seeds
+  // the "Columns…" picker so it can offer every column, selected ones checked.
+  private allColumns: string[] = [];
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.view = view;
@@ -91,7 +94,7 @@ export class BlockEmbedView implements NodeView {
       await this.loadExternal(token, provider);
       return;
     }
-    const payload = await fetchEmbed(this.ref, this.limit);
+    const payload = await fetchEmbed(this.ref, this.limit, this.selectedColumns());
     // A newer load() (ref change / refresh) superseded this one.
     if (token !== this.token) return;
     this.render(payload);
@@ -292,6 +295,21 @@ export class BlockEmbedView implements NodeView {
       menu.appendChild(
         this.menuButton(`Copy as JSON${suffix}`, () => this.copyPage(payload, "json")),
       );
+      // Column picker — only meaningful once we know the table's columns.
+      if (this.allColumns.length) {
+        const cols = document.createElement("button");
+        cols.type = "button";
+        cols.className = "pm-block-embed-menu-item";
+        cols.textContent = "Columns…";
+        // Unlike menuButton, this swaps the menu body for the checklist in
+        // place rather than closing — Apply (or outside click) closes it.
+        cols.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.showColumnsPanel(menu);
+        });
+        menu.appendChild(cols);
+      }
     }
 
     menu.appendChild(
@@ -299,6 +317,72 @@ export class BlockEmbedView implements NodeView {
     );
     wrap.appendChild(menu);
     return wrap;
+  }
+
+  /**
+   * The author's column selection from `config.columns`, or `undefined` when
+   * absent/empty/malformed (== "show all"). Guards to a non-empty array of
+   * non-empty strings so a bad config value degrades to no filtering rather
+   * than poisoning the fetch URL.
+   */
+  private selectedColumns(): string[] | undefined {
+    const cols = (this.config as { columns?: unknown }).columns;
+    if (!Array.isArray(cols)) return undefined;
+    const valid = cols.filter((c): c is string => typeof c === "string" && c.length > 0);
+    return valid.length ? valid : undefined;
+  }
+
+  /**
+   * Swap the open ⋮ menu's body for an inline checklist of `allColumns`, each
+   * checked iff currently selected (all checked when no selection = "show all").
+   * "Apply" writes the ordered selection to `config.columns` and closes.
+   */
+  private showColumnsPanel(menu: HTMLElement): void {
+    menu.replaceChildren();
+    const panel = document.createElement("div");
+    panel.className = "pm-block-embed-columns";
+
+    const selected = new Set(this.selectedColumns() ?? this.allColumns);
+    const inputs: { col: string; input: HTMLInputElement }[] = [];
+    for (const col of this.allColumns) {
+      const label = document.createElement("label");
+      label.className = "pm-block-embed-columns-item";
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.checked = selected.has(col);
+      const text = document.createElement("span");
+      text.textContent = col; // text node — column names are data-derived
+      label.appendChild(input);
+      label.appendChild(text);
+      panel.appendChild(label);
+      inputs.push({ col, input });
+    }
+
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "pm-block-embed-menu-item pm-block-embed-columns-apply";
+    apply.textContent = "Apply";
+    apply.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const picked = inputs.filter((i) => i.input.checked).map((i) => i.col);
+      // All checked == "show all": store `[]` (minimal config, clean fence)
+      // rather than the full list.
+      const next = picked.length === this.allColumns.length ? [] : picked;
+      this.closeMenu();
+      this.setColumns(next);
+    });
+    panel.appendChild(apply);
+    menu.appendChild(panel);
+  }
+
+  /** Merge `columns` into the node's `config` attr; update() then re-fetches. */
+  private setColumns(columns: string[]): void {
+    const pos = this.getPos();
+    if (pos == null) return;
+    const { state, dispatch } = this.view;
+    const config = { ...(this.node.attrs.config ?? {}), columns };
+    dispatch(state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, config }));
   }
 
   /** A menu button that closes the menu, then runs `action`. */
@@ -474,8 +558,10 @@ export class BlockEmbedView implements NodeView {
   private renderTable(
     payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
   ): void {
-    // Set before header() so overflowMenu() can offer the export items.
+    // Set before header() so overflowMenu() can offer the export items and the
+    // column picker (allColumns = the full set, before config.columns subsets).
     this.tablePayload = payload;
+    this.allColumns = payload.allColumns;
     this.dom.replaceChildren();
     this.dom.appendChild(
       this.header(iconMarkup(kindIcon(payload.kind)), `${payload.db}/${payload.label}`, payload.href),
@@ -637,6 +723,6 @@ export class BlockEmbedView implements NodeView {
   }
   stopEvent(event: Event): boolean {
     const target = event.target as HTMLElement | null;
-    return !!target && !!target.closest("a, button, select");
+    return !!target && !!target.closest("a, button, select, input, label");
   }
 }

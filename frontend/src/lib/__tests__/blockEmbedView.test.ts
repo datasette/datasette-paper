@@ -432,4 +432,126 @@ describe("BlockEmbedView", () => {
     const labels = exportItems(view).map((i) => i.textContent);
     expect(labels).toEqual(["Convert to inline element"]);
   });
+
+  // ── Column filter: fetch projection + the "Columns…" picker ───────────────
+
+  // Mount a block_embed (optionally with attrs) into a real EditorView, so the
+  // picker's setNodeMarkup transaction has a live state/dispatch to write to.
+  async function mountEmbed(
+    attrs: Record<string, unknown>,
+    native: unknown,
+  ): Promise<{ view: EditorView; nodeView: BlockEmbedView }> {
+    stubFetch(native);
+    let captured: BlockEmbedView | null = null;
+    const embed = schema.nodes.block_embed.create(attrs);
+    const doc = schema.node("doc", null, [embed]);
+    const place = document.createElement("div");
+    document.body.appendChild(place);
+    const view = new EditorView(place, {
+      state: EditorState.create({ doc }),
+      nodeViews: {
+        block_embed: (node, v, getPos) => {
+          captured = new BlockEmbedView(node, v, getPos as () => number | undefined);
+          return captured;
+        },
+      },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    return { view, nodeView: captured! };
+  }
+
+  function openColumnsPanel(view: EditorView): HTMLInputElement[] {
+    (view.dom.querySelector(".pm-block-embed-menu-btn") as HTMLButtonElement).click();
+    const colsBtn = [...view.dom.querySelectorAll(".pm-block-embed-menu-item")].find(
+      (el) => el.textContent === "Columns…",
+    ) as HTMLButtonElement;
+    colsBtn.click();
+    return [...view.dom.querySelectorAll(".pm-block-embed-columns-item input")] as HTMLInputElement[];
+  }
+
+  it("issues _col= for config.columns and renders only the projected columns", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        // PK `id` forced back in by the server even though only name/region picked.
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            columns: ["id", "name", "region"],
+            rows: [[1, "Acme", "West"]],
+            count: 1,
+          }),
+        };
+      }),
+    );
+    const node = schema.nodes.block_embed.create({
+      ref: "/data/vendors",
+      config: { columns: ["name", "region"] },
+    });
+    const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(urls[0]).toContain("_col=name");
+    expect(urls[0]).toContain("_col=region");
+    // Only the picked columns reach the rendered header — the PK is dropped.
+    expect([...view.dom.querySelectorAll("th")].map((t) => t.textContent)).toEqual([
+      "name",
+      "region",
+    ]);
+  });
+
+  it("the ⋮ menu lists every column as a checkbox, selected ones checked", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { columns: ["name"] } },
+      { columns: ["id", "name", "region"], rows: [[1, "Acme", "West"]], count: 1 },
+    );
+    const boxes = openColumnsPanel(view);
+    expect(boxes.map((b) => (b.nextSibling as HTMLElement).textContent)).toEqual([
+      "id",
+      "name",
+      "region",
+    ]);
+    // Only the selected "name" is checked.
+    expect(boxes.map((b) => b.checked)).toEqual([false, true, false]);
+    view.destroy();
+  });
+
+  it("checks all columns when config.columns is empty (show-all)", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 },
+    );
+    const boxes = openColumnsPanel(view);
+    expect(boxes.map((b) => b.checked)).toEqual([true, true]);
+    view.destroy();
+  });
+
+  it("Apply writes the ordered selection to config.columns", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id", "name", "region"], rows: [[1, "Acme", "West"]], count: 1 },
+    );
+    const boxes = openColumnsPanel(view);
+    // Uncheck the PK "id", keep name + region.
+    boxes[0].checked = false;
+    (view.dom.querySelector(".pm-block-embed-columns-apply") as HTMLButtonElement).click();
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({
+      columns: ["name", "region"],
+    });
+    view.destroy();
+  });
+
+  it("Apply with every column checked stores [] (minimal show-all config)", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { columns: ["name"] } },
+      { columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 },
+    );
+    const boxes = openColumnsPanel(view);
+    boxes.forEach((b) => (b.checked = true));
+    (view.dom.querySelector(".pm-block-embed-columns-apply") as HTMLButtonElement).click();
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({ columns: [] });
+    view.destroy();
+  });
 });

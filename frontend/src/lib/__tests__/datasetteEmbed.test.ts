@@ -153,11 +153,93 @@ describe("fetchEmbed (native .json)", () => {
       label: "t",
       db: "d",
       columns: ["id", "name"],
+      allColumns: ["id", "name"],
       rows: [[1, "Acme"]],
       count: 30,
       truncated: true,
       href: "/d/t",
     });
+  });
+
+  it("sends _col= for each selected column and projects the response", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        // Server re-adds the PK `rowid` first even though it wasn't requested.
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            columns: ["rowid", "name", "id"],
+            rows: [[7, "Acme", 1]],
+            count: 30,
+            next: null,
+          }),
+        };
+      }),
+    );
+    const out = await fetchEmbed("/d/t", 25, ["name", "id"]);
+    // _col= is sent for each selected column (unselected ones stay server-side).
+    expect(urls[0]).toContain("_col=name");
+    expect(urls[0]).toContain("_col=id");
+    expect(urls[0]).not.toContain("_col=rowid");
+    // Projection drops the forced-in PK and applies the author's order.
+    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
+    expect(out.columns).toEqual(["name", "id"]);
+    expect(out.rows).toEqual([["Acme", 1]]);
+    // The full set is preserved for the picker.
+    expect(out.allColumns).toEqual(["rowid", "name", "id"]);
+  });
+
+  it("issues no _col= and returns full columns when no selection is given", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 }),
+        };
+      }),
+    );
+    const out = await fetchEmbed("/d/t", 25);
+    expect(urls[0]).not.toContain("_col=");
+    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
+    expect(out.columns).toEqual(["id", "name"]);
+  });
+
+  it("drops selected columns absent from the response", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 }),
+      })),
+    );
+    const out = await fetchEmbed("/d/t", 25, ["name", "gone"]);
+    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
+    expect(out.columns).toEqual(["name"]);
+    expect(out.rows).toEqual([["Acme"]]);
+  });
+
+  it("falls back to the full response when every selected column has vanished", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({ columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 }),
+      })),
+    );
+    const out = await fetchEmbed("/d/t", 25, ["nope", "alsonope"]);
+    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
+    expect(out.columns).toEqual(["id", "name"]);
+    expect(out.rows).toEqual([[1, "Acme"]]);
   });
 
   it("transforms a native row response into a row payload", async () => {
