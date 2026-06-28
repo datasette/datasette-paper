@@ -249,6 +249,23 @@ class Instance:
         self._cached_live_version = self.version
         return live
 
+    def _raise_if_poisoned(self) -> None:
+        """Reject a write if a step in history couldn't be materialized.
+
+        When materialization fails partway, ``materialize_live_doc`` returns the
+        doc as of the last good version while the instance's version counter
+        still reflects the FULL count — so client batches are positioned against
+        a doc state the server can't reproduce. Raise with a clear marker rather
+        than letting each step fail individually with a misleading position
+        error. Callers that must not fail the write path (link reindex, auto
+        snapshot) check ``_materialization_error`` and skip instead.
+        """
+        if self._materialization_error is not None:
+            bad_version, bad_msg = self._materialization_error
+            raise InvalidStepError(
+                0, f"history corrupted at version {bad_version}: {bad_msg}"
+            )
+
     def _validate_steps(self, step_jsons: list[str]) -> None:
         """Apply each step against a clone of the live doc; raise on first failure.
 
@@ -266,18 +283,7 @@ class Instance:
         from .pm_schema import schema
 
         live_json = self.materialize_live_doc()
-        # If a step in history couldn't be applied during materialization,
-        # ``live_json`` is the doc as of the last good version — but the
-        # instance's version counter is the FULL count, so client batches
-        # are positioned against a doc state the server can't reproduce.
-        # Reject with a clear marker rather than letting each step fail
-        # individually with a misleading position error.
-        if self._materialization_error is not None:
-            bad_version, bad_msg = self._materialization_error
-            raise InvalidStepError(
-                0,
-                f"history corrupted at version {bad_version}: {bad_msg}",
-            )
+        self._raise_if_poisoned()
         try:
             doc = schema.node_from_json(live_json)
         except Exception as exc:
@@ -510,11 +516,7 @@ class Instance:
 
         async with self._write_lock:
             live_json = self.materialize_live_doc()
-            if self._materialization_error is not None:
-                bad_version, bad_msg = self._materialization_error
-                raise InvalidStepError(
-                    0, f"history corrupted at version {bad_version}: {bad_msg}"
-                )
+            self._raise_if_poisoned()
 
             try:
                 doc = schema.node_from_json(live_json)
@@ -559,11 +561,7 @@ class Instance:
 
         async with self._write_lock:
             live_json = self.materialize_live_doc()
-            if self._materialization_error is not None:
-                bad_version, bad_msg = self._materialization_error
-                raise InvalidStepError(
-                    0, f"history corrupted at version {bad_version}: {bad_msg}"
-                )
+            self._raise_if_poisoned()
 
             current_md = doc_to_markdown(live_json)
             new_md = edit_fn(current_md)
