@@ -21,9 +21,11 @@ import {
   fetchEmbed,
   iconMarkup,
   kindIcon,
+  refSegments,
   safeHref,
   type EmbedPayload,
 } from "./datasetteEmbed";
+import { rowsToCsv, rowsToJson } from "./tableExport";
 import { embedRegistry, type PaperEmbedProvider } from "./embedRegistry";
 import { ensureProviderForRef, manifestKindForRef } from "./embedProviders";
 import type { DatasetteStatus } from "./datasetteResolver";
@@ -46,6 +48,10 @@ export class BlockEmbedView implements NodeView {
   private menuEl: HTMLElement | null = null;
   // Cleanup returned by a third-party provider's mount(), if any.
   private cleanupExternal: (() => void) | null = null;
+  // The last table/view payload rendered, if any — drives the export items
+  // (Copy page serializes its held rows; Download links target its db/table).
+  // Cleared on any non-table render so the menu can't export stale data.
+  private tablePayload: Extract<EmbedPayload, { kind: "table" | "view" }> | null = null;
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.view = view;
@@ -227,9 +233,20 @@ export class BlockEmbedView implements NodeView {
   }
 
   /**
-   * The "⋮" overflow menu. Currently a single action — convert this block
-   * embed into the inline `inline_embed` pill (block → inline). The menu is
-   * positioned within the embed (which is tall enough not to clip it) and
+   * The "⋮" overflow menu. Always offers "Convert to inline element" (block →
+   * inline downgrade). For a table/view it also offers result-export items:
+   *
+   *  - **Download CSV / JSON** — links to Datasette's *native* streaming
+   *    endpoints (`.csv?_stream=on`, `.json?_shape=array`), which export the
+   *    *entire* table/view server-side, bypassing the embed's `_size` page cap
+   *    (and the SQL block's `max_returned_rows` cap). `.csv?_stream=on` is
+   *    gated by the `allow_csv_stream` setting (default on).
+   *  - **Copy page** — copies only the rows currently held client-side (one
+   *    `_size` page). Labelled with the page row count and "(page)" whenever
+   *    `count` exceeds the held rows, so a partial copy is never mistaken for
+   *    the whole table.
+   *
+   * The menu is positioned within the embed (tall enough not to clip it) and
    * closes on outside click.
    */
   private overflowMenu(): HTMLElement {
@@ -252,19 +269,86 @@ export class BlockEmbedView implements NodeView {
     const menu = document.createElement("div");
     menu.className = "pm-block-embed-menu";
 
-    const convert = document.createElement("button");
-    convert.type = "button";
-    convert.className = "pm-block-embed-menu-item";
-    convert.textContent = "Convert to inline element";
-    convert.addEventListener("click", (e) => {
+    const payload = this.tablePayload;
+    if (payload) {
+      // Native full-dataset download links — server-side, not the held page.
+      menu.appendChild(
+        this.menuLink("Download CSV (all rows)", this.exportUrl(payload, "csv")),
+      );
+      menu.appendChild(
+        this.menuLink("Download JSON (all rows)", this.exportUrl(payload, "json")),
+      );
+      // Client-side copy of the held page — honestly labelled when partial.
+      const partial = payload.count != null && payload.count > payload.rows.length;
+      const suffix = partial
+        ? ` (page, ${payload.rows.length} of ${payload.count})`
+        : ` (${payload.rows.length} row${payload.rows.length === 1 ? "" : "s"})`;
+      menu.appendChild(
+        this.menuButton(`Copy as CSV${suffix}`, () => this.copyPage(payload, "csv")),
+      );
+      menu.appendChild(
+        this.menuButton(`Copy as JSON${suffix}`, () => this.copyPage(payload, "json")),
+      );
+    }
+
+    menu.appendChild(
+      this.menuButton("Convert to inline element", () => this.convertToInline()),
+    );
+    wrap.appendChild(menu);
+    return wrap;
+  }
+
+  /** A menu button that closes the menu, then runs `action`. */
+  private menuButton(label: string, action: () => void): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pm-block-embed-menu-item";
+    b.textContent = label;
+    b.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
       this.closeMenu();
-      this.convertToInline();
+      action();
     });
-    menu.appendChild(convert);
-    wrap.appendChild(menu);
-    return wrap;
+    return b;
+  }
+
+  /** A menu item that's a download link (native streaming export endpoint). */
+  private menuLink(label: string, href: string): HTMLAnchorElement {
+    const a = document.createElement("a");
+    a.className = "pm-block-embed-menu-item";
+    a.href = href;
+    a.textContent = label;
+    // A bare GET to a same-origin .csv/.json — no new tab needed; the browser
+    // downloads (.csv) or shows (.json) it. Close the menu on activation.
+    a.addEventListener("click", () => this.closeMenu());
+    return a;
+  }
+
+  /**
+   * The native Datasette streaming-export URL for a table/view payload.
+   * `.csv?_stream=on` streams every row (bypasses row caps); `.json?_shape=array`
+   * gives a bare JSON array (paginated — the user follows `next` for the rest).
+   * Built from the ref segments so it can't be poisoned by a crafted `href`.
+   */
+  private exportUrl(
+    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
+    format: "csv" | "json",
+  ): string {
+    const path = "/" + refSegments(payload.href).map(encodeURIComponent).join("/");
+    return format === "csv" ? `${path}.csv?_stream=on` : `${path}.json?_shape=array`;
+  }
+
+  /** Copy the held page (one `_size` fetch) to the clipboard as CSV/JSON. */
+  private copyPage(
+    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
+    format: "csv" | "json",
+  ): void {
+    const text =
+      format === "csv"
+        ? rowsToCsv(payload.columns, payload.rows)
+        : rowsToJson(payload.columns, payload.rows);
+    void navigator.clipboard?.writeText(text);
   }
 
   private toggleMenu(menu: HTMLElement): void {
@@ -358,6 +442,8 @@ export class BlockEmbedView implements NodeView {
   }
 
   private render(payload: EmbedPayload): void {
+    // Default to "no exportable table" — renderTable re-sets it below.
+    this.tablePayload = null;
     this.dom.classList.remove(
       "pm-block-embed--denied",
       "pm-block-embed--missing",
@@ -385,6 +471,8 @@ export class BlockEmbedView implements NodeView {
   private renderTable(
     payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
   ): void {
+    // Set before header() so overflowMenu() can offer the export items.
+    this.tablePayload = payload;
     this.dom.replaceChildren();
     this.dom.appendChild(
       this.header(iconMarkup(kindIcon(payload.kind)), `${payload.db}/${payload.label}`, payload.href),
@@ -421,7 +509,15 @@ export class BlockEmbedView implements NodeView {
     const footer = document.createElement("div");
     footer.className = "pm-block-embed-footer";
 
-    // "showing [25] of 1,234 rows" — the count number is the limit dropdown.
+    // Left: "open in Datasette" (matches the SQL block's footer layout).
+    const link = document.createElement("a");
+    link.className = "pm-block-embed-footer-link";
+    link.href = payload.href;
+    link.textContent = "open in Datasette ↗";
+    footer.appendChild(link);
+
+    // Right (margin-left:auto on the info span pushes it over): "showing [25]
+    // of 1,234 rows" — the count number is the limit dropdown.
     const info = document.createElement("span");
     info.className = "pm-block-embed-footer-info";
     info.append("showing ", this.rowLimitSelect());
@@ -431,12 +527,6 @@ export class BlockEmbedView implements NodeView {
       info.append(" rows");
     }
     footer.appendChild(info);
-
-    const link = document.createElement("a");
-    link.className = "pm-block-embed-footer-link";
-    link.href = payload.href;
-    link.textContent = "open in Datasette ↗";
-    footer.appendChild(link);
     this.dom.appendChild(footer);
   }
 
@@ -500,16 +590,17 @@ export class BlockEmbedView implements NodeView {
 
     const footer = document.createElement("div");
     footer.className = "pm-block-embed-footer";
-    const info = document.createElement("span");
-    info.className = "pm-block-embed-footer-info";
-    const n = payload.tables.length;
-    info.textContent = `${n} table${n === 1 ? "" : "s"}`;
-    footer.appendChild(info);
+    // Link left, count right — same layout as the table footer.
     const link = document.createElement("a");
     link.className = "pm-block-embed-footer-link";
     link.href = payload.href;
     link.textContent = "open in Datasette ↗";
     footer.appendChild(link);
+    const info = document.createElement("span");
+    info.className = "pm-block-embed-footer-info";
+    const n = payload.tables.length;
+    info.textContent = `${n} table${n === 1 ? "" : "s"}`;
+    footer.appendChild(info);
     this.dom.appendChild(footer);
   }
 

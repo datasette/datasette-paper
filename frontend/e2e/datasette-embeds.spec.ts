@@ -65,6 +65,32 @@ test.describe("slash menu + datasette embed", () => {
     // Footer: inline limit dropdown (default 10) + total ("showing [10] of 30 rows").
     await expect(embed.locator(".pm-block-embed-rows")).toHaveValue("10");
     await expect(embed).toContainText("of 30 rows");
+    // Footer layout (ticket 02): the "open in Datasette" link is the FIRST
+    // footer child (left); the count/limit info is pushed to the right.
+    await expect(
+      embed.locator(".pm-block-embed-footer > :first-child"),
+    ).toHaveClass(/pm-block-embed-footer-link/);
+
+    // Export menu (ticket 01): the ⋮ menu offers native streaming downloads.
+    await embed.locator(".pm-block-embed-menu-btn").click();
+    const exportMenu = embed.locator(".pm-block-embed-menu");
+    await expect(exportMenu).toHaveClass(/pm-block-embed-menu--open/);
+    await expect(
+      exportMenu.locator(".pm-block-embed-menu-item", {
+        hasText: "Download CSV",
+      }),
+    ).toHaveAttribute("href", /\/vendors\.csv\?_stream=on/);
+    await expect(
+      exportMenu.locator(".pm-block-embed-menu-item", {
+        hasText: "Download JSON",
+      }),
+    ).toHaveAttribute("href", /\/vendors\.json\?_shape=array/);
+    // Copy is honestly labelled as the visible page (30 rows total, 10 held).
+    await expect(
+      exportMenu.locator(".pm-block-embed-menu-item", { hasText: "Copy as CSV" }),
+    ).toContainText("page");
+    // Close the menu before continuing.
+    await page.keyboard.press("Escape");
 
     // Persisted as ref-only: after a reload the NodeView re-fetches + renders.
     await waitForServerVersion(page, host.id, 1);

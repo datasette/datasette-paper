@@ -197,7 +197,11 @@ describe("BlockEmbedView", () => {
     btn.click();
     expect(isOpen()).toBe(true);
 
-    (view.dom.querySelector(".pm-block-embed-menu-item") as HTMLButtonElement).click();
+    // The menu now leads with export items; pick the Convert item by label.
+    const convert = [...view.dom.querySelectorAll(".pm-block-embed-menu-item")].find(
+      (el) => el.textContent === "Convert to inline element",
+    ) as HTMLButtonElement;
+    convert.click();
 
     const para = view.state.doc.firstChild!;
     expect(para.type.name).toBe("paragraph");
@@ -279,5 +283,103 @@ describe("BlockEmbedView", () => {
     // The payload string is present as text, but no <img> element was created.
     expect(view.dom.querySelector("td img")).toBeNull();
     expect(view.dom.querySelector("td")!.textContent).toContain("<img");
+  });
+
+  // ── Ticket 02: footer layout (link left, count right) ─────────────────────
+
+  it("orders the table footer: open-in-Datasette link first, info second", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 30,
+    });
+    const footer = view.dom.querySelector(".pm-block-embed-footer")!;
+    const kids = [...footer.children];
+    expect(kids[0].classList.contains("pm-block-embed-footer-link")).toBe(true);
+    expect(kids[1].classList.contains("pm-block-embed-footer-info")).toBe(true);
+    expect(kids[1].textContent).toContain("of 30 rows");
+  });
+
+  it("orders the database footer the same way (link first, count second)", async () => {
+    const view = await build("/data", {
+      tables: [{ name: "vendors", count: 30 }],
+    });
+    const footer = view.dom.querySelector(".pm-block-embed-footer")!;
+    const kids = [...footer.children];
+    expect(kids[0].classList.contains("pm-block-embed-footer-link")).toBe(true);
+    expect(kids[1].classList.contains("pm-block-embed-footer-info")).toBe(true);
+  });
+
+  // ── Ticket 01: export menu ────────────────────────────────────────────────
+
+  function exportItems(view: BlockEmbedView): HTMLElement[] {
+    return [...view.dom.querySelectorAll(".pm-block-embed-menu .pm-block-embed-menu-item")] as HTMLElement[];
+  }
+
+  it("adds CSV/JSON download links + a Copy page item to the ⋮ menu for a table", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id", "name"],
+      rows: [[1, "Acme"]],
+      count: 30,
+    });
+    const items = exportItems(view);
+    const labels = items.map((i) => i.textContent);
+    expect(labels.some((l) => l!.startsWith("Download CSV"))).toBe(true);
+    expect(labels.some((l) => l!.startsWith("Download JSON"))).toBe(true);
+    // Copy is honestly labelled as the page when count > held rows.
+    expect(labels.some((l) => l!.includes("Copy as CSV (page, 1 of 30)"))).toBe(true);
+    expect(labels.some((l) => l!.includes("Copy as JSON (page, 1 of 30)"))).toBe(true);
+    // "Convert to inline element" is still present.
+    expect(labels).toContain("Convert to inline element");
+  });
+
+  it("download links point at Datasette's native streaming endpoints", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 30,
+    });
+    const links = exportItems(view).filter(
+      (i) => i.tagName === "A",
+    ) as HTMLAnchorElement[];
+    const csv = links.find((a) => a.textContent!.startsWith("Download CSV"))!;
+    const json = links.find((a) => a.textContent!.startsWith("Download JSON"))!;
+    expect(csv.getAttribute("href")).toBe("/data/vendors.csv?_stream=on");
+    expect(json.getAttribute("href")).toBe("/data/vendors.json?_shape=array");
+  });
+
+  it("labels Copy as the full set (row count, no 'page') when all rows are held", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id"],
+      rows: [[1], [2]],
+      count: 2,
+    });
+    const labels = exportItems(view).map((i) => i.textContent);
+    expect(labels.some((l) => l === "Copy as CSV (2 rows)")).toBe(true);
+    expect(labels.some((l) => l!.includes("page"))).toBe(false);
+  });
+
+  it("Copy page writes the held rows (serialized) to the clipboard", async () => {
+    const writeText = vi.fn();
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const view = await build("/data/vendors", {
+      columns: ["id", "name"],
+      rows: [[1, "Acme"]],
+      count: 30,
+    });
+    const copyCsv = exportItems(view).find((i) =>
+      i.textContent!.startsWith("Copy as CSV"),
+    ) as HTMLButtonElement;
+    copyCsv.click();
+    expect(writeText).toHaveBeenCalledWith("id,name\n1,Acme");
+  });
+
+  it("offers no export items for a non-table embed (row card)", async () => {
+    const view = await build("/data/vendors/1", {
+      columns: ["id", "name"],
+      rows: [{ id: 1, name: "Acme" }],
+    });
+    const labels = exportItems(view).map((i) => i.textContent);
+    expect(labels).toEqual(["Convert to inline element"]);
   });
 });

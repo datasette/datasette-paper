@@ -837,7 +837,8 @@
 .editor-host .pm-block-embed-menu--open {
   display: block;
 }
-.editor-host .pm-block-embed-menu-item {
+.editor-host .pm-block-embed-menu-item,
+.editor-host a.pm-block-embed-menu-item:visited {
   display: block;
   width: 100%;
   text-align: left;
@@ -847,6 +848,7 @@
   font: inherit;
   font-size: 13px;
   color: #333;
+  text-decoration: none;
   padding: 6px 8px;
   border-radius: 4px;
 }
@@ -926,10 +928,16 @@
 }
 .editor-host .pm-block-embed-footer-link,
 .editor-host .pm-block-embed-footer-link:visited {
-  /* Float "open in Datasette" to the right edge of the footer. */
-  margin-left: auto;
+  /* "open in Datasette" sits at the left edge (mirrors the SQL block). */
   color: #6429a8;
   text-decoration: none;
+}
+.editor-host .pm-block-embed-footer-link:hover {
+  text-decoration: underline;
+}
+.editor-host .pm-block-embed-footer-info {
+  /* Push the row-count + page-size control to the right edge. */
+  margin-left: auto;
 }
 .editor-host .pm-block-embed-fields {
   display: grid;
