@@ -12,6 +12,7 @@ that provider — either because the doc contains one of its embeds (matched by
 """
 
 import logging
+from urllib.parse import quote
 
 from datasette.plugins import pm
 
@@ -33,6 +34,94 @@ def _providers(datasette):
         else:
             providers.append(result)
     return providers
+
+
+def _provider_for_ref(datasette, ref):
+    """Return the first provider whose ``ref_prefixes`` claims ``ref``, else None.
+
+    Mirrors the server-knowable mapping ``provider_manifest`` exposes
+    (``ref_prefixes``) — the same channel the frontend lazy-loader uses — so the
+    markdown serializer can find a ref's owning provider without running any
+    in-bundle JS ``matchRef``.
+    """
+    if not ref:
+        return None
+    for provider in _providers(datasette):
+        for prefix in getattr(provider, "ref_prefixes", None) or []:
+            if ref.startswith(prefix):
+                return provider
+    return None
+
+
+def ref_to_kind_and_url(datasette, ref):
+    """Map an inline-embed ``ref`` to ``(kind, resource_url | None)``.
+
+    Used by the markdown serializer (ticket 04) to build the canonical
+    ``paper:/embed/<kind>/<ref>`` and, when a provider supplies one, a real
+    resource href. A ref claimed by a provider (by ``ref_prefixes``) takes that
+    provider's ``kind`` and its optional ``resource_url(datasette, ref)``; an
+    unclaimed (core Datasette) ref is kind ``"datasette"`` with no URL (the
+    serializer can still emit the bare canonical). A provider whose
+    ``resource_url`` raises is logged and treated as no-URL, mirroring the
+    ``frontend_assets`` try/except discipline.
+    """
+    provider = _provider_for_ref(datasette, ref)
+    if provider is None:
+        return "datasette", None
+    kind = getattr(provider, "kind", None) or "datasette"
+    fn = getattr(provider, "resource_url", None)
+    url = None
+    if callable(fn):
+        try:
+            url = fn(datasette, ref)
+        except Exception:
+            logger.exception(
+                "paper_embed_provider.resource_url raised for %r; treating as None",
+                ref,
+            )
+            url = None
+    return kind, url
+
+
+def make_resource_resolver(datasette, request=None):
+    """Build the ``resource_url`` resolver passed to ``doc_to_markdown``.
+
+    Returns a callable ``(ref_type, value) -> (kind, url | None)`` matching
+    :data:`datasette_paper.markdown.ResourceResolver`:
+
+    * ``actor`` → ``/-/profile/<id>``
+    * ``tag``   → ``/-/paper/tag/<slug>``
+    * ``embed`` → ``(<provider-kind>, provider.resource_url(ref))`` via
+      ``ref_to_kind_and_url`` (core Datasette refs get kind ``"datasette"`` and
+      no href).
+
+    URLs are made absolute via ``datasette.absolute_url(request, path)`` when a
+    ``request`` is in scope (so external renderers like GitHub get a followable
+    link); otherwise the root-relative path is emitted (still better than a dead
+    ``paper:/`` link).
+    """
+
+    def absolutize(path):
+        if path is None:
+            return None
+        if request is not None:
+            try:
+                return datasette.absolute_url(request, path)
+            except Exception:
+                return path
+        return path
+
+    def resolve(ref_type, value):
+        if ref_type == "actor":
+            return None, absolutize(f"/-/profile/{quote(value, safe='')}")
+        if ref_type == "tag":
+            return None, absolutize(f"/-/paper/tag/{quote(value, safe='')}")
+        if ref_type == "embed":
+            kind, url = ref_to_kind_and_url(datasette, value)
+            return kind, absolutize(url)
+        return None, None
+
+    return resolve
 
 
 def provider_manifest(datasette):

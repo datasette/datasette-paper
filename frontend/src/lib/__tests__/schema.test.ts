@@ -151,11 +151,12 @@ describe("block_embed node", () => {
     const json = node.toJSON();
     expect(json).toEqual({
       type: "block_embed",
-      attrs: { ref: "/fixtures/facetable", mode: "table" },
+      attrs: { ref: "/fixtures/facetable", mode: "table", config: {} },
     });
     const back = schema.nodeFromJSON(json);
     expect(back.attrs.ref).toBe("/fixtures/facetable");
     expect(back.attrs.mode).toBe("table");
+    expect(back.attrs.config).toEqual({});
     expect(back.type).toBe(schema.nodes.block_embed);
   });
 

@@ -2,7 +2,7 @@
  * E2E for `@`-mentions. Two paths:
  *
  *  1. Rendering — a doc seeded (via the create-from-markdown API) with a
- *     `[@name](actor:id)` mention opens with a `.pm-mention` pill whose
+ *     `[@name](paper:/actor/id)` mention opens with a `.pm-mention` pill whose
  *     NodeView resolves the live display name through the ActorResolver.
  *
  *  2. Authoring — typing `@` opens the doc-scoped suggest popup. The e2e
@@ -26,7 +26,7 @@ test.describe("@-mentions", () => {
     const resp = await page.request.post(`${BASE}/api/docs`, {
       data: {
         name: "Mention Render Target",
-        content: "Ping [@alice](actor:alice) please",
+        content: "Ping [@alice](paper:/actor/alice) please",
         content_type: "markdown",
       },
     });

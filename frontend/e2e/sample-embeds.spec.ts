@@ -45,14 +45,14 @@ test.describe("third-party custom embeds (sample plugin)", () => {
     const content = [
       "# Embeds demo",
       "",
-      "Inline: [Front Page Hits](datasette:/-/sample-embeds/playlists/front-page-hits)",
+      "Inline: [Front Page Hits](paper:/embed/playlist/-/sample-embeds/playlists/front-page-hits)",
       "",
-      `${FENCE}datasette-embed`,
-      "/-/sample-embeds/playlists/front-page-hits",
+      `${FENCE}paper-embed`,
+      '{"config":{},"mode":"table","ref":"/-/sample-embeds/playlists/front-page-hits"}',
       FENCE,
       "",
-      `${FENCE}datasette-embed`,
-      "/-/sample-embeds/widgets/newsstand",
+      `${FENCE}paper-embed`,
+      '{"config":{},"mode":"table","ref":"/-/sample-embeds/widgets/newsstand"}',
       FENCE,
       "",
     ].join("\n");
@@ -84,8 +84,8 @@ test.describe("third-party custom embeds (sample plugin)", () => {
     const content = [
       "# Restricted",
       "",
-      `${FENCE}datasette-embed`,
-      "/-/sample-embeds/playlists/summer-mix",
+      `${FENCE}paper-embed`,
+      '{"config":{},"mode":"table","ref":"/-/sample-embeds/playlists/summer-mix"}',
       FENCE,
       "",
     ].join("\n");

@@ -28,6 +28,12 @@ export interface PaperEmbedContext {
   ref: string;
   /** The block node's `mode` attr (default "table"). */
   mode: string;
+  /**
+   * The block node's `config` attr — a provider-defined bag (e.g. column
+   * selection, sort) carried through the markdown `paper-embed` fence.
+   * Opaque to core paper; default `{}`.
+   */
+  config: Record<string, unknown>;
 }
 
 /** A browsable insert source a provider contributes to the `/` slash menu. */

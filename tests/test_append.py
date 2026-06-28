@@ -11,6 +11,7 @@ import asyncio
 import pytest
 
 from datasette_paper.instance import get_registry
+from datasette_paper.util import paper_db
 
 
 async def _make_doc(ds, name="Doc"):
@@ -98,18 +99,61 @@ async def test_append_inline_and_block_embed_roundtrip(ds):
     lock-step holds end-to-end through the markdown API)."""
     doc_id = await _make_doc(ds)
     content = (
-        "See [/fixtures/facetable](datasette:/fixtures/facetable) here.\n\n"
-        "```datasette-embed\n/fixtures/facetable\n```\n\n"
-        "```datasette-embed\n/fixtures/vendors/42\nmode: row\n```\n"
+        "See [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable) here.\n\n"
+        '```paper-embed\n{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```\n\n'
+        '```paper-embed\n{"config":{},"mode":"row","ref":"/fixtures/vendors/42"}\n```\n'
     )
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append", json={"content": content}
     )
     assert resp.status_code == 200
     md = await _document_markdown(ds, doc_id)
-    assert "[/fixtures/facetable](datasette:/fixtures/facetable)" in md
-    assert "```datasette-embed\n/fixtures/facetable\n```" in md
-    assert "```datasette-embed\n/fixtures/vendors/42\nmode: row\n```" in md
+    assert "[/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)" in md
+    assert (
+        '```paper-embed\n{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```'
+        in md
+    )
+    assert (
+        '```paper-embed\n{"config": {}, "mode": "row", "ref": "/fixtures/vendors/42"}\n```'
+        in md
+    )
+
+
+@pytest.mark.asyncio
+async def test_append_paper_refs_materialize_with_right_attrs(ds):
+    """Ticket 05: an external caller posting the new wire format (a
+    paper:/embed inline ref + a paper-embed JSON fence with config) produces a
+    materialized doc with the right nodes/attrs — proving the append /
+    create-from-markdown path works for the consolidated scheme."""
+    doc_id = await _make_doc(ds)
+    content = (
+        "Look [/db/t/row/9](paper:/embed/datasette/db/t/row/9) here.\n\n"
+        '```paper-embed\n{"config":{"columns":["a","b"]},"mode":"row","ref":"/db/t"}\n```\n'
+    )
+    resp = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/append", json={"content": content}
+    )
+    assert resp.status_code == 200
+
+    registry = get_registry(ds)
+    registry._instances.pop(doc_id, None)
+    instance = await registry.get(paper_db(ds), doc_id)
+    live = instance.materialize_live_doc()
+    flat = []
+
+    def walk(node):
+        flat.append(node)
+        for c in node.get("content") or []:
+            walk(c)
+
+    walk(live)
+    inline = [n for n in flat if n.get("type") == "inline_embed"]
+    block = [n for n in flat if n.get("type") == "block_embed"]
+    assert inline and inline[0]["attrs"]["ref"] == "/db/t/row/9"
+    assert block
+    assert block[0]["attrs"]["ref"] == "/db/t"
+    assert block[0]["attrs"]["mode"] == "row"
+    assert block[0]["attrs"]["config"] == {"columns": ["a", "b"]}
 
 
 @pytest.mark.asyncio

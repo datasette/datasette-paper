@@ -253,6 +253,56 @@ describe("BlockEmbedView", () => {
     }
   });
 
+  it("passes the node's config attr into the provider mount ctx", async () => {
+    const ctxSeen: { config?: unknown; mode?: string } = {};
+    embedRegistry().register({
+      kind: "place-list",
+      matchRef: (ref) => ref.startsWith("/-/places/list/"),
+      resolve: async (ref) => ({
+        status: "ok",
+        kind: "place-list",
+        label: "My places",
+        href: ref,
+      }),
+      mount: (host, ctx) => {
+        ctxSeen.config = ctx.config;
+        ctxSeen.mode = ctx.mode;
+        host.textContent = "ok";
+      },
+    });
+    try {
+      const config = { columns: ["name", "id"], sort: "-created" };
+      const node = schema.nodes.block_embed.create({
+        ref: "/-/places/list/5",
+        config,
+      });
+      new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+      await new Promise((r) => setTimeout(r, 0));
+      expect(ctxSeen.config).toEqual(config);
+    } finally {
+      _resetEmbedRegistryForTest();
+    }
+  });
+
+  it("survives a config attr through a DOM toDOM/parseDOM round-trip", () => {
+    const config = { columns: ["a"], nested: { x: 1 } };
+    const node = schema.nodes.block_embed.create({ ref: "/data/t", config });
+    // toDOM stringifies config into data-embed-config.
+    const out = node.type.spec.toDOM!(node) as [string, Record<string, string>];
+    expect(JSON.parse(out[1]["data-embed-config"])).toEqual(config);
+    // parseDOM getAttrs reads it back.
+    const div = document.createElement("div");
+    div.setAttribute("data-block-embed", "/data/t");
+    div.setAttribute("data-embed-config", out[1]["data-embed-config"]);
+    const getAttrs = node.type.spec.parseDOM![0].getAttrs as (
+      el: HTMLElement,
+    ) => Record<string, unknown>;
+    expect(getAttrs(div).config).toEqual(config);
+    // A malformed blob degrades to {}.
+    div.setAttribute("data-embed-config", "{not json");
+    expect(getAttrs(div).config).toEqual({});
+  });
+
   it("renders a leak-free denied placeholder when a provider resolves denied", async () => {
     embedRegistry().register({
       kind: "place-list",

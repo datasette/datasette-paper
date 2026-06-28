@@ -40,6 +40,7 @@ export class BlockEmbedView implements NodeView {
   private node: PMNode;
   private ref: string | null;
   private mode: string;
+  private config: Record<string, unknown>;
   // How many rows to fetch/show; user-adjustable via the footer dropdown.
   private limit = DEFAULT_ROW_LIMIT;
   // Bumped on each (re)fetch so a stale in-flight response is discarded.
@@ -61,6 +62,7 @@ export class BlockEmbedView implements NodeView {
     this.dom.className = "pm-block-embed";
     this.ref = node.attrs.ref ?? null;
     this.mode = node.attrs.mode ?? "table";
+    this.config = (node.attrs.config as Record<string, unknown>) ?? {};
     void this.load();
   }
 
@@ -156,6 +158,7 @@ export class BlockEmbedView implements NodeView {
       const cleanup = provider.mount(host, {
         ref: this.ref ?? "",
         mode: this.mode,
+        config: this.config,
       });
       this.cleanupExternal = typeof cleanup === "function" ? cleanup : null;
     } catch {
@@ -609,9 +612,13 @@ export class BlockEmbedView implements NodeView {
     this.node = node;
     const nextRef = node.attrs.ref ?? null;
     const nextMode = node.attrs.mode ?? "table";
-    if (nextRef !== this.ref || nextMode !== this.mode) {
+    const nextConfig = (node.attrs.config as Record<string, unknown>) ?? {};
+    const configChanged =
+      JSON.stringify(nextConfig) !== JSON.stringify(this.config);
+    if (nextRef !== this.ref || nextMode !== this.mode || configChanged) {
       this.ref = nextRef;
       this.mode = nextMode;
+      this.config = nextConfig;
       void this.load();
     }
     return true;

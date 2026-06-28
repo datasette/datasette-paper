@@ -8,9 +8,19 @@ may differ.
 """
 
 import contextvars
+import json
 import re
-from typing import List, Optional
+from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
+
+# A resource-URL resolver: given (ref_type, value) it returns
+# ``(kind, url)`` where:
+#   * ``kind`` is the embed provider kind (only meaningful for ``"embed"``;
+#     ``None`` for actor/tag whose canonical type segment is fixed), and
+#   * ``url`` is a human/external-renderer URL for the resource, or ``None``
+#     to emit the bare ``paper:/...`` ref with no href.
+# Returning ``None`` instead of a tuple is equivalent to ``(None, None)``.
+ResourceResolver = Callable[[str, str], Optional[Tuple[Optional[str], Optional[str]]]]
 
 # Optional {actor_id: display_name} map consulted by the `mention` inline
 # renderer, scoped to a single ``doc_to_markdown`` call. A ContextVar avoids
@@ -21,16 +31,36 @@ _actor_names: contextvars.ContextVar[dict] = contextvars.ContextVar(
     "paper_actor_names", default={}
 )
 
+# Optional resource-URL resolver, scoped to a single ``doc_to_markdown`` call —
+# the parallel of ``_actor_names`` for ticket 04. Lets the pure serializer
+# resolve real resource URLs (and the embed provider kind) without taking a
+# ``datasette`` argument. Absent a resolver, inline refs serialize as the bare
+# ``paper:/...`` href (ticket-02 behaviour).
+_resource_url: contextvars.ContextVar[Optional[ResourceResolver]] = (
+    contextvars.ContextVar("paper_resource_url", default=None)
+)
 
-def doc_to_markdown(doc: dict, actor_names: Optional[dict] = None) -> str:
+
+def doc_to_markdown(
+    doc: dict,
+    actor_names: Optional[dict] = None,
+    resource_url: Optional[ResourceResolver] = None,
+) -> str:
     """Serialize a ProseMirror doc to a markdown string ending in a newline.
 
     ``actor_names`` optionally maps actor ids to display names for `mention`
     nodes; when omitted, mentions render with the actor id as their label.
+
+    ``resource_url`` optionally resolves a real resource URL (and, for embeds,
+    the provider kind) for each inline ref — see :data:`ResourceResolver`. When
+    a URL is returned the ref serializes as ``[label](url "paper:/...")`` (the
+    canonical ref kept in the link title so the parser reads it back
+    losslessly); otherwise it serializes as the bare ``[label](paper:/...)``.
     """
     if doc.get("type") != "doc":
         raise ValueError("expected top-level 'doc' node")
     token = _actor_names.set(actor_names or {})
+    url_token = _resource_url.set(resource_url)
     try:
         blocks = doc.get("content") or []
         out: List[str] = []
@@ -42,6 +72,42 @@ def doc_to_markdown(doc: dict, actor_names: Optional[dict] = None) -> str:
         return text
     finally:
         _actor_names.reset(token)
+        _resource_url.reset(url_token)
+
+
+def _resolve_resource(ref_type: str, value: str) -> Tuple[Optional[str], Optional[str]]:
+    """Call the scoped resolver for ``(ref_type, value)``; normalize the result.
+
+    Returns ``(kind, url)`` with either element possibly ``None``. A resolver
+    that raises is swallowed (best-effort enrichment must never break the pure
+    serializer) and treated as no resolution.
+    """
+    resolver = _resource_url.get()
+    if resolver is None:
+        return None, None
+    try:
+        result = resolver(ref_type, value)
+    except Exception:
+        return None, None
+    if not result:
+        return None, None
+    kind, url = result
+    return kind, url
+
+
+def _ref_link(label: str, canonical: str, url: Optional[str]) -> str:
+    """Render an inline ref link.
+
+    With a resource ``url``: ``[label](url "canonical")`` — the canonical
+    ``paper:/`` ref lives in the title (the round-trip-safe channel). Without
+    one: ``[label](canonical)`` (ticket-02 behaviour). The ``"`` in the title is
+    escaped per CommonMark.
+    """
+    safe_label = label.replace("]", "\\]")
+    if url:
+        title = canonical.replace('"', '\\"')
+        return f'[{safe_label}]({url} "{title}")'
+    return f"[{safe_label}]({canonical})"
 
 
 def _render_block(node: dict) -> str:
@@ -91,13 +157,17 @@ def _render_block(node: dict) -> str:
         return _render_table(node)
     if t == "block_embed":
         attrs = node.get("attrs") or {}
-        ref = attrs.get("ref") or ""
-        mode = attrs.get("mode") or "table"
-        # A fenced block with info string `datasette-embed`: the first body
-        # line is the authoritative ref path; a non-default mode goes on a
-        # second `mode: <mode>` line (ticket 05 parses it back).
-        body = ref if mode == "table" else f"{ref}\nmode: {mode}"
-        return "```datasette-embed\n" + body + "\n```\n"
+        payload = {
+            "ref": attrs.get("ref") or "",
+            "mode": attrs.get("mode") or "table",
+            "config": attrs.get("config") or {},
+        }
+        # A fenced block with info string `paper-embed`: the body is one JSON
+        # object whose keys are exactly the node attrs. sort_keys → stable
+        # diffs; ensure_ascii=False keeps unicode readable. The parser reads it
+        # back in markdown_parser.py.
+        body = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        return "```paper-embed\n" + body + "\n```\n"
     if t == "list_item":
         # list_item is rendered by _render_list with markers; calling here
         # returns the bare child blocks.
@@ -494,33 +564,45 @@ def _render_inlines(nodes: list) -> str:
         elif t == "mention":
             actor_id = (n.get("attrs") or {}).get("actorId") or ""
             label = _actor_names.get().get(actor_id) or actor_id
-            # `[@Name](actor:<id>)` — `@` inside the link text so it renders
-            # as a single "@Name" link; the `actor:` scheme lets the parser
-            # detect mentions unambiguously. Escape `]` in the label and
-            # percent-encode the id so the link form stays well-formed.
-            safe_label = label.replace("]", "\\]")
-            out.append(f"[@{safe_label}](actor:{quote(actor_id, safe='')})")
+            # `[@Name](url "paper:/actor/<id>")` (or bare `paper:/actor/<id>`
+            # href if no resolver) — `@` inside the link text so it renders as a
+            # single "@Name" link; the canonical `paper:/actor/` ref lets the
+            # parser detect mentions unambiguously. Percent-encode the id so the
+            # canonical stays well-formed.
+            canonical = f"paper:/actor/{quote(actor_id, safe='')}"
+            _kind, url = _resolve_resource("actor", actor_id)
+            out.append(_ref_link("@" + label, canonical, url))
         elif t == "tag":
             tag = (n.get("attrs") or {}).get("tag") or ""
-            # `[#tag](tag:<slug>)` — `#` inside the link text so it renders as
-            # a single "#tag" link; the `tag:` scheme lets the parser detect
-            # inline tags unambiguously (a bare `#tag` would collide with ATX
-            # headings). Slugs are normalized at every input path (editor
-            # trigger, doc-tag normalize_tag, and the md parser) so `]` can't
-            # occur; the escape is defense-in-depth against an unvalidated
-            # collab step, mirroring the mention case above. Percent-encode
-            # the slug for the href.
-            safe_tag = tag.replace("]", "\\]")
-            out.append(f"[#{safe_tag}](tag:{quote(tag, safe='')})")
+            # `[#tag](url "paper:/tag/<slug>")` (or bare href) — `#` inside the
+            # link text so it renders as a single "#tag" link; the canonical
+            # `paper:/tag/` ref lets the parser detect inline tags unambiguously
+            # (a bare `#tag` would collide with ATX headings). Slugs are
+            # normalized at every input path so `]` can't occur. Percent-encode
+            # the slug for the canonical.
+            canonical = f"paper:/tag/{quote(tag, safe='')}"
+            _kind, url = _resolve_resource("tag", tag)
+            out.append(_ref_link("#" + tag, canonical, url))
         elif t == "inline_embed":
             ref = (n.get("attrs") or {}).get("ref") or ""
-            # `[label](datasette:<path>)` — the `datasette:` scheme lets the
-            # parser detect refs unambiguously. There is no resolved label at
-            # serialize time, so the path doubles as the label (like paper_link
-            # rendering `[[id]]`). The path is authoritative; keep its slashes
-            # intact (don't percent-encode), only escape `]` in the label.
-            safe = ref.replace("]", "\\]")
-            out.append(f"[{safe}](datasette:{ref})")
+            # `[label](url "paper:/embed/<kind>/<ref>")` (or bare canonical
+            # href). The canonical ref's slashes stay raw (`safe='/'`) so the
+            # path is readable, but spaces / `%` / other awkward chars are
+            # percent-encoded so the markdown link destination round-trips
+            # losslessly; the parser `unquote`s it back. There is no resolved
+            # label at serialize time, so the ref doubles as the label.
+            #
+            # The provider `kind` and resource `url` come from the resolver
+            # (ticket 04): an embed claimed by a provider gets that provider's
+            # kind + its `resource_url(ref)`; an unclaimed (core Datasette) ref
+            # falls back to kind "datasette". The ref begins with "/", so the
+            # concatenation `paper:/embed/<kind>` + ref is a valid path.
+            ref_path = ref if ref.startswith("/") else "/" + ref
+            encoded_ref = quote(ref_path, safe="/")
+            kind, url = _resolve_resource("embed", ref)
+            kind = kind or "datasette"
+            canonical = f"paper:/embed/{kind}{encoded_ref}"
+            out.append(_ref_link(ref, canonical, url))
 
     close_through(0)
     return "".join(out)

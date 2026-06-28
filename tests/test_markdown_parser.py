@@ -287,8 +287,8 @@ class TestInlineNodes:
         links = [n for n in content if n["type"] == "paper_link"]
         assert [link["attrs"]["docId"] for link in links] == [1, 2]
 
-    def test_mention_from_actor_scheme_link(self):
-        doc = parse_and_validate("Hi [@Alice Smith](actor:alice-id) there\n")
+    def test_mention_from_paper_actor_scheme_link(self):
+        doc = parse_and_validate("Hi [@Alice Smith](paper:/actor/alice-id) there\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["text", "mention", "text"]
         assert content[0]["text"] == "Hi "
@@ -297,10 +297,18 @@ class TestInlineNodes:
         assert content[2]["text"] == " there"
 
     def test_mention_percent_decodes_actor_id(self):
-        doc = parse_and_validate("[@Team](actor:team%2Feng%20dept)\n")
+        doc = parse_and_validate("[@Team](paper:/actor/team%2Feng%20dept)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["mention"]
         assert content[0]["attrs"]["actorId"] == "team/eng dept"
+
+    def test_mention_reads_canonical_from_link_title(self):
+        # Ticket 04: real href + canonical in the title — the parser reads the
+        # title first, ignoring the (human-facing) href entirely.
+        doc = parse_and_validate('[@Lois](/-/profile/lois "paper:/actor/lois")\n')
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["mention"]
+        assert content[0]["attrs"]["actorId"] == "lois"
 
     def test_ordinary_link_is_not_a_mention(self):
         doc = parse_and_validate("see [docs](https://example.com/y)\n")
@@ -309,8 +317,8 @@ class TestInlineNodes:
         link = content[-1]
         assert link["marks"][0]["attrs"]["href"] == "https://example.com/y"
 
-    def test_tag_from_tag_scheme_link(self):
-        doc = parse_and_validate("Our [#roadmap](tag:roadmap) plan\n")
+    def test_tag_from_paper_tag_scheme_link(self):
+        doc = parse_and_validate("Our [#roadmap](paper:/tag/roadmap) plan\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["text", "tag", "text"]
         assert content[0]["text"] == "Our "
@@ -319,7 +327,7 @@ class TestInlineNodes:
         assert content[2]["text"] == " plan"
 
     def test_tag_percent_decodes_slug(self):
-        doc = parse_and_validate("[#nested](tag:inbox%2Fto-read)\n")
+        doc = parse_and_validate("[#nested](paper:/tag/inbox%2Fto-read)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["tag"]
         assert content[0]["attrs"]["tag"] == "inbox/to-read"
@@ -335,7 +343,7 @@ class TestInlineNodes:
         # A hand-authored href with chars the editor could never type
         # (uppercase, `]`) is normalized to the canonical slug rule, so the
         # stored tag never contains `]`.
-        doc = parse_and_validate("[#x](tag:Foo%5DBar)\n")
+        doc = parse_and_validate("[#x](paper:/tag/Foo%5DBar)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["tag"]
         assert content[0]["attrs"]["tag"] == "foobar"
@@ -343,7 +351,7 @@ class TestInlineNodes:
     def test_unnormalizable_tag_slug_drops_atom(self):
         # A slug that normalizes to empty produces no tag atom (lossy, like
         # other out-of-schema content) rather than an invalid empty tag.
-        doc = parse_and_validate("[#x](tag:%5D%5D)\n")
+        doc = parse_and_validate("[#x](paper:/tag/%5D%5D)\n")
         content = doc["content"][0]["content"]
         assert all(n["type"] != "tag" for n in content)
 
@@ -354,8 +362,10 @@ class TestInlineNodes:
 
 
 class TestInlineEmbed:
-    def test_ref_from_datasette_scheme_link(self):
-        doc = parse_and_validate("see [x](datasette:/fixtures/facetable) ok\n")
+    def test_ref_from_paper_embed_scheme_link(self):
+        doc = parse_and_validate(
+            "see [x](paper:/embed/datasette/fixtures/facetable) ok\n"
+        )
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["text", "inline_embed", "text"]
         assert content[0]["text"] == "see "
@@ -363,35 +373,93 @@ class TestInlineEmbed:
         assert "marks" not in content[1]
         assert content[2]["text"] == " ok"
 
+    def test_ref_with_many_slashes_is_not_split(self):
+        # The ref keeps every slash after the <kind> segment — only the kind is
+        # split off (split-once gotcha).
+        doc = parse_and_validate("[x](paper:/embed/datasette/db/t/row/1)\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["inline_embed"]
+        assert content[0]["attrs"]["ref"] == "/db/t/row/1"
+
     def test_ref_percent_decodes_path(self):
-        doc = parse_and_validate("[x](datasette:/db/t%20with%20space/1)\n")
+        doc = parse_and_validate("[x](paper:/embed/datasette/db/t%20with%20space/1)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["inline_embed"]
         assert content[0]["attrs"]["ref"] == "/db/t with space/1"
+
+    def test_ref_reads_canonical_from_link_title(self):
+        # Ticket 04: real provider href + canonical (with the real kind) in the
+        # title; the parser reads the ref from the title.
+        doc = parse_and_validate(
+            '[Acme list](/-/places/list/5 "paper:/embed/place-list/-/places/list/5")\n'
+        )
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["inline_embed"]
+        assert content[0]["attrs"]["ref"] == "/-/places/list/5"
 
     def test_ordinary_link_is_not_a_ref(self):
         doc = parse_and_validate("see [docs](https://example.com/y)\n")
         content = doc["content"][0]["content"]
         assert all(n["type"] != "inline_embed" for n in content)
 
+    def test_plain_link_with_nonpaper_title_is_left_alone(self):
+        # A plain external link with a title that isn't paper:/ stays a link.
+        doc = parse_and_validate('[x](https://example.com "see this")\n')
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "inline_embed" for n in content)
+        assert content[0]["marks"][0]["attrs"]["href"] == "https://example.com"
+
 
 class TestBlockEmbed:
-    def test_embed_fence_default_mode(self):
-        doc = parse_and_validate("```datasette-embed\n/fixtures/facetable\n```\n")
-        block = doc["content"][0]
-        assert block["type"] == "block_embed"
-        assert block["attrs"] == {"ref": "/fixtures/facetable", "mode": "table"}
-
-    def test_embed_fence_with_mode_line(self):
+    def test_paper_embed_fence_default(self):
         doc = parse_and_validate(
-            "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
+            '```paper-embed\n{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```\n'
         )
         block = doc["content"][0]
         assert block["type"] == "block_embed"
-        assert block["attrs"] == {"ref": "/fixtures/facetable/1", "mode": "row"}
+        assert block["attrs"] == {
+            "ref": "/fixtures/facetable",
+            "mode": "table",
+            "config": {},
+        }
+
+    def test_paper_embed_fence_with_mode_and_config(self):
+        doc = parse_and_validate(
+            "```paper-embed\n"
+            '{"config":{"columns":["name"]},"mode":"row","ref":"/fixtures/facetable/1"}\n```\n'
+        )
+        block = doc["content"][0]
+        assert block["type"] == "block_embed"
+        assert block["attrs"] == {
+            "ref": "/fixtures/facetable/1",
+            "mode": "row",
+            "config": {"columns": ["name"]},
+        }
+
+    def test_malformed_paper_embed_body_is_safe_default(self):
+        # A hand-edited / non-JSON body must not raise — fall back to an
+        # empty/`table` embed.
+        doc = parse_and_validate("```paper-embed\nnot json at all\n```\n")
+        block = doc["content"][0]
+        assert block["type"] == "block_embed"
+        assert block["attrs"] == {"ref": None, "mode": "table", "config": {}}
+
+    def test_paper_embed_body_non_object_is_safe_default(self):
+        doc = parse_and_validate("```paper-embed\n[1, 2, 3]\n```\n")
+        block = doc["content"][0]
+        assert block["attrs"] == {"ref": None, "mode": "table", "config": {}}
+
+    def test_paper_embed_non_dict_config_falls_back_to_empty(self):
+        doc = parse_and_validate('```paper-embed\n{"ref":"/r","config":"oops"}\n```\n')
+        assert doc["content"][0]["attrs"]["config"] == {}
 
     def test_plain_fence_stays_code_block(self):
         doc = parse_and_validate("```\n/fixtures/facetable\n```\n")
+        assert doc["content"][0]["type"] == "code_block"
+
+    def test_no_datasette_embed_handling_remains(self):
+        # The old `datasette-embed` info string is now an ordinary code block.
+        doc = parse_and_validate("```datasette-embed\n/fixtures/facetable\n```\n")
         assert doc["content"][0]["type"] == "code_block"
 
     def test_other_info_string_stays_code_block(self):
@@ -605,10 +673,22 @@ ROUNDTRIP_STABLE = [
     # images (were dropped on serialize)
     "![alt](https://example.com/x.png)\n",
     '![alt](https://example.com/x.png "a title")\n',
-    # datasette inline ref + block embed
-    "see [/fixtures/facetable](datasette:/fixtures/facetable)\n",
-    "```datasette-embed\n/fixtures/facetable\n```\n",
-    "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n",
+    # paper:/ inline ref (mention / tag / embed) + block embed fence
+    "see [@Lois](paper:/actor/lois)\n",
+    "see [#roadmap](paper:/tag/roadmap)\n",
+    "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)\n",
+    # ticket 04: real href + canonical ref in the link title (title-first parse).
+    # Note: the visible label/href aren't reconstructed on serialize (no
+    # resolver in this round-trip), so only the bare-canonical forms above are
+    # byte-stable here; the title form is round-tripped via the parser test
+    # below + the doc→md→doc resolver test in test_markdown.py.
+    # an embed ref with multiple slashes (split-once gotcha)
+    "see [/db/t/row/1](paper:/embed/datasette/db/t/row/1)\n",
+    # block embed: paper-embed JSON fence (sorted keys, all three attrs)
+    '```paper-embed\n{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```\n',
+    '```paper-embed\n{"config": {}, "mode": "row", "ref": "/fixtures/facetable/1"}\n```\n',
+    '```paper-embed\n{"config": {"columns": ["name", "id"]}, '
+    '"mode": "table", "ref": "/fixtures/facetable"}\n```\n',
     # markdown-significant chars in plain text (re-parsed as markup unescaped)
     "literal star \\* and underscore \\_ and bracket \\[x\\]\n",
     "a backslash \\\\ in text\n",
@@ -696,7 +776,7 @@ def test_image_src_with_space_survives_roundtrip():
 
 
 def test_mention_roundtrips_through_serializer():
-    src = "Hi [@Alice](actor:alice-id) there\n"
+    src = "Hi [@Alice](paper:/actor/alice-id) there\n"
     doc1 = parse_and_validate(src)
     md1 = doc_to_markdown(doc1)
     doc2 = markdown_to_doc(md1)
@@ -704,7 +784,7 @@ def test_mention_roundtrips_through_serializer():
 
 
 def test_inline_embed_roundtrips_through_serializer():
-    src = "see [/fixtures/facetable](datasette:/fixtures/facetable) ok\n"
+    src = "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable) ok\n"
     doc1 = parse_and_validate(src)
     md1 = doc_to_markdown(doc1)
     doc2 = markdown_to_doc(md1)
@@ -712,7 +792,10 @@ def test_inline_embed_roundtrips_through_serializer():
 
 
 def test_block_embed_roundtrips_through_serializer():
-    src = "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
+    src = (
+        "```paper-embed\n"
+        '{"config": {"columns": ["a"]}, "mode": "row", "ref": "/fixtures/facetable/1"}\n```\n'
+    )
     doc1 = parse_and_validate(src)
     md1 = doc_to_markdown(doc1)
     doc2 = markdown_to_doc(md1)

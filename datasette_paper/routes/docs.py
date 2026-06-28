@@ -8,7 +8,7 @@ from datasette import Forbidden, Response
 from datasette_plugin_router import Body
 
 from ..router import router
-from ..embed_providers import provider_manifest
+from ..embed_providers import make_resource_resolver, provider_manifest
 from ..errors import InvalidStepError
 from ..instance import get_registry
 from ..markdown import doc_to_markdown, extract_tasks, group_tasks_by_section
@@ -739,7 +739,12 @@ async def get_document(datasette, request, doc_id: int):
     instance = await registry.get(db, doc_id)
 
     live_doc = instance.materialize_live_doc()
-    md = doc_to_markdown(live_doc)
+    # Resolve real resource URLs (and embed provider kinds) for inline refs;
+    # the canonical paper:/ ref is kept in each link's title for lossless
+    # round-trips. Request in scope → absolute URLs for external renderers.
+    md = doc_to_markdown(
+        live_doc, resource_url=make_resource_resolver(datasette, request)
+    )
 
     accept = request.headers.get("accept", "") or request.headers.get("Accept", "")
     if _wants_markdown(accept):

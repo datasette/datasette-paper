@@ -140,7 +140,8 @@ const tagNode: NodeSpec = {
 // authored via context-aware URL paste and rendered by a NodeView
 // (inlineEmbedView.ts) that resolves a live display label. The toDOM here is
 // a static fallback. Mirrors datasette_paper/pm_schema.py;
-// datasette_paper/markdown.py round-trips it as `[label](datasette:<path>)`.
+// datasette_paper/markdown.py round-trips it as
+// `[label](paper:/embed/<kind>/<ref>)`.
 const inlineEmbedNode: NodeSpec = {
   group: "inline",
   inline: true,
@@ -171,19 +172,30 @@ const inlineEmbedNode: NodeSpec = {
 // identity-only (`ref` + `mode`); rendered data is fetched per-viewer by a
 // NodeView (blockEmbedView.ts) and never persisted in attrs. The toDOM
 // here is a static fallback. Mirrors datasette_paper/pm_schema.py;
-// datasette_paper/markdown.py round-trips it as a ```datasette-embed fence.
+// datasette_paper/markdown.py round-trips it as a ```paper-embed JSON fence.
 const blockEmbedNode: NodeSpec = {
   group: "block",
   atom: true,
   selectable: true,
   draggable: false,
-  attrs: { ref: { default: null }, mode: { default: "table" } },
+  // `config` is an opaque provider-defined bag (column selection, sort, …)
+  // carried in the markdown `paper-embed` fence; core paper just stores and
+  // round-trips it. It survives the DOM round-trip JSON-stringified in
+  // `data-embed-config` (parsed defensively → {} on malformed input).
+  attrs: {
+    ref: { default: null },
+    mode: { default: "table" },
+    config: { default: {} },
+  },
   parseDOM: [
     {
       tag: "div[data-block-embed]",
       getAttrs: (el) => ({
         ref: (el as HTMLElement).getAttribute("data-block-embed") || null,
         mode: (el as HTMLElement).getAttribute("data-embed-mode") || "table",
+        config: parseEmbedConfig(
+          (el as HTMLElement).getAttribute("data-embed-config"),
+        ),
       }),
     },
   ],
@@ -192,11 +204,25 @@ const blockEmbedNode: NodeSpec = {
     {
       "data-block-embed": String(node.attrs.ref ?? ""),
       "data-embed-mode": String(node.attrs.mode ?? "table"),
+      "data-embed-config": JSON.stringify(node.attrs.config ?? {}),
       class: "pm-block-embed",
     },
     String(node.attrs.ref ?? "?"),
   ],
 };
+
+/** Parse the `data-embed-config` JSON blob, falling back to {} on any error. */
+function parseEmbedConfig(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  } catch {
+    return {};
+  }
+}
 
 // Block node for an editable SQL query run against a named Datasette
 // database. Unlike `block_embed` (an atom holding only a `ref`), the query is

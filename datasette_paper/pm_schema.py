@@ -14,6 +14,8 @@ even though we never expose merge/split UI; in practice every cell has
 `colspan=rowspan=1`.
 """
 
+import json
+
 from prosemirror.model import Schema
 from prosemirror.schema.basic import schema as basic_schema
 from prosemirror.schema.list import add_list_nodes
@@ -137,7 +139,7 @@ _paper_link_spec = {
 
 # Inline atom for @mentions — mirrors the JS schema in
 # frontend/src/lib/schema.ts. id-only (`actorId`); markdown round-trips as
-# `[@label](actor:id)` via datasette_paper/markdown.py. toDOM is never
+# `[@label](paper:/actor/<id>)` via datasette_paper/markdown.py. toDOM is never
 # rendered server-side but must be structurally valid for
 # node_from_json/Step.apply.
 _mention_spec = {
@@ -160,7 +162,7 @@ _mention_spec = {
 
 # Inline atom for #tags — mirrors the JS schema in
 # frontend/src/lib/schema.ts. value-only (`tag`); markdown round-trips as
-# `[#label](tag:slug)` via datasette_paper/markdown.py. No async resolver
+# `[#label](paper:/tag/<slug>)` via datasette_paper/markdown.py. No async resolver
 # (the tag is its own label). toDOM must be structurally valid for
 # node_from_json/Step.apply but is never rendered server-side.
 _tag_spec = {
@@ -183,7 +185,7 @@ _tag_spec = {
 
 # Inline atom for references to a Datasette resource — mirrors the JS schema
 # in frontend/src/lib/schema.ts. identity-only (`ref`, a Datasette URL path);
-# markdown round-trips as `[label](datasette:<path>)` via
+# markdown round-trips as `[label](paper:/embed/<kind>/<ref>)` via
 # datasette_paper/markdown.py. The display label is resolved per-viewer by the
 # NodeView and never persisted. toDOM is never rendered server-side but must be
 # structurally valid for node_from_json/Step.apply.
@@ -206,21 +208,31 @@ _inline_embed_spec = {
 }
 
 # Block atom for an embedded read-only render of a Datasette resource —
-# mirrors the JS schema. identity-only (`ref` + `mode`); rendered data is
-# fetched per-viewer and never persisted. markdown round-trips as a
-# ```datasette-embed fence via datasette_paper/markdown.py.
+# mirrors the JS schema. identity-only (`ref` + `mode` + opaque `config`);
+# rendered data is fetched per-viewer and never persisted. markdown round-trips
+# as a ```paper-embed JSON fence via datasette_paper/markdown.py. `config` is a
+# provider-defined bag carried verbatim; it survives the DOM round-trip
+# JSON-stringified in `data-embed-config` (parsed defensively → {}).
 _block_embed_spec = {
     "group": "block",
     "atom": True,
     "selectable": True,
     "draggable": False,
-    "attrs": {"ref": {"default": None}, "mode": {"default": "table"}},
+    "attrs": {
+        "ref": {"default": None},
+        "mode": {"default": "table"},
+        "config": {"default": {}},
+    },
+    # parseDOM is never exercised server-side (materialization goes through
+    # node_from_json, not DOM parsing), so — like the other specs here — we
+    # only declare the tag; attrs (incl. `config`) arrive via the JSON.
     "parseDOM": [{"tag": "div[data-block-embed]"}],
     "toDOM": lambda node: [
         "div",
         {
             "data-block-embed": str(node.attrs.get("ref") or ""),
             "data-embed-mode": str(node.attrs.get("mode") or "table"),
+            "data-embed-config": json.dumps(node.attrs.get("config") or {}),
             "class": "pm-block-embed",
         },
         str(node.attrs.get("ref") or ""),

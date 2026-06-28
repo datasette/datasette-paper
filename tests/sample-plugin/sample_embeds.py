@@ -161,6 +161,14 @@ class _SampleProvider:
         # A single vanilla-JS bundle, served by this plugin's own route below.
         return {"js": [self._js_url]}
 
+    def resource_url(self, datasette, ref):
+        # The stored ref already IS the human-facing page URL for this sample
+        # provider (e.g. /-/sample-embeds/playlists/summer-mix), so paper can
+        # use it directly as the markdown href; the canonical paper:/ ref stays
+        # in the link title. Returning the ref proves the title-attr path end
+        # to end in the round-trip tests.
+        return ref
+
 
 @hookimpl
 def paper_embed_provider(datasette):

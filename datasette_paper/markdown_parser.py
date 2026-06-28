@@ -20,6 +20,7 @@ Public API:
 
 from __future__ import annotations
 
+import json
 import re
 from urllib.parse import unquote
 
@@ -211,22 +212,28 @@ def _tokens_to_doc(tokens) -> dict:
             text = tok.content or ""
             if text.endswith("\n"):
                 text = text[:-1]
-            # A fence whose info string is `datasette-embed` is a block embed,
-            # not a code block: first line = ref path, optional `mode: <mode>`
-            # line. (Indented code_block tokens carry no info string.)
+            # A fence whose info string is `paper-embed` is a block embed, not a
+            # code block: the body is one JSON object `{ref, mode, config}`
+            # mirroring the node attrs. (Indented code_block tokens carry no
+            # info string.) Be defensive — a hand-edited / malformed body must
+            # never raise; fall back to an empty/`table` embed.
             info = (getattr(tok, "info", "") or "").strip()
-            if t == "fence" and info == "datasette-embed":
-                lines = text.split("\n")
-                ref = lines[0].strip() if lines else ""
-                mode = "table"
-                for line in lines[1:]:
-                    stripped = line.strip()
-                    if stripped.startswith("mode:"):
-                        mode = stripped[len("mode:") :].strip() or "table"
+            if t == "fence" and info == "paper-embed":
+                try:
+                    data = json.loads(text)
+                    if not isinstance(data, dict):
+                        raise ValueError
+                except (ValueError, TypeError):
+                    data = {}
+                config = data.get("config")
                 append(
                     {
                         "type": "block_embed",
-                        "attrs": {"ref": ref or None, "mode": mode},
+                        "attrs": {
+                            "ref": data.get("ref") or None,
+                            "mode": data.get("mode") or "table",
+                            "config": config if isinstance(config, dict) else {},
+                        },
                     }
                 )
                 continue
@@ -435,11 +442,7 @@ def _inline_to_pm(inline_token) -> list[dict]:
         # Unknown inline token kinds are dropped — better silent than crashing
         # in a converter that runs over arbitrary user input.
 
-    return _coalesce_text(
-        _split_paper_links(
-            _convert_datasette_refs(_convert_tag_links(_convert_actor_mentions(raw)))
-        )
-    )
+    return _coalesce_text(_split_paper_links(_convert_paper_refs(raw)))
 
 
 def _coalesce_text(nodes: list[dict]) -> list[dict]:
@@ -463,146 +466,104 @@ def _coalesce_text(nodes: list[dict]) -> list[dict]:
     return out
 
 
-_ACTOR_SCHEME = "actor:"
+_PAPER_SCHEME = "paper:/"  # note: scheme + leading path slash
 
 
-def _actor_link_href(node: dict) -> str | None:
-    """Return the `actor:`-scheme href of a text node's link mark, or None.
+def _parse_paper_ref(href: str) -> tuple[str, str]:
+    """Split a `paper:/<type>/<value>` href into ``(type, value)``.
 
-    Mentions serialize as `[@Name](actor:<id>)`; markdown-it parses that into
-    text wrapped in a ``link`` mark whose href carries the `actor:` scheme.
+    Splits ONCE on the slash after the type so the value keeps any raw
+    slashes it contains (critical for embed refs)::
+
+        "paper:/actor/lois"                      -> ("actor", "lois")
+        "paper:/tag/q3"                          -> ("tag", "q3")
+        "paper:/embed/datasette/fixtures/face"   -> ("embed", "datasette/fixtures/face")
+    """
+    rest = href[len(_PAPER_SCHEME) :]
+    kind, _, value = rest.partition("/")
+    return kind, value
+
+
+def _paper_ref_canonical(node: dict) -> str | None:
+    """Return a text node's `paper:/`-scheme reference, or None.
+
+    The canonical ref lives in the link mark's ``title`` (ticket 04's
+    round-trip-safe channel) when present, otherwise the ``href``. A plain
+    external link — `paper:/` in neither slot — returns None and is left as an
+    ordinary link mark (the safety property).
     """
     if node.get("type") != "text":
         return None
     for m in node.get("marks") or []:
         if m.get("type") == "link":
-            href = (m.get("attrs") or {}).get("href") or ""
-            if href.startswith(_ACTOR_SCHEME):
+            attrs = m.get("attrs") or {}
+            title = attrs.get("title") or ""
+            if title.startswith(_PAPER_SCHEME):
+                return title
+            href = attrs.get("href") or ""
+            if href.startswith(_PAPER_SCHEME):
                 return href
     return None
 
 
-def _convert_actor_mentions(nodes: list[dict]) -> list[dict]:
-    """Replace `actor:`-scheme link text with id-only `mention` atoms.
+def _paper_ref_to_node(kind: str, value: str) -> dict | None:
+    """Build the PM atom for a parsed `(kind, value)` paper ref, or None to drop.
 
-    Detection is purely by the link mark's URI scheme — no `@`-boundary or
-    path heuristics, so ordinary `[text](https://…)` links are never touched.
-    Consecutive text nodes sharing the same actor href fold into a single
-    mention; the visible label and the link mark are dropped (the NodeView
-    resolves the live display name). The actor id is the scheme-stripped,
-    percent-decoded href.
+    - ``actor`` → ``mention`` (actorId = percent-decoded value)
+    - ``tag``   → ``tag`` (normalized; un-normalizable drops the atom)
+    - ``embed`` → ``inline_embed`` (value is `<provider-kind>/<ref>`; split once
+      more, re-add the leading slash stripped during serialize). The provider
+      kind is informational at parse time — the frontend re-derives the provider
+      from ``ref_prefixes`` — so it isn't stored (the schema has no `kind` attr).
     """
-    out: list[dict] = []
-    prev_href: str | None = None
-    for node in nodes:
-        href = _actor_link_href(node)
-        if href is None:
-            prev_href = None
-            out.append(node)
-            continue
-        # Same mention's text continuing across split text nodes — the atom
-        # was already emitted, so swallow the remaining label fragments.
-        if href == prev_href:
-            continue
-        actor_id = unquote(href[len(_ACTOR_SCHEME) :])
-        out.append({"type": "mention", "attrs": {"actorId": actor_id}})
-        prev_href = href
-    return out
-
-
-_TAG_SCHEME = "tag:"
-
-
-def _tag_link_href(node: dict) -> str | None:
-    """Return the `tag:`-scheme href of a text node's link mark, or None.
-
-    Inline tags serialize as `[#slug](tag:<slug>)`; markdown-it parses that
-    into text wrapped in a ``link`` mark whose href carries the `tag:` scheme.
-    """
-    if node.get("type") != "text":
-        return None
-    for m in node.get("marks") or []:
-        if m.get("type") == "link":
-            href = (m.get("attrs") or {}).get("href") or ""
-            if href.startswith(_TAG_SCHEME):
-                return href
-    return None
-
-
-def _convert_tag_links(nodes: list[dict]) -> list[dict]:
-    """Replace `tag:`-scheme link text with value-only `tag` atoms.
-
-    Mirrors _convert_actor_mentions: detection is purely by the link mark's
-    URI scheme, so ordinary `[text](https://…)` links are never touched.
-    Consecutive text nodes sharing the same tag href fold into a single atom;
-    the visible label and the link mark are dropped. The slug is the
-    scheme-stripped, percent-decoded href.
-    """
-    out: list[dict] = []
-    prev_href: str | None = None
-    for node in nodes:
-        href = _tag_link_href(node)
-        if href is None:
-            prev_href = None
-            out.append(node)
-            continue
-        if href == prev_href:
-            continue
+    if kind == "actor":
+        return {"type": "mention", "attrs": {"actorId": unquote(value)}}
+    if kind == "tag":
         # Normalize through the same rule as typed / doc-level tags so a
-        # hand-authored `tag:` href can't smuggle in a slug the editor could
-        # never produce (uppercase, spaces, `]`, …). An un-normalizable slug
-        # drops the atom (lossy, like other out-of-schema content) but still
-        # advances prev_href so trailing fragments of the link fold away.
-        tag = normalize_tag(unquote(href[len(_TAG_SCHEME) :]))
-        if tag is not None:
-            out.append({"type": "tag", "attrs": {"tag": tag}})
-        prev_href = href
-    return out
-
-
-_DATASETTE_SCHEME = "datasette:"
-
-
-def _datasette_link_href(node: dict) -> str | None:
-    """Return the `datasette:`-scheme href of a text node's link mark, or None.
-
-    Inline refs serialize as `[label](datasette:<path>)`; markdown-it parses
-    that into text wrapped in a ``link`` mark whose href carries the
-    `datasette:` scheme.
-    """
-    if node.get("type") != "text":
-        return None
-    for m in node.get("marks") or []:
-        if m.get("type") == "link":
-            href = (m.get("attrs") or {}).get("href") or ""
-            if href.startswith(_DATASETTE_SCHEME):
-                return href
+        # hand-authored ref can't smuggle in a slug the editor could never
+        # produce (uppercase, spaces, `]`, …).
+        tag = normalize_tag(unquote(value))
+        if tag is None:
+            return None
+        return {"type": "tag", "attrs": {"tag": tag}}
+    if kind == "embed":
+        # value is "<provider-kind>/<ref-without-leading-slash>". Split once;
+        # the entire remainder is the ref (it can contain raw slashes). The ref
+        # is percent-decoded (serialize encodes spaces / `%` but keeps slashes)
+        # and the leading slash stripped during serialize is restored.
+        _provider_kind, _, ref = value.partition("/")
+        return {"type": "inline_embed", "attrs": {"ref": "/" + unquote(ref)}}
     return None
 
 
-def _convert_datasette_refs(nodes: list[dict]) -> list[dict]:
-    """Replace `datasette:`-scheme link text with identity-only `inline_embed`
-    atoms.
+def _convert_paper_refs(nodes: list[dict]) -> list[dict]:
+    """Replace `paper:/`-scheme link text with the matching reference atom.
 
-    Mirrors _convert_actor_mentions: detection is purely by the link mark's
-    URI scheme, so ordinary `[text](https://…)` links are never touched.
-    Consecutive text nodes sharing the same href fold into a single atom; the
-    visible label and the link mark are dropped (the NodeView resolves the live
-    label). The ref path is the scheme-stripped, percent-decoded href.
+    Detection is purely by the link mark's `paper:/` scheme (read title-first,
+    href-fallback) so ordinary `[text](https://…)` links are never touched.
+    Consecutive text nodes sharing the same canonical ref fold into a single
+    atom; the visible label and the link mark are dropped (the NodeView resolves
+    the live label / display name).
     """
     out: list[dict] = []
-    prev_href: str | None = None
+    prev_ref: str | None = None
     for node in nodes:
-        href = _datasette_link_href(node)
-        if href is None:
-            prev_href = None
+        canonical = _paper_ref_canonical(node)
+        if canonical is None:
+            prev_ref = None
             out.append(node)
             continue
-        if href == prev_href:
+        # Same ref's text continuing across split text nodes — the atom was
+        # already emitted, so swallow the remaining label fragments.
+        if canonical == prev_ref:
             continue
-        ref = unquote(href[len(_DATASETTE_SCHEME) :])
-        out.append({"type": "inline_embed", "attrs": {"ref": ref}})
-        prev_href = href
+        kind, value = _parse_paper_ref(canonical)
+        atom = _paper_ref_to_node(kind, value)
+        if atom is not None:
+            out.append(atom)
+        # Advance prev_ref even when the atom dropped (un-normalizable tag) so
+        # trailing fragments of the link still fold away.
+        prev_ref = canonical
     return out
 
 

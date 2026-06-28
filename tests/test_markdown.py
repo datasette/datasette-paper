@@ -492,7 +492,7 @@ def test_mention_without_name_map_falls_back_to_actor_id():
     md = doc_to_markdown(
         _doc(_para(_text("Hi "), {"type": "mention", "attrs": {"actorId": "alice"}}))
     )
-    assert md == "Hi [@alice](actor:alice)\n"
+    assert md == "Hi [@alice](paper:/actor/alice)\n"
 
 
 def test_mention_with_name_map_uses_display_name():
@@ -500,31 +500,31 @@ def test_mention_with_name_map_uses_display_name():
         _doc(_para({"type": "mention", "attrs": {"actorId": "alice"}})),
         actor_names={"alice": "Alice Smith"},
     )
-    assert md == "[@Alice Smith](actor:alice)\n"
+    assert md == "[@Alice Smith](paper:/actor/alice)\n"
 
 
 def test_mention_percent_encodes_awkward_actor_ids():
     md = doc_to_markdown(
         _doc(_para({"type": "mention", "attrs": {"actorId": "team/eng dept"}}))
     )
-    assert md == "[@team/eng dept](actor:team%2Feng%20dept)\n"
+    assert md == "[@team/eng dept](paper:/actor/team%2Feng%20dept)\n"
 
 
-def test_tag_serializes_as_tag_scheme_link():
+def test_tag_serializes_as_paper_scheme_link():
     md = doc_to_markdown(
         _doc(_para(_text("Our "), {"type": "tag", "attrs": {"tag": "roadmap"}}))
     )
-    assert md == "Our [#roadmap](tag:roadmap)\n"
+    assert md == "Our [#roadmap](paper:/tag/roadmap)\n"
 
 
 def test_tag_percent_encodes_nested_slug():
     md = doc_to_markdown(
         _doc(_para({"type": "tag", "attrs": {"tag": "inbox/to-read"}}))
     )
-    assert md == "[#inbox/to-read](tag:inbox%2Fto-read)\n"
+    assert md == "[#inbox/to-read](paper:/tag/inbox%2Fto-read)\n"
 
 
-def test_inline_embed_serializes_as_datasette_scheme_link():
+def test_inline_embed_serializes_as_paper_embed_scheme_link():
     md = doc_to_markdown(
         _doc(
             _para(
@@ -533,19 +533,101 @@ def test_inline_embed_serializes_as_datasette_scheme_link():
             )
         )
     )
-    # The path keeps its slashes (it doubles as the label) and is the
-    # authoritative identity after the `datasette:` scheme.
-    assert md == "see [/fixtures/facetable](datasette:/fixtures/facetable)\n"
+    # The ref keeps its slashes (it doubles as the label) and is the
+    # authoritative identity after the `paper:/embed/<kind>/` prefix. Kind is
+    # the ticket-02 `datasette` placeholder (ticket 04 supplies the real kind).
+    assert (
+        md == "see [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)\n"
+    )
 
 
-def test_block_embed_serializes_as_fenced_block():
+# ---------------------------------------------------------------------------
+# Ticket 04: resource_url resolver → real href + canonical ref in link title
+# ---------------------------------------------------------------------------
+
+
+def _resolver(mapping):
+    """A resource_url resolver from a {(type, value): (kind, url)} mapping."""
+    return lambda ref_type, value: mapping.get((ref_type, value))
+
+
+def test_mention_with_resolver_emits_href_and_title():
+    md = doc_to_markdown(
+        _doc(_para({"type": "mention", "attrs": {"actorId": "lois"}})),
+        resource_url=_resolver({("actor", "lois"): (None, "/-/profile/lois")}),
+    )
+    assert md == '[@lois](/-/profile/lois "paper:/actor/lois")\n'
+
+
+def test_tag_with_resolver_emits_href_and_title():
+    md = doc_to_markdown(
+        _doc(_para({"type": "tag", "attrs": {"tag": "q3"}})),
+        resource_url=_resolver({("tag", "q3"): (None, "/-/paper/tag/q3")}),
+    )
+    assert md == '[#q3](/-/paper/tag/q3 "paper:/tag/q3")\n'
+
+
+def test_inline_embed_with_provider_resolver_uses_real_kind_and_href():
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                {"type": "inline_embed", "attrs": {"ref": "/-/places/list/5"}},
+            )
+        ),
+        resource_url=_resolver(
+            {("embed", "/-/places/list/5"): ("place-list", "/-/places/list/5")}
+        ),
+    )
+    # kind is the provider's kind (NOT datasette); href is the real URL, the
+    # canonical paper:/embed/<kind>/<ref> ref sits in the title.
+    assert md == (
+        "[/-/places/list/5](/-/places/list/5 "
+        '"paper:/embed/place-list/-/places/list/5")\n'
+    )
+
+
+def test_inline_embed_provider_without_url_emits_bare_canonical():
+    # A provider matched (kind set) but no resource_url → bare canonical href.
+    md = doc_to_markdown(
+        _doc(_para({"type": "inline_embed", "attrs": {"ref": "/-/places/list/5"}})),
+        resource_url=_resolver({("embed", "/-/places/list/5"): ("place-list", None)}),
+    )
+    assert md == "[/-/places/list/5](paper:/embed/place-list/-/places/list/5)\n"
+
+
+def test_resolver_that_raises_falls_back_to_bare_canonical():
+    def boom(ref_type, value):
+        raise RuntimeError("provider blew up")
+
+    md = doc_to_markdown(
+        _doc(_para({"type": "mention", "attrs": {"actorId": "lois"}})),
+        resource_url=boom,
+    )
+    assert md == "[@lois](paper:/actor/lois)\n"
+
+
+def test_resolver_title_keeps_canonical_wellformed():
+    # An awkward ref char (`"`) is percent-encoded in the canonical so the
+    # markdown title stays well-formed; the visible label keeps the raw ref.
+    md = doc_to_markdown(
+        _doc(_para({"type": "inline_embed", "attrs": {"ref": '/a"b'}})),
+        resource_url=_resolver({("embed", '/a"b'): ("datasette", "/real")}),
+    )
+    assert md == '[/a"b](/real "paper:/embed/datasette/a%22b")\n'
+
+
+def test_block_embed_serializes_as_paper_embed_json_fence():
     md = doc_to_markdown(
         _doc({"type": "block_embed", "attrs": {"ref": "/fixtures/facetable"}})
     )
-    assert md == "```datasette-embed\n/fixtures/facetable\n```\n"
+    # Sorted-key JSON body with all three attrs (config defaults to {}).
+    assert md == (
+        "```paper-embed\n"
+        '{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```\n'
+    )
 
 
-def test_block_embed_non_default_mode_emits_mode_line():
+def test_block_embed_non_default_mode_in_json_body():
     md = doc_to_markdown(
         _doc(
             {
@@ -554,7 +636,31 @@ def test_block_embed_non_default_mode_emits_mode_line():
             }
         )
     )
-    assert md == "```datasette-embed\n/fixtures/facetable/1\nmode: row\n```\n"
+    assert md == (
+        "```paper-embed\n"
+        '{"config": {}, "mode": "row", "ref": "/fixtures/facetable/1"}\n```\n'
+    )
+
+
+def test_block_embed_non_empty_config_in_json_body():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "block_embed",
+                "attrs": {
+                    "ref": "/fixtures/facetable",
+                    "mode": "row",
+                    "config": {"sort": "-created", "columns": ["name", "id"]},
+                },
+            }
+        )
+    )
+    # sort_keys gives a stable diff regardless of attr insertion order.
+    assert md == (
+        "```paper-embed\n"
+        '{"config": {"columns": ["name", "id"], "sort": "-created"}, '
+        '"mode": "row", "ref": "/fixtures/facetable"}\n```\n'
+    )
 
 
 def test_sql_block_serializes_as_sql_fence():
@@ -581,3 +687,60 @@ def test_sql_block_hidden_emits_hidden_token():
         )
     )
     assert md == "```sql db=data hidden\nselect 1\n```\n"
+
+
+# ---------------------------------------------------------------------------
+# Ticket 05: combined fixture exercising ALL reference types in one doc.
+# Catches interaction bugs the per-type tests miss (e.g. the paper: converter
+# vs _split_paper_links ordering, the embed split-once gotcha next to a
+# normalized tag, the JSON fence beside inline refs).
+# ---------------------------------------------------------------------------
+
+
+def test_all_reference_types_roundtrip_in_one_doc():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    doc = _doc(
+        _para(
+            _text("Ping "),
+            {"type": "mention", "attrs": {"actorId": "lois"}},
+            _text(" re "),
+            {"type": "tag", "attrs": {"tag": "q3"}},
+            _text(" see "),
+            {"type": "inline_embed", "attrs": {"ref": "/fixtures/facetable/1"}},
+            _text(" and doc "),
+            {"type": "paper_link", "attrs": {"docId": 42}},
+        ),
+        {
+            "type": "block_embed",
+            "attrs": {
+                "ref": "/fixtures/facetable",
+                "mode": "row",
+                "config": {"columns": ["name", "id"], "sort": "-created"},
+            },
+        },
+    )
+    # No resolver → bare canonical hrefs, which round-trip byte-identically.
+    md = doc_to_markdown(doc)
+    back = markdown_to_doc(md)
+    assert back == doc
+
+
+def test_uppercase_hand_authored_tag_is_renormalized():
+    # A hand-authored paper:/tag/<UPPER CASE> ref is re-normalized on parse.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    back = markdown_to_doc("[#X](paper:/tag/Roadmap%20Q3)\n")
+    tags = [n for n in back["content"][0]["content"] if n["type"] == "tag"]
+    assert len(tags) == 1
+    assert tags[0]["attrs"]["tag"] == "roadmap-q3"
+
+
+def test_plain_external_link_is_never_a_ref():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    back = markdown_to_doc("see [the docs](https://example.com/page)\n")
+    content = back["content"][0]["content"]
+    assert all(n["type"] not in ("mention", "tag", "inline_embed") for n in content)
+    link = content[-1]
+    assert link["marks"][0]["attrs"]["href"] == "https://example.com/page"

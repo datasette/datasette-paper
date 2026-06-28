@@ -30,6 +30,17 @@ class PaperEmbedProvider(Protocol):
     ``kind`` (stable id matching the bundle's exported ``kind``) and
     ``frontend_assets`` are required. ``label`` (str) and ``ref_prefixes``
     (list[str]) are optional and read when present. See ``docs/EMBED_PROVIDERS``.
+
+    ``resource_url`` is an OPTIONAL method::
+
+        def resource_url(self, datasette, ref: str) -> str | None:
+            '''Absolute or root-relative URL a reader can follow to this ref's
+            resource (used as the markdown href; the canonical paper:/ ref is
+            kept in the link title). Optional — return None to emit the bare
+            paper:/ ref.'''
+
+    A provider whose ``resource_url`` raises is logged and treated as no-URL
+    (the markdown href falls back to the bare canonical ref).
     """
 
     kind: str
