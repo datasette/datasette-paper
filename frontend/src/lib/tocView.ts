@@ -68,7 +68,9 @@ export function readTocConfig(raw: unknown): TocConfig {
     typeof v === "number" && Number.isFinite(v) ? Math.round(v) : d;
   const minLevel = Math.min(Math.max(num(c.minLevel, 1), 1), 6);
   const maxLevel = Math.min(Math.max(num(c.maxLevel, 3), minLevel), 6);
-  return { minLevel, maxLevel, ordered: c.ordered !== false };
+  // Default is an unordered (bulleted) outline; `ordered:true` opts into a
+  // per-level numbered list.
+  return { minLevel, maxLevel, ordered: c.ordered === true };
 }
 
 /** Headings filtered to the config's [minLevel, maxLevel] range. */
@@ -304,7 +306,7 @@ export class TocView implements NodeView {
     const config: Record<string, unknown> = {};
     if (parsed.minLevel !== 1) config.minLevel = parsed.minLevel;
     if (parsed.maxLevel !== 3) config.maxLevel = parsed.maxLevel;
-    if (parsed.ordered !== true) config.ordered = false;
+    if (parsed.ordered) config.ordered = true;
     const { state, dispatch } = this.view;
     dispatch(state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, config }));
   }

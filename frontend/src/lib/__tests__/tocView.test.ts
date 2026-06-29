@@ -68,21 +68,21 @@ describe("headingSignature", () => {
 });
 
 describe("readTocConfig", () => {
-  it("defaults to {minLevel:1, maxLevel:3, ordered:true}", () => {
-    expect(readTocConfig(undefined)).toEqual({ minLevel: 1, maxLevel: 3, ordered: true });
-    expect(readTocConfig({})).toEqual({ minLevel: 1, maxLevel: 3, ordered: true });
+  it("defaults to {minLevel:1, maxLevel:3, ordered:false}", () => {
+    expect(readTocConfig(undefined)).toEqual({ minLevel: 1, maxLevel: 3, ordered: false });
+    expect(readTocConfig({})).toEqual({ minLevel: 1, maxLevel: 3, ordered: false });
   });
 
   it("clamps maxLevel up to minLevel and both into 1..6", () => {
     expect(readTocConfig({ minLevel: 4, maxLevel: 2 })).toEqual({
       minLevel: 4,
       maxLevel: 4,
-      ordered: true,
+      ordered: false,
     });
     expect(readTocConfig({ minLevel: 0, maxLevel: 99 })).toEqual({
       minLevel: 1,
       maxLevel: 6,
-      ordered: true,
+      ordered: false,
     });
   });
 
@@ -90,14 +90,14 @@ describe("readTocConfig", () => {
     expect(readTocConfig({ minLevel: "2", maxLevel: null })).toEqual({
       minLevel: 1,
       maxLevel: 3,
-      ordered: true,
+      ordered: false,
     });
   });
 
-  it("treats ordered:false as false, absent/other as true", () => {
-    expect(readTocConfig({ ordered: false }).ordered).toBe(false);
+  it("treats ordered:true as true, absent/false as false", () => {
     expect(readTocConfig({ ordered: true }).ordered).toBe(true);
-    expect(readTocConfig({}).ordered).toBe(true);
+    expect(readTocConfig({ ordered: false }).ordered).toBe(false);
+    expect(readTocConfig({}).ordered).toBe(false);
   });
 });
 
