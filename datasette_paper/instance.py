@@ -952,7 +952,15 @@ async def backfill_links(datasette, *, force: bool = False) -> dict:
     runs the same idempotent reindex the write tail uses. Guarded by a marker
     row so it only scans once; ``force=True`` bypasses the marker (tests /
     re-run). Returns a small stats dict for logging / assertions.
+
+    Unlike the write-tail :meth:`Instance.reindex_links` (one transaction per
+    doc), the backfill commits every doc's edge rows **and** the done-marker in
+    a single transaction: it materializes all docs read-only first, then writes
+    once. That makes it all-or-nothing — either the whole index is rebuilt and
+    recorded done, or nothing changes and the next startup retries — instead of
+    leaving the marker stamped "done" while some doc's write never landed.
     """
+    from .links import extract_links
     from .util import paper_db
 
     db = paper_db(datasette)
@@ -972,21 +980,49 @@ async def backfill_links(datasette, *, force: bool = False) -> dict:
             return {"docs": 0, "skipped": True}
 
     rows = (await internal.execute("SELECT id FROM _datasette_paper_doc")).rows
-    count = 0
+
+    # Phase 1 (read-only): hydrate + materialize every doc and count its edges.
+    # A poisoned doc is logged and skipped so one bad history can't wedge the
+    # whole backfill. No writes happen here.
+    indexed: list[tuple[int, int, dict[int, int]]] = []
     for row in rows:
         doc_id = row["id"]
         try:
             inst = await Instance.hydrate(db, doc_id)
-            await inst.reindex_links()
-            count += 1
+            live_json = inst.materialize_live_doc()
+            if inst._materialization_error is not None:
+                continue
+            edges: dict[int, int] = {}
+            for dst in extract_links(live_json):
+                edges[dst] = edges.get(dst, 0) + 1
+            indexed.append((doc_id, inst.version, edges))
         except Exception:
             logger.exception("link backfill failed for doc %s", doc_id)
-    await internal.execute_write(
-        f"INSERT OR IGNORE INTO {_LINK_BACKFILL_TABLE} (key, migrated_at) "
-        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-        [_LINK_BACKFILL_KEY],
-    )
-    return {"docs": count, "skipped": False}
+
+    # Phase 2: rewrite every doc's edge rows and stamp the marker in one
+    # transaction (execute_write_fn wraps the closure in a single transaction
+    # that rolls back on any error). Each per-doc delete+insert was already
+    # atomic; batching them with the marker closes the gap where the marker
+    # could commit while a doc's write was still outstanding.
+    def write(conn):
+        for src_doc_id, src_version, edges in indexed:
+            _queries.delete_links_for_src(conn, src_doc_id=src_doc_id)
+            for dst_doc_id, occurrences in edges.items():
+                _queries.insert_link(
+                    conn,
+                    src_doc_id=src_doc_id,
+                    dst_doc_id=dst_doc_id,
+                    occurrences=occurrences,
+                    src_version=src_version,
+                )
+        conn.execute(
+            f"INSERT OR IGNORE INTO {_LINK_BACKFILL_TABLE} (key, migrated_at) "
+            "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+            [_LINK_BACKFILL_KEY],
+        )
+
+    await internal.execute_write_fn(write)
+    return {"docs": len(indexed), "skipped": False}
 
 
 # Marker table + key for the one-time inline-#tag index backfill. Same idiom
