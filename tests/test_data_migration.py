@@ -22,8 +22,8 @@ idempotency.
 from __future__ import annotations
 
 import pytest
-from datasette.app import Datasette
 
+from conftest import build_ds
 from datasette_acl.grants import list_grants
 from datasette_paper.migrations import (
     DEFAULT_GENERAL_PRINCIPAL,
@@ -34,19 +34,6 @@ from datasette_paper.permissions import (
     PAPER_DOCS_PARENT,
     PaperDocResource,
 )
-
-
-async def _make_ds(config=None):
-    base = {
-        "permissions": {
-            "datasette-paper-create": True,
-        }
-    }
-    if config:
-        base.update(config)
-    ds = Datasette(memory=True, config=base)
-    await ds.invoke_startup()
-    return ds
 
 
 async def _recreate_legacy_schema(ds):
@@ -141,7 +128,7 @@ async def _public_grant_map(ds, doc_id):
 
 @pytest.mark.asyncio
 async def test_owner_migrated_to_manager():
-    ds = await _make_ds()
+    ds = await build_ds()
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="private")
 
     stats = await migrate_shares_to_acl(ds, force=True)
@@ -162,7 +149,7 @@ async def test_owner_migrated_to_manager():
 @pytest.mark.asyncio
 async def test_anonymous_owner_skipped():
     """created_by NULL (anonymous create) yields no owner grant."""
-    ds = await _make_ds()
+    ds = await build_ds()
     await _seed_doc(ds, doc_id=1, created_by=None, visibility="private")
 
     stats = await migrate_shares_to_acl(ds, force=True)
@@ -179,7 +166,7 @@ async def test_anonymous_owner_skipped():
 
 @pytest.mark.asyncio
 async def test_share_rows_migrated_to_viewer_and_editor():
-    ds = await _make_ds()
+    ds = await build_ds()
     await _seed_doc(ds, doc_id=1, created_by="alice")
     await _seed_share(ds, doc_id=1, actor_id="bob", role="viewer")
     await _seed_share(ds, doc_id=1, actor_id="carol", role="editor")
@@ -210,7 +197,7 @@ async def test_share_rows_migrated_to_viewer_and_editor():
 
 @pytest.mark.asyncio
 async def test_visibility_link_view_grants_signed_in_viewer():
-    ds = await _make_ds()
+    ds = await build_ds()
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="link-view")
 
     stats = await migrate_shares_to_acl(ds, force=True)
@@ -229,7 +216,7 @@ async def test_visibility_link_view_grants_signed_in_viewer():
 
 @pytest.mark.asyncio
 async def test_visibility_link_edit_grants_signed_in_editor():
-    ds = await _make_ds()
+    ds = await build_ds()
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="link-edit")
 
     stats = await migrate_shares_to_acl(ds, force=True)
@@ -251,7 +238,7 @@ async def test_visibility_link_edit_grants_signed_in_editor():
 @pytest.mark.asyncio
 async def test_private_visibility_grants_nothing_extra():
     """DECISIONS.md: upgrade default CLOSED — private docs stay owner-only."""
-    ds = await _make_ds()
+    ds = await build_ds()
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="private")
 
     await migrate_shares_to_acl(ds, force=True)
@@ -269,7 +256,7 @@ async def test_private_visibility_grants_nothing_extra():
 
 @pytest.mark.asyncio
 async def test_general_principal_configurable_to_everyone():
-    ds = await _make_ds(
+    ds = await build_ds(
         config={"plugins": {"datasette-paper": {"share-general-principal": "everyone"}}}
     )
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="link-view")
@@ -286,7 +273,7 @@ async def test_general_principal_configurable_to_everyone():
 
 @pytest.mark.asyncio
 async def test_invalid_general_principal_falls_back_to_default():
-    ds = await _make_ds(
+    ds = await build_ds(
         config={"plugins": {"datasette-paper": {"share-general-principal": "nonsense"}}}
     )
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="link-view")
@@ -305,7 +292,7 @@ async def test_invalid_general_principal_falls_back_to_default():
 
 @pytest.mark.asyncio
 async def test_marker_skips_repeat_run():
-    ds = await _make_ds()
+    ds = await build_ds()
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="link-view")
     await _seed_share(ds, doc_id=1, actor_id="bob", role="editor")
 
@@ -322,7 +309,7 @@ async def test_marker_skips_repeat_run():
 @pytest.mark.asyncio
 async def test_forced_rerun_no_duplicate_grants_or_audit():
     """A forced second run must not duplicate grants or audit rows."""
-    ds = await _make_ds()
+    ds = await build_ds()
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="link-edit")
     await _seed_share(ds, doc_id=1, actor_id="bob", role="viewer")
     await _seed_share(ds, doc_id=1, actor_id="carol", role="editor")
@@ -353,7 +340,7 @@ async def test_forced_rerun_no_duplicate_grants_or_audit():
 
 @pytest.mark.asyncio
 async def test_mixed_corpus_migrates_correctly():
-    ds = await _make_ds()
+    ds = await build_ds()
     # doc 1: private, owner alice, bob editor share
     await _seed_doc(ds, doc_id=1, created_by="alice", visibility="private")
     await _seed_share(ds, doc_id=1, actor_id="bob", role="editor")
@@ -400,7 +387,7 @@ async def test_mixed_corpus_migrates_correctly():
 @pytest.mark.asyncio
 async def test_startup_marks_migration_on_empty_db():
     """startup() runs the migration once; with no docs it just records the marker."""
-    ds = await _make_ds()
+    ds = await build_ds()
     db = ds.get_internal_database()
     # startup already ran the migration; the marker should exist.
     from datasette_paper.migrations import (

@@ -9,20 +9,8 @@ with no links aren't included) — that's intended.
 
 import pytest
 
-from conftest import setup_paper_datasette
+from conftest import create_doc, setup_paper_datasette
 from datasette_paper.db import PaperDB
-
-
-async def _create_doc(ds, name, actor_id):
-    """Create a doc as ``actor_id`` and return its new id."""
-    cookie = ds.sign({"a": {"id": actor_id}}, "actor")
-    resp = await ds.client.post(
-        "/-/paper/api/docs",
-        json={"name": name},
-        cookies={"ds_actor": cookie},
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["id"]
 
 
 @pytest.mark.asyncio
@@ -30,9 +18,9 @@ async def test_graph_excludes_non_viewable_nodes_and_edges():
     ds, _ = await setup_paper_datasette()
     db = PaperDB(ds.get_internal_database())
 
-    a = await _create_doc(ds, "Alice A", "alice")
-    b = await _create_doc(ds, "Alice B", "alice")
-    c = await _create_doc(ds, "Carol C", "carol")
+    a = await create_doc(ds, "Alice A", actor_id="alice")
+    b = await create_doc(ds, "Alice B", actor_id="alice")
+    c = await create_doc(ds, "Carol C", actor_id="carol")
 
     # src A → {B, C}; src C → {B}. Only A→B is fully viewable for alice.
     await db.replace_links(src_doc_id=a, src_version=1, edges={b: 1, c: 2})
@@ -58,9 +46,9 @@ async def test_graph_titles_only_for_viewable():
     ds, _ = await setup_paper_datasette()
     db = PaperDB(ds.get_internal_database())
 
-    a = await _create_doc(ds, "Alice A", "alice")
-    b = await _create_doc(ds, "Alice B", "alice")
-    c = await _create_doc(ds, "Carol Secret", "carol")
+    a = await create_doc(ds, "Alice A", actor_id="alice")
+    b = await create_doc(ds, "Alice B", actor_id="alice")
+    c = await create_doc(ds, "Carol Secret", actor_id="carol")
 
     await db.replace_links(src_doc_id=a, src_version=1, edges={b: 1, c: 1})
     await db.replace_links(src_doc_id=c, src_version=1, edges={b: 1})

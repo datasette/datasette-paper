@@ -1,9 +1,8 @@
 """Tests for `extract_tables` and the `/tables` API endpoints."""
 
-import json
-
 import pytest
 
+from conftest import plant_snapshot
 from datasette_paper.markdown import doc_to_markdown
 from datasette_paper.tables import (
     count_tables_with_name,
@@ -150,12 +149,7 @@ async def _seed_doc_with_table_snapshot(ds, paper_db, name="Tables"):
             _row(_cell("x"), _cell("y")),
         ),
     )
-    await paper_db.insert_snapshot(
-        doc_id=doc_id, version=0, doc_json=json.dumps(snapshot), actor_id=None
-    )
-    from datasette_paper.instance import get_registry
-
-    get_registry(ds)._instances.pop(doc_id, None)
+    await plant_snapshot(ds, doc_id, snapshot)
     return doc_id
 
 
@@ -209,12 +203,7 @@ async def test_get_table_by_name_reports_duplicates(ds_paper):
         _table("dup", _row(_cell("a"))),
         _table("dup", _row(_cell("b"))),
     )
-    await paper_db.insert_snapshot(
-        doc_id=doc_id, version=0, doc_json=json.dumps(snapshot), actor_id=None
-    )
-    from datasette_paper.instance import get_registry
-
-    get_registry(ds)._instances.pop(doc_id, None)
+    await plant_snapshot(ds, doc_id, snapshot)
 
     resp = await ds.client.get(f"/-/paper/api/docs/{doc_id}/tables/dup")
     assert resp.status_code == 200
@@ -245,16 +234,8 @@ async def test_tables_endpoints_require_view_permission(ds_paper):
     )
     doc_id = create.json()["id"]
 
-    from datasette_paper.db import PaperDB
-
-    paper_db = PaperDB(ds.get_internal_database())
     snapshot = _doc(_table("budget", _row(_cell("a"))))
-    await paper_db.insert_snapshot(
-        doc_id=doc_id, version=0, doc_json=json.dumps(snapshot), actor_id=None
-    )
-    from datasette_paper.instance import get_registry
-
-    get_registry(ds)._instances.pop(doc_id, None)
+    await plant_snapshot(ds, doc_id, snapshot)
 
     resp = await ds.client.get(f"/-/paper/api/docs/{doc_id}/tables", cookies=bob)
     assert resp.status_code in (403, 404)

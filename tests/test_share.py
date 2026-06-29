@@ -15,66 +15,8 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from datasette.app import Datasette
 
-from datasette_paper.permissions import (
-    PAPER_DOC_RESOURCE_TYPE,
-    PAPER_DOCS_PARENT,
-)
-
-
-def _cookie(ds, actor_id):
-    return {"ds_actor": ds.sign({"a": {"id": actor_id}}, "actor")}
-
-
-async def _make_ds():
-    ds = Datasette(
-        memory=True,
-        config={
-            "permissions": {
-                "datasette-paper-create": True,
-            }
-        },
-    )
-    await ds.invoke_startup()
-    return ds
-
-
-async def _alice_doc(ds, name="P"):
-    """Create a doc owned by alice; return its id."""
-    r = await ds.client.post(
-        "/-/paper/api/docs", json={"name": name}, cookies=_cookie(ds, "alice")
-    )
-    assert r.status_code == 201
-    return r.json()["id"]
-
-
-async def _grant_acl(ds, doc_id, actor_id, role):
-    """Grant ``actor_id`` an acl role on the doc (Viewer/Editor/Manager)."""
-    from datasette_acl.grants import grant, Principal
-
-    await grant(
-        ds,
-        PAPER_DOC_RESOURCE_TYPE,
-        PAPER_DOCS_PARENT,
-        str(doc_id),
-        principal=Principal.actor(actor_id),
-        role=role,
-        by_actor="alice",
-    )
-
-
-async def _revoke_acl(ds, doc_id, actor_id):
-    from datasette_acl.grants import revoke, Principal
-
-    await revoke(
-        ds,
-        PAPER_DOC_RESOURCE_TYPE,
-        PAPER_DOCS_PARENT,
-        str(doc_id),
-        principal=Principal.actor(actor_id),
-        by_actor="alice",
-    )
+from conftest import actor_cookie, build_ds, create_doc, grant_role, revoke_role
 
 
 # ---------------------------------------------------------------------------
@@ -84,12 +26,12 @@ async def _revoke_acl(ds, doc_id, actor_id):
 
 @pytest.mark.asyncio
 async def test_sweep_owner_allowed():
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
 
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
-        cookies=_cookie(ds, "alice"),
+        cookies=actor_cookie(ds, "alice"),
     )
     assert r.status_code == 200
     # No live subscribers, so nothing to revoke.
@@ -99,13 +41,13 @@ async def test_sweep_owner_allowed():
 @pytest.mark.asyncio
 async def test_sweep_viewer_403():
     """A viewer (can view, not manage) cannot trigger the sweep."""
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-    await _grant_acl(ds, doc_id, "bob", "Viewer")
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
+    await grant_role(ds, doc_id, "bob", "Viewer")
 
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
-        cookies=_cookie(ds, "bob"),
+        cookies=actor_cookie(ds, "bob"),
     )
     assert r.status_code == 403
 
@@ -113,13 +55,13 @@ async def test_sweep_viewer_403():
 @pytest.mark.asyncio
 async def test_sweep_editor_403():
     """An acl Editor can view + edit but not manage — sweep is manager-only."""
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-    await _grant_acl(ds, doc_id, "bob", "Editor")
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
+    await grant_role(ds, doc_id, "bob", "Editor")
 
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
-        cookies=_cookie(ds, "bob"),
+        cookies=actor_cookie(ds, "bob"),
     )
     assert r.status_code == 403
 
@@ -127,12 +69,12 @@ async def test_sweep_editor_403():
 @pytest.mark.asyncio
 async def test_sweep_stranger_403():
     """A stranger can't even see the doc — view pre-check returns 403."""
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
 
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
-        cookies=_cookie(ds, "carol"),
+        cookies=actor_cookie(ds, "carol"),
     )
     assert r.status_code == 403
 
@@ -148,9 +90,9 @@ async def test_sweep_endpoint_closes_revoked_subscriber():
     from datasette_paper.db import PaperDB
     from datasette_paper.instance import get_registry
 
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
-    await _grant_acl(ds, doc_id, "bob", "Editor")
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
+    await grant_role(ds, doc_id, "bob", "Editor")
 
     paper = PaperDB(ds.get_internal_database())
     registry = get_registry(ds)
@@ -161,10 +103,10 @@ async def test_sweep_endpoint_closes_revoked_subscriber():
 
     # Bob's grant is revoked (as the dialog would do against acl), then the
     # frontend's share-revoked handler calls the sweep endpoint.
-    await _revoke_acl(ds, doc_id, "bob")
+    await revoke_role(ds, doc_id, "bob")
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
-        cookies=_cookie(ds, "alice"),
+        cookies=actor_cookie(ds, "alice"),
     )
     assert r.status_code == 200
     assert r.json() == {"revoked": 1}
@@ -182,11 +124,11 @@ async def test_revocation_closes_open_subscribers():
     from datasette_paper.db import PaperDB
     from datasette_paper.instance import get_registry
 
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
 
     # Grant bob view access via acl.
-    await _grant_acl(ds, doc_id, "bob", "Editor")
+    await grant_role(ds, doc_id, "bob", "Editor")
 
     # Bob subscribes (simulating an open SSE stream).
     paper = PaperDB(ds.get_internal_database())
@@ -198,7 +140,7 @@ async def test_revocation_closes_open_subscribers():
     assert len(instance.subscribers) == 2
 
     # Bob's acl grant is revoked; the sweep then closes his queue.
-    await _revoke_acl(ds, doc_id, "bob")
+    await revoke_role(ds, doc_id, "bob")
     revoked = await instance.revoke_unauthorized(ds)
     assert revoked == 1
 
@@ -215,8 +157,8 @@ async def test_revocation_keeps_owner_subscribed():
     from datasette_paper.db import PaperDB
     from datasette_paper.instance import get_registry
 
-    ds = await _make_ds()
-    doc_id = await _alice_doc(ds)
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "P")
 
     paper = PaperDB(ds.get_internal_database())
     registry = get_registry(ds)
@@ -224,11 +166,11 @@ async def test_revocation_keeps_owner_subscribed():
     alice_q = await instance.subscribe(client_id=1, actor_id="alice")
 
     # Grant + immediately revoke an unrelated actor, then sweep.
-    await _grant_acl(ds, doc_id, "bob", "Viewer")
-    await _revoke_acl(ds, doc_id, "bob")
+    await grant_role(ds, doc_id, "bob", "Viewer")
+    await revoke_role(ds, doc_id, "bob")
     r = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/sweep-subscribers",
-        cookies=_cookie(ds, "alice"),
+        cookies=actor_cookie(ds, "alice"),
     )
     assert r.status_code == 200
 

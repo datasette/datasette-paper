@@ -10,14 +10,9 @@ import asyncio
 
 import pytest
 
+from conftest import create_doc
 from datasette_paper.instance import get_registry
 from datasette_paper.util import paper_db
-
-
-async def _make_doc(ds, name="Doc"):
-    resp = await ds.client.post("/-/paper/api/docs", json={"name": name})
-    assert resp.status_code == 201
-    return resp.json()["id"]
 
 
 async def _document_markdown(ds, doc_id):
@@ -28,7 +23,7 @@ async def _document_markdown(ds, doc_id):
 
 @pytest.mark.asyncio
 async def test_append_to_blank_doc(ds):
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append",
         json={"content": "# Title\n\nHello **world**.\n"},
@@ -45,7 +40,7 @@ async def test_append_to_blank_doc(ds):
 
 @pytest.mark.asyncio
 async def test_append_preserves_existing_content(ds):
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append", json={"content": "First block.\n"}
     )
@@ -59,7 +54,7 @@ async def test_append_preserves_existing_content(ds):
 
 @pytest.mark.asyncio
 async def test_append_version_advances_by_step(ds):
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     r1 = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append", json={"content": "a\n"}
     )
@@ -72,7 +67,7 @@ async def test_append_version_advances_by_step(ds):
 
 @pytest.mark.asyncio
 async def test_append_rich_content_roundtrips(ds):
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     content = (
         "## Section\n\n"
         "- [ ] todo one\n"
@@ -97,7 +92,7 @@ async def test_append_inline_and_block_embed_roundtrip(ds):
     """An inline embed and a block embed fence survive the full
     append → step-apply → materialize → serialize path (proves the schema
     lock-step holds end-to-end through the markdown API)."""
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     content = (
         "See [/fixtures/facetable](paper:/embed/datasette/fixtures/facetable) here.\n\n"
         '```paper-embed\n{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```\n\n'
@@ -125,7 +120,7 @@ async def test_append_paper_refs_materialize_with_right_attrs(ds):
     paper:/embed inline ref + a paper-embed JSON fence with config) produces a
     materialized doc with the right nodes/attrs — proving the append /
     create-from-markdown path works for the consolidated scheme."""
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     content = (
         "Look [/db/t/row/9](paper:/embed/datasette/db/t/row/9) here.\n\n"
         '```paper-embed\n{"config":{"columns":["a","b"]},"mode":"row","ref":"/db/t"}\n```\n'
@@ -161,7 +156,7 @@ async def test_append_sql_block_roundtrip(ds):
     """A ```sql db=NAME fence survives the full append → step-apply →
     materialize → serialize path (proves the sql_block schema lock-step holds
     end-to-end through the markdown API)."""
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     content = (
         "```sql db=data\nselect 1 as n\n```\n\n"
         "```sql db=data hidden\nselect * from t\n```\n"
@@ -177,7 +172,7 @@ async def test_append_sql_block_roundtrip(ds):
 
 @pytest.mark.asyncio
 async def test_append_empty_markdown_is_noop(ds):
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     # Bump the version once so we can assert it doesn't move.
     r1 = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append", json={"content": "seed\n"}
@@ -195,7 +190,7 @@ async def test_append_empty_markdown_is_noop(ds):
 
 @pytest.mark.asyncio
 async def test_append_missing_content_is_400(ds):
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     resp = await ds.client.post(f"/-/paper/api/docs/{doc_id}/append", json={})
     assert resp.status_code == 400
     assert "content" in resp.json()["error"]
@@ -203,7 +198,7 @@ async def test_append_missing_content_is_400(ds):
 
 @pytest.mark.asyncio
 async def test_append_non_string_content_is_400(ds):
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append", json={"content": ["not", "a", "string"]}
     )
@@ -212,7 +207,7 @@ async def test_append_non_string_content_is_400(ds):
 
 @pytest.mark.asyncio
 async def test_append_unsupported_content_type_is_400(ds):
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append",
         json={"content": "x\n", "content_type": "html"},
@@ -238,7 +233,7 @@ async def test_append_broadcasts_to_live_subscribers(ds):
     """A live SSE subscriber receives the appended step as an update."""
     from datasette_paper.util import paper_db
 
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     instance = await get_registry(ds).get(paper_db(ds), doc_id)
     queue = await instance.subscribe(client_id=12345, actor_id="alice")
 
@@ -265,7 +260,7 @@ async def test_append_auto_snapshots_past_threshold(ds, monkeypatch):
 
     monkeypatch.setattr(inst_mod, "SNAPSHOT_THRESHOLD", 2)
 
-    doc_id = await _make_doc(ds)
+    doc_id = await create_doc(ds)
     db = paper_db(ds)
     instance = await get_registry(ds).get(db, doc_id)
     assert instance.snapshot_version == 0

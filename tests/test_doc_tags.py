@@ -13,40 +13,7 @@ test_doc_tags_db.py.
 
 import pytest
 
-from datasette_acl.grants import grant, Principal
-from datasette_paper.permissions import (
-    PAPER_DOC_RESOURCE_TYPE,
-    PAPER_DOCS_PARENT,
-)
-
-from conftest import setup_paper_datasette
-
-
-async def _create_doc(ds, name, actor_id):
-    cookie = ds.sign({"a": {"id": actor_id}}, "actor")
-    resp = await ds.client.post(
-        "/-/paper/api/docs",
-        json={"name": name},
-        cookies={"ds_actor": cookie},
-    )
-    assert resp.status_code == 201, resp.text
-    return resp.json()["id"]
-
-
-async def _grant_viewer(ds, doc_id, actor_id):
-    await grant(
-        ds,
-        PAPER_DOC_RESOURCE_TYPE,
-        PAPER_DOCS_PARENT,
-        str(doc_id),
-        principal=Principal.actor(actor_id),
-        role="Viewer",
-        by_actor="alice",
-    )
-
-
-def _cookie(ds, actor_id):
-    return {"ds_actor": ds.sign({"a": {"id": actor_id}}, "actor")}
+from conftest import actor_cookie, create_doc, grant_role, setup_paper_datasette
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +24,7 @@ def _cookie(ds, actor_id):
 @pytest.mark.asyncio
 async def test_add_remove_list_tags():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Doc", "alice")
+    doc_id = await create_doc(ds, "Doc", actor_id="alice")
 
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/tags/add", json={"tag": "roadmap"}
@@ -79,7 +46,7 @@ async def test_add_remove_list_tags():
 @pytest.mark.asyncio
 async def test_replace_tags_dedupes_and_normalizes():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Doc", "alice")
+    doc_id = await create_doc(ds, "Doc", actor_id="alice")
 
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/tags/replace",
@@ -93,7 +60,7 @@ async def test_replace_tags_dedupes_and_normalizes():
 @pytest.mark.asyncio
 async def test_add_tag_normalizes_to_canonical_form():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Doc", "alice")
+    doc_id = await create_doc(ds, "Doc", actor_id="alice")
 
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/tags/add", json={"tag": "  Road Map "}
@@ -104,7 +71,7 @@ async def test_add_tag_normalizes_to_canonical_form():
 @pytest.mark.asyncio
 async def test_add_invalid_tag_400():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Doc", "alice")
+    doc_id = await create_doc(ds, "Doc", actor_id="alice")
 
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/tags/add", json={"tag": "!!!"}
@@ -120,9 +87,9 @@ async def test_add_invalid_tag_400():
 @pytest.mark.asyncio
 async def test_mutations_require_manage():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Doc", "alice")
-    await _grant_viewer(ds, doc_id, "bob")  # bob can view, not manage
-    bob = _cookie(ds, "bob")
+    doc_id = await create_doc(ds, "Doc", actor_id="alice")
+    await grant_role(ds, doc_id, "bob")  # bob can view, not manage
+    bob = actor_cookie(ds, "bob")
 
     # A viewer can read the tags...
     resp = await ds.client.get(f"/-/paper/api/docs/{doc_id}/tags", cookies=bob)
@@ -146,10 +113,10 @@ async def test_mutations_require_manage():
 @pytest.mark.asyncio
 async def test_list_tags_is_acl_scoped():
     ds, _ = await setup_paper_datasette()
-    d1 = await _create_doc(ds, "Mine 1", "alice")
-    d2 = await _create_doc(ds, "Mine 2", "alice")
+    d1 = await create_doc(ds, "Mine 1", actor_id="alice")
+    d2 = await create_doc(ds, "Mine 2", actor_id="alice")
     # carol's private doc — alice can't view it, so its tags must not surface.
-    d3 = await _create_doc(ds, "Carol", "carol")
+    d3 = await create_doc(ds, "Carol", actor_id="carol")
 
     await ds.client.post(f"/-/paper/api/docs/{d1}/tags/add", json={"tag": "shared"})
     await ds.client.post(f"/-/paper/api/docs/{d2}/tags/add", json={"tag": "shared"})
@@ -157,7 +124,7 @@ async def test_list_tags_is_acl_scoped():
     await ds.client.post(
         f"/-/paper/api/docs/{d3}/tags/add",
         json={"tag": "hidden"},
-        cookies=_cookie(ds, "carol"),
+        cookies=actor_cookie(ds, "carol"),
     )
 
     resp = await ds.client.get("/-/paper/api/tags")  # as alice (default)
@@ -174,9 +141,9 @@ async def test_list_tags_is_acl_scoped():
 @pytest.mark.asyncio
 async def test_docs_filter_by_tag_intersection():
     ds, _ = await setup_paper_datasette()
-    d1 = await _create_doc(ds, "One", "alice")
-    d2 = await _create_doc(ds, "Two", "alice")
-    d3 = await _create_doc(ds, "Three", "alice")
+    d1 = await create_doc(ds, "One", actor_id="alice")
+    d2 = await create_doc(ds, "Two", actor_id="alice")
+    d3 = await create_doc(ds, "Three", actor_id="alice")
 
     await ds.client.post(
         f"/-/paper/api/docs/{d1}/tags/replace", json={"tags": ["a", "b"]}
@@ -199,7 +166,7 @@ async def test_docs_filter_by_tag_intersection():
 @pytest.mark.asyncio
 async def test_list_includes_tags_per_doc():
     ds, _ = await setup_paper_datasette()
-    doc_id = await _create_doc(ds, "Doc", "alice")
+    doc_id = await create_doc(ds, "Doc", actor_id="alice")
     await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/tags/replace", json={"tags": ["x", "y"]}
     )
