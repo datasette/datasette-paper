@@ -126,14 +126,16 @@ def _render_block(node: dict) -> str:
     if t == "sql_block":
         # An editable SQL query fenced with an info string of `sql db=NAME`
         # (+ a trailing `hidden` when the editor is collapsed). The `db=`
-        # token is what distinguishes this from a plain ```sql code block
-        # (markdown_parser.py keys off it).
+        # token is ALWAYS emitted — even for a db-less block, where it
+        # serializes as a bare `sql db=` — and is what distinguishes this
+        # from a plain ```sql code block (markdown_parser.py keys off the
+        # presence of the `db=` token, not a populated value). Emitting it
+        # unconditionally is what keeps a db-less sql_block from round-
+        # tripping back down to a code_block.
         attrs = node.get("attrs") or {}
         db = attrs.get("db") or ""
         text = "".join(c.get("text", "") for c in content)
-        info = "sql"
-        if db:
-            info += f" db={db}"
+        info = f"sql db={db}"
         if attrs.get("hidden"):
             info += " hidden"
         return "```" + info + "\n" + text + "\n```\n"
@@ -503,9 +505,17 @@ def _mark_delims(mark: dict) -> tuple[str, str]:
 def _encode_value_format(fmt) -> str:
     """Encode a `value` node's `format` attr into its `| kind:arg` markdown
     suffix (the part after the pipe). Mirror of `encodeFormat` in
-    `frontend/src/lib/formatValue.ts` — keep the two in lock-step. `fallback`
-    is intentionally not encoded; the markdown grammar carries only
-    `kind[:arg]`. Returns "" for a null/unknown format."""
+    `frontend/src/lib/formatValue.ts` — keep the two in lock-step.
+
+    `format.fallback` (the per-value display string for null/unparseable
+    cells, default "—") is intentionally NOT encoded: the markdown grammar
+    carries only `kind[:arg]`, and a fallback is arbitrary text that can't be
+    crammed into the `:`-delimited arg slot without an escaping scheme. The
+    documented consequence is that a custom fallback is dropped on a
+    doc→markdown→doc round-trip (e.g. the agent whole-doc edit path); the
+    value itself, its source/column, and its kind/arg survive. This loss is
+    pinned by `test_value_fallback_is_dropped*` in the markdown tests. Returns
+    "" for a null/unknown format."""
     if not fmt:
         return ""
     kind = fmt.get("kind")
@@ -661,12 +671,22 @@ def _render_inlines(nodes: list) -> str:
             # the parser can tell the two apart unambiguously. An optional
             # `| kind:arg` suffix carries the per-value `format` (see
             # `_encode_value_format`); a null format emits the bare form.
+            #
+            # Source *names* are normalized to `[a-z0-9_]+` at every input path,
+            # but *columns* are DB-derived and may contain spaces / hyphens /
+            # dots that the bare `name.column` grammar can't read back. Wrap
+            # such a column in `[...]` (the bracketed form the parser's
+            # `_SQL_VALUE_RE` also accepts) so it survives the round-trip. A
+            # column that is already a bare `\w+` keeps the clean unbracketed
+            # form. (A literal `]` inside a column name still can't round-trip,
+            # but that's vanishingly rare for a SQL identifier.)
             attrs = n.get("attrs") or {}
             source = str(attrs.get("source") or "")
             column = str(attrs.get("column") or "")
+            column_md = column if re.fullmatch(r"\w+", column) else "[" + column + "]"
             fmt = _encode_value_format(attrs.get("format"))
             suffix = f" | {fmt}" if fmt else ""
-            out.append("${{" + source + "." + column + suffix + "}}")
+            out.append("${{" + source + "." + column_md + suffix + "}}")
 
     close_through(0)
     return "".join(out)

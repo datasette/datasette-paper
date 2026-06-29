@@ -892,3 +892,105 @@ def test_value_and_placeholder_coexist_in_one_paragraph():
         )
     )
     assert md == "{{today}} — ${{revenue.total}}\n"
+
+
+# ---------------------------------------------------------------------------
+# Ticket 06: remaining lossy round-trips (sql_block / value column / fallback)
+# ---------------------------------------------------------------------------
+
+
+def test_dbless_sql_block_emits_empty_db_discriminator():
+    # A db-less sql_block (db=None) must still emit the `db=` discriminator
+    # token (`sql db=`) so it doesn't downgrade to a plain ```sql code block
+    # on reparse.
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "sql_block",
+                "attrs": {"db": None, "hidden": False},
+                "content": [{"type": "text", "text": "select 1 as n"}],
+            }
+        )
+    )
+    assert md == "```sql db=\nselect 1 as n\n```\n"
+
+
+def test_dbless_sql_block_hidden_emits_empty_db_and_hidden():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "sql_block",
+                "attrs": {"db": None, "hidden": True},
+                "content": [{"type": "text", "text": "select 1"}],
+            }
+        )
+    )
+    assert md == "```sql db= hidden\nselect 1\n```\n"
+
+
+@pytest.mark.parametrize(
+    "column,expected",
+    [
+        ("total", "${{revenue.total}}\n"),  # bare \w+ stays unbracketed
+        ("total sales", "${{revenue.[total sales]}}\n"),  # space → bracketed
+        ("gross-margin", "${{revenue.[gross-margin]}}\n"),  # hyphen → bracketed
+        ("a.b", "${{revenue.[a.b]}}\n"),  # dot → bracketed
+    ],
+)
+def test_value_column_bracketing(column, expected):
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                {
+                    "type": "value",
+                    "attrs": {"source": "revenue", "column": column, "format": None},
+                }
+            )
+        )
+    )
+    assert md == expected
+
+
+def test_value_bracketed_column_with_format_suffix():
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                {
+                    "type": "value",
+                    "attrs": {
+                        "source": "revenue",
+                        "column": "total sales",
+                        "format": {"kind": "currency", "currency": "USD"},
+                    },
+                }
+            )
+        )
+    )
+    assert md == "${{revenue.[total sales] | currency:USD}}\n"
+
+
+def test_value_fallback_is_dropped_on_serialize():
+    # Documented behaviour (see `_encode_value_format`): the markdown grammar
+    # carries only `kind[:arg]`, so a custom `format.fallback` is intentionally
+    # NOT serialized. The value's source/column/kind survive; the fallback is
+    # lost on a doc→markdown→doc round-trip.
+    md = doc_to_markdown(
+        _doc(
+            _para(
+                {
+                    "type": "value",
+                    "attrs": {
+                        "source": "revenue",
+                        "column": "total",
+                        "format": {
+                            "kind": "currency",
+                            "currency": "USD",
+                            "fallback": "N/A",
+                        },
+                    },
+                }
+            )
+        )
+    )
+    assert md == "${{revenue.total | currency:USD}}\n"
+    assert "N/A" not in md
