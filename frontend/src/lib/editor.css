@@ -534,6 +534,19 @@
   color: #888;
   font-style: italic;
 }
+/* Trailing "Create <query> page" row — set off from the result rows above
+   it with a divider and a muted "Create"/"page" framing so the typed title
+   reads as the actionable part. */
+.editor-host .pm-wikilink-create {
+  border-top: 1px solid #ececec;
+  margin-top: 4px;
+  padding-top: 6px;
+  color: #555;
+}
+.editor-host .pm-wikilink-create strong {
+  color: #0b5cad;
+  font-weight: 600;
+}
 
 /* `@`-triggered mention autocomplete. Mirrors the `[[` popup. */
 .editor-host .pm-mention-typing {

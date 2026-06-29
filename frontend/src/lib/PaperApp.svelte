@@ -17,6 +17,7 @@
   import SourcesPanel from "./SourcesPanel.svelte";
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
+  import CreatePageDialog from "./CreatePageDialog.svelte";
   import { insertImage } from "./image";
   import { insertDatasetteEmbed } from "./datasetteEmbed";
 
@@ -30,6 +31,13 @@
   // Which embed source the picker is scoped to: undefined = core Datasette,
   // otherwise a third-party provider source id.
   let embedSource = $state<string | undefined>(undefined);
+  // Create-page dialog, driven by the `[[`-autocomplete's "Create … page"
+  // row. `createResolver` bridges the imperative editor flow (which awaits a
+  // doc id) to the declarative dialog: onCreatePage opens it and parks a
+  // promise resolver here until the dialog reports a result.
+  let createDialogOpen = $state(false);
+  let createInitialTitle = $state("");
+  let createResolver: ((id: number | null) => void) | null = null;
 
   let editorEl: HTMLDivElement | undefined = $state(undefined);
 
@@ -105,6 +113,7 @@
           embedSource = sourceId;
           embedDialogOpen = true;
         },
+        onCreatePage,
       },
       reporter,
     );
@@ -133,6 +142,24 @@
     if (!view) return;
     insertDatasetteEmbed(ref, mode)(view.state, view.dispatch);
     view.focus();
+  }
+
+  // Open the create-page dialog and resolve once it reports back. The editor
+  // (wikiLinkSuggest) awaits this and drops a paper_link to the new id.
+  function onCreatePage(title: string): Promise<number | null> {
+    return new Promise((resolve) => {
+      // Defensive: a still-pending dialog shouldn't strand its promise.
+      createResolver?.(null);
+      createInitialTitle = title;
+      createResolver = resolve;
+      createDialogOpen = true;
+    });
+  }
+
+  function onCreateResult(docId: number | null) {
+    const resolve = createResolver;
+    createResolver = null;
+    resolve?.(docId);
   }
 
   async function copyMarkdown(): Promise<boolean> {
@@ -268,6 +295,11 @@
     bind:open={embedDialogOpen}
     source={embedSource}
     oninsert={onEmbedInsert}
+  />
+  <CreatePageDialog
+    bind:open={createDialogOpen}
+    initialTitle={createInitialTitle}
+    onresult={onCreateResult}
   />
 </div>
 

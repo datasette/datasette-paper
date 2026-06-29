@@ -29,8 +29,8 @@ test.describe("wiki-link autocomplete", () => {
     });
     await expect(match).toBeVisible({ timeout: 10000 });
 
-    // Choose the first result and commit.
-    await page.keyboard.press("ArrowDown");
+    // The first result is highlighted by default; commit it. (ArrowDown
+    // would now move onto the trailing "Create … page" row.)
     await page.keyboard.press("Enter");
 
     // A paper_link node is now rendered; its NodeView resolves the title
@@ -46,5 +46,43 @@ test.describe("wiki-link autocomplete", () => {
 
     // The typed `[[` trigger text is gone.
     await expect(editor).not.toContainText("[[Autocomplete");
+  });
+
+  test("[[ create row mints a new page and links it", async ({ page }) => {
+    const host = await createPaper(page);
+    await gotoPaper(page, host.url);
+
+    const editor = page.locator(".ProseMirror");
+    await editor.click();
+    // A title that matches nothing existing, so the create row is the
+    // only actionable option.
+    await page.keyboard.type("[[Fresh Page XYZ");
+
+    const popup = page.locator(".pm-wikilink-popup");
+    await expect(popup).toBeVisible({ timeout: 10000 });
+    const createRow = popup.locator(".pm-wikilink-create");
+    await expect(createRow).toBeVisible({ timeout: 10000 });
+    await expect(createRow).toContainText("Fresh Page XYZ");
+
+    // Open the create dialog (prefilled with the typed title) and confirm.
+    await createRow.click();
+    const dialog = page.locator(".create-page-dialog");
+    await expect(dialog).toBeVisible({ timeout: 10000 });
+    await expect(dialog.locator("input")).toHaveValue("Fresh Page XYZ");
+    await dialog.locator(".create-page-create-btn").click();
+
+    // The brand-new doc's paper_link is inserted and resolves to its title.
+    const link = page.locator(".pm-paper-link");
+    await expect(link).toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(async () => link.first().innerText(), {
+        timeout: 10000,
+        message: "new paper_link never resolved its title",
+      })
+      .toContain("Fresh Page XYZ");
+
+    // The typed trigger text is gone and the dialog has closed.
+    await expect(editor).not.toContainText("[[Fresh");
+    await expect(dialog).not.toBeVisible();
   });
 });

@@ -47,6 +47,19 @@ export interface WikiState {
   dismissedFrom?: number;
 }
 
+/**
+ * Host-supplied behaviour for the `[[` popup. When `onCreatePage` is
+ * provided, the popup grows a trailing "Create &lt;query&gt; page" affordance
+ * (keyboard-navigable + clickable). The host opens its own create-page
+ * dialog, mints the doc, and resolves with the new doc id (or null if the
+ * user cancelled); this module then drops a `paper_link` to it in place of
+ * the `[[query` the user typed. Resolution-by-id means the inserted link
+ * picks up whatever title the new page ends up with.
+ */
+export interface WikiSuggestOptions {
+  onCreatePage?: (title: string) => Promise<number | null>;
+}
+
 type WikiMeta =
   | { type: "setResults"; results: WikiResult[] }
   | { type: "move"; d: 1 | -1 }
@@ -116,59 +129,108 @@ function recompute(
   };
 }
 
-export const wikiLinkSuggestPlugin = new Plugin<WikiState>({
-  key: wikiLinkKey,
-  state: {
-    init() {
-      return { ...INACTIVE };
-    },
-    apply(tr, prev, _oldState, newState) {
-      const meta = tr.getMeta(wikiLinkKey) as WikiMeta | undefined;
-      if (meta) {
-        switch (meta.type) {
-          case "setResults":
-            return {
-              ...prev,
-              results: meta.results,
-              index: clampIndex(prev.index, meta.results.length),
-            };
-          case "move":
-            return {
-              ...prev,
-              index: clamp(
-                prev.index + meta.d,
-                0,
-                Math.max(0, prev.results.length - 1),
-              ),
-            };
-          case "cancel":
-            // Remember the span we dismissed so it doesn't immediately
-            // re-open while the same `[[query` still sits before the cursor.
-            return { ...INACTIVE, dismissedFrom: prev.from };
-          case "commit":
-            // The doc replacement rides in the same tr (see
-            // commitWikiSelection); just go inactive.
-            return { ...INACTIVE };
+/**
+ * Re-derive the `[[query` span (doc positions) straight from the current
+ * doc + selection, independent of plugin state. Used by the async
+ * create-page flow to relocate the span after the host's dialog resolves —
+ * the popup is dismissed (and its state cleared) while the dialog is open,
+ * and collaborative edits may have shifted positions, so the stored `from`
+ * can't be trusted. Returns null when the cursor is no longer sitting at
+ * the end of a `[[query`.
+ */
+function findTriggerSpan(
+  state: EditorState,
+): { from: number; to: number } | null {
+  const sel = state.selection;
+  if (!(sel instanceof TextSelection) || !sel.empty || !sel.$cursor) return null;
+  const $cursor = sel.$cursor;
+  const textBefore = $cursor.parent.textBetween(
+    0,
+    $cursor.parentOffset,
+    undefined,
+    "￼",
+  );
+  const m = TRIGGER.exec(textBefore);
+  if (!m) return null;
+  const to = sel.from;
+  return { from: to - m[0].length, to };
+}
+
+/**
+ * Number of navigable rows: one per result, plus a trailing create row when
+ * the host wired up `onCreatePage` and the user has typed a (trimmed)
+ * non-empty title. Keeps the keymap clamp, the popup highlight, and the
+ * commit handler agreeing on where the create row lives (index === length).
+ */
+function rowCount(createEnabled: boolean, ws: WikiState): number {
+  const extra = createEnabled && ws.query.trim().length > 0 ? 1 : 0;
+  return ws.results.length + extra;
+}
+
+export function wikiLinkSuggestPlugin(
+  opts: WikiSuggestOptions = {},
+): Plugin<WikiState> {
+  const createEnabled = !!opts.onCreatePage;
+  return new Plugin<WikiState>({
+    key: wikiLinkKey,
+    state: {
+      init() {
+        return { ...INACTIVE };
+      },
+      apply(tr, prev, _oldState, newState) {
+        const meta = tr.getMeta(wikiLinkKey) as WikiMeta | undefined;
+        if (meta) {
+          switch (meta.type) {
+            case "setResults":
+              return {
+                ...prev,
+                results: meta.results,
+                index: clampIndex(
+                  prev.index,
+                  rowCount(createEnabled, { ...prev, results: meta.results }),
+                ),
+              };
+            case "move":
+              return {
+                ...prev,
+                index: clamp(
+                  prev.index + meta.d,
+                  0,
+                  Math.max(0, rowCount(createEnabled, prev) - 1),
+                ),
+              };
+            case "cancel":
+              // Remember the span we dismissed so it doesn't immediately
+              // re-open while the same `[[query` still sits before the cursor.
+              return { ...INACTIVE, dismissedFrom: prev.from };
+            case "commit":
+              // The doc replacement rides in the same tr (see
+              // commitWikiSelection); just go inactive.
+              return { ...INACTIVE };
+          }
         }
-      }
-      return recompute(tr, prev, newState);
+        return recompute(tr, prev, newState);
+      },
     },
-  },
-  props: {
-    decorations(state) {
-      const ws = wikiLinkKey.getState(state);
-      if (!ws || !ws.active) return DecorationSet.empty;
-      const cursorTo = state.selection.from;
-      return DecorationSet.create(state.doc, [
-        Decoration.inline(ws.from, cursorTo, { class: "pm-wikilink-typing" }),
-      ]);
+    props: {
+      decorations(state) {
+        const ws = wikiLinkKey.getState(state);
+        if (!ws || !ws.active) return DecorationSet.empty;
+        const cursorTo = state.selection.from;
+        return DecorationSet.create(state.doc, [
+          Decoration.inline(ws.from, cursorTo, { class: "pm-wikilink-typing" }),
+        ]);
+      },
     },
-  },
-});
+  });
+}
 
 type Command = (
   state: EditorState,
   dispatch?: (tr: Transaction) => void,
+  // ProseMirror passes the view as the third arg to keymap commands; the
+  // create-row commit needs it to drive the async create flow.
+  view?: EditorView,
 ) => boolean;
 
 /** Move the highlighted result by `d`; falls through when inactive. */
@@ -202,11 +264,26 @@ export function cancelWikiSuggest(): Command {
   };
 }
 
-/** Replace the `[[query` span with the highlighted result's paper_link. */
-export function commitWikiSelection(): Command {
-  return (state, dispatch) => {
+/**
+ * Commit the highlighted row. A result row replaces the `[[query` span
+ * with that paper's `paper_link`; the trailing create row (index ===
+ * results.length, only present when the host wired `onCreatePage`) hands
+ * off to the async create flow instead. Falls through (false) when
+ * inactive or when there's nothing committable under the cursor.
+ */
+export function commitWikiSelection(opts: WikiSuggestOptions = {}): Command {
+  return (state, dispatch, view) => {
     const ws = wikiLinkKey.getState(state);
-    if (!ws || !ws.active || ws.results.length === 0) return false;
+    if (!ws || !ws.active) return false;
+    const createEnabled = !!opts.onCreatePage && ws.query.trim().length > 0;
+    // The create row sits right after the results.
+    if (createEnabled && ws.index === ws.results.length) {
+      // The doc mutation happens later (after the dialog resolves), so only
+      // start the flow when we actually have a view to dispatch through.
+      if (dispatch && view) void runCreateFlow(view, opts);
+      return true;
+    }
+    if (ws.results.length === 0) return false;
     const result = ws.results[ws.index];
     if (!result) return false;
     if (dispatch) {
@@ -223,17 +300,64 @@ export function commitWikiSelection(): Command {
 }
 
 /**
+ * Create-a-new-page flow, shared by the create row's Enter (keymap) and
+ * click (popup) paths. Dismisses the popup, asks the host to mint a doc
+ * titled `query` (its dialog owns the network call + any "you're the
+ * manager" copy), and on success replaces the `[[query` the user typed
+ * with a `paper_link` to the brand-new doc. A null result (cancelled /
+ * failed) leaves the typed text untouched so the user can retry or pick an
+ * existing page.
+ */
+async function runCreateFlow(
+  view: EditorView,
+  opts: WikiSuggestOptions,
+): Promise<void> {
+  const onCreatePage = opts.onCreatePage;
+  if (!onCreatePage) return;
+  const ws = wikiLinkKey.getState(view.state);
+  const title = ws?.query.trim();
+  if (!ws || !ws.active || !title) return;
+
+  // Close the popup before handing focus to the host's dialog. We don't
+  // touch the doc yet — the `[[query` text stays put and we re-locate it
+  // with findTriggerSpan once we have an id, so collaborative edits during
+  // the dialog can't strand a stale position.
+  view.dispatch(view.state.tr.setMeta(wikiLinkKey, { type: "cancel" }));
+
+  let docId: number | null = null;
+  try {
+    docId = await onCreatePage(title);
+  } catch {
+    docId = null;
+  }
+  if (docId == null) {
+    view.focus();
+    return;
+  }
+
+  const span = findTriggerSpan(view.state);
+  const node = schema.nodes.paper_link.create({ docId });
+  const tr = span
+    ? view.state.tr.replaceWith(span.from, span.to, node)
+    : view.state.tr.replaceSelectionWith(node);
+  view.dispatch(tr);
+  view.focus();
+}
+
+/**
  * Keymap consumed while the `[[` popup is open. Each command returns
  * false when the popup is inactive, so normal editing keystrokes fall
  * through to the rest of the keymap chain. This MUST be registered
  * before `baseKeymap` so Enter/Arrow/Escape are intercepted while the
  * popup is up.
  */
-export function wikiLinkKeymap(): Record<string, Command> {
+export function wikiLinkKeymap(
+  opts: WikiSuggestOptions = {},
+): Record<string, Command> {
   return {
     ArrowDown: moveWikiSelection(1),
     ArrowUp: moveWikiSelection(-1),
-    Enter: commitWikiSelection(),
+    Enter: commitWikiSelection(opts),
     Escape: cancelWikiSuggest(),
   };
 }
@@ -265,7 +389,10 @@ class WikiLinkPopupView {
   private lastFetchedQuery: string | null = null;
   private requestSeq = 0;
 
-  constructor(private view: EditorView) {
+  constructor(
+    private view: EditorView,
+    private opts: WikiSuggestOptions,
+  ) {
     const host = view.dom.parentElement;
     if (!host) {
       // Detached EditorView — nothing to anchor to. destroy() is a no-op.
@@ -365,13 +492,8 @@ class WikiLinkPopupView {
     const root = this.root;
     if (!root) return;
     root.textContent = "";
-    if (ws.results.length === 0) {
-      const empty = document.createElement("div");
-      empty.className = "pm-wikilink-empty";
-      empty.textContent = "No matches";
-      root.appendChild(empty);
-      return;
-    }
+    const createEnabled =
+      !!this.opts.onCreatePage && ws.query.trim().length > 0;
     ws.results.forEach((result, i) => {
       const item = document.createElement("div");
       item.className = "pm-wikilink-item";
@@ -384,6 +506,40 @@ class WikiLinkPopupView {
       });
       root.appendChild(item);
     });
+    if (createEnabled) {
+      this.appendCreateRow(root, ws);
+    } else if (ws.results.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "pm-wikilink-empty";
+      empty.textContent = "No matches";
+      root.appendChild(empty);
+    }
+  }
+
+  /**
+   * The trailing "Create &lt;query&gt; page" row. Highlighted when the cursor
+   * index has walked past the last result (index === results.length), and
+   * clicking it kicks off the same async create flow the keymap's Enter
+   * uses.
+   */
+  private appendCreateRow(root: HTMLDivElement, ws: WikiState): void {
+    const title = ws.query.trim();
+    const item = document.createElement("div");
+    item.className = "pm-wikilink-item pm-wikilink-create";
+    if (ws.index === ws.results.length) {
+      item.classList.add("pm-wikilink-item--active");
+    }
+    item.append("Create ");
+    const strong = document.createElement("strong");
+    strong.textContent = `"${title}"`;
+    item.appendChild(strong);
+    item.append(" page");
+    item.addEventListener("mousedown", (e) => {
+      // Keep editor focus/selection so the create flow can re-find the span.
+      e.preventDefault();
+      void runCreateFlow(this.view, this.opts);
+    });
+    root.appendChild(item);
   }
 
   private commitResult(result: WikiResult): void {
@@ -416,10 +572,12 @@ class WikiLinkPopupView {
 }
 
 /** The `Plugin.view` popup that renders the `[[` autocomplete list. */
-export function wikiLinkSuggestPopupPlugin(): Plugin {
+export function wikiLinkSuggestPopupPlugin(
+  opts: WikiSuggestOptions = {},
+): Plugin {
   return new Plugin({
     view(view) {
-      return new WikiLinkPopupView(view);
+      return new WikiLinkPopupView(view, opts);
     },
   });
 }
