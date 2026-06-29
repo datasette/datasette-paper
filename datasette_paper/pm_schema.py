@@ -15,12 +15,142 @@ even though we never expose merge/split UI; in practice every cell has
 """
 
 import json
+import re
+from typing import Optional
 
 from prosemirror.model import Schema
 from prosemirror.schema.basic import schema as basic_schema
 from prosemirror.schema.list import add_list_nodes
 
+# ─── URL-scheme allowlists (mirror frontend/src/lib/safeHref.ts) ──────────────
+#
+# The stock prosemirror-schema-basic `link` mark and `image` node emit their
+# `href`/`src` verbatim. The browser `toDOM` (schema.ts) is the render sink a
+# viewer clicks, so the real XSS guard lives there — but we mirror the same
+# allowlist here to keep the two schemas in lock-step (CLAUDE.md rule 1) and,
+# more importantly, to back the server-side step validator in instance.py,
+# which rejects a hand-crafted collab step carrying a `javascript:` href before
+# it is ever persisted or broadcast.
+#
+# Allowlist, not blocklist: an attacker needs only one script-bearing scheme,
+# so we enumerate the safe ones. ASCII control + space chars are stripped
+# before the scheme is read (the URL parser ignores them), so `java\tscript:`
+# can't smuggle a blocked scheme past the colon check.
+
+_ALLOWED_HREF_SCHEMES = frozenset({"http", "https", "mailto", "tel"})
+_ALLOWED_IMAGE_SCHEMES = frozenset({"http", "https"})
+# scheme = ALPHA *( ALPHA / DIGIT / "+" / "-" / "." ) ":"
+_SCHEME_RE = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.\-]*):")
+_CTRL_WS_RE = re.compile(r"[\x00-\x20]")
+
+
+def _scheme_of(cleaned: str) -> Optional[str]:
+    m = _SCHEME_RE.match(cleaned)
+    return m.group(1).lower() if m else None
+
+
+def is_safe_href(href) -> bool:
+    """Whether a link ``href`` uses an allowlisted scheme, is an in-page
+    ``#fragment``, or is a same-document relative path. Mirrors
+    ``isSafeHref`` in frontend/src/lib/safeHref.ts."""
+    if not href or not isinstance(href, str):
+        return True
+    cleaned = _CTRL_WS_RE.sub("", href)
+    if not cleaned or cleaned.startswith("#"):
+        return True
+    if cleaned.startswith("/") and not cleaned.startswith("//"):
+        return True
+    scheme = _scheme_of(cleaned)
+    if scheme is None:
+        return True  # scheme-less relative reference
+    return scheme in _ALLOWED_HREF_SCHEMES
+
+
+def is_safe_image_src(src) -> bool:
+    """Like :func:`is_safe_href` but for an image ``src``: also allows inline
+    ``data:image/...`` URIs (paper stores pasted images inline) while still
+    rejecting ``data:text/html`` / ``javascript:``. Mirrors ``isSafeImageSrc``
+    in frontend/src/lib/safeHref.ts."""
+    if not src or not isinstance(src, str):
+        return True
+    cleaned = _CTRL_WS_RE.sub("", src)
+    if not cleaned:
+        return True
+    if cleaned[:11].lower() == "data:image/":
+        return True
+    if cleaned.startswith("/") and not cleaned.startswith("//"):
+        return True
+    scheme = _scheme_of(cleaned)
+    if scheme is None:
+        return True
+    return scheme in _ALLOWED_IMAGE_SCHEMES
+
+
+def safe_href(href):
+    """A link ``href`` if safe, else ``"#"`` — the render-sink sanitizer."""
+    return href if (href and is_safe_href(href)) else "#"
+
+
+def safe_image_src(src):
+    """An image ``src`` if safe, else ``"#"`` — the render-sink sanitizer."""
+    return src if (src and is_safe_image_src(src)) else "#"
+
+
+def step_href_violation(step_obj) -> Optional[str]:
+    """Return a reason string if a step's JSON carries a ``link`` mark or an
+    ``image`` node with a blocked URL scheme, else ``None``.
+
+    Walks the whole step structure rather than decoding a specific step shape,
+    so it catches a href hidden in a ReplaceStep's slice, an AddMarkStep's
+    top-level ``mark``, or any nesting in between. Used by instance.py to
+    reject a crafted step before it is persisted/broadcast.
+    """
+    stack = [step_obj]
+    while stack:
+        obj = stack.pop()
+        if isinstance(obj, dict):
+            attrs = obj.get("attrs")
+            if isinstance(attrs, dict):
+                if obj.get("type") == "link":
+                    href = attrs.get("href")
+                    if isinstance(href, str) and not is_safe_href(href):
+                        return f"blocked link href scheme: {href!r}"
+                elif obj.get("type") == "image":
+                    src = attrs.get("src")
+                    if isinstance(src, str) and not is_safe_image_src(src):
+                        return f"blocked image src scheme: {src!r}"
+            stack.extend(obj.values())
+        elif isinstance(obj, list):
+            stack.extend(obj)
+    return None
+
+
 _list_nodes = add_list_nodes(basic_schema.spec["nodes"], "paragraph block*", "block")
+
+# Sanitize the image `src` at the render sink — mirrors schema.ts. toDOM is
+# never rendered server-side, but we keep it in lock-step with the JS schema.
+_image_spec = {
+    **_list_nodes["image"],
+    "toDOM": lambda node: [
+        "img",
+        {
+            "src": safe_image_src(node.attrs.get("src")),
+            "alt": node.attrs.get("alt"),
+            "title": node.attrs.get("title"),
+        },
+    ],
+}
+
+# Sanitize the link `href` at the render sink — mirrors schema.ts.
+_link_mark_spec = {
+    **basic_schema.spec["marks"]["link"],
+    "toDOM": lambda node: [
+        "a",
+        {"href": safe_href(node.attrs.get("href")), "title": node.attrs.get("title")},
+        0,
+    ],
+}
+_marks = {**basic_schema.spec["marks"], "link": _link_mark_spec}
 
 # Custom task_list / task_item — mirrors frontend/src/lib/schema.ts.
 _task_list_spec = {
@@ -353,6 +483,7 @@ _source_spec = {
 
 _nodes = {
     **_list_nodes,
+    "image": _image_spec,
     "placeholder": _placeholder_spec,
     "paper_link": _paper_link_spec,
     "mention": _mention_spec,
@@ -371,4 +502,4 @@ _nodes = {
     "table_header": _table_header_spec,
 }
 
-schema = Schema({"nodes": _nodes, "marks": basic_schema.spec["marks"]})
+schema = Schema({"nodes": _nodes, "marks": _marks})

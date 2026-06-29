@@ -23,6 +23,12 @@ import type { Command } from "prosemirror-state";
 import { TOOLBAR_ICONS } from "./icons";
 import type { DatasetteStatus } from "./datasetteResolver";
 
+// `safeHref` moved to its own dependency-free module (shared with the schema
+// render sink in schema.ts, which can't import from here without a cycle).
+// Re-export so existing importers (blockEmbedView, inlineEmbedView) and the
+// datasetteEmbed.test stay pointed here.
+export { safeHref } from "./safeHref";
+
 /** Default capped row count for a table embed when the caller gives none. */
 export const DEFAULT_EMBED_LIMIT = 25;
 
@@ -118,24 +124,6 @@ export function embedIconMarkup(
   status: Extract<DatasetteStatus, { status: "ok" }>,
 ): string {
   return status.icon ?? iconMarkup(kindIcon(status.kind));
-}
-
-/**
- * Sanitize an href before it touches the DOM. Allows only same-origin
- * relative paths and absolute `http(s)` URLs; everything else (notably
- * `javascript:` / `data:`) collapses to "#". Core refs are always relative
- * paths, but a third-party provider's `resolve` could supply an arbitrary
- * `href`, so guard at every assignment site.
- */
-export function safeHref(href: string | undefined): string {
-  if (!href) return "#";
-  if (href.startsWith("/") && !href.startsWith("//")) return href; // relative path
-  try {
-    const u = new URL(href, window.location.origin);
-    return u.protocol === "http:" || u.protocol === "https:" ? href : "#";
-  } catch {
-    return "#";
-  }
 }
 
 /** Render a JSON-safe cell value as a display string (never HTML). */

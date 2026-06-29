@@ -61,6 +61,7 @@ import type { Command } from "prosemirror-state";
 import type { MarkType } from "prosemirror-model";
 
 import { schema } from "./schema";
+import { isSafeHref } from "./safeHref";
 import { foldHeadingsPlugin } from "./foldHeadings";
 import { TocView, tocPlugin } from "./tocView";
 import { Reporter } from "./reporter";
@@ -406,6 +407,11 @@ function linkInputRule(): InputRule {
     /\[([^\]]+)\]\(([^)\s]+)\)$/,
     (state, match, start, end) => {
       const [, text, href] = match;
+      // Don't create a link mark for a dangerous scheme (javascript:, etc.):
+      // return null so the rule no-ops and the literal `[text](href)` stays as
+      // plain text. The render sink would neutralize it anyway; this keeps the
+      // poison out of the doc / step log in the first place.
+      if (!isSafeHref(href)) return null;
       const linkType = schema.marks.link;
       const innerStart = start + 1;
       const innerEnd = innerStart + text.length;
@@ -616,6 +622,14 @@ function toggleLinkCommand(): Command {
     // Prompts are synchronous; jsdom returns null which we treat as cancel.
     const href = typeof window !== "undefined" ? window.prompt("Link URL") : null;
     if (!href) return false;
+    // Reject a dangerous scheme (javascript:, vbscript:, data:…) before the
+    // mark is created — the render sink neutralizes it on display anyway, but
+    // refusing here keeps it out of the doc and tells the user why.
+    if (!isSafeHref(href)) {
+      if (typeof window !== "undefined")
+        window.alert("That link URL isn't allowed (only http, https, mailto, tel, and # links).");
+      return false;
+    }
     return toggleMark(linkType, { href })(state, dispatch);
   };
 }
