@@ -376,6 +376,121 @@ async def test_post_validates_against_post_update_doc(ds_paper):
     assert len(steps) == 2
 
 
+# ---------------------------------------------------------------------------
+# Stored-XSS guard (blockers-0629/01): a crafted step planting a
+# `javascript:` link href (or image src) must be rejected server-side and
+# never persisted, even though it bypasses the UI and the markdown parser.
+# ---------------------------------------------------------------------------
+
+
+# `replace` step inserting a text node carrying a `javascript:` link mark
+# into the empty starter paragraph (pos 1) — the exact crafted-step vector.
+XSS_LINK_STEP = json.dumps(
+    {
+        "stepType": "replace",
+        "from": 1,
+        "to": 1,
+        "slice": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": "click me",
+                    "marks": [
+                        {"type": "link", "attrs": {"href": "javascript:alert(1)"}}
+                    ],
+                }
+            ]
+        },
+    }
+)
+
+
+@pytest.mark.asyncio
+async def test_post_crafted_javascript_link_rejected_422(ds_paper):
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    resp = await ds.client.post(
+        url,
+        json={"version": 0, "clientID": 1, "steps": [XSS_LINK_STEP]},
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["error"] == "invalid_step"
+    assert body["step_index"] == 0
+    assert "blocked link href" in body["message"]
+
+    # Nothing written; version unchanged.
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert steps == []
+    doc = await paper_db.select_doc_by_id(doc_id)
+    assert doc.current_version == 0
+
+
+@pytest.mark.asyncio
+async def test_post_crafted_javascript_image_src_rejected_422(ds_paper):
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    bad_image = json.dumps(
+        {
+            "stepType": "replace",
+            "from": 1,
+            "to": 1,
+            "slice": {
+                "content": [{"type": "image", "attrs": {"src": "javascript:alert(1)"}}],
+                # An inline image inserted into the paragraph needs the slice
+                # openStart/openEnd defaults (0) — it's a leaf inline atom.
+            },
+        }
+    )
+    resp = await ds.client.post(
+        url,
+        json={"version": 0, "clientID": 1, "steps": [bad_image]},
+    )
+    assert resp.status_code == 422, resp.text
+    assert "blocked image src" in resp.json()["message"]
+
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert steps == []
+
+
+@pytest.mark.asyncio
+async def test_post_safe_link_href_persists(ds_paper):
+    """A normal https link mark is accepted — the guard only blocks bad schemes."""
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+
+    good = json.dumps(
+        {
+            "stepType": "replace",
+            "from": 1,
+            "to": 1,
+            "slice": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "click me",
+                        "marks": [
+                            {"type": "link", "attrs": {"href": "https://example.com"}}
+                        ],
+                    }
+                ]
+            },
+        }
+    )
+    url = f"/-/paper/api/docs/{doc_id}/events"
+    resp = await ds.client.post(
+        url,
+        json={"version": 0, "clientID": 1, "steps": [good]},
+    )
+    assert resp.status_code == 200, resp.text
+    steps = await paper_db.select_steps_after(doc_id=doc_id, after_version=0)
+    assert len(steps) == 1
+
+
 @pytest.mark.asyncio
 async def test_post_broadcasts_to_subscribers(ds_paper):
     ds, paper_db = ds_paper

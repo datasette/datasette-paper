@@ -2,15 +2,43 @@ import { Schema, type MarkSpec, type NodeSpec } from "prosemirror-model";
 import { schema as basic } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
 import { tableNodes } from "prosemirror-tables";
+import { safeHref, safeImageSrc } from "./safeHref";
 
-const baseNodes = addListNodes(basic.spec.nodes, "paragraph block*", "block");
+// The render sink for link/image URLs. `prosemirror-schema-basic` ships the
+// stock `link` mark and `image` node whose `toDOM` emit `href`/`src` verbatim,
+// and there's no NodeView/markView for either — so `toDOM` *is* the DOM that a
+// viewer clicks. Route both through the scheme allowlist in `safeHref.ts`
+// (mirrored by `datasette_paper/pm_schema.py`) so a `javascript:` URL planted
+// on a mark — by the Mod-K prompt, the `[t](href)` input rule, or a crafted
+// collab step that bypasses the UI — renders inert. This is the primary fix
+// for the stored-XSS hole; creation-site guards and the server-side step
+// validator (`instance.py`) are defense-in-depth around it.
+const _imageBase = basic.spec.nodes.get("image") as NodeSpec;
+const baseNodes = addListNodes(
+  basic.spec.nodes.update("image", {
+    ..._imageBase,
+    toDOM: (node) => [
+      "img",
+      { src: safeImageSrc(node.attrs.src), alt: node.attrs.alt, title: node.attrs.title },
+    ],
+  }),
+  "paragraph block*",
+  "block",
+);
 
 // `prosemirror-schema-basic` ships `code` without `inclusive: false`, so the
 // mark extends across the boundary when the cursor sits next to an existing
 // inline-code span — meaning typing plain text adjacent to code silently
 // becomes code. Override it to match how `link` already behaves.
 const codeBase = basic.spec.marks.get("code") as MarkSpec;
-const baseMarks = basic.spec.marks.update("code", { ...codeBase, inclusive: false });
+const _linkBase = basic.spec.marks.get("link") as MarkSpec;
+const baseMarks = basic.spec.marks
+  .update("code", { ...codeBase, inclusive: false })
+  // Sanitize the link `href` at the render sink (see the block comment above).
+  .update("link", {
+    ..._linkBase,
+    toDOM: (node) => ["a", { href: safeHref(node.attrs.href), title: node.attrs.title }, 0],
+  });
 
 // Inline atom for template placeholders — e.g. {today}, {actor}. Only
 // authored inside templates; substituted server-side at

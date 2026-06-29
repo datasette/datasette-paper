@@ -280,7 +280,7 @@ class Instance:
         from prosemirror.model import ReplaceError
         from prosemirror.transform import Step
 
-        from .pm_schema import schema
+        from .pm_schema import schema, step_href_violation
 
         live_json = self.materialize_live_doc()
         self._raise_if_poisoned()
@@ -302,9 +302,18 @@ class Instance:
                     f"step too large ({len(step_json)} bytes; max {MAX_STEP_BYTES})",
                 )
             try:
-                step = Step.from_json(schema, json.loads(step_json))
+                parsed = json.loads(step_json)
+                step = Step.from_json(schema, parsed)
             except Exception as exc:
                 raise InvalidStepError(i, f"step parse failed: {exc}") from exc
+            # Defense-in-depth (CLAUDE.md / blockers-0629/01): reject a crafted
+            # step that plants a `javascript:` (or other blocked-scheme) href on
+            # a link mark or image src. The browser render sink neutralizes it
+            # on display, but a direct POST to /events bypasses the UI entirely —
+            # stop it at persistence so it never reaches the step log or SSE.
+            violation = step_href_violation(parsed)
+            if violation is not None:
+                raise InvalidStepError(i, violation)
             try:
                 result = step.apply(doc)
             except (ReplaceError, ValueError) as exc:
