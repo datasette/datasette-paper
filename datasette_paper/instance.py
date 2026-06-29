@@ -1004,7 +1004,15 @@ async def backfill_inline_tags(datasette, *, force: bool = False) -> dict:
     idempotent reindex the write tail uses. Marker-guarded so it only scans
     once; ``force=True`` bypasses the marker (tests / re-run). Mirrors
     :func:`backfill_links`.
+
+    Unlike the write-tail :meth:`Instance.reindex_tags` (one transaction per
+    doc), the backfill commits every doc's index rows **and** the done-marker in
+    a single transaction: it materializes all docs read-only first, then writes
+    once. That makes it all-or-nothing — either the whole index is rebuilt and
+    recorded done, or nothing changes and the next startup retries — instead of
+    leaving the marker stamped "done" while some doc's write never landed.
     """
+    from .tags import extract_tags
     from .util import paper_db
 
     db = paper_db(datasette)
@@ -1024,18 +1032,46 @@ async def backfill_inline_tags(datasette, *, force: bool = False) -> dict:
             return {"docs": 0, "skipped": True}
 
     rows = (await internal.execute("SELECT id FROM _datasette_paper_doc")).rows
-    count = 0
+
+    # Phase 1 (read-only): hydrate + materialize every doc and count its inline
+    # tags. A poisoned doc is logged and skipped so one bad history can't wedge
+    # the whole backfill. No writes happen here.
+    indexed: list[tuple[int, int, dict[str, int]]] = []
     for row in rows:
         doc_id = row["id"]
         try:
             inst = await Instance.hydrate(db, doc_id)
-            await inst.reindex_tags()
-            count += 1
+            live_json = inst.materialize_live_doc()
+            if inst._materialization_error is not None:
+                continue
+            tags: dict[str, int] = {}
+            for slug in extract_tags(live_json):
+                tags[slug] = tags.get(slug, 0) + 1
+            indexed.append((doc_id, inst.version, tags))
         except Exception:
             logger.exception("inline-tag backfill failed for doc %s", doc_id)
-    await internal.execute_write(
-        f"INSERT OR IGNORE INTO {_TAG_BACKFILL_TABLE} (key, migrated_at) "
-        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
-        [_TAG_BACKFILL_KEY],
-    )
-    return {"docs": count, "skipped": False}
+
+    # Phase 2: rewrite every doc's index rows and stamp the marker in one
+    # transaction (execute_write_fn wraps the closure in a single transaction
+    # that rolls back on any error). Each per-doc delete+insert was already
+    # atomic; batching them with the marker closes the gap where the marker
+    # could commit while a doc's write was still outstanding.
+    def write(conn):
+        for doc_id, src_version, tags in indexed:
+            _queries.delete_inline_tags_for_doc(conn, doc_id=doc_id)
+            for tag, occurrences in tags.items():
+                _queries.insert_inline_tag(
+                    conn,
+                    doc_id=doc_id,
+                    tag=tag,
+                    occurrences=occurrences,
+                    src_version=src_version,
+                )
+        conn.execute(
+            f"INSERT OR IGNORE INTO {_TAG_BACKFILL_TABLE} (key, migrated_at) "
+            "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+            [_TAG_BACKFILL_KEY],
+        )
+
+    await internal.execute_write_fn(write)
+    return {"docs": len(indexed), "skipped": False}
