@@ -156,7 +156,18 @@ async def list_docs(datasette, request):
     # datasette-user-profiles, then the core actors_from_ids hook). Falls back
     # to the id as the name when no profile source is installed; both fields are
     # None for anonymous-created docs (created_by is None).
-    profiles = await resolve_actor_profiles(datasette, (r.created_by for r in rows))
+    #
+    # Name + avatar are profile data, so the lookup is gated on user-profiles'
+    # `profile_access` action — mirrors the resolve_actors gate from #11. The
+    # rows are already acl-filtered to docs this actor can view, so a denied
+    # actor still learns nothing new: created_by_name just degrades to the raw
+    # id (already in the payload) and created_by_avatar to None.
+    may_resolve = await datasette.allowed(action="profile_access", actor=request.actor)
+    profiles = (
+        await resolve_actor_profiles(datasette, (r.created_by for r in rows))
+        if may_resolve
+        else {}
+    )
     # Tags for every returned doc in one query (chips on the list page).
     tags_by_doc = await db.list_tags_for_docs(doc_ids=[r.id for r in rows])
     return Response.json(
@@ -168,10 +179,14 @@ async def list_docs(datasette, request):
                 "updated_at": r.updated_at,
                 "created_by": r.created_by,
                 "created_by_name": (
-                    profiles[r.created_by]["name"] if r.created_by else None
+                    (profiles.get(r.created_by) or {}).get("name") or r.created_by
+                    if r.created_by
+                    else None
                 ),
                 "created_by_avatar": (
-                    profiles[r.created_by]["avatar_url"] if r.created_by else None
+                    (profiles.get(r.created_by) or {}).get("avatar_url")
+                    if r.created_by
+                    else None
                 ),
                 "is_owner": r.created_by is not None and r.created_by == me,
                 "tags": tags_by_doc.get(r.id, []),

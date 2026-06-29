@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from conftest import plant_snapshot
+from conftest import actor_cookie, build_ds, plant_snapshot
 
 
 @pytest.mark.asyncio
@@ -38,9 +38,34 @@ async def test_list_created_by_name_falls_back_to_id(ds):
 
 
 @pytest.mark.asyncio
-async def test_list_created_by_uses_actor_profile(ds, monkeypatch):
-    """created_by_name + created_by_avatar resolve through actors_from_ids."""
+async def test_list_created_by_gated_on_profile_access(ds, monkeypatch):
+    """Creator-profile resolution is gated on ``profile_access`` (mirrors the
+    resolve_actors gate from #11). The default fixture grants paper-create but
+    NOT profile_access, so even with a profile source stubbed in, the listing
+    degrades to the raw id (rows are already acl-filtered → no new disclosure).
+    """
+    import datasette_paper.routes.docs as routes_docs
+
+    async def fake_profiles(datasette, ids):
+        return {i: {"name": f"Name {i}", "avatar_url": f"/pic/{i}"} for i in ids}
+
+    monkeypatch.setattr(routes_docs, "resolve_actor_profiles", fake_profiles)
     await ds.client.post("/-/paper/api/docs", json={"name": "Mine"})
+    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    assert docs[0]["created_by"] == "alice"
+    assert docs[0]["created_by_name"] == "alice"
+    assert docs[0]["created_by_avatar"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_created_by_uses_actor_profile(monkeypatch):
+    """With profile_access granted, created_by_name + created_by_avatar resolve
+    through actors_from_ids."""
+    ds = await build_ds(
+        config={"permissions": {"datasette-paper-create": True, "profile_access": True}}
+    )
+    cookies = actor_cookie(ds, "alice")
+    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"}, cookies=cookies)
 
     async def fake_actors_from_ids(actor_ids):
         return {
@@ -53,26 +78,31 @@ async def test_list_created_by_uses_actor_profile(ds, monkeypatch):
         }
 
     monkeypatch.setattr(ds, "actors_from_ids", fake_actors_from_ids)
-    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    docs = (await ds.client.get("/-/paper/api/docs", cookies=cookies)).json()
     assert docs[0]["created_by"] == "alice"
     assert docs[0]["created_by_name"] == "Alice Liddell"
     assert docs[0]["created_by_avatar"] == "/-/profile/pic/alice"
 
 
 @pytest.mark.asyncio
-async def test_list_created_by_uses_user_profiles(ds):
+async def test_list_created_by_uses_user_profiles():
     """End-to-end: a seeded datasette-user-profiles row surfaces name + avatar.
 
     Exercises the real plugin path (no monkeypatch) — resolve_profile_actors is
     queried directly because user-profiles doesn't register actors_from_ids.
+    Requires profile_access (the gate added mirroring #11).
     """
-    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"})
+    ds = await build_ds(
+        config={"permissions": {"datasette-paper-create": True, "profile_access": True}}
+    )
+    cookies = actor_cookie(ds, "alice")
+    await ds.client.post("/-/paper/api/docs", json={"name": "Mine"}, cookies=cookies)
     internal = ds.get_internal_database()
     await internal.execute_write(
         "INSERT INTO datasette_user_profiles (actor_id, display_name) VALUES (?, ?)",
         ["alice", "Alice Anderson"],
     )
-    docs = (await ds.client.get("/-/paper/api/docs")).json()
+    docs = (await ds.client.get("/-/paper/api/docs", cookies=cookies)).json()
     assert docs[0]["created_by_name"] == "Alice Anderson"
     assert docs[0]["created_by_avatar"] == "/-/profile/pic/alice"
 
