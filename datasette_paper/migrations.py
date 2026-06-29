@@ -598,3 +598,42 @@ def m006_doc_tags(db: Database):
             ON _datasette_paper_doc_tag(tag);
         """
     )
+
+
+@migrations()
+def m008_inline_tag_index(db: Database):
+    # Derived index of inline ``#tag`` nodes found in the materialized doc
+    # body, rebuilt wholesale per doc by the write-tail reindex (mirrors
+    # _datasette_paper_link / reindex_links). Replaces the old
+    # ``step_json LIKE`` candidate scan in selectTagRefCandidatesScoped:
+    # the inline-#tag search now JOINs this table on an exact, indexed tag
+    # match instead of an unindexed substring scan over every step of every
+    # viewable doc. Distinct namespace from _datasette_paper_doc_tag
+    # (manual doc-level tags) — this table tracks tags inside the document
+    # body. ``occurrences`` preserves the per-doc count the refs endpoint
+    # returns without re-materializing the doc.
+    #
+    # NOTE: m007 is intentionally skipped here — it is taken by a sibling
+    # migration landing in parallel; this step is m008 to stay append-only
+    # and avoid a numbering collision.
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _datasette_paper_inline_tag (
+            --! Inline #tag occurrences extracted from the materialized doc
+            --! body. Rebuilt wholesale for a doc whenever it is
+            --! re-extracted by the write-tail reindex.
+            doc_id      INTEGER NOT NULL REFERENCES _datasette_paper_doc(id) ON DELETE CASCADE,
+            --- Normalized inline tag slug (see normalize_tag); matches what
+            --- extract_tags emits from the live doc.
+            tag         TEXT NOT NULL,
+            --- How many times the tag appears in the doc body.
+            occurrences INTEGER NOT NULL DEFAULT 1,
+            --- Doc version the index was last rebuilt at.
+            src_version INTEGER NOT NULL,
+            updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            PRIMARY KEY (doc_id, tag)
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_inline_tag_tag
+            ON _datasette_paper_inline_tag(tag);
+        """
+    )

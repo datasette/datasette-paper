@@ -350,43 +350,60 @@ ORDER BY version DESC
 LIMIT 1;
 
 -- ============================================================================
--- Inline #tag search (LIKE-scan v1)
+-- Compaction
 --
--- Candidate scan for `GET /tags/{slug}/refs`: restrict to docs the requester
--- can view, then LIKE-match either the latest snapshot's doc_json OR any step's
--- step_json for the tag node's serialized slug ("tag":"<slug>"). Scanning the
--- step log too is load-bearing: a doc edited fewer than SNAPSHOT_THRESHOLD
--- steps ago (e.g. a tag just typed) has no snapshot reflecting that content —
--- it may have no snapshot at all — so a snapshot-only candidate scan would
--- silently miss it. This is a *candidate* filter — false positives are
--- confirmed in Python by walking the materialized live doc (snapshot + live
--- steps) for a real `tag` node. A derived inline-tag index table is the
--- documented follow-up if this scan becomes a hotspot (see
--- todos/tags/07-tag-search.md).
+-- The step log + snapshot table are append-only on the hot path but would
+-- otherwise grow without bound: every snapshot supersedes all prior steps and
+-- snapshots for that doc. After a new snapshot at version V lands, every step
+-- with version <= V is baked into the snapshot doc_json, and every snapshot
+-- with version < V is dead weight (hydrate only reads the latest one). Pruning
+-- them is safe because a client asking for evicted history already gets HTTP
+-- 410 → full re-bootstrap from the latest snapshot. Caller (PaperDB.compact_doc)
+-- runs both DELETEs in one execute_write_fn closure after the snapshot insert.
 -- ============================================================================
 
--- name: selectTagRefCandidatesScoped :rows -> Doc
-SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name, d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at, d.kind, d.locked
+-- Drop steps now folded into the snapshot at $version (inclusive).
+-- name: deleteStepsUpToVersion
+DELETE FROM _datasette_paper_step
+WHERE doc_id = $doc_id::integer
+  AND version <= $version::integer;
+
+-- Drop every snapshot older than the latest one at $version. The latest
+-- snapshot (version == $version) is kept; hydrate only ever reads it.
+-- name: deleteSnapshotsBelowVersion
+DELETE FROM _datasette_paper_snapshot
+WHERE doc_id = $doc_id::integer
+  AND version < $version::integer;
+
+-- ============================================================================
+-- Inline #tag index (derived from the materialized doc body)
+--
+-- ``_datasette_paper_inline_tag`` (migration m008) is a derived index of the
+-- inline ``#tag`` nodes in each doc's live body, rebuilt wholesale per doc by
+-- the write-tail reindex (mirrors _datasette_paper_link / reindex_links).
+-- ``GET /tags/{slug}/refs`` JOINs it on an exact, indexed tag match — no more
+-- unindexed ``step_json LIKE`` scan over every step of every viewable doc, and
+-- no N+1 materialize loop to confirm candidates (the index already holds the
+-- confirmed, normalized tag + per-doc occurrence count).
+-- ============================================================================
+
+-- Clear a doc's inline-tag rows — the first half of replace_inline_tags.
+-- name: deleteInlineTagsForDoc
+DELETE FROM _datasette_paper_inline_tag WHERE doc_id = $doc_id::integer;
+
+-- name: insertInlineTag
+INSERT INTO _datasette_paper_inline_tag (doc_id, tag, occurrences, src_version)
+VALUES ($doc_id::integer, $tag::text, $occurrences::integer, $src_version::integer);
+
+-- Docs containing inline ``#tag`` $tag, scoped to the requester's viewable
+-- set, with the per-doc occurrence count. id is a deterministic tie-break:
+-- updated_at has second resolution, so docs touched in the same second would
+-- otherwise order arbitrarily (flaky results page + flaky screenshot diffs).
+-- name: selectTagRefsScoped :rows -> TagRef
+SELECT d.id, d.name, d.state, d.kind, d.updated_at, t.occurrences
 FROM _datasette_paper_doc d
+JOIN _datasette_paper_inline_tag t ON t.doc_id = d.id AND t.tag = $tag::text
 WHERE d.id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
   )
-  AND (
-    EXISTS (
-      SELECT 1 FROM _datasette_paper_snapshot s
-      WHERE s.doc_id = d.id
-        AND s.version = (
-          SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id
-        )
-        AND s.doc_json LIKE $like::text
-    )
-    OR EXISTS (
-      SELECT 1 FROM _datasette_paper_step st
-      WHERE st.doc_id = d.id
-        AND st.step_json LIKE $like::text
-    )
-  )
--- id is a deterministic tie-break: updated_at has second resolution, so docs
--- touched in the same second would otherwise order arbitrarily (flaky results
--- page + flaky screenshot diffs).
 ORDER BY d.updated_at DESC, d.id DESC;

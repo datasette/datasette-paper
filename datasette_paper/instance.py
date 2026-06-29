@@ -143,6 +143,9 @@ class Instance:
         # In-memory: lost on eviction/rehydrate, which just means one cheap
         # idempotent reindex on the next write — fine.
         self._links_indexed_version: Optional[int] = None
+        # Doc version at which the inline-#tag index was last rebuilt. Same
+        # in-memory guard idiom as ``_links_indexed_version``.
+        self._tags_indexed_version: Optional[int] = None
         # Serializes ``add_events`` and the subscribe+backlog snapshot in
         # ``subscribe_with_backlog`` so the Python-level state transitions
         # (version check → validate → write → tail append → broadcast)
@@ -435,7 +438,39 @@ class Instance:
         self.last_active = time.monotonic()
         await self._maybe_auto_snapshot(actor_id)
         await self.reindex_links()
+        await self.reindex_tags()
         return self.version
+
+    async def reindex_tags(self) -> None:
+        """Rebuild this doc's inline-#tag index rows from the live doc.
+
+        Mirror of :meth:`reindex_links`: called from the write tail, guarded so
+        it never raises into the write path (skips a poisoned history and a
+        redundant re-run, swallows + logs any persistence error). Keeps
+        ``_datasette_paper_inline_tag`` current as of the latest write, which is
+        what ``GET /tags/{slug}/refs`` joins against.
+        """
+        if self._materialization_error is not None:
+            return
+        if self._tags_indexed_version == self.version:
+            return
+        try:
+            live_json = self.materialize_live_doc()
+            if self._materialization_error is not None:
+                return
+            from .tags import extract_tags
+
+            tags: dict[str, int] = {}
+            for slug in extract_tags(live_json):
+                tags[slug] = tags.get(slug, 0) + 1
+            await self.db.replace_inline_tags(
+                doc_id=self.doc_id,
+                src_version=self.version,
+                tags=tags,
+            )
+            self._tags_indexed_version = self.version
+        except Exception:
+            logger.exception("inline-tag reindex failed for doc %s", self.doc_id)
 
     async def reindex_links(self) -> None:
         """Rebuild this doc's outgoing link edges from the live doc.
@@ -851,6 +886,18 @@ class Instance:
             self._cached_live_doc_json = None
             self._cached_live_version = None
             self._materialization_error = None
+            # Compact the on-disk log to match: the steps we just popped from
+            # the tail are now baked into the snapshot, and older snapshots are
+            # dead weight. Without this both tables grow without bound. A client
+            # asking for evicted history gets a 410 → full re-bootstrap, so this
+            # is safe. Guarded so a compaction failure can't fail the user's
+            # edit (it runs in the write tail).
+            try:
+                await self.db.compact_doc(doc_id=self.doc_id, version=version)
+            except Exception:
+                logger.exception(
+                    "step/snapshot compaction failed for doc %s", self.doc_id
+                )
 
 
 class InstanceRegistry:
@@ -938,5 +985,57 @@ async def backfill_links(datasette, *, force: bool = False) -> dict:
         f"INSERT OR IGNORE INTO {_LINK_BACKFILL_TABLE} (key, migrated_at) "
         "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
         [_LINK_BACKFILL_KEY],
+    )
+    return {"docs": count, "skipped": False}
+
+
+# Marker table + key for the one-time inline-#tag index backfill. Same idiom
+# as the link backfill above; a dedicated key so the two are independent.
+_TAG_BACKFILL_TABLE = "_datasette_paper_inline_tag_backfill"
+_TAG_BACKFILL_KEY = "inline_tags_v1"
+
+
+async def backfill_inline_tags(datasette, *, force: bool = False) -> dict:
+    """Reindex inline ``#tag`` rows for every existing doc, once.
+
+    Docs that carry inline tags but haven't been edited since migration m008
+    landed have no rows in ``_datasette_paper_inline_tag``, so the refs endpoint
+    would miss them. This walks every doc, hydrates it, and runs the same
+    idempotent reindex the write tail uses. Marker-guarded so it only scans
+    once; ``force=True`` bypasses the marker (tests / re-run). Mirrors
+    :func:`backfill_links`.
+    """
+    from .util import paper_db
+
+    db = paper_db(datasette)
+    internal = datasette.get_internal_database()
+    await internal.execute_write(
+        f"CREATE TABLE IF NOT EXISTS {_TAG_BACKFILL_TABLE} "
+        "(key TEXT PRIMARY KEY, migrated_at TEXT NOT NULL)"
+    )
+    if not force:
+        done = (
+            await internal.execute(
+                f"SELECT 1 FROM {_TAG_BACKFILL_TABLE} WHERE key = ?",
+                [_TAG_BACKFILL_KEY],
+            )
+        ).rows
+        if done:
+            return {"docs": 0, "skipped": True}
+
+    rows = (await internal.execute("SELECT id FROM _datasette_paper_doc")).rows
+    count = 0
+    for row in rows:
+        doc_id = row["id"]
+        try:
+            inst = await Instance.hydrate(db, doc_id)
+            await inst.reindex_tags()
+            count += 1
+        except Exception:
+            logger.exception("inline-tag backfill failed for doc %s", doc_id)
+    await internal.execute_write(
+        f"INSERT OR IGNORE INTO {_TAG_BACKFILL_TABLE} (key, migrated_at) "
+        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [_TAG_BACKFILL_KEY],
     )
     return {"docs": count, "skipped": False}

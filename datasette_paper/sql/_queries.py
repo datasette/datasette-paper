@@ -82,6 +82,16 @@ class Snapshot:
     created_at: str
 
 
+@dataclass
+class TagRef:
+    id: int
+    name: str
+    state: str
+    kind: str
+    updated_at: str
+    occurrences: int
+
+
 def insert_doc(
     conn: sqlite3.Connection,
     name: str,
@@ -588,35 +598,68 @@ LIMIT 1;
     return Snapshot(*row) if row is not None else None
 
 
-def select_tag_ref_candidates_scoped(
-    conn: sqlite3.Connection, viewable_json: str, like: str
-) -> list[Doc]:
+def delete_steps_up_to_version(
+    conn: sqlite3.Connection, doc_id: int, version: int
+) -> None:
     sql = """\
-SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name, d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at, d.kind, d.locked
+DELETE FROM _datasette_paper_step
+WHERE doc_id = $doc_id::integer
+  AND version <= $version::integer;
+"""
+    params = {"doc_id::integer": doc_id, "version::integer": version}
+    conn.execute(sql, params)
+    return None
+
+
+def delete_snapshots_below_version(
+    conn: sqlite3.Connection, doc_id: int, version: int
+) -> None:
+    sql = """\
+DELETE FROM _datasette_paper_snapshot
+WHERE doc_id = $doc_id::integer
+  AND version < $version::integer;
+"""
+    params = {"doc_id::integer": doc_id, "version::integer": version}
+    conn.execute(sql, params)
+    return None
+
+
+def delete_inline_tags_for_doc(conn: sqlite3.Connection, doc_id: int) -> None:
+    sql = "DELETE FROM _datasette_paper_inline_tag WHERE doc_id = $doc_id::integer;"
+    params = {"doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def insert_inline_tag(
+    conn: sqlite3.Connection, doc_id: int, tag: str, occurrences: int, src_version: int
+) -> None:
+    sql = """\
+INSERT INTO _datasette_paper_inline_tag (doc_id, tag, occurrences, src_version)
+VALUES ($doc_id::integer, $tag::text, $occurrences::integer, $src_version::integer);
+"""
+    params = {
+        "doc_id::integer": doc_id,
+        "tag::text": tag,
+        "occurrences::integer": occurrences,
+        "src_version::integer": src_version,
+    }
+    conn.execute(sql, params)
+    return None
+
+
+def select_tag_refs_scoped(
+    conn: sqlite3.Connection, tag: str, viewable_json: str
+) -> list[TagRef]:
+    sql = """\
+SELECT d.id, d.name, d.state, d.kind, d.updated_at, t.occurrences
 FROM _datasette_paper_doc d
+JOIN _datasette_paper_inline_tag t ON t.doc_id = d.id AND t.tag = $tag::text
 WHERE d.id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
   )
-  AND (
-    EXISTS (
-      SELECT 1 FROM _datasette_paper_snapshot s
-      WHERE s.doc_id = d.id
-        AND s.version = (
-          SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id
-        )
-        AND s.doc_json LIKE $like::text
-    )
-    OR EXISTS (
-      SELECT 1 FROM _datasette_paper_step st
-      WHERE st.doc_id = d.id
-        AND st.step_json LIKE $like::text
-    )
-  )
--- id is a deterministic tie-break: updated_at has second resolution, so docs
--- touched in the same second would otherwise order arbitrarily (flaky results
--- page + flaky screenshot diffs).
 ORDER BY d.updated_at DESC, d.id DESC;
 """
-    params = {"viewable_json::text": viewable_json, "like::text": like}
+    params = {"tag::text": tag, "viewable_json::text": viewable_json}
     cursor = conn.execute(sql, params)
-    return [Doc(*row) for row in cursor.fetchall()]
+    return [TagRef(*row) for row in cursor.fetchall()]
