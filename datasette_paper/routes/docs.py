@@ -270,7 +270,11 @@ async def mention_search(datasette, request, doc_id: int):
     except ValueError:
         limit = 20
     named, open_audience = await named_viewers(datasette, doc_id)
-    profiles = await resolve_actor_profiles(datasette, named)
+    # Name + avatar are profile data, gated on `profile_access` like the
+    # resolve_actors / list_docs siblings. Without it, degrade to id-as-name
+    # rather than 403 — the loop's `prof.get("name") or aid` fallback handles it.
+    may_resolve = await datasette.allowed(action="profile_access", actor=request.actor)
+    profiles = await resolve_actor_profiles(datasette, named) if may_resolve else {}
     results = []
     for aid in named:
         prof = profiles.get(aid) or {}
