@@ -773,6 +773,17 @@ class Instance:
         for q in list(self.subscribers):
             q.put_nowait(msg)
 
+    def broadcast_published(self, version: Optional[int]) -> None:
+        """Notify live editors that a version was published / unpublished.
+
+        ``version`` is the now-current published version, or ``None`` after an
+        unpublish. The editor (publishing dialog) listens for this to show a
+        "Published vN · View" badge without refetching the bootstrap.
+        """
+        msg = {"kind": "published", "version": version}
+        for q in list(self.subscribers):
+            q.put_nowait(msg)
+
     async def broadcast_permissions_changed(self, datasette, locked: bool) -> None:
         """Push a per-subscriber ``permissions-changed`` event after a lock flip.
 
