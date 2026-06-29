@@ -183,6 +183,16 @@ def _render_block(node: dict) -> str:
         # back in markdown_parser.py.
         body = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         return "```paper-embed\n" + body + "\n```\n"
+    if t == "toc":
+        attrs = node.get("attrs") or {}
+        config = attrs.get("config") or {}
+        # Empty config → empty fence body (the common case stays clean). A
+        # non-empty config serializes as sorted JSON, read back in
+        # markdown_parser.py. The rendered heading list is never persisted.
+        if config:
+            body = json.dumps(config, sort_keys=True, ensure_ascii=False)
+            return "```paper-toc\n" + body + "\n```\n"
+        return "```paper-toc\n```\n"
     if t == "list_item":
         # list_item is rendered by _render_list with markers; calling here
         # returns the bare child blocks.

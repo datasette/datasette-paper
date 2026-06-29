@@ -27,6 +27,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
 import { insertTable } from "./tables";
+import { insertToc } from "./tocView";
 import { insertSqlBlock, insertSource } from "./sqlQuery";
 import { embedInsertSources, type EmbedInsertSource } from "./embedProviders";
 
@@ -556,6 +557,19 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       // The slash menu only fires in an empty top-level paragraph, so a table
       // is always insertable here — no canInsertTable gate needed.
       run: runCommand(insertTable(3, 3)),
+    },
+    {
+      id: "toc",
+      label: "Table of contents",
+      keywords: ["toc", "contents", "outline", "index"],
+      icon: "listNested",
+      // `media` (not `styling`): the label contains "table", so in `styling`
+      // it would outrank the real Table command for `/table` (styling sorts
+      // before media). In `media`, the earlier-registered Table command wins.
+      group: "media",
+      // Slash menu only fires in an empty top-level paragraph, so insertion is
+      // always valid here (same as table/divider) — no gate needed.
+      run: runCommand(insertToc),
     },
     {
       id: "divider",

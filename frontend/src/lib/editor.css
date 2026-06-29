@@ -1484,3 +1484,133 @@
   white-space: pre-wrap;
 }
 
+/* Table of contents — card chrome matches .pm-block-embed; the body is a
+   nested heading list indented per data-level. */
+.editor-host .pm-toc {
+  position: relative;
+  margin: 0 0 0.75em;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  background: #fbfbfd;
+  overflow: hidden;
+}
+.editor-host .pm-toc.ProseMirror-selectednode {
+  outline: 2px solid #6429a8;
+  outline-offset: 1px;
+}
+.editor-host .pm-toc-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid #ececf0;
+  background: #f4f4f7;
+  font-size: 12px;
+  color: #555;
+}
+.editor-host .pm-toc-icon {
+  display: inline-flex;
+  color: #6429a8;
+}
+.editor-host .pm-toc-icon svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+.editor-host .pm-toc-title {
+  font-weight: 600;
+  color: #333;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+}
+.editor-host .pm-toc-refresh,
+.editor-host .pm-toc-menu-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #777;
+  padding: 2px;
+  display: inline-flex;
+  border-radius: 4px;
+}
+.editor-host .pm-toc-refresh {
+  margin-left: auto;
+}
+.editor-host .pm-toc-refresh:hover,
+.editor-host .pm-toc-menu-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+}
+.editor-host .pm-toc-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.editor-host .pm-toc-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 12;
+  min-width: 170px;
+  padding: 6px;
+  background: #fff;
+  border: 1px solid #d4d4d4;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+.editor-host .pm-toc-menu--open {
+  display: block;
+}
+.editor-host .pm-toc-menu-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 6px;
+  font-size: 13px;
+  color: #333;
+}
+.editor-host .pm-toc-menu-num {
+  width: 48px;
+  font: inherit;
+  padding: 2px 4px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+}
+/* Outer list keeps the card's left padding; nested lists indent one step
+   each. Numbering restarts per <ol> level (proper outline), bullets per <ul>. */
+.editor-host ol.pm-toc-list {
+  list-style: decimal;
+}
+.editor-host ul.pm-toc-list {
+  list-style: disc;
+}
+.editor-host .pm-toc > .pm-toc-list {
+  margin: 0;
+  padding: 8px 12px 10px 30px;
+  font-size: 14px;
+}
+.editor-host .pm-toc-list .pm-toc-list {
+  margin: 1px 0;
+  padding: 0 0 0 1.4em;
+}
+.editor-host .pm-toc-item {
+  margin: 1px 0;
+}
+.editor-host .pm-toc-link {
+  color: #3a3a3a;
+  text-decoration: none;
+  cursor: pointer;
+}
+.editor-host .pm-toc-link:hover {
+  color: #6429a8;
+  text-decoration: underline;
+}
+.editor-host .pm-toc-empty {
+  padding: 10px 12px;
+  font-size: 13px;
+  font-style: italic;
+  color: #999;
+}
+

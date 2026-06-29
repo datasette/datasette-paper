@@ -257,6 +257,39 @@ const blockEmbedNode: NodeSpec = {
   ],
 };
 
+// Block atom for an auto-generated table of contents. Content-free — the
+// heading list is derived per-render by a NodeView (tocView.ts) from the live
+// doc and never persisted. `config` is an opaque options bag
+// (minLevel/maxLevel/ordered) carried in the markdown `paper-toc` fence; it
+// survives the DOM round-trip JSON-stringified in `data-toc-config` (parsed
+// defensively → {} on malformed input, sharing block_embed's parseEmbedConfig).
+// Mirrors datasette_paper/pm_schema.py; datasette_paper/markdown.py round-trips
+// it as a ```paper-toc JSON fence.
+const tocNode: NodeSpec = {
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: { config: { default: {} } },
+  parseDOM: [
+    {
+      tag: "div[data-toc]",
+      getAttrs: (el) => ({
+        config: parseEmbedConfig((el as HTMLElement).getAttribute("data-toc-config")),
+      }),
+    },
+  ],
+  toDOM: (node) => [
+    "div",
+    {
+      "data-toc": "true",
+      "data-toc-config": JSON.stringify(node.attrs.config ?? {}),
+      class: "pm-toc",
+    },
+    "Table of contents",
+  ],
+};
+
 /** Parse the `data-embed-config` JSON blob, falling back to {} on any error. */
 function parseEmbedConfig(raw: string | null): Record<string, unknown> {
   if (!raw) return {};
@@ -411,6 +444,7 @@ export const schema = new Schema({
     .append({ value: valueNode })
     .append({ inline_embed: inlineEmbedNode })
     .append({ block_embed: blockEmbedNode })
+    .append({ toc: tocNode })
     .append({ sql_block: sqlBlockNode })
     .append({ source: sourceNode })
     .append(taskNodes)
