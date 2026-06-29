@@ -412,6 +412,8 @@ async function freezeVolatile(page) {
       .querySelectorAll(".paper-index tbody tr td:nth-child(3)")
       .forEach((el) => (el.textContent = "2 hours ago"));
     set(".delete-at", "Deletes in 7 days");
+    // Published page: the frozen "data as of …" stamp.
+    set(".pm-data-asof", "data as of Jun 29 2026");
   });
 }
 
@@ -711,6 +713,45 @@ function buildShots(ctx, ids) {
         .waitFor({ state: "visible", timeout: 10_000 });
       await freezeVolatile(page);
       await page.screenshot({ path: out("published") });
+      await page.close();
+    },
+
+    // Published page, FROZEN mode: a fresh SQL-report doc published with
+    // data_mode_default=frozen — the results are baked into the static HTML at
+    // publish time (green "frozen" badge + "data as of" stamp), so viewers run
+    // no queries. Distinct doc from `published` so the two shots don't clobber
+    // each other's publication.
+    "published-frozen": async () => {
+      const page = await newPage();
+      const owner = { Cookie: `ds_actor=${signActorCookie(ACTOR)}` };
+      const create = await ctx.request.post(`${PAPER}/api/docs`, {
+        data: {
+          name: "Frozen vendor report",
+          content:
+            "# Frozen vendor report\n\nNumbers baked in at publish time — no " +
+            "per-viewer queries, served straight from cache.\n\n```sql db=data\n" +
+            "select region, count(*) as vendors from vendors group by region " +
+            "order by vendors desc\n```\n",
+        },
+        headers: owner,
+      });
+      if (create.status() !== 201) {
+        throw new Error(`create failed: ${create.status()} ${await create.text()}`);
+      }
+      const id = (await create.json()).id;
+      const pub = await ctx.request.post(`${PAPER}/api/docs/${id}/publish`, {
+        data: { data_mode_default: "frozen", audience: [{ principal: "everyone" }] },
+        headers: owner,
+      });
+      if (pub.status() !== 200) {
+        throw new Error(`publish failed: ${pub.status()} ${await pub.text()}`);
+      }
+      await page.goto(`${PAPER}/doc/${id}/publish`);
+      await page
+        .locator(".paper-published .pm-data-table")
+        .waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("published-frozen") });
       await page.close();
     },
 

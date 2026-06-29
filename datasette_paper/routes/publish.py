@@ -8,6 +8,7 @@ audience (``paper-doc-published``), independent of the live-doc editors. See
 ``plans/publishing/`` for the full design.
 """
 
+import datetime
 from typing import Annotated
 
 from datasette import Response
@@ -15,7 +16,7 @@ from datasette_plugin_router import Body
 
 from datasette_acl.grants import Principal
 
-from ..publish import build_publication
+from ..publish import build_publication, make_sql_runner
 from ..instance import get_registry
 from ..permissions import (
     can_paper_manage,
@@ -29,6 +30,11 @@ from ..schemas import PublishBody
 from ..util import actor_id, paper_db
 
 _VALID_MODES = {"live", "frozen"}
+
+
+def _now_iso() -> str:
+    """Publish-time stamp for the 'data as of …' footer on frozen blocks."""
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _principal_from_grant(g) -> Principal:
@@ -91,8 +97,9 @@ async def publish_doc(
         data_mode_default=data_mode_default,
         block_overrides=body.block_overrides or {},
         published_by=me,
-        # Frozen execution lands in T05; until then every block stays live.
-        frozen_executor=None,
+        # Frozen blocks run their query once, now, as the publishing actor.
+        run_sql=make_sql_runner(datasette, request.actor),
+        computed_at=_now_iso(),
     )
 
     await db.write_publication(
@@ -201,7 +208,8 @@ async def preview_publication(datasette, request, doc_id: int):
         version=version,
         data_mode_default=data_mode_default,
         published_by=actor_id(request),
-        frozen_executor=None,
+        run_sql=make_sql_runner(datasette, request.actor),
+        computed_at=_now_iso(),
     )
     return Response.json(
         {
@@ -268,9 +276,12 @@ async def _serve_publication(datasette, request, doc_id, version):
     if (request.headers.get("if-none-match") or "").strip() == etag:
         return Response("", status=304, headers=headers)
 
-    # The hydrator bundle ships only when there are live blocks — an all-frozen
-    # page is pure static HTML with zero JS.
-    entrypoint = "src/pages/publish/main.ts" if pub.has_live_blocks else None
+    # The publish entry carries both the published stylesheet and the live-block
+    # hydrator. The CSS is always needed (even an all-frozen page must be
+    # styled), and the hydrator is a no-op when there are no [data-publish-live]
+    # blocks, so we always inject the entry. (The bundle is tiny — ~1KB gzipped
+    # JS + the CSS — and pulls in no ProseMirror/editor code.)
+    entrypoint = "src/pages/publish/main.ts"
     page_data = {
         "doc_id": doc_id,
         "published_version": version,
