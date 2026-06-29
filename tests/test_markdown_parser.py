@@ -706,6 +706,45 @@ class TestTables:
         assert text["text"] == "bold"
         assert text["marks"] == [{"type": "strong"}]
 
+    def test_paper_table_sidecar_sets_name(self):
+        md = '```paper-table\n{"name": "sales"}\n```\n| h |\n| --- |\n| x |\n'
+        doc = parse_and_validate(md)
+        # The sidecar fence emits no node of its own.
+        assert [n["type"] for n in doc["content"]] == ["table"]
+        assert doc["content"][0]["attrs"]["name"] == "sales"
+
+    def test_paper_table_sidecar_name_with_spaces(self):
+        md = '```paper-table\n{"name": "sales report"}\n```\n| h |\n| --- |\n| x |\n'
+        doc = parse_and_validate(md)
+        assert doc["content"][0]["attrs"]["name"] == "sales report"
+
+    def test_table_name_round_trips(self):
+        md = '```paper-table\n{"name": "q3"}\n```\n| h |\n| --- |\n| x |\n'
+        doc = parse_and_validate(md)
+        assert doc_to_markdown(doc).startswith('```paper-table\n{"name": "q3"}\n```\n')
+        # …and a second pass is stable.
+        assert (
+            markdown_to_doc(doc_to_markdown(doc))["content"][0]["attrs"]["name"] == "q3"
+        )
+
+    def test_paper_table_sidecar_does_not_leak_to_later_table(self):
+        md = (
+            '```paper-table\n{"name": "first"}\n```\n'
+            "| h |\n| --- |\n| x |\n\n"
+            "| h |\n| --- |\n| y |\n"
+        )
+        doc = parse_and_validate(md)
+        tables = [n for n in doc["content"] if n["type"] == "table"]
+        assert len(tables) == 2
+        assert tables[0]["attrs"]["name"] == "first"
+        assert tables[1]["attrs"]["name"] is None
+
+    def test_malformed_paper_table_sidecar_yields_no_name(self):
+        md = "```paper-table\nnot json\n```\n| h |\n| --- |\n| x |\n"
+        doc = parse_and_validate(md)
+        assert [n["type"] for n in doc["content"]] == ["table"]
+        assert doc["content"][0]["attrs"]["name"] is None
+
 
 # ---------------------------------------------------------------------------
 # Robustness on ugly / hostile input

@@ -171,6 +171,35 @@ async def test_append_sql_block_roundtrip(ds):
 
 
 @pytest.mark.asyncio
+async def test_apply_markdown_edit_preserves_named_table(ds):
+    """Ticket 04: an agent edit runs the whole doc through
+    doc_to_markdown -> edit_fn -> markdown_to_doc. A table's `name` attr (used
+    by `/tables/{name}` addressing) must survive that round-trip instead of
+    being silently dropped."""
+    doc_id = await create_doc(ds)
+    # Seed a named table via the append endpoint (markdown sidecar form).
+    content = '```paper-table\n{"name": "sales"}\n```\n| h |\n| --- |\n| x |\n'
+    resp = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/append", json={"content": content}
+    )
+    assert resp.status_code == 200
+
+    instance = await get_registry(ds).get(paper_db(ds), doc_id)
+    # An agent-style edit that touches unrelated prose; the named table is
+    # carried through the (de)serialize untouched.
+    await instance.apply_markdown_edit(lambda md: "# Report\n\n" + md)
+
+    live = instance.materialize_live_doc()
+    tables = [n for n in live["content"] if n.get("type") == "table"]
+    assert len(tables) == 1
+    assert tables[0]["attrs"]["name"] == "sales"
+
+    # And the name is still addressable through the /tables/{name} endpoint.
+    resp = await ds.client.get(f"/-/paper/api/docs/{doc_id}/tables/sales")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_append_empty_markdown_is_noop(ds):
     doc_id = await create_doc(ds)
     # Bump the version once so we can assert it doesn't move.

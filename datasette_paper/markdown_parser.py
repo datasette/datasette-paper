@@ -116,6 +116,10 @@ def _tokens_to_doc(tokens) -> dict:
     # instead of `list_item`. The frame is independent of the block stack
     # because lists can nest inside other things.
     list_kind_stack: list[str] = []
+    # Out-of-band table name carried by a `paper-table` sidecar fence; consumed
+    # by the next `table_open` (the serializer emits the fence immediately
+    # before its table). None means no name pending.
+    pending_table_name: str | None = None
 
     def push(node: dict) -> dict:
         stack[-1].setdefault("content", []).append(node)
@@ -219,6 +223,20 @@ def _tokens_to_doc(tokens) -> dict:
             # info string.) Be defensive — a hand-edited / malformed body must
             # never raise; fall back to an empty/`table` embed.
             info = (getattr(tok, "info", "") or "").strip()
+            # A fence whose info string is `paper-table` is the out-of-band
+            # sidecar carrying the `name` attr of the table that immediately
+            # follows (GFM has no slot for it). The body is one JSON object
+            # `{"name": <name>}`. Stash the name; the next `table_open` consumes
+            # it. Emit no node of its own. Be defensive — a malformed body must
+            # never raise; it just yields no pending name.
+            if t == "fence" and info == "paper-table":
+                try:
+                    data = json.loads(text)
+                    name = data.get("name") if isinstance(data, dict) else None
+                except (ValueError, TypeError):
+                    name = None
+                pending_table_name = name if isinstance(name, str) else None
+                continue
             if t == "fence" and info == "paper-embed":
                 try:
                     data = json.loads(text)
@@ -298,7 +316,16 @@ def _tokens_to_doc(tokens) -> dict:
             append(cb)
 
         elif t == "table_open":
-            push({"type": "table", "attrs": {"name": None}, "content": []})
+            # Consume any name stashed by a preceding `paper-table` sidecar
+            # fence; reset so it can't leak onto a later unnamed table.
+            push(
+                {
+                    "type": "table",
+                    "attrs": {"name": pending_table_name},
+                    "content": [],
+                }
+            )
+            pending_table_name = None
         elif t == "table_close":
             pop()
 
