@@ -67,12 +67,12 @@ distinct from a paper's metadata tags shown on the index.
 // the varied occurrence counts exercise the "N mention(s)" pluralization.
 const TAG_PAGE_A = `# Q3 roadmap review
 
-Sprint planning notes filed under [#roadmap](tag:roadmap). We revisit the
-[#roadmap](tag:roadmap) priorities at the end of every cycle.
+Sprint planning notes filed under [#roadmap](paper:/tag/roadmap). We revisit the
+[#roadmap](paper:/tag/roadmap) priorities at the end of every cycle.
 `;
 const TAG_PAGE_B = `# Launch checklist
 
-Ship-blocking work tracked against the [#roadmap](tag:roadmap).
+Ship-blocking work tracked against the [#roadmap](paper:/tag/roadmap).
 `;
 
 // Docs for the embed element shots. Each `inline_embed` pill is authored with
