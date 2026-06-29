@@ -162,4 +162,60 @@ describe("ValueView", () => {
     expect(attrs.format).toEqual({ kind: "currency" });
     view.destroy();
   });
+
+  it("typing into a format input commits ONE step on blur, not per keystroke", () => {
+    const dispatched: unknown[] = [];
+    const node = schema.nodes.value.create({ source: "revenue", column: "total", format: null });
+    const view = new ValueView(node, fakeView(dispatched), () => 3, fakeStore(okState(["total"], [1])));
+    view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    const pop = view.dom.querySelector(".pm-value-popover")!;
+
+    // Choosing the currency kind commits once (a <select> change), and reveals
+    // the currency text input.
+    const kindSel = pop.querySelectorAll("select")[1];
+    kindSel.value = "currency";
+    kindSel.dispatchEvent(new Event("change"));
+    expect(dispatched).toHaveLength(1);
+
+    // Type three characters — none of these `input` events may dispatch.
+    const curInput = pop.querySelector<HTMLInputElement>("[data-opt=currency]")!;
+    for (const ch of ["U", "US", "USD"]) {
+      curInput.value = ch;
+      curInput.dispatchEvent(new Event("input"));
+    }
+    expect(dispatched).toHaveLength(1); // still just the kind-change step
+
+    // Blur commits exactly one step carrying the full typed value.
+    curInput.dispatchEvent(new Event("blur"));
+    expect(dispatched).toHaveLength(2);
+    const attrs = (dispatched[1] as { attrs: { format: ValueFormat } }).attrs;
+    expect(attrs.format).toEqual({ kind: "currency", currency: "USD" });
+    view.destroy();
+  });
+
+  it("pressing Enter in a format input commits one step (via blur)", () => {
+    const dispatched: unknown[] = [];
+    const node = schema.nodes.value.create({ source: "revenue", column: "total", format: null });
+    const view = new ValueView(node, fakeView(dispatched), () => 3, fakeStore(okState(["total"], [1])));
+    // jsdom only fires focus/blur for connected elements, and Enter commits by
+    // blurring — so mount the chip in the document for this test.
+    document.body.appendChild(view.dom);
+    view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    const pop = view.dom.querySelector(".pm-value-popover")!;
+
+    // Raw kind, custom fallback: typing dispatches nothing.
+    const fbInput = pop.querySelector<HTMLInputElement>(".pm-value-popover-input")!;
+    fbInput.focus();
+    fbInput.value = "n/a";
+    fbInput.dispatchEvent(new Event("input"));
+    expect(dispatched).toHaveLength(0);
+
+    // Enter blurs the input, which commits exactly once.
+    fbInput.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(dispatched).toHaveLength(1);
+    const attrs = (dispatched[0] as { attrs: { format: ValueFormat } }).attrs;
+    expect(attrs.format).toEqual({ kind: "text", fallback: "n/a" });
+    view.destroy();
+    view.dom.remove();
+  });
 });

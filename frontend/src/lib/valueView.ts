@@ -14,7 +14,12 @@
  *
  * Clicking the chip opens a small popover (anchored, outside-click teardown —
  * same open/close pattern as sqlBlockView's export menu) to edit the column +
- * `format`. Edits dispatch a `setNodeMarkup` so they flow through collab.
+ * `format`. Edits dispatch a `setNodeMarkup` so they flow through collab. The
+ * <select> rows commit on change; the free-text inputs (fallback / decimals /
+ * currency) commit on blur or Enter — never per keystroke — so a multi-char
+ * edit appends one collab step, not one per character (mirrors
+ * tableInsertTooltip's name input). We never call `view.focus()` from the
+ * input handlers; that would steal focus on every keystroke.
  */
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
@@ -222,6 +227,22 @@ export class ValueView implements NodeView {
       this.commit(column, format);
     };
 
+    // Free-text inputs commit on blur or Enter, never on every `input` event,
+    // so typing several characters appends ONE collab step (one setNodeMarkup)
+    // instead of one per keystroke. We never call `view.focus()` here — that
+    // would steal focus on every keystroke (see frontend/CLAUDE.md).
+    const commitOnBlurOrEnter = (inp: HTMLInputElement): void => {
+      inp.addEventListener("blur", apply);
+      inp.addEventListener("keydown", (event) => {
+        if ((event as KeyboardEvent).key === "Enter") {
+          event.preventDefault();
+          // Route Enter through blur so commit happens once, via the blur
+          // handler — calling apply() here *and* blurring would double-commit.
+          inp.blur();
+        }
+      });
+    };
+
     const renderOpts = (): void => {
       optsRow.replaceChildren();
       const kind = kindSel.value;
@@ -235,7 +256,7 @@ export class ValueView implements NodeView {
         inp.value = this.format?.kind === kind && this.format.decimals != null
           ? String(this.format.decimals)
           : "";
-        inp.addEventListener("input", apply);
+        commitOnBlurOrEnter(inp);
         wrap.appendChild(inp);
         optsRow.appendChild(wrap);
       } else if (kind === "currency") {
@@ -246,7 +267,7 @@ export class ValueView implements NodeView {
         inp.dataset.opt = "currency";
         inp.placeholder = "USD";
         inp.value = this.format?.kind === "currency" ? (this.format.currency ?? "") : "";
-        inp.addEventListener("input", apply);
+        commitOnBlurOrEnter(inp);
         wrap.appendChild(inp);
         optsRow.appendChild(wrap);
       } else if (kind === "date") {
@@ -274,7 +295,7 @@ export class ValueView implements NodeView {
       renderOpts();
       apply();
     });
-    fbInput.addEventListener("input", apply);
+    commitOnBlurOrEnter(fbInput);
     renderOpts();
 
     this.dom.appendChild(pop);
