@@ -291,12 +291,20 @@ def _tokens_to_doc(tokens) -> dict:
                 append(source_block)
                 continue
             # A fence whose info string is `sql db=NAME [hidden]` is an
-            # editable SQL query block. The `db=` token is the discriminator:
-            # a plain ```sql fence (no db=) stays a normal code block.
-            if t == "fence" and info.startswith("sql") and "db=" in info:
+            # editable SQL query block. The leading `sql` token plus a `db=`
+            # token are the discriminator: the serializer always emits `db=`
+            # (empty for a db-less block, `sql db=`), so its *presence* — not a
+            # populated value — separates a runnable sql_block from a plain
+            # ```sql display code block (which carries no `db=` token).
+            sql_tokens = info.split()
+            if (
+                t == "fence"
+                and sql_tokens[:1] == ["sql"]
+                and any(tok.startswith("db=") for tok in sql_tokens[1:])
+            ):
                 db = None
                 hidden = False
-                for token in info.split():
+                for token in sql_tokens[1:]:
                     if token.startswith("db="):
                         db = token[len("db=") :] or None
                     elif token == "hidden":
@@ -688,11 +696,16 @@ def _split_paper_links(nodes: list[dict]) -> list[dict]:
 
 # `${{source.column}}` — the leading `$` is what keeps this disjoint from the
 # `placeholder` node's bare `{{key}}` (which markdown.py emits but never parses
-# back), so the two never collide. Only the strict `name.column` shape matches;
-# a bare `{{key}}` or a half-typed `${{` stays literal text. An optional
-# `| kind:arg` suffix carries the per-value `format` (decoded by
+# back), so the two never collide. The source is always a bare `\w+` (names are
+# normalized to `[a-z0-9_]+`); the column is either a bare `\w+` OR a bracketed
+# `[...]` form (`${{src.[total sales]}}`) so DB-derived columns containing
+# spaces / hyphens / dots survive — the bracket body is anything up to the
+# closing `]`. A bare `{{key}}` or a half-typed `${{` stays literal text. An
+# optional `| kind:arg` suffix carries the per-value `format` (decoded by
 # `_decode_value_format`).
-_SQL_VALUE_RE = re.compile(r"\$\{\{\s*(\w+)\.(\w+)\s*(?:\|\s*([^}]+?))?\s*\}\}")
+_SQL_VALUE_RE = re.compile(
+    r"\$\{\{\s*(\w+)\.(?:\[([^\]]+)\]|(\w+))\s*(?:\|\s*([^}]+?))?\s*\}\}"
+)
 
 _VALID_DATE_STYLES = {"iso", "medium", "long"}
 
@@ -741,8 +754,10 @@ def _split_sql_values(nodes: list[dict]) -> list[dict]:
             "type": "value",
             "attrs": {
                 "source": m.group(1),
-                "column": m.group(2),
-                "format": _decode_value_format(m.group(3)),
+                # group 2 = bracketed column body, group 3 = bare `\w+` column;
+                # exactly one matches.
+                "column": m.group(2) if m.group(2) is not None else m.group(3),
+                "format": _decode_value_format(m.group(4)),
             },
         },
     )
