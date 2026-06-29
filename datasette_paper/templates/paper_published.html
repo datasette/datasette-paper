@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title or "Published" }}{% endblock %}
+
+{% block body_class %}paper-published-page{% endblock %}
+
+{% block extra_head %}
+{# The slim client hydrator + published CSS ship only when the page has live
+   data blocks (an all-frozen page is pure static HTML with zero JS). #}
+{% if entrypoint %}{{ datasette_paper_vite_entry(entrypoint) | safe }}{% endif %}
+<script type="application/json" id="pageData">{{ page_data | tojson }}</script>
+{% endblock %}
+
+{% block content %}
+<article class="paper-published">{{ published_html | safe }}</article>
+{% endblock %}

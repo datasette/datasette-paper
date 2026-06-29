@@ -83,6 +83,41 @@ def ref_to_kind_and_url(datasette, ref):
     return kind, url
 
 
+async def provider_precompute(datasette, ref, config, actor):
+    """Precompute a frozen payload for a custom-provider ``block_embed``.
+
+    The publishing feature calls this when a block claimed by a third-party
+    provider is published in **frozen** mode. If the provider exposes an
+    (optional) ``precompute`` method it's invoked with the publisher's ``actor``;
+    its return value (any JSON-serializable payload, or None to decline) is baked
+    into the published page. Returns ``None`` when no provider claims the ref or
+    the provider has no ``precompute`` (→ the block falls back to live). A
+    provider whose ``precompute`` raises is logged and treated as a decline,
+    mirroring the ``resource_url`` / ``frontend_assets`` try/except discipline.
+
+    ``precompute`` may be sync or async. See ``docs/EMBED_PROVIDERS.md`` for the
+    payload render-parity contract (the provider's client bundle must accept the
+    same payload so a frozen embed looks identical to a live one).
+    """
+    provider = _provider_for_ref(datasette, ref)
+    if provider is None:
+        return None
+    fn = getattr(provider, "precompute", None)
+    if not callable(fn):
+        return None
+    try:
+        result = fn(datasette, ref, config, actor)
+        if hasattr(result, "__await__"):
+            result = await result
+        return result
+    except Exception:
+        logger.exception(
+            "paper_embed_provider.precompute raised for %r; treating as decline",
+            ref,
+        )
+        return None
+
+
 def make_resource_resolver(datasette, request=None):
     """Build the ``resource_url`` resolver passed to ``doc_to_markdown``.
 

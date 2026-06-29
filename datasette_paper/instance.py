@@ -95,6 +95,78 @@ def _step_record(row) -> dict:
     }
 
 
+def _apply_steps_over_snapshot(
+    snapshot_doc_json: str, step_jsons: list[str], *, doc_id: int
+) -> dict:
+    """Apply a sequence of serialized steps over a snapshot and return the
+    resulting doc as a JSON dict.
+
+    Shared, side-effect-free core used by ``materialize_doc_at`` (the
+    publishing path). The live collab path keeps its own copy in
+    ``Instance.materialize_live_doc`` because that one threads instance-level
+    caching + a poisoned-history marker; this helper deliberately does neither
+    so it stays safe to call off the hot path. On a step that fails to apply it
+    logs a warning and returns the doc as far as steps succeeded (never raises).
+    """
+    # Late imports keep prosemirror off the cold-path module import.
+    from prosemirror.transform import Step
+
+    from .pm_schema import schema
+
+    try:
+        doc = schema.node_from_json(json.loads(snapshot_doc_json))
+    except Exception:
+        logger.exception(
+            "doc_id=%s: snapshot_doc_json failed to parse, returning raw", doc_id
+        )
+        return json.loads(snapshot_doc_json)
+
+    for step_json in step_jsons:
+        try:
+            step = Step.from_json(schema, json.loads(step_json))
+            result = step.apply(doc)
+            if result.failed:
+                logger.warning(
+                    "doc_id=%s: Step.apply failed during materialize_at: %s",
+                    doc_id,
+                    result.failed,
+                )
+                break
+            doc = result.doc
+        except Exception:
+            logger.exception(
+                "doc_id=%s: Step.apply raised during materialize_at", doc_id
+            )
+            break
+
+    return doc.to_json()
+
+
+async def materialize_doc_at(db: PaperDB, doc_id: int, version: int) -> dict:
+    """Reconstruct a doc's ProseMirror JSON at an arbitrary ``version``.
+
+    The arbitrary-version analogue of ``Instance.hydrate`` +
+    ``materialize_live_doc``: pick the latest snapshot at-or-before ``version``,
+    then apply the steps strictly after it through ``version``. ``version`` 0
+    (or a doc with no steps/snapshot) yields the empty doc.
+    """
+    snapshot = await db.select_latest_snapshot_at_or_before(
+        doc_id=doc_id, version=version
+    )
+    if snapshot is None:
+        snapshot_version = 0
+        snapshot_doc_json = empty_doc_json()
+    else:
+        snapshot_version = snapshot.version
+        snapshot_doc_json = snapshot.doc_json
+
+    steps = await db.select_steps_in_range(
+        doc_id=doc_id, after_version=snapshot_version, through_version=version
+    )
+    step_jsons = [row.step_json for row in steps]
+    return _apply_steps_over_snapshot(snapshot_doc_json, step_jsons, doc_id=doc_id)
+
+
 class Instance:
     """In-memory state for a single collaborative document."""
 
@@ -698,6 +770,17 @@ class Instance:
         switch state without needing to refetch the bootstrap.
         """
         msg = {"kind": "state-changed", **payload}
+        for q in list(self.subscribers):
+            q.put_nowait(msg)
+
+    def broadcast_published(self, version: Optional[int]) -> None:
+        """Notify live editors that a version was published / unpublished.
+
+        ``version`` is the now-current published version, or ``None`` after an
+        unpublish. The editor (publishing dialog) listens for this to show a
+        "Published vN · View" badge without refetching the bootstrap.
+        """
+        msg = {"kind": "published", "version": version}
         for q in list(self.subscribers):
             q.put_nowait(msg)
 

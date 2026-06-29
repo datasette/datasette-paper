@@ -18,8 +18,6 @@
  * `EmbedPayload` / `SearchResult` / `DatasetteStatus` shapes are unchanged, so
  * the NodeViews that consume them are untouched.
  */
-import { schema } from "./schema";
-import type { Command } from "prosemirror-state";
 import { TOOLBAR_ICONS } from "./icons";
 import type { DatasetteStatus } from "./datasetteResolver";
 
@@ -137,15 +135,6 @@ export function cellText(value: CellValue): string {
   if (value === null) return "";
   if (typeof value === "object") return "[binary]";
   return String(value);
-}
-
-/** A ProseMirror command that inserts a `block_embed` block at the selection. */
-export function insertDatasetteEmbed(ref: string, mode = "table"): Command {
-  return (state, dispatch) => {
-    const node = schema.nodes.block_embed.create({ ref, mode });
-    if (dispatch) dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
-    return true;
-  };
 }
 
 // ---------------------------------------------------------------------------

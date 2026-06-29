@@ -393,3 +393,90 @@ WHERE d.id IN (
 -- touched in the same second would otherwise order arbitrarily (flaky results
 -- page + flaky screenshot diffs).
 ORDER BY d.updated_at DESC, d.id DESC;
+
+-- ============================================================================
+-- Publications (publishing feature)
+--
+-- ``materialize_at(version)`` needs the latest snapshot at-or-before a target
+-- version plus the steps strictly after it through that version — the
+-- arbitrary-version analogue of selectLatestSnapshot + selectStepsAfter.
+-- ============================================================================
+
+-- name: selectLatestSnapshotAtOrBefore :row -> Snapshot
+SELECT doc_id, version, doc_json, created_at
+FROM _datasette_paper_snapshot
+WHERE doc_id = $doc_id::integer
+  AND version <= $version::integer
+ORDER BY version DESC
+LIMIT 1;
+
+-- name: selectStepsInRange :rows -> Step
+SELECT doc_id, version, client_id, actor_id, step_json, created_at
+FROM _datasette_paper_step
+WHERE doc_id = $doc_id::integer
+  AND version > $after_version::integer
+  AND version <= $through_version::integer
+ORDER BY version;
+
+-- Immutable per (doc_id, version); REPLACE so republishing the same version
+-- overwrites cleanly (re-render with different data modes).
+-- name: upsertPublication
+INSERT OR REPLACE INTO _datasette_paper_publication
+    (doc_id, version, html, doc_json, data_mode_default, config_json, has_live_blocks, published_by)
+VALUES (
+    $doc_id::integer,
+    $version::integer,
+    $html::text,
+    $doc_json::text,
+    $data_mode_default::text,
+    $config_json::text,
+    $has_live_blocks::integer,
+    $published_by::text::
+);
+
+-- name: selectPublication :row -> Publication
+SELECT doc_id, version, html, doc_json, data_mode_default, config_json, has_live_blocks, published_at, published_by
+FROM _datasette_paper_publication
+WHERE doc_id = $doc_id::integer
+  AND version = $version::integer;
+
+-- name: listPublicationVersions :rows -> PublicationMeta
+SELECT doc_id, version, data_mode_default, has_live_blocks, published_at, published_by
+FROM _datasette_paper_publication
+WHERE doc_id = $doc_id::integer
+ORDER BY version DESC;
+
+-- The currently-live publication pointer (NULL = not published).
+-- name: selectPublishedVersion :value
+SELECT published_version FROM _datasette_paper_doc WHERE id = $doc_id::integer;
+
+-- name: setPublishedVersion
+UPDATE _datasette_paper_doc
+SET published_version = $version::integer
+WHERE id = $doc_id::integer;
+
+-- name: clearPublishedVersion
+UPDATE _datasette_paper_doc
+SET published_version = NULL
+WHERE id = $doc_id::integer;
+
+-- name: deletePublicationData
+DELETE FROM _datasette_paper_publication_data
+WHERE doc_id = $doc_id::integer AND version = $version::integer;
+
+-- name: insertPublicationData
+INSERT OR REPLACE INTO _datasette_paper_publication_data
+    (doc_id, version, block_id, kind, payload_json, computed_by)
+VALUES (
+    $doc_id::integer,
+    $version::integer,
+    $block_id::text,
+    $kind::text,
+    $payload_json::text,
+    $computed_by::text::
+);
+
+-- name: selectPublicationData :rows -> PublicationData
+SELECT doc_id, version, block_id, kind, payload_json, computed_at, computed_by
+FROM _datasette_paper_publication_data
+WHERE doc_id = $doc_id::integer AND version = $version::integer;

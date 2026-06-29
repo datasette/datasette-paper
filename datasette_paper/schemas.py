@@ -122,3 +122,36 @@ class EventsBody(BaseModel):
     version: int
     client_id: int = Field(alias="clientID")
     steps: list[Any]
+
+
+class PublishAudienceGrant(BaseModel):
+    """One audience grant for a publication's ``paper-doc-published`` resource.
+
+    ``principal`` is ``actor`` | ``group`` | ``everyone`` | ``authenticated`` |
+    ``anonymous``; ``actor_id`` / ``group_id`` accompany the first two.
+    """
+
+    principal: str
+    actor_id: Optional[str] = None
+    group_id: Optional[int] = None
+
+
+class PublishBody(BaseModel):
+    """``POST /api/docs/<id>/publish`` body — all fields optional.
+
+    ``version`` defaults to the doc's current version. ``data_mode_default`` /
+    ``block_overrides`` choose live vs frozen per the publishing design (the
+    handler validates the enum). ``audience`` optionally (re)grants the
+    published-view audience atomically with the publish; omit to leave existing
+    grants untouched.
+    """
+
+    version: Optional[int] = None
+    data_mode_default: Optional[str] = None
+    block_overrides: dict[str, str] = {}
+    audience: Optional[list[PublishAudienceGrant]] = None
+
+    @field_validator("block_overrides", mode="before")
+    @classmethod
+    def _none_to_empty_dict(cls, v):
+        return v or {}

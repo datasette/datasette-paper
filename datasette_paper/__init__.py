@@ -3,15 +3,18 @@ import re
 from datasette import hookimpl, Response
 from datasette.permissions import Action
 from datasette_vite import vite_entry
-from datasette_acl.roles import standard_roles
+from datasette_acl.roles import AclRole, standard_roles
 from datasette_acl_share import datasette_share_assets as _share_assets
 from datasette.plugins import pm
 from . import hookspecs as _hookspecs
 from .router import router
 from .permissions import (  # noqa: F401
     PaperDocResource,
+    PaperPublishedResource,
     permission_resources_sql,
     PAPER_DOC_RESOURCE_TYPE,
+    PAPER_PUBLISHED_RESOURCE_TYPE,
+    PAPER_PUBLISHED_VIEW,
     PAPER_VIEW,
     PAPER_EDIT,
     PAPER_MANAGE,
@@ -200,6 +203,15 @@ def register_actions(datasette):
             resource_class=PaperDocResource,
             also_requires=PAPER_VIEW,
         ),
+        # --- Published-version audience -------------------------------------
+        # Who may read the *published* page of a doc. Deliberately NOT
+        # also_requires paper-view: a published reader need not be able to see
+        # the live doc. Resolved against PaperPublishedResource grants.
+        Action(
+            name=PAPER_PUBLISHED_VIEW,
+            description="View the published version of a paper doc",
+            resource_class=PaperPublishedResource,
+        ),
     ]
 
 
@@ -221,7 +233,19 @@ def datasette_acl_roles(datasette):
             "Editor": "Can view and edit the doc",
             "Manager": "Can view, edit, and manage sharing",
         },
-    )
+    ) + [
+        # Single "Audience" role for the published page: holders can read the
+        # published version. Lets the acl-share dialog target the
+        # paper-doc-published resource with a friendly role name.
+        AclRole(
+            resource_type=PAPER_PUBLISHED_RESOURCE_TYPE,
+            name="Audience",
+            actions=[PAPER_PUBLISHED_VIEW],
+            rank=10,
+            manage=False,
+            description="Can read the published version",
+        ),
+    ]
 
 
 @hookimpl

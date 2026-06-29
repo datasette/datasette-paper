@@ -27,7 +27,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
 import { insertTable } from "./tables";
-import { insertSqlBlock, insertSource } from "./sqlQuery";
+import { insertSqlBlock, insertSource } from "./sqlBlockCommands";
 import { embedInsertSources, type EmbedInsertSource } from "./embedProviders";
 
 /**

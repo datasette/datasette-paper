@@ -17,8 +17,9 @@
   import SourcesPanel from "./SourcesPanel.svelte";
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
+  import PublishDialog from "./PublishDialog.svelte";
   import { insertImage } from "./image";
-  import { insertDatasetteEmbed } from "./datasetteEmbed";
+  import { insertDatasetteEmbed } from "./datasetteEmbedCommand";
 
   let { docId }: { docId: string } = $props();
 
@@ -27,6 +28,10 @@
   // dialog is opened by the slash menu and context-aware paste.
   let imageDialogOpen = $state(false);
   let embedDialogOpen = $state(false);
+  // Publish dialog (owner-only) + the currently-published version (null = not
+  // published), kept live via the `published` SSE event.
+  let publishDialogOpen = $state(false);
+  let publishedVersion = $state<number | null>(null);
   // Which embed source the picker is scoped to: undefined = core Datasette,
   // otherwise a third-party provider source id.
   let embedSource = $state<string | undefined>(undefined);
@@ -84,6 +89,9 @@
         onDocState: (s) => {
           docState = s;
         },
+        onPublished: (v) => {
+          publishedVersion = v;
+        },
         onKind: (k) => {
           kind = k;
         },
@@ -113,6 +121,19 @@
       unsub?.();
       conn?.close();
     };
+  });
+
+  // Seed the published badge once on load — the `published` SSE event only
+  // fires on a subsequent publish/unpublish, so an already-published doc needs
+  // this to show "Published vN" when the editor first opens.
+  $effect(() => {
+    const path = `/-/paper/api/docs/${docId}/publications`;
+    void (async () => {
+      const r = await fetch(path);
+      if (!r.ok) return;
+      const d = (await r.json()) as { published_version: number | null };
+      publishedVersion = d.published_version ?? null;
+    })();
   });
 
   // Push mode changes into the connection. Tracked separately from the
@@ -220,6 +241,8 @@
     {locked}
     {kind}
     {selfActor}
+    {publishedVersion}
+    onPublish={() => (publishDialogOpen = true)}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />
@@ -269,6 +292,13 @@
     source={embedSource}
     oninsert={onEmbedInsert}
   />
+  {#if isOwner}
+    <PublishDialog
+      bind:open={publishDialogOpen}
+      {docId}
+      onPublished={(v) => (publishedVersion = v)}
+    />
+  {/if}
 </div>
 
 <style>

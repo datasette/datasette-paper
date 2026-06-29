@@ -10,11 +10,11 @@ import { schema } from "../schema";
 import {
   runSqlQuery,
   listQueryableDatabases,
-  insertSqlBlock,
   queryHref,
   rowsToCsv,
   rowsToJson,
 } from "../sqlQuery";
+import { insertSqlBlock } from "../sqlBlockCommands";
 
 afterEach(() => vi.unstubAllGlobals());
 

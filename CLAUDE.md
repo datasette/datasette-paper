@@ -33,7 +33,12 @@ comments at the relevant code site.
    the third member of that lock-step group; the markdown *parser*
    (`datasette_paper/markdown_parser.py`, md → PM JSON, used by the
    append/create-from-markdown API) is the fourth — it can only emit
-   nodes/marks the schema accepts. The schema spans four
+   nodes/marks the schema accepts. The static-HTML renderer
+   (`datasette_paper/html_render.py`, PM JSON → HTML, used by the publishing
+   feature to prerender a read-only page) is the fifth — adding a node means
+   giving it an HTML rendering there too (a completeness test over a
+   one-of-each fixture in `tests/test_html_render.py` fails loudly if you
+   don't). The schema spans four
    node groups: `prosemirror-schema-basic`, lists, the custom
    `task_list` / `task_item` pair, and the table family
    (`table` / `table_row` / `table_cell` / `table_header`). The JS

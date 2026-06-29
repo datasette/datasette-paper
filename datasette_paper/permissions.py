@@ -38,6 +38,14 @@ PAPER_DOC_ACTIONS = (PAPER_VIEW, PAPER_EDIT, PAPER_MANAGE)
 # parent level lets acl model "all paper docs" and target the parent later.
 PAPER_DOCS_PARENT = "_paper"
 
+# Publishing: a *separate* acl resource type for "who may read the published
+# version of a doc", independent of who may view/edit the live doc. Same shape
+# as ``paper-doc`` (two-level, doc id as child) but its own type + parent
+# sentinel so a publication's audience is granted/checked in isolation.
+PAPER_PUBLISHED_RESOURCE_TYPE = "paper-doc-published"
+PAPER_PUBLISHED_VIEW = "paper-published-view"
+PAPER_PUBLISHED_PARENT = "_paper_published"
+
 
 class PaperDocsParent(Resource):
     """Parent level for :class:`PaperDocResource`.
@@ -87,6 +95,47 @@ class PaperDocResource(Resource):
     async def resources_sql(cls, datasette, actor=None) -> str:
         return (
             f"SELECT '{PAPER_DOCS_PARENT}' AS parent, "
+            "CAST(id AS TEXT) AS child FROM _datasette_paper_doc"
+        )
+
+
+class PaperPublishedParent(Resource):
+    """Parent level for :class:`PaperPublishedResource` (sentinel only)."""
+
+    name = "paper-published-parent"
+    parent_class = None
+
+    @classmethod
+    async def resources_sql(cls, datasette, actor=None) -> str:
+        return f"SELECT '{PAPER_PUBLISHED_PARENT}' AS parent, NULL AS child"
+
+
+class PaperPublishedResource(Resource):
+    """The published version of a single doc, acl-backed (type
+    ``paper-doc-published``). Two-level: parent is the
+    :data:`PAPER_PUBLISHED_PARENT` sentinel, child is the doc id.
+
+    Same calling convention as :class:`PaperDocResource`::
+
+        PaperPublishedResource(doc_id)
+    """
+
+    name = PAPER_PUBLISHED_RESOURCE_TYPE
+    parent_class = PaperPublishedParent
+
+    def __init__(self, parent=None, child=None):
+        if child is None and parent is not None:
+            parent, child = PAPER_PUBLISHED_PARENT, parent
+        elif parent is None:
+            parent = PAPER_PUBLISHED_PARENT
+        super().__init__(
+            parent=str(parent), child=str(child) if child is not None else None
+        )
+
+    @classmethod
+    async def resources_sql(cls, datasette, actor=None) -> str:
+        return (
+            f"SELECT '{PAPER_PUBLISHED_PARENT}' AS parent, "
             "CAST(id AS TEXT) AS child FROM _datasette_paper_doc"
         )
 
@@ -256,3 +305,65 @@ async def can_paper_manage(datasette, actor, doc_id) -> bool:
         resource=PaperDocResource(doc_id),
         actor=actor,
     )
+
+
+# ---------------------------------------------------------------------------
+# Published-version audience (publishing feature)
+# ---------------------------------------------------------------------------
+
+
+async def ensure_published_view(datasette, request, doc_id) -> None:
+    await datasette.ensure_permission(
+        action=PAPER_PUBLISHED_VIEW,
+        resource=PaperPublishedResource(doc_id),
+        actor=request.actor,
+    )
+
+
+async def can_published_view(datasette, actor, doc_id) -> bool:
+    return await datasette.allowed(
+        action=PAPER_PUBLISHED_VIEW,
+        resource=PaperPublishedResource(doc_id),
+        actor=actor,
+    )
+
+
+async def grant_published_view(datasette, doc_id, principal, by_actor=None) -> None:
+    """Grant ``principal`` the published-view action on a doc's published page."""
+    await _acl_grant(
+        datasette,
+        PAPER_PUBLISHED_RESOURCE_TYPE,
+        PAPER_PUBLISHED_PARENT,
+        str(doc_id),
+        principal=principal,
+        actions=[PAPER_PUBLISHED_VIEW],
+        by_actor=str(by_actor) if by_actor else None,
+    )
+
+
+async def published_audience_class(datasette, doc_id) -> str:
+    """Classify a published page's audience for cache-header purposes.
+
+    ``public`` — a shared cache may store it (an ``everyone``/``anonymous``
+    grant). ``auth`` — any signed-in user (``authenticated``), browser-private.
+    ``private`` — specific actors/groups only. Drives ``Cache-Control`` in the
+    view route (see ``plans/publishing/05-caching.md``).
+    """
+    from datasette_acl.grants import list_grants
+
+    grants = await list_grants(
+        datasette,
+        PAPER_PUBLISHED_RESOURCE_TYPE,
+        PAPER_PUBLISHED_PARENT,
+        str(doc_id),
+    )
+    cls = "private"
+    for g in grants:
+        if PAPER_PUBLISHED_VIEW not in g["actions"]:
+            continue
+        principal = g["principal"]
+        if principal in ("everyone", "anonymous"):
+            return "public"
+        if principal == "authenticated":
+            cls = "auth"
+    return cls

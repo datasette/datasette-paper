@@ -18,6 +18,13 @@ shots *names:
     npm --prefix frontend exec -- playwright install chromium
     node frontend/scripts/screenshots.mjs {{names}}
 
+# Publishing benchmark: prerendered-published vs live-editor fan-out. Boots a
+# throwaway datasette, seeds + publishes a doc, runs a concurrency matrix, and
+# writes benchmarks/publishing/results/report.md. Pass extra flags through, e.g.
+# `just bench-publishing --vus 1,10,50,100,500 --iterations 80`.
+bench-publishing *args:
+    uv run --prerelease=allow python benchmarks/publishing/bench.py {{args}}
+
 # --- Formatting ---
 # Frontend formatting (prettier) deferred — `just lint-frontend` covers it
 # for now via eslint rules.

@@ -169,6 +169,19 @@ class _SampleProvider:
         # to end in the round-trip tests.
         return ref
 
+    def precompute(self, datasette, ref, config, actor):
+        # Reference implementation of the OPTIONAL frozen-publishing hook (see
+        # paper's hookspecs.py): compute a JSON-serializable payload for this
+        # ref at publish time, with the publisher's permissions. A real provider
+        # would fetch its own data; here we synthesize a tiny tabular payload so
+        # a frozen embed renders through paper's results-table path. Returning a
+        # {columns, rows} dict keeps it identical to a live table embed.
+        slug = ref.rstrip("/").rsplit("/", 1)[-1]
+        return {
+            "columns": ["field", "value"],
+            "rows": [["kind", self.kind], ["ref", slug]],
+        }
+
 
 @hookimpl
 def paper_embed_provider(datasette):

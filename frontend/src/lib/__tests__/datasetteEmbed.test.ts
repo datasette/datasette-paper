@@ -6,7 +6,6 @@ import { EditorState, TextSelection } from "prosemirror-state";
 
 import { schema } from "../schema";
 import {
-  insertDatasetteEmbed,
   fetchEmbed,
   searchResources,
   cellText,
@@ -15,6 +14,7 @@ import {
   embedIconMarkup,
   safeHref,
 } from "../datasetteEmbed";
+import { insertDatasetteEmbed } from "../datasetteEmbedCommand";
 import { TOOLBAR_ICONS } from "../icons";
 
 function emptyState(): EditorState {

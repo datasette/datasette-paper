@@ -41,6 +41,19 @@ class PaperEmbedProvider(Protocol):
 
     A provider whose ``resource_url`` raises is logged and treated as no-URL
     (the markdown href falls back to the bare canonical ref).
+
+    ``precompute`` is an OPTIONAL method enabling **frozen** publishing of this
+    provider's embeds::
+
+        def precompute(self, datasette, ref, config, actor) -> dict | None:
+            '''Compute a JSON-serializable payload for this ref at publish time,
+            with the publishing ``actor``'s permissions. Return None to decline
+            (the block falls back to live). May be sync or async.'''
+
+    Contract: the provider's *client* bundle must accept the same payload (a
+    ``paper_embed_render(payload)`` path) so a frozen embed renders identically
+    to a live one. A provider without ``precompute`` simply can't be frozen — its
+    embeds stay live and the publisher is warned. See ``docs/EMBED_PROVIDERS``.
     """
 
     kind: str
