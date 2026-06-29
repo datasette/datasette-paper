@@ -17,6 +17,7 @@ from datasette_plugin_router import Body
 from datasette_acl.grants import Principal
 
 from ..publish import build_publication, make_sql_runner
+from ..embed_providers import provider_precompute
 from ..instance import get_registry
 from ..permissions import (
     can_paper_manage,
@@ -35,6 +36,18 @@ _VALID_MODES = {"live", "frozen"}
 def _now_iso() -> str:
     """Publish-time stamp for the 'data as of …' footer on frozen blocks."""
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _make_embed_precompute(datasette, actor):
+    """Frozen-mode payload computer for custom-provider block embeds (T06)."""
+
+    async def precompute(block):
+        if block.kind != "embed":
+            return None
+        cfg = block.config or {}
+        return await provider_precompute(datasette, cfg.get("ref"), cfg, actor)
+
+    return precompute
 
 
 def _principal_from_grant(g) -> Principal:
@@ -99,6 +112,7 @@ async def publish_doc(
         published_by=me,
         # Frozen blocks run their query once, now, as the publishing actor.
         run_sql=make_sql_runner(datasette, request.actor),
+        embed_precompute=_make_embed_precompute(datasette, request.actor),
         computed_at=_now_iso(),
     )
 
@@ -209,6 +223,7 @@ async def preview_publication(datasette, request, doc_id: int):
         data_mode_default=data_mode_default,
         published_by=actor_id(request),
         run_sql=make_sql_runner(datasette, request.actor),
+        embed_precompute=_make_embed_precompute(datasette, request.actor),
         computed_at=_now_iso(),
     )
     return Response.json(

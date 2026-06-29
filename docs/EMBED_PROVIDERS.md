@@ -146,6 +146,46 @@ export default {
   arbitrary external-web URLs (GitHub, etc.) needs a server-side fetch layer and
   is a separate, future feature.
 
+## Frozen publishing (optional `precompute`)
+
+A published page (`/-/paper/doc/<id>/publish`) can render a `block_embed` in one
+of two **data modes** the publisher chooses per block:
+
+- **live** (default) — the embed hydrates per viewer, under that viewer's
+  permissions (your client `mount` runs as normal). Nothing extra is required.
+- **frozen** — the embed's data is computed **once at publish time, with the
+  publisher's permissions**, baked into the static HTML, and served to the whole
+  audience. To support this, add an optional **`precompute`** method to your
+  provider object:
+
+  ```python
+  class MyProvider:
+      kind = "playlist"
+      ref_prefixes = ["/-/my-plugin/playlists/"]
+      def frontend_assets(self, datasette): ...
+
+      def precompute(self, datasette, ref, config, actor):
+          # Compute a JSON-serializable payload for `ref` with `actor`'s
+          # permissions. Return None to decline (the block stays live).
+          # May be sync or async.
+          return {"columns": [...], "rows": [...]}
+  ```
+
+**Contract.** Whatever payload you return is what your client bundle must be able
+to render *without fetching* — i.e. your bundle needs a "render from payload"
+path so a frozen embed looks identical to a live one. The simplest payload is a
+`{columns, rows}` table, which paper renders through its built-in results-table
+markup with no client code at all. A provider **without** `precompute` can't be
+frozen: its embeds stay live and the publish response includes a warning naming
+the block.
+
+**Safety.** Frozen data is the publisher's query result shown to everyone in the
+published audience (including anonymous, if the page is public). Paper surfaces a
+per-block warning in the publish UI; your `precompute` should still respect
+`actor`'s permissions so you never bake data the publisher couldn't see.
+
+A reference implementation lives in `tests/sample-plugin/sample_embeds.py`.
+
 ## Testing
 
 Drive `resolve` with a stubbed `fetch` and assert the denied/not_found mapping;
