@@ -215,6 +215,15 @@ def _render_table(node: dict) -> str:
     Cell text is the flattened inline content of the cell's blocks; pipes
     inside cell text are escaped. We assume rectangular tables (no
     colspan/rowspan) since the editor doesn't expose merge.
+
+    GFM has no slot for the table's `name` attr (the id the `/tables/{name}`
+    endpoint addresses), so a named table is preceded by an out-of-band
+    sidecar fence ``` ```paper-table ``` whose body is one JSON object
+    `{"name": <name>}` — mirroring the `paper-embed` / `paper-toc` JSON-body
+    fence family. The parser (`markdown_parser.py`) reads it back and restores
+    `attrs.name` on the table that immediately follows. Without it the name is
+    silently dropped on every doc→md→doc round-trip (e.g. the agent
+    `apply_markdown_edit` path), breaking `/tables/{name}` addressing.
     """
     rows = node.get("content") or []
     if not rows:
@@ -260,7 +269,18 @@ def _render_table(node: dict) -> str:
     out.append("| " + " | ".join("---" for _ in range(width)) + " |")
     for r in body:
         out.append("| " + " | ".join(pad([cell_text(c) for c in cells(r)])) + " |")
-    return "\n".join(out) + "\n"
+    table_md = "\n".join(out) + "\n"
+
+    name = (node.get("attrs") or {}).get("name")
+    if name:
+        # Sidecar fence carrying the out-of-band table name, emitted
+        # immediately before the pipe table (no blank line — the closing
+        # fence already ends the block, and GFM still detects the table on the
+        # next line). JSON body keeps names with spaces / `=` / special chars
+        # safe, matching the `paper-embed` / `paper-toc` family.
+        body = json.dumps({"name": name}, sort_keys=True, ensure_ascii=False)
+        return "```paper-table\n" + body + "\n```\n" + table_md
+    return table_md
 
 
 def _render_task_list(node: dict) -> str:

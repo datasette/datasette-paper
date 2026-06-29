@@ -483,6 +483,64 @@ def test_table_cell_marks_are_preserved():
     assert "| **bold** |" in md
 
 
+def test_named_table_emits_paper_table_sidecar():
+    table = {
+        "type": "table",
+        "attrs": {"name": "sales"},
+        "content": [
+            {
+                "type": "table_row",
+                "content": [{"type": "table_header", "content": [_para(_text("Col"))]}],
+            },
+            {
+                "type": "table_row",
+                "content": [{"type": "table_cell", "content": [_para(_text("x"))]}],
+            },
+        ],
+    }
+    md = doc_to_markdown(_doc(table))
+    # Sidecar fence precedes the pipe table, immediately (no blank line).
+    assert md.startswith('```paper-table\n{"name": "sales"}\n```\n| Col |\n')
+
+
+def test_anonymous_table_emits_no_sidecar():
+    table = {
+        "type": "table",
+        "attrs": {"name": None},
+        "content": [
+            {
+                "type": "table_row",
+                "content": [{"type": "table_header", "content": [_para(_text("Col"))]}],
+            }
+        ],
+    }
+    md = doc_to_markdown(_doc(table))
+    assert "paper-table" not in md
+
+
+def test_named_table_round_trips_through_parser():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    table = {
+        "type": "table",
+        "attrs": {"name": "sales report"},
+        "content": [
+            {
+                "type": "table_row",
+                "content": [{"type": "table_header", "content": [_para(_text("Col"))]}],
+            },
+            {
+                "type": "table_row",
+                "content": [{"type": "table_cell", "content": [_para(_text("x"))]}],
+            },
+        ],
+    }
+    md = doc_to_markdown(_doc(table))
+    back = markdown_to_doc(md)
+    assert back["content"][0]["type"] == "table"
+    assert back["content"][0]["attrs"]["name"] == "sales report"
+
+
 def test_paper_link_renders_double_bracket():
     md = doc_to_markdown(_doc(_para({"type": "paper_link", "attrs": {"docId": 12}})))
     assert "[[12]]" in md
