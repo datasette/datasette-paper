@@ -13,7 +13,7 @@ import pytest
 from datasette import hookimpl
 from datasette.plugins import pm
 
-from tests.conftest import setup_paper_datasette
+from conftest import setup_paper_datasette
 
 
 class _WithPrecompute:

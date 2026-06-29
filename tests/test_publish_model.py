@@ -16,7 +16,7 @@ from datasette_paper.instance import (
     empty_doc_json,
     materialize_doc_at,
 )
-from tests.conftest import setup_paper_datasette
+from conftest import setup_paper_datasette
 
 
 def _build_step_history(n: int):

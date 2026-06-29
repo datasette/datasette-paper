@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.conftest import setup_paper_datasette
+from conftest import setup_paper_datasette
 
 
 def _cookie(ds, actor_id: str) -> dict:
