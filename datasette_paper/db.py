@@ -241,20 +241,44 @@ class PaperDB:
         return await self.database.execute_write_fn(read)
 
     # ------------------------------------------------------------------
-    # Inline #tag search
+    # Inline #tag index (derived from the materialized doc body)
     # ------------------------------------------------------------------
 
-    async def tag_ref_candidates(
-        self, *, like: str, viewable_ids: list[int]
-    ) -> list[_queries.Doc]:
-        # LIKE-scan v1 candidate filter: viewable docs whose latest snapshot's
-        # doc_json matches the serialized tag slug. Confirmation (a real `tag`
-        # node) happens in Python against the materialized live doc.
+    async def replace_inline_tags(
+        self,
+        *,
+        doc_id: int,
+        src_version: int,
+        tags: dict[str, int],
+    ) -> None:
+        # Rebuild the inline-tag rows for one doc in a single transaction
+        # (mirror replace_links): delete all of the doc's rows, then re-insert
+        # the current set. ``tags`` maps a normalized slug to its occurrence
+        # count in the live doc body.
+        def write(conn):
+            _queries.delete_inline_tags_for_doc(conn, doc_id=doc_id)
+            for tag, occurrences in tags.items():
+                _queries.insert_inline_tag(
+                    conn,
+                    doc_id=doc_id,
+                    tag=tag,
+                    occurrences=occurrences,
+                    src_version=src_version,
+                )
+
+        await self.database.execute_write_fn(write)
+
+    async def tag_refs(
+        self, *, tag: str, viewable_ids: list[int]
+    ) -> list[_queries.TagRef]:
+        # Exact, indexed lookup against the derived inline-tag index (no
+        # step_json scan, no N+1 materialize loop): viewable docs that carry
+        # inline ``#tag`` ``tag``, with the per-doc occurrence count.
         viewable_json = json.dumps(viewable_ids)
 
         def read(conn):
-            return _queries.select_tag_ref_candidates_scoped(
-                conn, viewable_json=viewable_json, like=like
+            return _queries.select_tag_refs_scoped(
+                conn, tag=tag, viewable_json=viewable_json
             )
 
         return await self.database.execute_write_fn(read)
@@ -429,3 +453,21 @@ class PaperDB:
         self, *, doc_id: int
     ) -> Optional[_queries.Snapshot]:
         return await self._exec(_queries.select_latest_snapshot, doc_id=doc_id)
+
+    async def compact_doc(self, *, doc_id: int, version: int) -> None:
+        """Prune steps + snapshots superseded by the snapshot at ``version``.
+
+        Run after a snapshot insert: every step with version <= the snapshot's
+        version is folded into the snapshot doc_json, and every older snapshot
+        is dead weight (hydrate reads only the latest). Both DELETEs run in one
+        transaction. Safe because a client requesting evicted history gets a
+        410 → full re-bootstrap from the latest snapshot.
+        """
+
+        def write(conn):
+            _queries.delete_steps_up_to_version(conn, doc_id=doc_id, version=version)
+            _queries.delete_snapshots_below_version(
+                conn, doc_id=doc_id, version=version
+            )
+
+        await self.database.execute_write_fn(write)

@@ -14,7 +14,6 @@ from ..instance import get_registry
 from ..markdown import doc_to_markdown, extract_tasks, group_tasks_by_section
 from ..markdown_parser import markdown_to_doc, markdown_to_fragment
 from ..tables import count_tables_with_name, extract_tables, find_table_by_name
-from ..tags import extract_tags
 from ..permissions import (
     PAPER_DOCS_PARENT,
     PAPER_VIEW,
@@ -517,13 +516,11 @@ async def tag_refs(datasette, request, tag: str):
     Ungated but scoped to ``allowed_resources("paper-view")`` like the list /
     backlinks endpoints, so a non-viewer's doc is never disclosed. Inline tags
     are a SEPARATE namespace from the doc-level ``?tag=`` filter and the
-    ``_datasette_paper_doc_tag`` table — this scans the document body.
+    ``_datasette_paper_doc_tag`` table — this reflects the document body.
 
-    LIKE-scan v1 (see todos/tags/07): a SQL ``LIKE`` over each viewable doc's
-    latest snapshot is a *candidate* filter; each candidate's materialized live
-    doc is then walked for a real ``tag`` node (which also picks up live steps
-    not yet snapshotted). A derived inline-tag index table is the documented
-    follow-up if this scan becomes a hotspot.
+    Backed by the derived ``_datasette_paper_inline_tag`` index (migration
+    m008), maintained by the write-tail reindex: an exact, indexed JOIN, no
+    ``step_json`` scan and no per-candidate re-materialization.
 
     → 200 ``{"tag": slug, "docs": [{id, name, state, kind, occurrences,
     updated_at}]}`` ordered by ``updated_at`` DESC; 400 if the slug normalizes
@@ -535,27 +532,18 @@ async def tag_refs(datasette, request, tag: str):
 
     viewable = await viewable_doc_ids(datasette, request.actor)
     db = paper_db(datasette)
-    # Loose candidate pattern — Python confirmation is authoritative, so an
-    # over-match (the slug appearing in plain text or as a substring) is fine.
-    candidates = await db.tag_ref_candidates(like=f"%{slug}%", viewable_ids=viewable)
-
-    registry = get_registry(datasette)
-    docs = []
-    for cand in candidates:
-        instance = await registry.get(db, cand.id)
-        live_doc = instance.materialize_live_doc()
-        occurrences = sum(1 for t in extract_tags(live_doc) if t == slug)
-        if occurrences:
-            docs.append(
-                {
-                    "id": cand.id,
-                    "name": cand.name,
-                    "state": cand.state,
-                    "kind": cand.kind,
-                    "occurrences": occurrences,
-                    "updated_at": cand.updated_at,
-                }
-            )
+    refs = await db.tag_refs(tag=slug, viewable_ids=viewable)
+    docs = [
+        {
+            "id": ref.id,
+            "name": ref.name,
+            "state": ref.state,
+            "kind": ref.kind,
+            "occurrences": ref.occurrences,
+            "updated_at": ref.updated_at,
+        }
+        for ref in refs
+    ]
     return Response.json({"tag": slug, "docs": docs})
 
 

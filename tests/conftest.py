@@ -200,7 +200,14 @@ async def plant_snapshot(
     await db.insert_snapshot(
         doc_id=doc_id, version=version, doc_json=doc_json, actor_id=actor_id
     )
-    get_registry(ds)._instances.pop(doc_id, None)  # force re-hydrate
+    registry = get_registry(ds)
+    registry._instances.pop(doc_id, None)  # drop any stale instance
+    # Rebuild the derived inline-#tag index from the planted snapshot, the same
+    # way the production write tail does after a real edit — so snapshot-only
+    # tests still exercise the index-backed tag search.
+    inst = await registry.get(db, doc_id)
+    await inst.reindex_tags()
+    registry._instances.pop(doc_id, None)  # force re-hydrate on next access
 
 
 @pytest_asyncio.fixture

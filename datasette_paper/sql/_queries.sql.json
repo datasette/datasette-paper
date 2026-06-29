@@ -1817,19 +1817,109 @@
       "result_class": "Snapshot"
     },
     {
-      "name": "selectTagRefCandidatesScoped",
-      "result_type": "Rows",
-      "sql": "SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name, d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at, d.kind, d.locked\nFROM _datasette_paper_doc d\nWHERE d.id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)\n  )\n  AND (\n    EXISTS (\n      SELECT 1 FROM _datasette_paper_snapshot s\n      WHERE s.doc_id = d.id\n        AND s.version = (\n          SELECT MAX(s2.version) FROM _datasette_paper_snapshot s2 WHERE s2.doc_id = d.id\n        )\n        AND s.doc_json LIKE $like::text\n    )\n    OR EXISTS (\n      SELECT 1 FROM _datasette_paper_step st\n      WHERE st.doc_id = d.id\n        AND st.step_json LIKE $like::text\n    )\n  )\n-- id is a deterministic tie-break: updated_at has second resolution, so docs\n-- touched in the same second would otherwise order arbitrarily (flaky results\n-- page + flaky screenshot diffs).\nORDER BY d.updated_at DESC, d.id DESC;",
+      "name": "deleteStepsUpToVersion",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_step\nWHERE doc_id = $doc_id::integer\n  AND version <= $version::integer;",
       "parameters": [
         {
-          "full_name": "$viewable_json::text",
-          "name": "viewable_json",
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteSnapshotsBelowVersion",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_snapshot\nWHERE doc_id = $doc_id::integer\n  AND version < $version::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteInlineTagsForDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_inline_tag WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "insertInlineTag",
+      "result_type": "Void",
+      "sql": "INSERT INTO _datasette_paper_inline_tag (doc_id, tag, occurrences, src_version)\nVALUES ($doc_id::integer, $tag::text, $occurrences::integer, $src_version::integer);",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$tag::text",
+          "name": "tag",
           "annotated_type": "text",
           "nullable": false
         },
         {
-          "full_name": "$like::text",
-          "name": "like",
+          "full_name": "$occurrences::integer",
+          "name": "occurrences",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$src_version::integer",
+          "name": "src_version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "selectTagRefsScoped",
+      "result_type": "Rows",
+      "sql": "SELECT d.id, d.name, d.state, d.kind, d.updated_at, t.occurrences\nFROM _datasette_paper_doc d\nJOIN _datasette_paper_inline_tag t ON t.doc_id = d.id AND t.tag = $tag::text\nWHERE d.id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)\n  )\nORDER BY d.updated_at DESC, d.id DESC;",
+      "parameters": [
+        {
+          "full_name": "$tag::text",
+          "name": "tag",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$viewable_json::text",
+          "name": "viewable_json",
           "annotated_type": "text",
           "nullable": false
         }
@@ -1852,10 +1942,18 @@
           "nullable": false
         },
         {
-          "name": "created_at",
+          "name": "state",
           "origin_database": "main",
           "origin_table": "_datasette_paper_doc",
-          "origin_column": "created_at",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
           "decltype": "TEXT",
           "nullable": false
         },
@@ -1868,79 +1966,15 @@
           "nullable": false
         },
         {
-          "name": "created_by",
+          "name": "occurrences",
           "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "created_by",
-          "decltype": "TEXT",
-          "nullable": true
-        },
-        {
-          "name": "schema_name",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "schema_name",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
-          "name": "current_version",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "current_version",
-          "decltype": "INTEGER",
-          "nullable": false
-        },
-        {
-          "name": "state",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "state",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
-          "name": "archived_at",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "archived_at",
-          "decltype": "TEXT",
-          "nullable": true
-        },
-        {
-          "name": "trashed_at",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "trashed_at",
-          "decltype": "TEXT",
-          "nullable": true
-        },
-        {
-          "name": "delete_at",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "delete_at",
-          "decltype": "TEXT",
-          "nullable": true
-        },
-        {
-          "name": "kind",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "kind",
-          "decltype": "TEXT",
-          "nullable": false
-        },
-        {
-          "name": "locked",
-          "origin_database": "main",
-          "origin_table": "_datasette_paper_doc",
-          "origin_column": "locked",
+          "origin_table": "_datasette_paper_inline_tag",
+          "origin_column": "occurrences",
           "decltype": "INTEGER",
           "nullable": false
         }
       ],
-      "result_class": "Doc"
+      "result_class": "TagRef"
     }
   ]
 }
