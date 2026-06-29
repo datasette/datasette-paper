@@ -79,7 +79,7 @@ const paperLinkNode: NodeSpec = {
 // Inline atom for @mentions — id-only (`actorId`), authored via the `@`
 // autocomplete and rendered by a NodeView (mentionView.ts). The toDOM here is
 // a static fallback. Mirrors datasette_paper/pm_schema.py;
-// datasette_paper/markdown.py round-trips it as `[@label](actor:id)`.
+// datasette_paper/markdown.py round-trips it as `[@label](paper:/actor/id)`.
 const mentionNode: NodeSpec = {
   group: "inline",
   inline: true,
@@ -108,7 +108,7 @@ const mentionNode: NodeSpec = {
 // Inline atom for #tags — value-only (`tag`), authored via the `#`
 // autocomplete and rendered by a NodeView (tagView.ts). The toDOM here is a
 // static fallback. Mirrors datasette_paper/pm_schema.py;
-// datasette_paper/markdown.py round-trips it as `[#label](tag:slug)`. Unlike
+// datasette_paper/markdown.py round-trips it as `[#label](paper:/tag/slug)`. Unlike
 // mentions there is no async resolver — the tag is its own label.
 const tagNode: NodeSpec = {
   group: "inline",

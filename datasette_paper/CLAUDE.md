@@ -63,7 +63,7 @@ Five actions: two global (config-driven) and three per-doc
 Per-doc access is **owned by datasette-acl** — the actions resolve
 against acl grants, not paper SQL. The only rule paper still emits via
 `permission_resources_sql` is the `locked` read-only deny for
-`paper-edit`. Routes call the `ensure_paper_{list,create,view,edit}` /
+`paper-edit`. Routes call the `ensure_paper_{create,view,edit}` /
 `can_paper_{view,edit,manage}` helpers from `permissions.py`;
 Manager-only operations (lock, archive, …) gate on `paper-manage` (via
 `_ensure_owner`). See `docs/PERMISSIONS.md` for the full model.
