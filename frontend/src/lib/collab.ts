@@ -236,12 +236,6 @@ interface SendableResult {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function repeat<T>(val: T, n: number): T[] {
-  const result: T[] = [];
-  for (let i = 0; i < n; i++) result.push(val);
-  return result;
-}
-
 /**
  * Curated structural input rules — re-implementation of
  * `prosemirror-example-setup`'s `buildInputRules` with the typographic
@@ -254,37 +248,25 @@ function repeat<T>(val: T, n: number): T[] {
  * coming from example-setup (which has no HR rule at all).
  */
 function buildPaperStructuralRules(): InputRule[] {
-  const rules: InputRule[] = [];
-  if (schema.nodes.blockquote) {
-    rules.push(wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote));
-  }
-  if (schema.nodes.ordered_list) {
-    rules.push(
-      wrappingInputRule(
-        /^(\d+)\.\s$/,
-        schema.nodes.ordered_list,
-        (match) => ({ order: +match[1] }),
-        (match, node) =>
-          node.childCount + (node.attrs.order as number) === +match[1],
-      ),
-    );
-  }
-  if (schema.nodes.bullet_list) {
-    rules.push(wrappingInputRule(/^\s*([-+*])\s$/, schema.nodes.bullet_list));
-  }
-  if (schema.nodes.code_block) {
-    rules.push(textblockTypeInputRule(/^```$/, schema.nodes.code_block));
-  }
-  if (schema.nodes.heading) {
-    rules.push(
-      textblockTypeInputRule(
-        /^(#{1,6})\s$/,
-        schema.nodes.heading,
-        (match) => ({ level: match[1].length }),
-      ),
-    );
-  }
-  return rules;
+  // Every node here is unconditionally present in the static schema, so no
+  // per-node existence guard is needed.
+  return [
+    wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote),
+    wrappingInputRule(
+      /^(\d+)\.\s$/,
+      schema.nodes.ordered_list,
+      (match) => ({ order: +match[1] }),
+      (match, node) =>
+        node.childCount + (node.attrs.order as number) === +match[1],
+    ),
+    wrappingInputRule(/^\s*([-+*])\s$/, schema.nodes.bullet_list),
+    textblockTypeInputRule(/^```$/, schema.nodes.code_block),
+    textblockTypeInputRule(
+      /^(#{1,6})\s$/,
+      schema.nodes.heading,
+      (match) => ({ level: match[1].length }),
+    ),
+  ];
 }
 
 /**
@@ -399,32 +381,6 @@ function delimiterMarkRule(
   });
 }
 
-/** `**text**` → strong. */
-function strongInputRule(): InputRule {
-  return delimiterMarkRule(
-    /(?:^|\s)\*\*([^\s*][^*]*?[^\s*]|[^\s*])\*\*$/,
-    schema.marks.strong,
-    2,
-  );
-}
-
-/** `*text*` → em. The `(?:^|\s)` prefix prevents firing on the inner `*`s of `**…**`. */
-function emInputRule(): InputRule {
-  return delimiterMarkRule(
-    /(?:^|\s)\*([^\s*][^*]*?[^\s*]|[^\s*])\*$/,
-    schema.marks.em,
-    1,
-  );
-}
-
-/** `` `text` `` → code. */
-function codeInputRule(): InputRule {
-  return delimiterMarkRule(
-    /(?:^|\s)`([^\s`][^`]*?[^\s`]|[^\s`])`$/,
-    schema.marks.code,
-    1,
-  );
-}
 
 /** `[text](url)` → link. Fires on the closing `)`. URL can't contain spaces or `)`.
  *
@@ -939,6 +895,17 @@ export class EditorConnection {
     return "/-/paper/api/docs/" + this.opts.docId + path;
   }
 
+  /** POST a JSON body to an API path, attaching the CSRF header when present. */
+  private postJson(path: string, body: string): Promise<Response> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (this.opts.csrfToken) {
+      headers["X-CSRFToken"] = this.opts.csrfToken;
+    }
+    return fetch(this.apiUrl(path), { method: "POST", headers, body });
+  }
+
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   private reportStepError(err: StepApplyError): void {
@@ -1037,14 +1004,26 @@ export class EditorConnection {
             ellipsis,
             horizontalRuleInputRule(),
             ...buildPaperStructuralRules(),
-          ],
-        }),
-        inputRules({
-          rules: [
             taskListInputRule(),
-            strongInputRule(),
-            emInputRule(),
-            codeInputRule(),
+            // `**text**` → strong.
+            delimiterMarkRule(
+              /(?:^|\s)\*\*([^\s*][^*]*?[^\s*]|[^\s*])\*\*$/,
+              schema.marks.strong,
+              2,
+            ),
+            // `*text*` → em. The `(?:^|\s)` prefix prevents firing on the
+            // inner `*`s of `**…**`.
+            delimiterMarkRule(
+              /(?:^|\s)\*([^\s*][^*]*?[^\s*]|[^\s*])\*$/,
+              schema.marks.em,
+              1,
+            ),
+            // `` `text` `` → code.
+            delimiterMarkRule(
+              /(?:^|\s)`([^\s`][^`]*?[^\s`]|[^\s`])`$/,
+              schema.marks.code,
+              1,
+            ),
             linkInputRule(),
             autoLinkInputRule(),
           ],
@@ -1498,18 +1477,7 @@ export class EditorConnection {
     });
 
     try {
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (this.opts.csrfToken) {
-        headers["X-CSRFToken"] = this.opts.csrfToken;
-      }
-
-      const resp = await fetch(this.apiUrl("/events"), {
-        method: "POST",
-        headers,
-        body,
-      });
+      const resp = await this.postJson("/events", body);
 
       this.sending = false;
 
@@ -1521,7 +1489,7 @@ export class EditorConnection {
           const tr = receiveTransaction(
             this.view.state,
             sendable.steps,
-            repeat(sendable.clientID, sendable.steps.length)
+            new Array(sendable.steps.length).fill(sendable.clientID)
           );
           this.view.dispatch(tr);
           this.comm = "loaded";
@@ -1715,17 +1683,7 @@ export class EditorConnection {
    */
   async snapshot(): Promise<void> {
     if (!this.view) return;
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-    if (this.opts.csrfToken) {
-      headers["X-CSRFToken"] = this.opts.csrfToken;
-    }
-    const resp = await fetch(this.apiUrl("/snapshot"), {
-      method: "POST",
-      headers,
-      body: "{}",
-    });
+    const resp = await this.postJson("/snapshot", "{}");
     if (resp.ok) {
       const data = (await resp.json().catch(() => null)) as {
         version?: number;
