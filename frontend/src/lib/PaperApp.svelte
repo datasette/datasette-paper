@@ -18,7 +18,7 @@
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
   import { insertImage } from "./image";
-  import { insertDatasetteEmbed } from "./datasetteEmbed";
+  import { insertDatasetteEmbed } from "./datasetteEmbedCommand";
 
   let { docId }: { docId: string } = $props();
 

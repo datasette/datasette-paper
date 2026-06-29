@@ -1,0 +1,220 @@
+/* Styles for the published, read-only page. A trimmed sibling of editor.css's
+ * rich-element rules — scoped under `.paper-published`, with every editing
+ * affordance (insert tooltips, selection chrome, hover edit UI) removed.
+ * Mirrors the visual target in plans/publishing/plan.html. */
+
+.paper-published {
+  max-width: 760px;
+  margin: 2rem auto;
+  padding: 0 1.25rem 4rem;
+  font:
+    16px/1.65 -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  color: #1f2328;
+}
+
+.paper-published h1,
+.paper-published h2,
+.paper-published h3 {
+  line-height: 1.25;
+  margin: 1.6em 0 0.5em;
+}
+.paper-published h1 {
+  font-size: 1.9rem;
+}
+.paper-published h2 {
+  font-size: 1.45rem;
+}
+.paper-published h3 {
+  font-size: 1.2rem;
+}
+.paper-published p {
+  margin: 0.75em 0;
+}
+.paper-published blockquote {
+  margin: 1em 0;
+  padding: 0.25em 1em;
+  border-left: 3px solid #d0d7de;
+  color: #57606a;
+}
+.paper-published pre.pm-code-block {
+  background: #f6f8fa;
+  border: 1px solid #e2e2e2;
+  border-radius: 6px;
+  padding: 0.75em 1em;
+  overflow-x: auto;
+}
+.paper-published hr {
+  border: none;
+  border-top: 1px solid #e2e2e2;
+  margin: 2em 0;
+}
+.paper-published a {
+  color: #0969da;
+}
+
+/* Author tables */
+.paper-published table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+}
+.paper-published th,
+.paper-published td {
+  border: 1px solid #e2e2e2;
+  padding: 6px 10px;
+  text-align: left;
+}
+.paper-published thead th {
+  background: #f6f8fa;
+}
+
+/* Task lists */
+.paper-published ul[data-task-list] {
+  list-style: none;
+  padding-left: 0.25em;
+}
+.paper-published li[data-task-item] {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5em;
+}
+.paper-published li[data-task-item] > input[type="checkbox"] {
+  margin-top: 0.4em;
+}
+.paper-published li[data-task-item][data-checked="true"] > .task-item-content {
+  text-decoration: line-through;
+  color: #8b949e;
+}
+.paper-published .task-item-content > p {
+  margin: 0.2em 0;
+}
+
+/* Inline atom pills */
+.paper-published .pm-paper-link {
+  white-space: nowrap;
+  color: #0b5cad;
+  text-decoration: none;
+  padding: 0 2px;
+  border-radius: 3px;
+  background: rgba(11, 92, 173, 0.08);
+}
+.paper-published .pm-mention,
+.paper-published .pm-tag {
+  white-space: nowrap;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+.paper-published .pm-mention {
+  color: #0b5cad;
+  background: rgba(11, 92, 173, 0.1);
+}
+.paper-published .pm-tag {
+  color: #0f766e;
+  background: rgba(15, 118, 110, 0.1);
+}
+.paper-published .pm-inline-embed {
+  color: #0969da;
+  text-decoration: none;
+  border-bottom: 1px dotted #0969da;
+}
+.paper-published .pm-value {
+  font-variant-numeric: tabular-nums;
+  background: rgba(9, 105, 218, 0.08);
+  border-radius: 3px;
+  padding: 0 3px;
+}
+
+/* Data blocks (sql / embed / source). Live + frozen share this look. */
+.paper-published .pm-sql-block,
+.paper-published .pm-block-embed,
+.paper-published .pm-source-card {
+  border: 1px solid #e2e2e2;
+  border-radius: 8px;
+  margin: 1.25em 0;
+  overflow: hidden;
+}
+.paper-published .pm-data-head,
+.paper-published .pm-source-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  background: #f6f8fa;
+  border-bottom: 1px solid #e2e2e2;
+  padding: 6px 10px;
+  font-size: 0.85rem;
+  color: #57606a;
+}
+.paper-published .pm-data-db,
+.paper-published .pm-data-ref,
+.paper-published .pm-source-card-name {
+  font-weight: 600;
+  color: #1f2328;
+}
+.paper-published .pm-source-card-sigil {
+  color: #8957e5;
+  font-weight: 700;
+}
+.paper-published .pm-badge {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.paper-published .pm-badge-live {
+  color: #0969da;
+  background: rgba(9, 105, 218, 0.12);
+}
+.paper-published .pm-badge-frozen {
+  color: #1a7f37;
+  background: rgba(26, 127, 55, 0.12);
+}
+.paper-published .pm-sql-src,
+.paper-published .pm-source-card-code {
+  margin: 0;
+  padding: 0.6em 0.9em;
+  background: #fff;
+  border-bottom: 1px solid #f0f0f0;
+  overflow-x: auto;
+  font-size: 0.85rem;
+  color: #24292f;
+}
+.paper-published .pm-data-slot,
+.paper-published .pm-data-empty {
+  padding: 0.75em 0.9em;
+  color: #8b949e;
+  font-size: 0.9rem;
+}
+.paper-published table.pm-data-table {
+  margin: 0;
+  width: 100%;
+}
+.paper-published table.pm-data-table th {
+  background: #fbfcfd;
+}
+.paper-published table.pm-data-table td {
+  font-variant-numeric: tabular-nums;
+}
+.paper-published .pm-data-asof {
+  padding: 6px 10px;
+  font-size: 0.78rem;
+  color: #8b949e;
+  border-top: 1px solid #f0f0f0;
+}
+.paper-published .pm-embed-row {
+  margin: 0;
+  padding: 0.6em 0.9em;
+}
+.paper-published .pm-embed-row dt {
+  font-weight: 600;
+  color: #57606a;
+  font-size: 0.82rem;
+}
+.paper-published .pm-embed-row dd {
+  margin: 0 0 0.5em;
+}

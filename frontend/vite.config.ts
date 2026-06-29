@@ -24,6 +24,7 @@ export default defineConfig({
         index: path.resolve(__dirname, "src/pages/index/main.ts"),
         doc: path.resolve(__dirname, "src/pages/doc/main.ts"),
         tag: path.resolve(__dirname, "src/pages/tag/main.ts"),
+        publish: path.resolve(__dirname, "src/pages/publish/main.ts"),
       },
     },
   },

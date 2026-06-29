@@ -692,6 +692,28 @@ function buildShots(ctx, ids) {
     "sql-block": sqlBlockShot(sqlBlockId, "sql-block"),
     "sql-block-hidden": sqlBlockShot(sqlBlockHiddenId, "sql-block-hidden"),
 
+    // Published page: a pinned version rendered as static read-only HTML (no
+    // ProseMirror), with the SQL block hydrating live per-viewer. Publish the
+    // SQL-report doc (owner = ACTOR) to `everyone`, then capture the public
+    // /publish page once the live results table appears.
+    published: async () => {
+      const page = await newPage();
+      const pub = await ctx.request.post(`${PAPER}/api/docs/${sqlBlockId}/publish`, {
+        data: { audience: [{ principal: "everyone" }] },
+        headers: { Cookie: `ds_actor=${signActorCookie(ACTOR)}` },
+      });
+      if (pub.status() !== 200) {
+        throw new Error(`publish failed: ${pub.status()} ${await pub.text()}`);
+      }
+      await page.goto(`${PAPER}/doc/${sqlBlockId}/publish`);
+      await page
+        .locator(".paper-published .pm-sql-block .pm-data-table")
+        .waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("published") });
+      await page.close();
+    },
+
     // Inline SQL value chips resolved live from a source query.
     "inline-value": inlineValueShot(inlineValueId, "inline-value"),
     // The `${{` autocomplete: type a source name + dot to reach the column

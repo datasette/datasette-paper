@@ -268,10 +268,9 @@ async def _serve_publication(datasette, request, doc_id, version):
     if (request.headers.get("if-none-match") or "").strip() == etag:
         return Response("", status=304, headers=headers)
 
-    # The hydrator bundle ships only when there are live blocks. (The entry
-    # itself is added in T04; until then the page is static and live blocks
-    # show their loading state.)
-    entrypoint = None
+    # The hydrator bundle ships only when there are live blocks — an all-frozen
+    # page is pure static HTML with zero JS.
+    entrypoint = "src/pages/publish/main.ts" if pub.has_live_blocks else None
     page_data = {
         "doc_id": doc_id,
         "published_version": version,

@@ -8,9 +8,6 @@
  * to a leak-free `denied`; a SQL error maps to `error` with the message (safe
  * to show — it's the viewer's own query against a db they can reach).
  */
-import { schema } from "./schema";
-import type { Command } from "prosemirror-state";
-import type { EditorView } from "prosemirror-view";
 import type { CellValue } from "./datasetteEmbed";
 
 export interface SqlResult {
@@ -85,27 +82,6 @@ export async function listQueryableDatabases(): Promise<string[]> {
 // `block_embed`); re-exported here so existing SQL-block imports keep working.
 export { rowsToCsv, rowsToJson } from "./tableExport";
 
-/** A ProseMirror command that inserts an empty `sql_block` at the selection. */
-export function insertSqlBlock(db: string | null = null): Command {
-  return (state, dispatch) => {
-    const node = schema.nodes.sql_block.create({ db, hidden: false });
-    if (dispatch) dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
-    return true;
-  };
-}
-
-/** Imperative variant for the slash menu (which hands us a view, not state). */
-export function runInsertSqlBlock(view: EditorView, db: string | null = null): void {
-  insertSqlBlock(db)(view.state, view.dispatch);
-  view.focus();
-}
-
-/** A command that inserts an empty `source` (named query) at the selection.
- *  The NodeView defaults the database and exposes name + SQL inputs. */
-export function insertSource(db: string | null = null): Command {
-  return (state, dispatch) => {
-    const node = schema.nodes.source.create({ name: null, db });
-    if (dispatch) dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
-    return true;
-  };
-}
+// ProseMirror insert commands (insertSqlBlock / runInsertSqlBlock / insertSource)
+// live in ./sqlBlockCommands so this module stays ProseMirror-free and can be
+// reused by the published page's slim hydrator without pulling in `schema`.
