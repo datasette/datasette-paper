@@ -27,3 +27,7 @@ datasette_paper/manifest.json
 # Playwright artifacts
 test-results/
 playwright-report/
+
+# Local maintainer scratch (untracked working-tree files)
+NOTES.md
+benchmarks/
