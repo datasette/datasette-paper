@@ -475,3 +475,132 @@ class PaperDB:
             return _queries.select_latest_snapshot(conn, doc_id=doc_id)
 
         return await self.database.execute_write_fn(read)
+
+    async def select_latest_snapshot_at_or_before(
+        self, *, doc_id: int, version: int
+    ) -> Optional[_queries.Snapshot]:
+        def read(conn):
+            return _queries.select_latest_snapshot_at_or_before(
+                conn, doc_id=doc_id, version=version
+            )
+
+        return await self.database.execute_write_fn(read)
+
+    async def select_steps_in_range(
+        self, *, doc_id: int, after_version: int, through_version: int
+    ) -> list[_queries.Step]:
+        def read(conn):
+            return _queries.select_steps_in_range(
+                conn,
+                doc_id=doc_id,
+                after_version=after_version,
+                through_version=through_version,
+            )
+
+        return await self.database.execute_write_fn(read)
+
+    # ------------------------------------------------------------------
+    # Publications (publishing feature)
+    # ------------------------------------------------------------------
+
+    async def write_publication(
+        self,
+        *,
+        doc_id: int,
+        version: int,
+        html: str,
+        doc_json: str,
+        data_mode_default: str,
+        config_json: str,
+        has_live_blocks: bool,
+        published_by: Optional[str],
+        frozen_data: list[dict],
+        set_current: bool = True,
+    ) -> None:
+        """Persist a publication row + its frozen-block payloads + move the
+        ``published_version`` pointer, all in one transaction.
+
+        ``frozen_data`` is a list of
+        ``{block_id, kind, payload_json, computed_by}`` dicts (one per frozen
+        data block); it replaces any existing rows for this (doc_id, version).
+        """
+
+        def write(conn):
+            _queries.upsert_publication(
+                conn,
+                doc_id=doc_id,
+                version=version,
+                html=html,
+                doc_json=doc_json,
+                data_mode_default=data_mode_default,
+                config_json=config_json,
+                has_live_blocks=1 if has_live_blocks else 0,
+                published_by=published_by,
+            )
+            _queries.delete_publication_data(conn, doc_id=doc_id, version=version)
+            for row in frozen_data:
+                _queries.insert_publication_data(
+                    conn,
+                    doc_id=doc_id,
+                    version=version,
+                    block_id=row["block_id"],
+                    kind=row["kind"],
+                    payload_json=row["payload_json"],
+                    computed_by=row.get("computed_by"),
+                )
+            if set_current:
+                _queries.set_published_version(conn, version=version, doc_id=doc_id)
+
+        await self.database.execute_write_fn(write)
+
+    async def select_publication(
+        self, *, doc_id: int, version: int
+    ) -> Optional[_queries.Publication]:
+        def read(conn):
+            return _queries.select_publication(conn, doc_id=doc_id, version=version)
+
+        return await self.database.execute_write_fn(read)
+
+    async def select_current_publication(
+        self, *, doc_id: int
+    ) -> Optional[_queries.Publication]:
+        """The publication the ``published_version`` pointer references, or
+        None if the doc isn't currently published."""
+
+        def read(conn):
+            version = _queries.select_published_version(conn, doc_id=doc_id)
+            if version is None:
+                return None
+            return _queries.select_publication(conn, doc_id=doc_id, version=version)
+
+        return await self.database.execute_write_fn(read)
+
+    async def select_published_version(self, *, doc_id: int) -> Optional[int]:
+        def read(conn):
+            return _queries.select_published_version(conn, doc_id=doc_id)
+
+        return await self.database.execute_write_fn(read)
+
+    async def list_publication_versions(
+        self, *, doc_id: int
+    ) -> list[_queries.PublicationMeta]:
+        def read(conn):
+            return _queries.list_publication_versions(conn, doc_id=doc_id)
+
+        return await self.database.execute_write_fn(read)
+
+    async def select_publication_data(
+        self, *, doc_id: int, version: int
+    ) -> list[_queries.PublicationData]:
+        def read(conn):
+            return _queries.select_publication_data(
+                conn, doc_id=doc_id, version=version
+            )
+
+        return await self.database.execute_write_fn(read)
+
+    async def clear_published_version(self, *, doc_id: int) -> None:
+        def write(conn):
+            _queries.clear_published_version(conn, doc_id=doc_id)
+
+        await self.database.execute_write_fn(write)

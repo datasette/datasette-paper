@@ -598,3 +598,66 @@ def m006_doc_tags(db: Database):
             ON _datasette_paper_doc_tag(tag);
         """
     )
+
+
+@migrations()
+def m007_publications(db: Database):
+    # Publishing: an immutable, server-prerendered snapshot of a doc at one
+    # pinned version. A doc carries a single ``published_version`` pointer to
+    # the currently-live publication (NULL = not published); republishing
+    # renders a new version and moves the pointer, unpublishing clears it.
+    # Past publication rows are retained (cheap + immutable) so version
+    # permalinks keep working.
+    #
+    # ``_datasette_paper_publication`` holds the prerendered HTML + the frozen
+    # PM JSON (self-contained, independent of snapshot eviction) + the
+    # per-publish data-mode config. ``_datasette_paper_publication_data`` holds
+    # the baked payload for each *frozen* data block (one row per block_id,
+    # the document-order ordinal assigned during the publish walk).
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _datasette_paper_publication (
+            --! One row per published version of a doc; immutable once written.
+            doc_id            INTEGER NOT NULL REFERENCES _datasette_paper_doc(id) ON DELETE CASCADE,
+            --- The doc version that was published (a _datasette_paper_step.version).
+            version           INTEGER NOT NULL,
+            --- Prerendered prose + frozen-data HTML body (the served page).
+            html              TEXT NOT NULL,
+            --- Frozen ProseMirror JSON at ``version`` (kept so a publication is
+            --- reproducible forever, even after its snapshot is evicted).
+            doc_json          TEXT NOT NULL,
+            --- Default data mode for blocks without an explicit override.
+            data_mode_default TEXT NOT NULL DEFAULT 'live'
+                                CHECK (data_mode_default IN ('live','frozen')),
+            --- JSON: per-block mode overrides, audience class, render metadata.
+            config_json       TEXT NOT NULL DEFAULT '{}',
+            --- 1 iff at least one block resolved to ``live`` (so the view route
+            --- knows whether to ship the client hydrator bundle).
+            has_live_blocks   INTEGER NOT NULL DEFAULT 1 CHECK (has_live_blocks IN (0,1)),
+            published_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            --- Actor who published (NULL for anonymous).
+            published_by      TEXT,
+            PRIMARY KEY (doc_id, version)
+        );
+
+        CREATE TABLE IF NOT EXISTS _datasette_paper_publication_data (
+            --! Baked query payload for one FROZEN data block of a publication.
+            doc_id       INTEGER NOT NULL,
+            version      INTEGER NOT NULL,
+            --- Document-order ordinal over data-bearing nodes (e.g. 'b3'),
+            --- assigned during the publish walk; stable within a version.
+            block_id     TEXT NOT NULL,
+            --- 'sql' | 'embed' | 'source' | 'custom'.
+            kind         TEXT NOT NULL,
+            --- JSON payload (columns+rows / first-row / provider payload).
+            payload_json TEXT NOT NULL,
+            computed_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            --- Actor whose permissions computed this payload (audit).
+            computed_by  TEXT,
+            PRIMARY KEY (doc_id, version, block_id)
+        );
+
+        ALTER TABLE _datasette_paper_doc
+            ADD COLUMN published_version INTEGER;
+        """
+    )

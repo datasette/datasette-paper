@@ -82,6 +82,40 @@ class Snapshot:
     created_at: str
 
 
+@dataclass
+class Publication:
+    doc_id: int
+    version: int
+    html: str
+    doc_json: str
+    data_mode_default: str
+    config_json: str
+    has_live_blocks: int
+    published_at: str
+    published_by: str | None
+
+
+@dataclass
+class PublicationMeta:
+    doc_id: int
+    version: int
+    data_mode_default: str
+    has_live_blocks: int
+    published_at: str
+    published_by: str | None
+
+
+@dataclass
+class PublicationData:
+    doc_id: int
+    version: int
+    block_id: str
+    kind: str
+    payload_json: str
+    computed_at: str
+    computed_by: str | None
+
+
 def insert_doc(
     conn: sqlite3.Connection,
     name: str,
@@ -628,3 +662,196 @@ ORDER BY d.updated_at DESC, d.id DESC;
     params = {"viewable_json::text": viewable_json, "like::text": like}
     cursor = conn.execute(sql, params)
     return [Doc(*row) for row in cursor.fetchall()]
+
+
+def select_latest_snapshot_at_or_before(
+    conn: sqlite3.Connection, doc_id: int, version: int
+) -> Snapshot | None:
+    sql = """\
+SELECT doc_id, version, doc_json, created_at
+FROM _datasette_paper_snapshot
+WHERE doc_id = $doc_id::integer
+  AND version <= $version::integer
+ORDER BY version DESC
+LIMIT 1;
+"""
+    params = {"doc_id::integer": doc_id, "version::integer": version}
+    cursor = conn.execute(sql, params)
+    row = cursor.fetchone()
+    return Snapshot(*row) if row is not None else None
+
+
+def select_steps_in_range(
+    conn: sqlite3.Connection, doc_id: int, after_version: int, through_version: int
+) -> list[Step]:
+    sql = """\
+SELECT doc_id, version, client_id, actor_id, step_json, created_at
+FROM _datasette_paper_step
+WHERE doc_id = $doc_id::integer
+  AND version > $after_version::integer
+  AND version <= $through_version::integer
+ORDER BY version;
+"""
+    params = {
+        "doc_id::integer": doc_id,
+        "after_version::integer": after_version,
+        "through_version::integer": through_version,
+    }
+    cursor = conn.execute(sql, params)
+    return [Step(*row) for row in cursor.fetchall()]
+
+
+def upsert_publication(
+    conn: sqlite3.Connection,
+    doc_id: int,
+    version: int,
+    html: str,
+    doc_json: str,
+    data_mode_default: str,
+    config_json: str,
+    has_live_blocks: int,
+    published_by: str | None,
+) -> None:
+    sql = """\
+INSERT OR REPLACE INTO _datasette_paper_publication
+    (doc_id, version, html, doc_json, data_mode_default, config_json, has_live_blocks, published_by)
+VALUES (
+    $doc_id::integer,
+    $version::integer,
+    $html::text,
+    $doc_json::text,
+    $data_mode_default::text,
+    $config_json::text,
+    $has_live_blocks::integer,
+    $published_by::text::
+);
+"""
+    params = {
+        "doc_id::integer": doc_id,
+        "version::integer": version,
+        "html::text": html,
+        "doc_json::text": doc_json,
+        "data_mode_default::text": data_mode_default,
+        "config_json::text": config_json,
+        "has_live_blocks::integer": has_live_blocks,
+        "published_by::text::": published_by,
+    }
+    conn.execute(sql, params)
+    return None
+
+
+def select_publication(
+    conn: sqlite3.Connection, doc_id: int, version: int
+) -> Publication | None:
+    sql = """\
+SELECT doc_id, version, html, doc_json, data_mode_default, config_json, has_live_blocks, published_at, published_by
+FROM _datasette_paper_publication
+WHERE doc_id = $doc_id::integer
+  AND version = $version::integer;
+"""
+    params = {"doc_id::integer": doc_id, "version::integer": version}
+    cursor = conn.execute(sql, params)
+    row = cursor.fetchone()
+    return Publication(*row) if row is not None else None
+
+
+def list_publication_versions(
+    conn: sqlite3.Connection, doc_id: int
+) -> list[PublicationMeta]:
+    sql = """\
+SELECT doc_id, version, data_mode_default, has_live_blocks, published_at, published_by
+FROM _datasette_paper_publication
+WHERE doc_id = $doc_id::integer
+ORDER BY version DESC;
+"""
+    params = {"doc_id::integer": doc_id}
+    cursor = conn.execute(sql, params)
+    return [PublicationMeta(*row) for row in cursor.fetchall()]
+
+
+def select_published_version(conn: sqlite3.Connection, doc_id: int) -> int | None:
+    sql = "SELECT published_version FROM _datasette_paper_doc WHERE id = $doc_id::integer;"
+    params = {"doc_id::integer": doc_id}
+    cursor = conn.execute(sql, params)
+    row = cursor.fetchone()
+    return row[0] if row is not None else None
+
+
+def set_published_version(conn: sqlite3.Connection, version: int, doc_id: int) -> None:
+    sql = """\
+UPDATE _datasette_paper_doc
+SET published_version = $version::integer
+WHERE id = $doc_id::integer;
+"""
+    params = {"version::integer": version, "doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def clear_published_version(conn: sqlite3.Connection, doc_id: int) -> None:
+    sql = """\
+UPDATE _datasette_paper_doc
+SET published_version = NULL
+WHERE id = $doc_id::integer;
+"""
+    params = {"doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def delete_publication_data(
+    conn: sqlite3.Connection, doc_id: int, version: int
+) -> None:
+    sql = """\
+DELETE FROM _datasette_paper_publication_data
+WHERE doc_id = $doc_id::integer AND version = $version::integer;
+"""
+    params = {"doc_id::integer": doc_id, "version::integer": version}
+    conn.execute(sql, params)
+    return None
+
+
+def insert_publication_data(
+    conn: sqlite3.Connection,
+    doc_id: int,
+    version: int,
+    block_id: str,
+    kind: str,
+    payload_json: str,
+    computed_by: str | None,
+) -> None:
+    sql = """\
+INSERT OR REPLACE INTO _datasette_paper_publication_data
+    (doc_id, version, block_id, kind, payload_json, computed_by)
+VALUES (
+    $doc_id::integer,
+    $version::integer,
+    $block_id::text,
+    $kind::text,
+    $payload_json::text,
+    $computed_by::text::
+);
+"""
+    params = {
+        "doc_id::integer": doc_id,
+        "version::integer": version,
+        "block_id::text": block_id,
+        "kind::text": kind,
+        "payload_json::text": payload_json,
+        "computed_by::text::": computed_by,
+    }
+    conn.execute(sql, params)
+    return None
+
+
+def select_publication_data(
+    conn: sqlite3.Connection, doc_id: int, version: int
+) -> list[PublicationData]:
+    sql = """\
+SELECT doc_id, version, block_id, kind, payload_json, computed_at, computed_by
+FROM _datasette_paper_publication_data
+WHERE doc_id = $doc_id::integer AND version = $version::integer;
+"""
+    params = {"doc_id::integer": doc_id, "version::integer": version}
+    cursor = conn.execute(sql, params)
+    return [PublicationData(*row) for row in cursor.fetchall()]

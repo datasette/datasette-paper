@@ -1965,6 +1965,555 @@
         }
       ],
       "result_class": "Doc"
+    },
+    {
+      "name": "selectLatestSnapshotAtOrBefore",
+      "result_type": "Row",
+      "sql": "SELECT doc_id, version, doc_json, created_at\nFROM _datasette_paper_snapshot\nWHERE doc_id = $doc_id::integer\n  AND version <= $version::integer\nORDER BY version DESC\nLIMIT 1;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_snapshot",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_snapshot",
+          "origin_column": "version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "doc_json",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_snapshot",
+          "origin_column": "doc_json",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_snapshot",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Snapshot"
+    },
+    {
+      "name": "selectStepsInRange",
+      "result_type": "Rows",
+      "sql": "SELECT doc_id, version, client_id, actor_id, step_json, created_at\nFROM _datasette_paper_step\nWHERE doc_id = $doc_id::integer\n  AND version > $after_version::integer\n  AND version <= $through_version::integer\nORDER BY version;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$after_version::integer",
+          "name": "after_version",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$through_version::integer",
+          "name": "through_version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "client_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "client_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "actor_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "actor_id",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "step_json",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "step_json",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_step",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "Step"
+    },
+    {
+      "name": "upsertPublication",
+      "result_type": "Void",
+      "sql": "INSERT OR REPLACE INTO _datasette_paper_publication\n    (doc_id, version, html, doc_json, data_mode_default, config_json, has_live_blocks, published_by)\nVALUES (\n    $doc_id::integer,\n    $version::integer,\n    $html::text,\n    $doc_json::text,\n    $data_mode_default::text,\n    $config_json::text,\n    $has_live_blocks::integer,\n    $published_by::text::\n);",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$html::text",
+          "name": "html",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_json::text",
+          "name": "doc_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$data_mode_default::text",
+          "name": "data_mode_default",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$config_json::text",
+          "name": "config_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$has_live_blocks::integer",
+          "name": "has_live_blocks",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$published_by::text::",
+          "name": "published_by",
+          "annotated_type": "text",
+          "nullable": true
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "selectPublication",
+      "result_type": "Row",
+      "sql": "SELECT doc_id, version, html, doc_json, data_mode_default, config_json, has_live_blocks, published_at, published_by\nFROM _datasette_paper_publication\nWHERE doc_id = $doc_id::integer\n  AND version = $version::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "html",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "html",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "doc_json",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "doc_json",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "data_mode_default",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "data_mode_default",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "config_json",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "config_json",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "has_live_blocks",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "has_live_blocks",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "published_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "published_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "published_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "published_by",
+          "decltype": "TEXT",
+          "nullable": true
+        }
+      ],
+      "result_class": "Publication"
+    },
+    {
+      "name": "listPublicationVersions",
+      "result_type": "Rows",
+      "sql": "SELECT doc_id, version, data_mode_default, has_live_blocks, published_at, published_by\nFROM _datasette_paper_publication\nWHERE doc_id = $doc_id::integer\nORDER BY version DESC;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "data_mode_default",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "data_mode_default",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "has_live_blocks",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "has_live_blocks",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "published_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "published_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "published_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication",
+          "origin_column": "published_by",
+          "decltype": "TEXT",
+          "nullable": true
+        }
+      ],
+      "result_class": "PublicationMeta"
+    },
+    {
+      "name": "selectPublishedVersion",
+      "result_type": "Value",
+      "sql": "SELECT published_version FROM _datasette_paper_doc WHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "published_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "published_version",
+          "decltype": "INTEGER",
+          "nullable": true
+        }
+      ],
+      "result_class": null
+    },
+    {
+      "name": "setPublishedVersion",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET published_version = $version::integer\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "clearPublishedVersion",
+      "result_type": "Void",
+      "sql": "UPDATE _datasette_paper_doc\nSET published_version = NULL\nWHERE id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deletePublicationData",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_publication_data\nWHERE doc_id = $doc_id::integer AND version = $version::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "insertPublicationData",
+      "result_type": "Void",
+      "sql": "INSERT OR REPLACE INTO _datasette_paper_publication_data\n    (doc_id, version, block_id, kind, payload_json, computed_by)\nVALUES (\n    $doc_id::integer,\n    $version::integer,\n    $block_id::text,\n    $kind::text,\n    $payload_json::text,\n    $computed_by::text::\n);",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$block_id::text",
+          "name": "block_id",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$kind::text",
+          "name": "kind",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$payload_json::text",
+          "name": "payload_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$computed_by::text::",
+          "name": "computed_by",
+          "annotated_type": "text",
+          "nullable": true
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "selectPublicationData",
+      "result_type": "Rows",
+      "sql": "SELECT doc_id, version, block_id, kind, payload_json, computed_at, computed_by\nFROM _datasette_paper_publication_data\nWHERE doc_id = $doc_id::integer AND version = $version::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$version::integer",
+          "name": "version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication_data",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication_data",
+          "origin_column": "version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "block_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication_data",
+          "origin_column": "block_id",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication_data",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "payload_json",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication_data",
+          "origin_column": "payload_json",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "computed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication_data",
+          "origin_column": "computed_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "computed_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_publication_data",
+          "origin_column": "computed_by",
+          "decltype": "TEXT",
+          "nullable": true
+        }
+      ],
+      "result_class": "PublicationData"
     }
   ]
 }
