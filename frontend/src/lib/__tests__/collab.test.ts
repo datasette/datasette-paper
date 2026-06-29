@@ -532,6 +532,118 @@ describe("send() 410 response", () => {
   });
 });
 
+// ─── Test: self-heal (bootstrap retry + reconnect backoff) ──────────────────
+
+describe("self-heal", () => {
+  it("retries a transient bootstrap GET failure and ends up with a live view", async () => {
+    const el = makeEl();
+
+    // First bootstrap GET fails with a transient 503; the second succeeds.
+    let bootstrapCalls = 0;
+    const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+      const isBootstrapGet =
+        (url as string).endsWith("/test-doc") &&
+        (!opts?.method || opts.method === "GET");
+      if (isBootstrapGet) {
+        bootstrapCalls++;
+        if (bootstrapCalls === 1) {
+          return Promise.resolve({ ok: false, status: 503, json: async () => ({}) });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ ...BOOTSTRAP }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+
+    // Constructor kicks off start(), which suspends on the bootstrap GET —
+    // the editor is "dead" (no view) until the request resolves.
+    expect(conn.view).toBeNull();
+
+    // The first GET fails; instead of giving up the connection schedules a
+    // backed-off retry that re-runs start() and ends up with a live view.
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    expect(bootstrapCalls).toBeGreaterThanOrEqual(2);
+    expect(getVersion(conn.view!.state)).toBe(BOOTSTRAP.version);
+    // A confirmed bootstrap clears the retry backoff.
+    expect(conn.backOff).toBe(0);
+
+    conn.close();
+  });
+
+  it("does NOT retry a permanent (4xx) bootstrap failure", async () => {
+    const el = makeEl();
+
+    let bootstrapCalls = 0;
+    const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+      const isBootstrapGet =
+        (url as string).endsWith("/test-doc") &&
+        (!opts?.method || opts.method === "GET");
+      if (isBootstrapGet) {
+        bootstrapCalls++;
+        return Promise.resolve({ ok: false, status: 403, json: async () => ({}) });
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({}) });
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+
+    // Give any (erroneous) scheduled retry well past the 200ms backoff to fire.
+    await new Promise((r) => setTimeout(r, 400));
+
+    // A 403 is permanent: surfaced once, never retried.
+    expect(bootstrapCalls).toBe(1);
+    expect(conn.view).toBeNull();
+
+    conn.close();
+  });
+
+  it("backs off monotonically across stream failures and only resets after a good message", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    // Healthy bootstrap → backoff at rest.
+    expect(conn.backOff).toBe(0);
+
+    // First stream failure → recover() arms a 200ms reconnect.
+    const es0 = MockEventSource.instances.at(-1)!;
+    es0.dispatchEvent("error");
+    expect(conn.backOff).toBe(200);
+
+    // The reconnect timer fires and reopens the stream. Because the prior
+    // recover() no longer resets backOff, the next failure must *double* it.
+    await waitFor(() => expect(MockEventSource.instances.length).toBe(2));
+    const es1 = MockEventSource.instances.at(-1)!;
+    es1.dispatchEvent("error");
+    expect(conn.backOff).toBe(400);
+
+    await waitFor(() => expect(MockEventSource.instances.length).toBe(3));
+    const es2 = MockEventSource.instances.at(-1)!;
+    es2.dispatchEvent("error");
+    expect(conn.backOff).toBe(800);
+
+    // The next reconnect actually delivers a well-formed message — only now
+    // is the stream proven healthy, so the backoff resets.
+    await waitFor(() => expect(MockEventSource.instances.length).toBe(4));
+    const es3 = MockEventSource.instances.at(-1)!;
+    es3.dispatchEvent(
+      "message",
+      JSON.stringify({ version: BOOTSTRAP.version, steps: [], clientIDs: [] }),
+    );
+    expect(conn.backOff).toBe(0);
+
+    conn.close();
+  });
+});
+
 // ─── Test: keymap wires markdown shortcuts ──────────────────────────────────
 
 describe("markdown keybindings", () => {

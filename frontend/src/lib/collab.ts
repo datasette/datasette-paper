@@ -822,6 +822,12 @@ export class EditorConnection {
   // multiple snapshots; cleared on close.
   private snapshotTimer: ReturnType<typeof setTimeout> | null = null;
 
+  // Pending backed-off bootstrap retry. Set when the initial bootstrap GET
+  // fails transiently (network / 5xx) so `start()` re-runs instead of
+  // leaving the editor permanently dead; cleared when a bootstrap succeeds
+  // and on close() so the timer never leaks past teardown.
+  private bootstrapTimer: ReturnType<typeof setTimeout> | null = null;
+
   // navigator.onLine listeners — bound in start(), removed in close().
   // Stored as fields so we can unregister without recreating the
   // bound-fn identity. Off in non-browser tests (jsdom has `window` but
@@ -919,6 +925,13 @@ export class EditorConnection {
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
+  /** True once close() has torn the connection down. Read as a method so
+   * TypeScript doesn't narrow `this.comm` to a stale literal after an
+   * intervening `await` (close() can flip it concurrently). */
+  private isDetached(): boolean {
+    return this.comm === "detached";
+  }
+
   private reportStepError(err: StepApplyError): void {
     if (!this.stepError) {
       this.stepError = err;
@@ -938,6 +951,11 @@ export class EditorConnection {
   async start(): Promise<void> {
     this.comm = "start";
     this.stepError = null;
+    // A retry that's now running supersedes any pending one.
+    if (this.bootstrapTimer !== null) {
+      clearTimeout(this.bootstrapTimer);
+      this.bootstrapTimer = null;
+    }
     try {
       const resp = await fetch(this.apiUrl(""), { method: "GET" });
       if (!resp.ok) {
@@ -950,8 +968,48 @@ export class EditorConnection {
       this.backOff = 0;
       this._loaded(boot);
     } catch (err) {
-      this.report.failure(err instanceof Error ? err : new Error(String(err)));
+      const e = err instanceof Error ? err : new Error(String(err));
+      // close() raced the in-flight GET — stay torn down, don't reschedule.
+      if (this.isDetached()) return;
+      const status = (e as Error & { status?: number }).status;
+      // 4xx (other than 408/429) are permanent client errors — not-found,
+      // forbidden, bad request — so retrying just fails the same way. Surface
+      // and give up. Network failures (no status) and 5xx are transient:
+      // back off and retry so a flaky GET doesn't leave the editor
+      // permanently dead with `this.view` null (onlineHandler is gated on a
+      // live view, so it can't rescue this on its own). Mirrors the upstream
+      // PM collab reference, which only recovers from status >= 500 / network.
+      if (
+        status !== undefined &&
+        status >= 400 &&
+        status < 500 &&
+        status !== 408 &&
+        status !== 429
+      ) {
+        this.report.failure(e);
+        return;
+      }
+      this.scheduleBootstrapRetry(e);
     }
+  }
+
+  /**
+   * Schedule a backed-off `start()` retry after a transient bootstrap
+   * failure. Reuses the same `backOff` accumulator / reporting as
+   * `recover()` (200ms, doubling to a 60s cap; a `delay` banner once the
+   * wait crosses 1s). Cancelled by the next `start()` and by `close()`.
+   */
+  private scheduleBootstrapRetry(err: Error): void {
+    const newBackOff = this.backOff ? Math.min(this.backOff * 2, 6e4) : 200;
+    if (newBackOff > 1000 && this.backOff < 1000) {
+      this.report.delay(err);
+    }
+    this.backOff = newBackOff;
+    if (this.bootstrapTimer !== null) clearTimeout(this.bootstrapTimer);
+    this.bootstrapTimer = setTimeout(() => {
+      this.bootstrapTimer = null;
+      if (!this.isDetached()) this.start();
+    }, this.backOff);
   }
 
   private _loaded(boot: BootstrapData): void {
@@ -1336,6 +1394,16 @@ export class EditorConnection {
         return;
       }
 
+      // A well-formed message proves the stream reconnected and is healthy.
+      // This is the confirmed-reconnect signal that clears the recover
+      // backoff — `recover()` deliberately no longer resets it from its own
+      // timer (the stream hadn't proven healthy yet), so a flapping server
+      // that errors before delivering anything keeps backing off.
+      if (this.backOff !== 0) {
+        this.backOff = 0;
+        this.report.success();
+      }
+
       if (typeof data.users === "number") {
         this.opts.onUsers?.(data.users);
       }
@@ -1587,7 +1655,11 @@ export class EditorConnection {
     setTimeout(() => {
       if (this.comm === "recover") {
         this.comm = "loaded";
-        this.backOff = 0;
+        // NB: do NOT reset `this.backOff` here — reopening the stream is not
+        // proof it's healthy. The reset happens once a good SSE message
+        // actually arrives (see `handleMessage`) or a send succeeds, so a
+        // server that keeps dropping the stream backs off monotonically
+        // instead of restarting at ~200ms every cycle.
         this.report.success();
         this.openStream();
       }
@@ -1631,6 +1703,10 @@ export class EditorConnection {
     if (this.snapshotTimer !== null) {
       clearTimeout(this.snapshotTimer);
       this.snapshotTimer = null;
+    }
+    if (this.bootstrapTimer !== null) {
+      clearTimeout(this.bootstrapTimer);
+      this.bootstrapTimer = null;
     }
     this.linkResolver.dispose();
     this.accessChecker.dispose();
