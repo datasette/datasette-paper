@@ -43,6 +43,15 @@ pre-acl model). It is the Manager-only capability — managing sharing, locking,
 archiving, templating. The document owner gets it via a Manager grant seeded at
 create time (§4).
 
+> **One external action paper consults: `profile_access`.** Display-name /
+> avatar resolution is gated on the `profile_access` action *owned by
+> datasette-user-profiles*, not by paper. It is **not** one of paper's four
+> actions and paper never declares it — paper only *consults* it
+> (`datasette.allowed("profile_access", …)`) before resolving actor ids to
+> profiles, and **degrades** to id-as-name when it's denied (never 403). See
+> §14 for the rule and §15 for which endpoints apply it. Noted here so the full
+> gate surface lives in one place.
+
 ---
 
 ## 1. Declaring the actions
@@ -565,3 +574,94 @@ database (`frontend/src/lib/sqlQuery.ts`). Consequences:
 - This deliberately sidesteps paper's per-doc ACL model: editing a doc
   (`paper-edit`) lets you *author* a query, but running it still requires the
   viewer's own Datasette `execute-sql`.
+- **By-design consequence (not a hole): an editor can cause viewer-side query
+  execution.** Because the query runs in *each viewer's own browser* under
+  *their* `execute-sql`, a doc editor who authors a `source` / inline `value`
+  is effectively driving every viewer's browser to run that read-only query the
+  next time they open the doc. This is bounded the right way — the query only
+  ever runs with the viewer's own credentials and Datasette permissions, so an
+  editor can never read data the viewer couldn't already read themselves, and a
+  viewer without `execute-sql` on the target database just gets the "no access"
+  state. But authors should know that a `source` block is, in effect, code that
+  executes in readers' browsers; it is intentional and gated by Datasette, not
+  by paper.
+
+## 14. Profile resolution — the `profile_access` gate
+
+Several endpoints turn an actor **id** into a display **name** and **avatar**
+(via datasette-user-profiles' `resolve_profile_actors`, then the core
+`actors_from_ids` hook — `resolve_actor_profiles` in `util.py`). Name and avatar
+are profile data, so paper gates that resolution on user-profiles' own
+`profile_access` action — **not** on `paper-view`/`-edit`/`-manage`, and not on
+anything paper declares.
+
+**The rule (copy verbatim into any sibling plugin):**
+
+> *Profile resolution (name / avatar) is gated on `profile_access`. An endpoint
+> that emits a resolved name or avatar must check
+> `datasette.allowed("profile_access", actor=…)` first and **degrade to
+> id-as-name** when it's denied — it must never `403` on the profile gate.*
+
+Degrade, don't deny, because these ids ride along on data the actor is *already*
+authorized to see (the rows are acl-filtered first), and the id is something the
+caller usually supplied. So when `profile_access` is denied the endpoint returns
+the **raw id as the name** and a **null avatar** — the actor learns nothing they
+didn't already have. A 403 here would instead wedge the UI (mention chips stuck
+on "loading", a doc list that won't render its "created by" column) for what is
+only a cosmetic enrichment.
+
+Where this is applied today:
+
+- **`list_docs`** — gates the batched creator-profile lookup on `profile_access`
+  (`routes/docs.py`); without it, `created_by_name` falls back to the raw id and
+  `created_by_avatar` to `None`. The doc rows themselves are still returned (they
+  were acl-filtered by `paper-view`).
+- **`resolve_actors`** (`POST /-/paper/api/actors/resolve`) — the route is
+  otherwise ungated; the *resolution* is `profile_access`-gated and degrades so
+  each id echoes back as its own name.
+- **`mention-search`** — **required end state, see the mismatch note in §15.**
+
+## 15. Endpoint reference — mentions, tags, profiles
+
+The table below is the current gate for each endpoint added by the
+mention / tag / profile work, cross-checked against `routes/docs.py` and
+`permissions.py`. "ungated route" means the handler runs for anyone, but the
+data it returns is restricted some other way (acl-filtered rows, or
+degrade-on-`profile_access`).
+
+| Endpoint | Method | Gate |
+|---|---|---|
+| `/-/paper/api/docs/{id}/mention-search` | GET | **`paper-view`** (only viewers may list a doc's collaborators) — see profile note below |
+| `/-/paper/api/actors/resolve` | POST | ungated route; profile resolution gated on **`profile_access`** (degrades to id-as-name) |
+| `/-/paper/api/docs/{id}/tags` | GET | **`paper-view`** |
+| `/-/paper/api/docs/{id}/tags/add` | POST | **`paper-manage`** (manage, **not** edit) |
+| `/-/paper/api/docs/{id}/tags/remove` | POST | **`paper-manage`** (manage, **not** edit) |
+| `/-/paper/api/docs/{id}/tags/replace` | POST | **`paper-manage`** (manage, **not** edit) |
+| `/-/paper/api/tags` | GET | ungated route; ACL-filtered through `viewable_doc_ids` (`paper-view`) |
+| `/-/paper/api/tags/{tag}/refs` | GET | ungated route; ACL-filtered through `viewable_doc_ids` (`paper-view`) |
+| `/-/paper/tag/{tag}` | GET | ungated HTML shell (the client then calls the ACL-filtered `…/refs` API) |
+
+Notes:
+
+- **Tag mutations are `paper-manage`, deliberately not `paper-edit`.** Add /
+  remove / replace all funnel through `_ensure_owner` (§7), so they are
+  Manager-only — the same gate as archive / lock / make_template. Document-level
+  tags are sharing/organization metadata, treated like the other manage
+  operations rather than like body edits. (Inline `#tag` nodes in the *body* are
+  a separate namespace, authored under `paper-edit` like any other content; the
+  `…/tags/{tag}/refs` endpoint scans that body namespace and is read-only +
+  ACL-filtered.)
+- **`mention-search` and `profile_access` — a current doc-vs-code gap.** The
+  *intended* end state (ticket 03) is that `mention-search`, like `list_docs`
+  and `resolve_actors`, gates its name/avatar resolution on `profile_access` and
+  degrades to id-as-name. As of this writing the handler is only `paper-view`-
+  gated and calls `resolve_actor_profiles` **unconditionally** — it does **not**
+  consult `profile_access`. That unguarded resolution is exactly the leak ticket
+  03 closes; this doc records the required end state, and ticket 03 implements
+  it. Until 03 lands, treat the `profile_access` degrade on `mention-search` as
+  *specified, not yet enforced*.
+- **Ungated-but-ACL-filtered** endpoints (`/api/tags`, `…/refs`, and the index /
+  link-search / graph endpoints in §6) never gate the *route*; they enumerate
+  only the docs `allowed_resources("paper-view")` returns, so a no-grant actor
+  gets an empty result rather than a 403. This is the same "listing is not
+  gated" pattern as the doc index (TL;DR).
