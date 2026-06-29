@@ -34,7 +34,7 @@ import type { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import type { Node as PMNode } from "prosemirror-model";
 import { schema } from "./schema";
-import { TOOLBAR_ICONS } from "./icons";
+import { iconMarkup } from "./datasetteEmbed";
 
 interface RowResolved {
   tableNode: PMNode;
@@ -160,7 +160,7 @@ class TableRowDragView {
     this.handle.title = "Drag to reorder row";
     this.handle.setAttribute("aria-label", "Drag to reorder row");
     this.handle.style.display = "none";
-    this.handle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS.gripVertical}</svg>`;
+    this.handle.innerHTML = iconMarkup("gripVertical");
     // Pointer events with setPointerCapture: subsequent move/up events
     // are routed straight to the handle regardless of pointer position
     // and capture-phase routing, so prosemirror-tables' own document
