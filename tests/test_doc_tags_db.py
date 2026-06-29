@@ -138,3 +138,28 @@ async def test_filter_docs_by_tag_intersection():
     assert await filtered(["a", "b"]) == {d1.id}
     # Unknown tag → nothing.
     assert await filtered(["nope"]) == set()
+
+
+# ---------------------------------------------------------------------------
+# migrations
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_doc_tag_indexes_after_migrations():
+    """m007 drops the redundant doc_id index but keeps the tag index.
+
+    ``idx_paper_doc_tag_doc`` (doc_id) duplicates the leftmost prefix of
+    ``PRIMARY KEY (doc_id, tag)``, so m007 removes it. ``idx_paper_doc_tag_tag``
+    serves trailing-column (tag) lookups and must remain.
+    """
+    paper = await make_paper_db()
+    rows = (
+        await paper.database.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'index' AND tbl_name = '_datasette_paper_doc_tag'"
+        )
+    ).rows
+    names = {row["name"] for row in rows}
+    assert "idx_paper_doc_tag_doc" not in names
+    assert "idx_paper_doc_tag_tag" in names
