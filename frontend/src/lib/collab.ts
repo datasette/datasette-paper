@@ -62,6 +62,7 @@ import type { MarkType } from "prosemirror-model";
 
 import { schema } from "./schema";
 import { foldHeadingsPlugin } from "./foldHeadings";
+import { TocView, tocPlugin } from "./tocView";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
 import { LinkResolver } from "./linkResolver";
@@ -1124,6 +1125,10 @@ export class EditorConnection {
         }),
         remoteCursorsPlugin(),
         foldHeadingsPlugin,
+        // Re-renders every mounted table-of-contents block when the doc's
+        // top-level heading signature changes (a TocView's own update() only
+        // fires for changes to the toc node itself).
+        tocPlugin,
         // In-table action bar (add/delete row/col, name input + API link)
         // — anchored above the table when the cursor is inside one. The
         // docId is baked in so the API button can build the right URL.
@@ -1210,6 +1215,8 @@ export class EditorConnection {
           ),
         block_embed: (node, view, getPos) =>
           new BlockEmbedView(node, view, getPos as () => number | undefined),
+        toc: (node, view, getPos) =>
+          new TocView(node, view, getPos as () => number | undefined),
         sql_block: (node, view, getPos) =>
           new SqlBlockView(node, view, getPos as () => number | undefined),
         tag: (node, view) => new TagView(node, view),

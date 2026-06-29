@@ -531,6 +531,32 @@ class TestBlockEmbed:
         block = doc["content"][0]
         assert block["attrs"] == {"ref": None, "mode": "table", "config": {}}
 
+
+class TestToc:
+    def test_paper_toc_fence_empty_body(self):
+        doc = parse_and_validate("```paper-toc\n```\n")
+        block = doc["content"][0]
+        assert block["type"] == "toc"
+        assert block["attrs"] == {"config": {}}
+
+    def test_paper_toc_fence_with_config(self):
+        doc = parse_and_validate('```paper-toc\n{"maxLevel": 2}\n```\n')
+        block = doc["content"][0]
+        assert block["type"] == "toc"
+        assert block["attrs"] == {"config": {"maxLevel": 2}}
+
+    def test_malformed_paper_toc_body_is_safe_default(self):
+        # A hand-edited / non-JSON body must not raise — fall back to {}.
+        doc = parse_and_validate("```paper-toc\n{bad json\n```\n")
+        block = doc["content"][0]
+        assert block["type"] == "toc"
+        assert block["attrs"] == {"config": {}}
+
+    def test_paper_toc_body_non_object_is_safe_default(self):
+        doc = parse_and_validate("```paper-toc\n[1, 2, 3]\n```\n")
+        block = doc["content"][0]
+        assert block["attrs"] == {"config": {}}
+
     def test_paper_embed_non_dict_config_falls_back_to_empty(self):
         doc = parse_and_validate('```paper-embed\n{"ref":"/r","config":"oops"}\n```\n')
         assert doc["content"][0]["attrs"]["config"] == {}

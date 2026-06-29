@@ -135,6 +135,25 @@ const INLINE_VALUE =
   "We currently track ${{vendors.n}} vendors across ${{vendors.regions}} " +
   "regions — and the numbers update themselves whenever the warehouse changes.\n";
 
+// Table-of-contents block: a ```paper-toc fence (empty body = default config)
+// followed by a multi-level heading outline, so the rendered card shows the
+// nested H1/H2/H3 list it auto-generates. Plain string concatenation avoids
+// escaping the fence backticks inside a template literal (like the BLOCK_*
+// fixtures above).
+const TOC =
+  "# Engineering handbook\n\n" +
+  "```paper-toc\n```\n\n" +
+  "A living guide for the team. The contents above are generated from this " +
+  "document's headings and refresh themselves as sections come and go.\n\n" +
+  "## Getting started\n\n" +
+  "How to get a local environment running and make your first change.\n\n" +
+  "### Prerequisites\n\nThe tools to install before you begin.\n\n" +
+  "### Local setup\n\nClone, install dependencies, and boot the dev server.\n\n" +
+  "## Architecture\n\nHow the pieces fit together.\n\n" +
+  "### Services\n\nThe long-running processes and what each one owns.\n\n" +
+  "### Data model\n\nThe core tables and how they relate.\n\n" +
+  "## Deployment\n\nShipping changes safely to production.\n";
+
 export async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -192,6 +211,7 @@ export async function seed(ctx) {
   const sqlBlockId = await create("Q2 vendor report", ACTOR, SQL_BLOCK);
   const sqlBlockHiddenId = await create("Q2 vendor report (hidden)", ACTOR, SQL_BLOCK_HIDDEN);
   const inlineValueId = await create("Vendor snapshot", ACTOR, INLINE_VALUE);
+  const tocId = await create("Engineering handbook", ACTOR, TOC);
   return {
     richId,
     mentionId,
@@ -208,5 +228,6 @@ export async function seed(ctx) {
     sqlBlockId,
     sqlBlockHiddenId,
     inlineValueId,
+    tocId,
   };
 }

@@ -689,6 +689,27 @@ def test_block_embed_columns_roundtrip_byte_stable():
     assert markdown_to_doc(md) == doc
 
 
+def test_toc_serializes_as_empty_paper_toc_fence():
+    # All-default (empty) config → a clean empty-body fence.
+    md = doc_to_markdown(_doc({"type": "toc", "attrs": {"config": {}}}))
+    assert md == "```paper-toc\n```\n"
+
+
+def test_toc_missing_attrs_serializes_as_empty_fence():
+    md = doc_to_markdown(_doc({"type": "toc"}))
+    assert md == "```paper-toc\n```\n"
+
+
+def test_toc_with_config_serializes_sorted_json_and_roundtrips():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    doc = _doc({"type": "toc", "attrs": {"config": {"maxLevel": 2, "minLevel": 2}}})
+    md = doc_to_markdown(doc)
+    # sort_keys gives a stable diff regardless of attr insertion order.
+    assert md == '```paper-toc\n{"maxLevel": 2, "minLevel": 2}\n```\n'
+    assert markdown_to_doc(md) == doc
+
+
 def test_sql_block_serializes_as_sql_fence():
     md = doc_to_markdown(
         _doc(

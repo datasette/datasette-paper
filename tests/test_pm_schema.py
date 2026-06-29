@@ -47,3 +47,17 @@ def test_block_embed_config_survives_json_roundtrip():
     )
     again = Node.from_json(schema, doc.to_json())
     assert again.content.child(0).attrs["config"] == config
+
+
+def test_toc_with_config_materializes():
+    config = {"minLevel": 2, "maxLevel": 2, "ordered": False}
+    doc = _materialize({"type": "toc", "attrs": {"config": config}})
+    toc = doc.content.child(0)
+    assert toc.type.name == "toc"
+    assert toc.attrs["config"] == config
+
+
+def test_toc_without_config_applies_default():
+    doc = _materialize({"type": "toc"})
+    toc = doc.content.child(0)
+    assert toc.attrs["config"] == {}

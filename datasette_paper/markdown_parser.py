@@ -238,6 +238,19 @@ def _tokens_to_doc(tokens) -> dict:
                     }
                 )
                 continue
+            # A fence whose info string is `paper-toc` is a table-of-contents
+            # block: the body is the optional config JSON (empty body → {}).
+            # The heading list is derived at render time, never stored. Be
+            # defensive — a malformed body must never raise.
+            if t == "fence" and info == "paper-toc":
+                try:
+                    data = json.loads(text) if text.strip() else {}
+                    if not isinstance(data, dict):
+                        raise ValueError
+                except (ValueError, TypeError):
+                    data = {}
+                append({"type": "toc", "attrs": {"config": data}})
+                continue
             # A fence whose info string starts with `source` is a named SQL
             # query ("source") that inline `value` atoms reference by name.
             # The leading `source` token is the discriminator (checked before

@@ -270,6 +270,32 @@ _block_embed_spec = {
     ],
 }
 
+# Block atom for an auto-generated table of contents — mirrors the JS schema in
+# frontend/src/lib/schema.ts. Content-free; the heading list is derived
+# per-viewer and never persisted. `config` is an opaque options bag
+# (minLevel/maxLevel/ordered) carried verbatim. markdown round-trips as a
+# ```paper-toc JSON fence via datasette_paper/markdown.py. toDOM is never
+# rendered server-side but must be structurally valid for node_from_json.
+_toc_spec = {
+    "group": "block",
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {"config": {"default": {}}},
+    # parseDOM is never exercised server-side (materialization goes through
+    # node_from_json, not DOM parsing); only declare the tag.
+    "parseDOM": [{"tag": "div[data-toc]"}],
+    "toDOM": lambda node: [
+        "div",
+        {
+            "data-toc": "true",
+            "data-toc-config": json.dumps(node.attrs.get("config") or {}),
+            "class": "pm-toc",
+        },
+        "Table of contents",
+    ],
+}
+
 # Block node for an editable SQL query — mirrors the JS schema in
 # frontend/src/lib/schema.ts. Unlike block_embed (an atom), the query is
 # editable text content; `db` names the target database and `hidden` collapses
@@ -334,6 +360,7 @@ _nodes = {
     "value": _value_spec,
     "inline_embed": _inline_embed_spec,
     "block_embed": _block_embed_spec,
+    "toc": _toc_spec,
     "sql_block": _sql_block_spec,
     "source": _source_spec,
     "task_list": _task_list_spec,

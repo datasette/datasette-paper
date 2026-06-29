@@ -7,6 +7,7 @@
   import { schema } from "./schema";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { canInsertTable, insertTable } from "./tables";
+  import { insertToc } from "./tocView";
   import { embedInsertSources } from "./embedProviders";
   // The in-table action bar (add/delete row/col, name input) is owned
   // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). Only the
@@ -324,6 +325,7 @@
   {@render btn("quote", "Blockquote", () => run(wrapIn(schema.nodes.blockquote)), isBlockquote)}
   {@render btn("codeBlock", "Code block", () => run(setBlockType(schema.nodes.code_block)), isCodeBlock)}
   {@render btn("hr", "Horizontal rule", insertHorizontalRule)}
+  {@render btn("listNested", "Insert table of contents", () => run(insertToc))}
   {@render btn("image", "Insert image", () => onInsertImage?.())}
   {@render btn(
     "table",
