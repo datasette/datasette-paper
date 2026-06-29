@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { cookieHeader } from "./helpers";
+import { cookieHeader, createPaper, gotoPaper, setActorCookie } from "./helpers";
 
 // Paper API/page root (relative — resolved against playwright's baseURL).
 const BASE = `/-/paper`;
@@ -69,6 +69,37 @@ test("published page renders statically and hydrates live blocks", async ({
   expect(await page.evaluate(() => (window as unknown as { __sseOpened: boolean }).__sseOpened)).toBe(
     false,
   );
+});
+
+test("owner publishes from the editor dialog; non-owner has no Publish button", async ({
+  page,
+}) => {
+  await page.goto("/-/paper/");
+  await setActorCookie(page, "alice");
+  const doc = await createPaper(page, { name: "Dialog publish", actorId: "alice" });
+  await gotoPaper(page, doc.url);
+
+  // The owner sees a Publish button; open the dialog, go public, publish.
+  await expect(page.locator(".publish-btn")).toBeVisible();
+  await page.locator(".publish-btn").click();
+  await expect(page.locator(".publish-dialog")).toBeVisible();
+  await page.locator('.publish-dialog input[type="radio"][value="public"]').check();
+  await page.locator(".publish-dialog").getByRole("button", { name: "Publish" }).click();
+
+  // The header badge appears and the published page is now world-readable.
+  await expect(page.locator(".published-badge")).toBeVisible({ timeout: 10_000 });
+  const anon = await page.request.get(`/-/paper/doc/${doc.id}/publish`, {
+    headers: { Cookie: "ds_actor=nonsense" },
+  });
+  expect(anon.status()).toBe(200);
+
+  // A non-owner editing surface has no Publish button.
+  const ctx = await page.context().browser()!.newContext();
+  const other = await ctx.newPage();
+  await other.goto(doc.url);
+  await expect(other.locator(".ProseMirror")).toBeVisible({ timeout: 10_000 });
+  await expect(other.locator(".publish-btn")).toHaveCount(0);
+  await ctx.close();
 });
 
 test("unpublished / out-of-audience publish page is 404", async ({ request }) => {

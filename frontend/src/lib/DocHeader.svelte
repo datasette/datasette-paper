@@ -21,6 +21,8 @@
     locked = false,
     kind = "doc",
     selfActor = null,
+    publishedVersion = null,
+    onPublish,
     copyMarkdown,
   }: {
     docId: string;
@@ -32,6 +34,8 @@
     locked?: boolean;
     kind?: "doc" | "template";
     selfActor?: string | null;
+    publishedVersion?: number | null;
+    onPublish?: () => void;
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
@@ -320,6 +324,26 @@
         <span class="saved" aria-live="polite">✓ saved</span>
       {/if}
       <span class="meta-actions">
+        {#if isOwner}
+          <button
+            type="button"
+            class="publish-btn"
+            title="Publish a read-only version of this doc"
+            onclick={() => onPublish?.()}
+          >
+            Publish
+          </button>
+        {/if}
+        {#if publishedVersion !== null}
+          <a
+            class="published-badge"
+            href={`/-/paper/doc/${docId}/publish`}
+            target="_blank"
+            title="View the published version"
+          >
+            Published v{publishedVersion} ↗
+          </a>
+        {/if}
         <!-- The <datasette-acl-share-dialog> custom element renders its own
              share-icon trigger button and a native <dialog> modal; paper only
              feeds it the acl resource identity + current actor and listens for
@@ -625,6 +649,28 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+  .publish-btn {
+    border: 1px solid #1a7f37;
+    background: #1a7f37;
+    color: #fff;
+    font: inherit;
+    font-size: 13px;
+    padding: 4px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .publish-btn:hover {
+    background: #176f30;
+  }
+  .published-badge {
+    font-size: 12px;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(26, 127, 55, 0.12);
+    color: #1a7f37;
+    text-decoration: none;
+    white-space: nowrap;
   }
   .copy-feedback {
     font-size: 12px;

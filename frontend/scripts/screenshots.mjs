@@ -755,6 +755,28 @@ function buildShots(ctx, ids) {
       await page.close();
     },
 
+    // The Manager publish dialog: opened from the editor header on an owned doc
+    // with a data block; default mode flipped to frozen so the
+    // sensitive-data warning + a baked preview show.
+    "publish-dialog": async () => {
+      const page = await newPage();
+      await gotoEditor(page, sqlBlockId);
+      await page.locator(".publish-btn").click();
+      await page
+        .locator(".publish-dialog")
+        .waitFor({ state: "visible", timeout: 10_000 });
+      await page
+        .locator(".pub-blocks li")
+        .first()
+        .waitFor({ state: "visible", timeout: 10_000 });
+      // Flip to frozen → warning + a baked preview (runs as the owner).
+      await page.locator('.publish-dialog input[type="radio"][value="frozen"]').check();
+      await page.locator(".pub-warn").waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await page.locator(".publish-dialog").screenshot({ path: out("publish-dialog") });
+      await page.close();
+    },
+
     // Inline SQL value chips resolved live from a source query.
     "inline-value": inlineValueShot(inlineValueId, "inline-value"),
     // The `${{` autocomplete: type a source name + dot to reach the column

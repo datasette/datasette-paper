@@ -229,10 +229,32 @@ async def build_publication(
         "frozen_data": frozen_data,
         "warnings": warnings,
         "blocks": [
-            {"block_id": b.block_id, "kind": b.kind, "mode": final_mode[b.block_id]}
+            {
+                "block_id": b.block_id,
+                "kind": b.kind,
+                "mode": final_mode[b.block_id],
+                "label": _block_label(b),
+            }
             for b in discovery.blocks
         ],
     }
+
+
+def _block_label(block) -> str:
+    """A short human label for a data block, used by the publish dialog to name
+    what a frozen block would expose (the db / ref / source)."""
+    cfg = block.config or {}
+    if block.kind == "sql":
+        return cfg.get("db") or "query"
+    if block.kind == "source":
+        return f"{cfg.get('name') or 'source'} ({cfg.get('db') or '?'})"
+    if block.kind == "embed":
+        return cfg.get("ref") or "embed"
+    if block.kind == "value":
+        return f"{cfg.get('source') or '?'}.{cfg.get('column') or '?'}"
+    if block.kind == "inline_embed":
+        return cfg.get("ref") or "embed"
+    return block.kind
 
 
 def _embed_sql(config: dict) -> Optional[str]:

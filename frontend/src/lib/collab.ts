@@ -169,6 +169,12 @@ export interface ConnectionOpts {
    */
   onDocState?: (payload: DocStatePayload) => void;
   /**
+   * Called when the server broadcasts a ``published`` SSE event with the
+   * now-current published version (or ``null`` on unpublish). Drives the
+   * editor's "Published vN · View" badge.
+   */
+  onPublished?: (version: number | null) => void;
+  /**
    * Called once at bootstrap with the paper's ``kind``. Templates and
    * docs share the editor surface but the UI differs: templates show a
    * badge, surface the placeholder-insert affordance (slice 4), and
@@ -1434,6 +1440,19 @@ export class EditorConnection {
       "permissions-changed",
       handlePermissionsChanged as EventListener,
     );
+
+    const handlePublished = (evt: MessageEvent) => {
+      // Server pushes ``{version}`` on publish (the now-current published
+      // version) or ``{version: null}`` on unpublish. Lets the editor show a
+      // "Published vN · View" badge live, without a refetch.
+      try {
+        const data = JSON.parse(evt.data) as { version?: number | null };
+        this.opts.onPublished?.(data.version ?? null);
+      } catch {
+        // ignore malformed
+      }
+    };
+    es.addEventListener("published", handlePublished as EventListener);
 
     es.addEventListener("error", () => {
       this.closeStream();
