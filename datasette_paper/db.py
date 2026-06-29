@@ -360,6 +360,12 @@ class PaperDB:
         def write(conn):
             _queries.delete_steps_for_doc(conn, doc_id=doc_id)
             _queries.delete_snapshots_for_doc(conn, doc_id=doc_id)
+            # Outgoing link edges (this doc as src) and doc-tags would
+            # otherwise be orphaned — and inherited by a new doc that reuses
+            # this rowid. Inbound edges (this doc as dst) are intentionally
+            # kept (see m005: resolve-time decides 'not found').
+            _queries.delete_links_for_src(conn, src_doc_id=doc_id)
+            _queries.delete_tags_for_doc(conn, doc_id=doc_id)
             _queries.hard_delete_doc(conn, doc_id=doc_id)
 
         await self.database.execute_write_fn(write)
