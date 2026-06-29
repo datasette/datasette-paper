@@ -126,14 +126,16 @@ def _render_block(node: dict) -> str:
     if t == "sql_block":
         # An editable SQL query fenced with an info string of `sql db=NAME`
         # (+ a trailing `hidden` when the editor is collapsed). The `db=`
-        # token is what distinguishes this from a plain ```sql code block
-        # (markdown_parser.py keys off it).
+        # token is ALWAYS emitted — even for a db-less block, where it
+        # serializes as a bare `sql db=` — and is what distinguishes this
+        # from a plain ```sql code block (markdown_parser.py keys off the
+        # presence of the `db=` token, not a populated value). Emitting it
+        # unconditionally is what keeps a db-less sql_block from round-
+        # tripping back down to a code_block.
         attrs = node.get("attrs") or {}
         db = attrs.get("db") or ""
         text = "".join(c.get("text", "") for c in content)
-        info = "sql"
-        if db:
-            info += f" db={db}"
+        info = f"sql db={db}"
         if attrs.get("hidden"):
             info += " hidden"
         return "```" + info + "\n" + text + "\n```\n"
@@ -215,6 +217,15 @@ def _render_table(node: dict) -> str:
     Cell text is the flattened inline content of the cell's blocks; pipes
     inside cell text are escaped. We assume rectangular tables (no
     colspan/rowspan) since the editor doesn't expose merge.
+
+    GFM has no slot for the table's `name` attr (the id the `/tables/{name}`
+    endpoint addresses), so a named table is preceded by an out-of-band
+    sidecar fence ``` ```paper-table ``` whose body is one JSON object
+    `{"name": <name>}` — mirroring the `paper-embed` / `paper-toc` JSON-body
+    fence family. The parser (`markdown_parser.py`) reads it back and restores
+    `attrs.name` on the table that immediately follows. Without it the name is
+    silently dropped on every doc→md→doc round-trip (e.g. the agent
+    `apply_markdown_edit` path), breaking `/tables/{name}` addressing.
     """
     rows = node.get("content") or []
     if not rows:
@@ -260,7 +271,18 @@ def _render_table(node: dict) -> str:
     out.append("| " + " | ".join("---" for _ in range(width)) + " |")
     for r in body:
         out.append("| " + " | ".join(pad([cell_text(c) for c in cells(r)])) + " |")
-    return "\n".join(out) + "\n"
+    table_md = "\n".join(out) + "\n"
+
+    name = (node.get("attrs") or {}).get("name")
+    if name:
+        # Sidecar fence carrying the out-of-band table name, emitted
+        # immediately before the pipe table (no blank line — the closing
+        # fence already ends the block, and GFM still detects the table on the
+        # next line). JSON body keeps names with spaces / `=` / special chars
+        # safe, matching the `paper-embed` / `paper-toc` family.
+        body = json.dumps({"name": name}, sort_keys=True, ensure_ascii=False)
+        return "```paper-table\n" + body + "\n```\n" + table_md
+    return table_md
 
 
 def _render_task_list(node: dict) -> str:
@@ -503,9 +525,17 @@ def _mark_delims(mark: dict) -> tuple[str, str]:
 def _encode_value_format(fmt) -> str:
     """Encode a `value` node's `format` attr into its `| kind:arg` markdown
     suffix (the part after the pipe). Mirror of `encodeFormat` in
-    `frontend/src/lib/formatValue.ts` — keep the two in lock-step. `fallback`
-    is intentionally not encoded; the markdown grammar carries only
-    `kind[:arg]`. Returns "" for a null/unknown format."""
+    `frontend/src/lib/formatValue.ts` — keep the two in lock-step.
+
+    `format.fallback` (the per-value display string for null/unparseable
+    cells, default "—") is intentionally NOT encoded: the markdown grammar
+    carries only `kind[:arg]`, and a fallback is arbitrary text that can't be
+    crammed into the `:`-delimited arg slot without an escaping scheme. The
+    documented consequence is that a custom fallback is dropped on a
+    doc→markdown→doc round-trip (e.g. the agent whole-doc edit path); the
+    value itself, its source/column, and its kind/arg survive. This loss is
+    pinned by `test_value_fallback_is_dropped*` in the markdown tests. Returns
+    "" for a null/unknown format."""
     if not fmt:
         return ""
     kind = fmt.get("kind")
@@ -661,12 +691,22 @@ def _render_inlines(nodes: list) -> str:
             # the parser can tell the two apart unambiguously. An optional
             # `| kind:arg` suffix carries the per-value `format` (see
             # `_encode_value_format`); a null format emits the bare form.
+            #
+            # Source *names* are normalized to `[a-z0-9_]+` at every input path,
+            # but *columns* are DB-derived and may contain spaces / hyphens /
+            # dots that the bare `name.column` grammar can't read back. Wrap
+            # such a column in `[...]` (the bracketed form the parser's
+            # `_SQL_VALUE_RE` also accepts) so it survives the round-trip. A
+            # column that is already a bare `\w+` keeps the clean unbracketed
+            # form. (A literal `]` inside a column name still can't round-trip,
+            # but that's vanishingly rare for a SQL identifier.)
             attrs = n.get("attrs") or {}
             source = str(attrs.get("source") or "")
             column = str(attrs.get("column") or "")
+            column_md = column if re.fullmatch(r"\w+", column) else "[" + column + "]"
             fmt = _encode_value_format(attrs.get("format"))
             suffix = f" | {fmt}" if fmt else ""
-            out.append("${{" + source + "." + column + suffix + "}}")
+            out.append("${{" + source + "." + column_md + suffix + "}}")
 
     close_through(0)
     return "".join(out)

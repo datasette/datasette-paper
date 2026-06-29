@@ -601,6 +601,18 @@ def m006_doc_tags(db: Database):
 
 
 @migrations()
+def m007_drop_redundant_doc_tag_index(db: Database):
+    # ``idx_paper_doc_tag_doc`` (on _datasette_paper_doc_tag(doc_id), created in
+    # m006) duplicates the leftmost prefix of ``PRIMARY KEY (doc_id, tag)``:
+    # SQLite already serves ``doc_id`` lookups from the composite-PK index via
+    # the leftmost-prefix rule, so the standalone index was pure
+    # write-amplification with no read benefit. Drop it. The other m006 index,
+    # ``idx_paper_doc_tag_tag`` (on the trailing ``tag`` column), is retained —
+    # it serves WHERE tag IN (...) / GROUP BY tag and is not redundant.
+    db.executescript("DROP INDEX IF EXISTS idx_paper_doc_tag_doc;")
+
+
+@migrations()
 def m008_inline_tag_index(db: Database):
     # Derived index of inline ``#tag`` nodes found in the materialized doc
     # body, rebuilt wholesale per doc by the write-tail reindex (mirrors
@@ -612,10 +624,6 @@ def m008_inline_tag_index(db: Database):
     # (manual doc-level tags) — this table tracks tags inside the document
     # body. ``occurrences`` preserves the per-doc count the refs endpoint
     # returns without re-materializing the doc.
-    #
-    # NOTE: m007 is intentionally skipped here — it is taken by a sibling
-    # migration landing in parallel; this step is m008 to stay append-only
-    # and avoid a numbering collision.
     db.executescript(
         """
         CREATE TABLE IF NOT EXISTS _datasette_paper_inline_tag (

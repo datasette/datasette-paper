@@ -116,6 +116,10 @@ def _tokens_to_doc(tokens) -> dict:
     # instead of `list_item`. The frame is independent of the block stack
     # because lists can nest inside other things.
     list_kind_stack: list[str] = []
+    # Out-of-band table name carried by a `paper-table` sidecar fence; consumed
+    # by the next `table_open` (the serializer emits the fence immediately
+    # before its table). None means no name pending.
+    pending_table_name: str | None = None
 
     def push(node: dict) -> dict:
         stack[-1].setdefault("content", []).append(node)
@@ -219,6 +223,20 @@ def _tokens_to_doc(tokens) -> dict:
             # info string.) Be defensive — a hand-edited / malformed body must
             # never raise; fall back to an empty/`table` embed.
             info = (getattr(tok, "info", "") or "").strip()
+            # A fence whose info string is `paper-table` is the out-of-band
+            # sidecar carrying the `name` attr of the table that immediately
+            # follows (GFM has no slot for it). The body is one JSON object
+            # `{"name": <name>}`. Stash the name; the next `table_open` consumes
+            # it. Emit no node of its own. Be defensive — a malformed body must
+            # never raise; it just yields no pending name.
+            if t == "fence" and info == "paper-table":
+                try:
+                    data = json.loads(text)
+                    name = data.get("name") if isinstance(data, dict) else None
+                except (ValueError, TypeError):
+                    name = None
+                pending_table_name = name if isinstance(name, str) else None
+                continue
             if t == "fence" and info == "paper-embed":
                 try:
                     data = json.loads(text)
@@ -273,12 +291,20 @@ def _tokens_to_doc(tokens) -> dict:
                 append(source_block)
                 continue
             # A fence whose info string is `sql db=NAME [hidden]` is an
-            # editable SQL query block. The `db=` token is the discriminator:
-            # a plain ```sql fence (no db=) stays a normal code block.
-            if t == "fence" and info.startswith("sql") and "db=" in info:
+            # editable SQL query block. The leading `sql` token plus a `db=`
+            # token are the discriminator: the serializer always emits `db=`
+            # (empty for a db-less block, `sql db=`), so its *presence* — not a
+            # populated value — separates a runnable sql_block from a plain
+            # ```sql display code block (which carries no `db=` token).
+            sql_tokens = info.split()
+            if (
+                t == "fence"
+                and sql_tokens[:1] == ["sql"]
+                and any(tok.startswith("db=") for tok in sql_tokens[1:])
+            ):
                 db = None
                 hidden = False
-                for token in info.split():
+                for token in sql_tokens[1:]:
                     if token.startswith("db="):
                         db = token[len("db=") :] or None
                     elif token == "hidden":
@@ -298,7 +324,16 @@ def _tokens_to_doc(tokens) -> dict:
             append(cb)
 
         elif t == "table_open":
-            push({"type": "table", "attrs": {"name": None}, "content": []})
+            # Consume any name stashed by a preceding `paper-table` sidecar
+            # fence; reset so it can't leak onto a later unnamed table.
+            push(
+                {
+                    "type": "table",
+                    "attrs": {"name": pending_table_name},
+                    "content": [],
+                }
+            )
+            pending_table_name = None
         elif t == "table_close":
             pop()
 
@@ -661,11 +696,16 @@ def _split_paper_links(nodes: list[dict]) -> list[dict]:
 
 # `${{source.column}}` — the leading `$` is what keeps this disjoint from the
 # `placeholder` node's bare `{{key}}` (which markdown.py emits but never parses
-# back), so the two never collide. Only the strict `name.column` shape matches;
-# a bare `{{key}}` or a half-typed `${{` stays literal text. An optional
-# `| kind:arg` suffix carries the per-value `format` (decoded by
+# back), so the two never collide. The source is always a bare `\w+` (names are
+# normalized to `[a-z0-9_]+`); the column is either a bare `\w+` OR a bracketed
+# `[...]` form (`${{src.[total sales]}}`) so DB-derived columns containing
+# spaces / hyphens / dots survive — the bracket body is anything up to the
+# closing `]`. A bare `{{key}}` or a half-typed `${{` stays literal text. An
+# optional `| kind:arg` suffix carries the per-value `format` (decoded by
 # `_decode_value_format`).
-_SQL_VALUE_RE = re.compile(r"\$\{\{\s*(\w+)\.(\w+)\s*(?:\|\s*([^}]+?))?\s*\}\}")
+_SQL_VALUE_RE = re.compile(
+    r"\$\{\{\s*(\w+)\.(?:\[([^\]]+)\]|(\w+))\s*(?:\|\s*([^}]+?))?\s*\}\}"
+)
 
 _VALID_DATE_STYLES = {"iso", "medium", "long"}
 
@@ -714,8 +754,10 @@ def _split_sql_values(nodes: list[dict]) -> list[dict]:
             "type": "value",
             "attrs": {
                 "source": m.group(1),
-                "column": m.group(2),
-                "format": _decode_value_format(m.group(3)),
+                # group 2 = bracketed column body, group 3 = bare `\w+` column;
+                # exactly one matches.
+                "column": m.group(2) if m.group(2) is not None else m.group(3),
+                "format": _decode_value_format(m.group(4)),
             },
         },
     )

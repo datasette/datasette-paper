@@ -199,6 +199,117 @@ class TestBlocks:
         para = doc["content"][0]
         assert all(c["type"] != "value" for c in para["content"])
 
+    # --- ticket 06: remaining lossy round-trips ---
+
+    def test_dbless_sql_block_from_empty_db_fence(self):
+        # A `sql db=` fence (empty db) is a db-less sql_block, not a code_block:
+        # the `db=` token is present, so the discriminator fires.
+        doc = parse_and_validate("```sql db=\nselect 1 as n\n```\n")
+        sb = doc["content"][0]
+        assert sb["type"] == "sql_block"
+        assert sb["attrs"] == {"db": None, "hidden": False}
+        assert sb["content"] == [{"type": "text", "text": "select 1 as n"}]
+
+    def test_dbless_sql_block_round_trips(self):
+        # The core fix: a db-less sql_block survives doc→md→doc as a sql_block,
+        # not a code_block.
+        md = "```sql db=\nselect * from t\n```\n"
+        assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_dbless_sql_block_hidden_round_trips(self):
+        md = "```sql db= hidden\nselect 1\n```\n"
+        doc = parse_and_validate(md)
+        assert doc["content"][0]["type"] == "sql_block"
+        assert doc["content"][0]["attrs"] == {"db": None, "hidden": True}
+        assert doc_to_markdown(doc) == md
+
+    def test_plain_sql_fence_still_stays_code_block(self):
+        # Regression guard: a bare ```sql fence (no db= token) is still a plain
+        # display code_block, not a sql_block.
+        doc = parse_and_validate("```sql\nselect 1\n```\n")
+        assert doc["content"][0]["type"] == "code_block"
+
+    @pytest.mark.parametrize("column", ["total sales", "gross-margin", "a.b"])
+    def test_value_with_non_word_column_round_trips(self, column):
+        # A `value` whose column contains spaces / hyphens / dots survives as a
+        # value node (bracketed `${{src.[col]}}` form), not literal text.
+        from datasette_paper.markdown import doc_to_markdown as serialize
+
+        doc = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {"type": "text", "text": "x "},
+                        {
+                            "type": "value",
+                            "attrs": {
+                                "source": "revenue",
+                                "column": column,
+                                "format": None,
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+        md = serialize(doc)
+        back = parse_and_validate(md)
+        val = next(c for c in back["content"][0]["content"] if c["type"] == "value")
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": column,
+            "format": None,
+        }
+        assert serialize(back) == md
+
+    def test_value_bracketed_column_with_format_parsed(self):
+        doc = parse_and_validate("${{revenue.[total sales] | currency:USD}}\n")
+        val = next(c for c in doc["content"][0]["content"] if c["type"] == "value")
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": "total sales",
+            "format": {"kind": "currency", "currency": "USD"},
+        }
+
+    def test_value_fallback_dropped_on_round_trip(self):
+        # Documented loss: `format.fallback` is not carried by the markdown
+        # grammar, so it is dropped when a value round-trips through markdown
+        # (e.g. the agent whole-doc edit path). Everything else survives.
+        from datasette_paper.markdown import doc_to_markdown as serialize
+
+        doc = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "value",
+                            "attrs": {
+                                "source": "revenue",
+                                "column": "total",
+                                "format": {
+                                    "kind": "currency",
+                                    "currency": "USD",
+                                    "fallback": "N/A",
+                                },
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+        back = parse_and_validate(serialize(doc))
+        val = next(c for c in back["content"][0]["content"] if c["type"] == "value")
+        # source/column/kind/arg survive; fallback is gone.
+        assert val["attrs"] == {
+            "source": "revenue",
+            "column": "total",
+            "format": {"kind": "currency", "currency": "USD"},
+        }
+
     def test_blockquote(self):
         doc = parse_and_validate("> quote\n")
         assert types_only(doc) == "doc[blockquote[paragraph[text]]]"
@@ -705,6 +816,45 @@ class TestTables:
         text = cell["content"][0]["content"][0]
         assert text["text"] == "bold"
         assert text["marks"] == [{"type": "strong"}]
+
+    def test_paper_table_sidecar_sets_name(self):
+        md = '```paper-table\n{"name": "sales"}\n```\n| h |\n| --- |\n| x |\n'
+        doc = parse_and_validate(md)
+        # The sidecar fence emits no node of its own.
+        assert [n["type"] for n in doc["content"]] == ["table"]
+        assert doc["content"][0]["attrs"]["name"] == "sales"
+
+    def test_paper_table_sidecar_name_with_spaces(self):
+        md = '```paper-table\n{"name": "sales report"}\n```\n| h |\n| --- |\n| x |\n'
+        doc = parse_and_validate(md)
+        assert doc["content"][0]["attrs"]["name"] == "sales report"
+
+    def test_table_name_round_trips(self):
+        md = '```paper-table\n{"name": "q3"}\n```\n| h |\n| --- |\n| x |\n'
+        doc = parse_and_validate(md)
+        assert doc_to_markdown(doc).startswith('```paper-table\n{"name": "q3"}\n```\n')
+        # …and a second pass is stable.
+        assert (
+            markdown_to_doc(doc_to_markdown(doc))["content"][0]["attrs"]["name"] == "q3"
+        )
+
+    def test_paper_table_sidecar_does_not_leak_to_later_table(self):
+        md = (
+            '```paper-table\n{"name": "first"}\n```\n'
+            "| h |\n| --- |\n| x |\n\n"
+            "| h |\n| --- |\n| y |\n"
+        )
+        doc = parse_and_validate(md)
+        tables = [n for n in doc["content"] if n["type"] == "table"]
+        assert len(tables) == 2
+        assert tables[0]["attrs"]["name"] == "first"
+        assert tables[1]["attrs"]["name"] is None
+
+    def test_malformed_paper_table_sidecar_yields_no_name(self):
+        md = "```paper-table\nnot json\n```\n| h |\n| --- |\n| x |\n"
+        doc = parse_and_validate(md)
+        assert [n["type"] for n in doc["content"]] == ["table"]
+        assert doc["content"][0]["attrs"]["name"] is None
 
 
 # ---------------------------------------------------------------------------
