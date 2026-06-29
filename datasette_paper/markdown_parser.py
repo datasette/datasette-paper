@@ -594,14 +594,14 @@ def _convert_paper_refs(nodes: list[dict]) -> list[dict]:
 _PAPER_LINK_RE = re.compile(r"\[\[(\d+)\]\]")
 
 
-def _split_paper_links(nodes: list[dict]) -> list[dict]:
-    """Split `[[<int>]]` occurrences inside text nodes into `paper_link` atoms.
+def _split_text_nodes(nodes, regex, make_atom):
+    """Split `regex` occurrences inside text nodes into the atom returned by
+    `make_atom(match)`.
 
-    markdown-it has no notion of our `[[id]]` link syntax, so it arrives as
+    markdown-it has no notion of our custom inline syntaxes, so they arrive as
     literal text; we post-process the emitted inline nodes here. Surrounding
-    text keeps its marks; the `paper_link` atom carries none (a bold/italic
-    span around a link is meaningless for an id-only reference). Only the
-    digits-only form matches, so `[[notanumber]]` stays literal text.
+    text keeps its marks; the atom carries none. Non-text nodes and text that
+    doesn't match pass through untouched.
     """
     out: list[dict] = []
     for node in nodes:
@@ -612,14 +612,14 @@ def _split_paper_links(nodes: list[dict]) -> list[dict]:
         marks = node.get("marks")
         last = 0
         matched = False
-        for m in _PAPER_LINK_RE.finditer(text):
+        for m in regex.finditer(text):
             matched = True
             if m.start() > last:
                 seg = {"type": "text", "text": text[last : m.start()]}
                 if marks:
                     seg["marks"] = marks
                 out.append(seg)
-            out.append({"type": "paper_link", "attrs": {"docId": int(m.group(1))}})
+            out.append(make_atom(m))
             last = m.end()
         if not matched:
             out.append(node)
@@ -630,6 +630,20 @@ def _split_paper_links(nodes: list[dict]) -> list[dict]:
                 seg["marks"] = marks
             out.append(seg)
     return out
+
+
+def _split_paper_links(nodes: list[dict]) -> list[dict]:
+    """Split `[[<int>]]` occurrences inside text nodes into `paper_link` atoms.
+
+    The `paper_link` atom carries no marks (a bold/italic span around a link is
+    meaningless for an id-only reference). Only the digits-only form matches, so
+    `[[notanumber]]` stays literal text.
+    """
+    return _split_text_nodes(
+        nodes,
+        _PAPER_LINK_RE,
+        lambda m: {"type": "paper_link", "attrs": {"docId": int(m.group(1))}},
+    )
 
 
 # `${{source.column}}` — the leading `$` is what keeps this disjoint from the
@@ -678,48 +692,20 @@ def _decode_value_format(s):
 
 def _split_sql_values(nodes: list[dict]) -> list[dict]:
     """Split `${{source.column}}` occurrences inside text nodes into `value`
-    atoms.
-
-    markdown-it has no notion of our `${{…}}` syntax, so it arrives as literal
-    text; we post-process here, mirroring `_split_paper_links`. Surrounding
-    text keeps its marks; the `value` atom carries none.
+    atoms. The `value` atom carries no marks.
     """
-    out: list[dict] = []
-    for node in nodes:
-        if node.get("type") != "text":
-            out.append(node)
-            continue
-        text = node["text"]
-        marks = node.get("marks")
-        last = 0
-        matched = False
-        for m in _SQL_VALUE_RE.finditer(text):
-            matched = True
-            if m.start() > last:
-                seg = {"type": "text", "text": text[last : m.start()]}
-                if marks:
-                    seg["marks"] = marks
-                out.append(seg)
-            out.append(
-                {
-                    "type": "value",
-                    "attrs": {
-                        "source": m.group(1),
-                        "column": m.group(2),
-                        "format": _decode_value_format(m.group(3)),
-                    },
-                }
-            )
-            last = m.end()
-        if not matched:
-            out.append(node)
-            continue
-        if last < len(text):
-            seg = {"type": "text", "text": text[last:]}
-            if marks:
-                seg["marks"] = marks
-            out.append(seg)
-    return out
+    return _split_text_nodes(
+        nodes,
+        _SQL_VALUE_RE,
+        lambda m: {
+            "type": "value",
+            "attrs": {
+                "source": m.group(1),
+                "column": m.group(2),
+                "format": _decode_value_format(m.group(3)),
+            },
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
