@@ -293,6 +293,12 @@ const BLOCK_TABLE =
   '# Vendors table\n\n```paper-embed\n{"config": {}, "mode": "table", "ref": "/data/vendors"}\n```\n';
 const BLOCK_ROW =
   '# Featured vendor\n\n```paper-embed\n{"config": {}, "mode": "table", "ref": "/data/vendors/5"}\n```\n';
+// A table embed with a column selection: `config.columns` hides the PK `id`
+// and renders just name + region, in that order (the "Columns…" picker writes
+// exactly this). Demonstrates the column-filter feature for the README.
+const BLOCK_COLUMNS =
+  "# Vendors (selected columns)\n\n```paper-embed\n" +
+  '{"config": {"columns": ["name", "region"]}, "mode": "table", "ref": "/data/vendors"}\n```\n';
 
 // SQL query block: an editable query run against the `data` database, with the
 // results rendered live. The `db=data` token marks it as a runnable SQL block
@@ -371,6 +377,7 @@ async function seed(ctx) {
   const blockDbId = await create("Vendors database", ACTOR, BLOCK_DB);
   const blockTableId = await create("Vendors table", ACTOR, BLOCK_TABLE);
   const blockRowId = await create("Featured vendor (block)", ACTOR, BLOCK_ROW);
+  const blockColumnsId = await create("Vendors (columns)", ACTOR, BLOCK_COLUMNS);
   const sqlBlockId = await create("Q2 vendor report", ACTOR, SQL_BLOCK);
   const sqlBlockHiddenId = await create("Q2 vendor report (hidden)", ACTOR, SQL_BLOCK_HIDDEN);
   const inlineValueId = await create("Vendor snapshot", ACTOR, INLINE_VALUE);
@@ -386,6 +393,7 @@ async function seed(ctx) {
     blockDbId,
     blockTableId,
     blockRowId,
+    blockColumnsId,
     sqlBlockId,
     sqlBlockHiddenId,
     inlineValueId,
@@ -466,6 +474,7 @@ function buildShots(ctx, ids) {
     blockDbId,
     blockTableId,
     blockRowId,
+    blockColumnsId,
     sqlBlockId,
     sqlBlockHiddenId,
     inlineValueId,
@@ -686,6 +695,35 @@ function buildShots(ctx, ids) {
     "block-embed-database": blockEmbedShot(blockDbId, "block-embed-database", "vendors"),
     "block-embed-table": blockEmbedShot(blockTableId, "block-embed-table", "Vendor 1"),
     "block-embed-row": blockEmbedShot(blockRowId, "block-embed-row", "Vendor 5"),
+    "block-embed-columns": blockEmbedShot(blockColumnsId, "block-embed-columns", "Vendor 1"),
+    // The "Columns…" picker open in the ⋮ menu: a checklist of every column,
+    // with the currently-selected ones (name + region) checked and the hidden
+    // PK (id) unchecked — the author UI that writes config.columns.
+    "block-embed-columns-picker": async () => {
+      const page = await newPage();
+      await gotoEditor(page, blockColumnsId);
+      const embed = page.locator(".pm-block-embed");
+      await embed.waitFor({ state: "visible", timeout: 10_000 });
+      await page.waitForFunction(
+        () => {
+          const el = document.querySelector(".pm-block-embed");
+          return !!el && !el.querySelector(".pm-block-embed-skeleton") &&
+            (el.innerText || "").includes("Vendor 1");
+        },
+        { timeout: 10_000 },
+      );
+      // Open the ⋮ menu, then swap its body for the column checklist.
+      await embed.locator(".pm-block-embed-menu-btn").click();
+      await embed
+        .locator(".pm-block-embed-menu-item", { hasText: "Columns…" })
+        .click();
+      await embed
+        .locator(".pm-block-embed-columns")
+        .waitFor({ state: "visible", timeout: 10_000 });
+      await freezeVolatile(page);
+      await page.screenshot({ path: out("block-embed-columns-picker") });
+      await page.close();
+    },
 
     // SQL query block: editable query + Run + live results, and the collapsed
     // ("Show SQL") report view.

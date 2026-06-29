@@ -1059,6 +1059,35 @@
   background: #f1ecf8;
   color: #6429a8;
 }
+/* The in-place "Columns…" checklist that replaces the menu body. */
+.editor-host .pm-block-embed-columns {
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+  overflow: auto;
+}
+.editor-host .pm-block-embed-columns-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  font-size: 13px;
+  color: #333;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.editor-host .pm-block-embed-columns-item:hover {
+  background: #f1ecf8;
+}
+.editor-host .pm-block-embed-columns-item input {
+  margin: 0;
+}
+.editor-host .pm-block-embed-columns-apply {
+  margin-top: 4px;
+  border-top: 1px solid #eee;
+  font-weight: 600;
+  color: #6429a8;
+}
 .editor-host .pm-block-embed-tables {
   list-style: none;
   margin: 0;

@@ -663,6 +663,32 @@ def test_block_embed_non_empty_config_in_json_body():
     )
 
 
+def test_block_embed_columns_roundtrip_byte_stable():
+    # Column-filter-specific guard (the generic config round-trip lives in the
+    # paper-url-scheme board): a `config.columns` selection serializes to a
+    # stable sorted-key fence and parses back with the author's order intact.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    doc = _doc(
+        {
+            "type": "block_embed",
+            "attrs": {
+                "ref": "/data/vendors",
+                "mode": "table",
+                "config": {"columns": ["name", "region"]},
+            },
+        }
+    )
+    md = doc_to_markdown(doc)
+    assert md == (
+        "```paper-embed\n"
+        '{"config": {"columns": ["name", "region"]}, '
+        '"mode": "table", "ref": "/data/vendors"}\n```\n'
+    )
+    # serialize → parse → identical (order preserved, not reordered/dropped).
+    assert markdown_to_doc(md) == doc
+
+
 def test_sql_block_serializes_as_sql_fence():
     md = doc_to_markdown(
         _doc(

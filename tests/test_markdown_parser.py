@@ -535,6 +535,18 @@ class TestBlockEmbed:
         doc = parse_and_validate('```paper-embed\n{"ref":"/r","config":"oops"}\n```\n')
         assert doc["content"][0]["attrs"]["config"] == {}
 
+    def test_paper_embed_malformed_columns_does_not_crash(self):
+        # `config` is a valid object but `columns` is a string, not a list. The
+        # parser keeps `config` verbatim (it doesn't validate the bag's shape);
+        # the frontend fetch guard treats a non-array `columns` as "no filter".
+        # The only contract here is: don't raise.
+        doc = parse_and_validate(
+            '```paper-embed\n{"ref":"/r","config":{"columns":"name"}}\n```\n'
+        )
+        block = doc["content"][0]
+        assert block["type"] == "block_embed"
+        assert block["attrs"]["config"] == {"columns": "name"}
+
     def test_plain_fence_stays_code_block(self):
         doc = parse_and_validate("```\n/fixtures/facetable\n```\n")
         assert doc["content"][0]["type"] == "code_block"

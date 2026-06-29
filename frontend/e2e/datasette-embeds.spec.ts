@@ -7,6 +7,8 @@
  *   - the "Datasette embed" command opens the picker, inserts an embed, and
  *     the embed renders a capped table — surviving a reload (proves the node
  *     persists `ref` only and the NodeView re-fetches on mount).
+ *   - the ⋮ "Columns…" picker restricts the embed to a column subset (hiding
+ *     the PK), and the selection persists across reload (config round-trips).
  */
 import { test, expect } from "@playwright/test";
 import { createPaper, gotoPaper, waitForServerVersion } from "./helpers";
@@ -104,5 +106,61 @@ test.describe("slash menu + datasette embed", () => {
         message: "embed did not re-render after reload",
       })
       .toContain("Vendor 1");
+  });
+
+  test("⋮ Columns… restricts the embed to a subset that survives reload", async ({
+    page,
+  }) => {
+    const host = await createPaper(page);
+    await gotoPaper(page, host.url);
+
+    // Insert a vendors embed via the slash-menu picker.
+    const editor = page.locator(".ProseMirror");
+    await editor.click();
+    await page.keyboard.type("/datasette");
+    await expect(page.locator(".pm-slash-menu")).toBeVisible({ timeout: 10000 });
+    await page.keyboard.press("Enter");
+    const dialog = page.locator(".ds-embed-dialog");
+    await expect(dialog).toBeVisible({ timeout: 10000 });
+    await dialog.locator(".ds-embed-search").fill("vendors");
+    const result = dialog.locator(".ds-embed-result", { hasText: "vendors" });
+    await expect(result).toBeVisible({ timeout: 10000 });
+    await result.click();
+
+    const embed = page.locator(".pm-block-embed");
+    await expect(embed).toBeVisible({ timeout: 10000 });
+    // Both columns (PK `id` + `name`) render before any selection.
+    await expect
+      .poll(async () => embed.locator("thead th").allInnerTexts(), { timeout: 10000 })
+      .toEqual(["id", "name"]);
+
+    // Open the ⋮ menu → "Columns…", uncheck the PK `id`, Apply.
+    await embed.locator(".pm-block-embed-menu-btn").click();
+    await embed
+      .locator(".pm-block-embed-menu-item", { hasText: "Columns…" })
+      .click();
+    const idRow = embed.locator(".pm-block-embed-columns-item", { hasText: "id" });
+    await idRow.locator("input").uncheck();
+    await embed.locator(".pm-block-embed-columns-apply").click();
+
+    // The embed re-fetches/re-renders to just `name` (the PK is gone).
+    await expect
+      .poll(async () => embed.locator("thead th").allInnerTexts(), { timeout: 10000 })
+      .toEqual(["name"]);
+    await expect(embed.locator("table")).toContainText("Vendor 1");
+
+    // The selection persists across reload (config.columns round-trips through
+    // the step log + snapshot, not just markdown). Insert = v1, Apply = v2.
+    await waitForServerVersion(page, host.id, 2);
+    await page.reload();
+    await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 10000 });
+    const reloaded = page.locator(".pm-block-embed");
+    await expect(reloaded).toBeVisible({ timeout: 10000 });
+    await expect
+      .poll(async () => reloaded.locator("thead th").allInnerTexts(), {
+        timeout: 10000,
+        message: "column selection did not persist across reload",
+      })
+      .toEqual(["name"]);
   });
 });

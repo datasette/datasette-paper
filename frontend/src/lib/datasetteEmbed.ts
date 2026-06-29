@@ -35,7 +35,13 @@ export type EmbedPayload =
       kind: "table" | "view";
       label: string;
       db: string;
+      // The columns actually rendered, after any `config.columns` projection
+      // (author order, PKs the author didn't pick dropped). Equals `allColumns`
+      // when no column selection is active.
       columns: string[];
+      // The full server-returned column set (pre-projection), so the column
+      // picker can offer every column with the selected ones checked.
+      allColumns: string[];
       rows: CellValue[][];
       count: number | null;
       truncated: boolean;
@@ -176,12 +182,22 @@ async function fetchTableEmbed(
   table: string,
   ref: string,
   limit: number,
+  columns?: string[],
 ): Promise<EmbedPayload> {
+  // `config.columns` (if any): send `?_col=` so unselected columns never leave
+  // the server. `_col` can't *hide* PKs (Datasette always re-adds them) or
+  // reorder, so we still project the response client-side below — the hybrid
+  // gives both honesty (less on the wire) and full control (hide PKs, reorder).
+  const wanted = (columns ?? []).filter((c) => typeof c === "string" && c.length > 0);
+  const colParams = wanted.map((c) => `&_col=${encodeURIComponent(c)}`).join("");
   // `_shape=arrays` (plural) returns the {columns, rows-as-arrays, count, next}
   // envelope; `_shape=array` (singular) would be a bare top-level array with
   // no columns/count. `_extra` adds count + columns to the envelope.
   const res = await fetch(
-    jsonUrl(ref, `?_shape=arrays&_extra=count,columns&_size=${encodeURIComponent(String(limit))}`),
+    jsonUrl(
+      ref,
+      `?_shape=arrays&_extra=count,columns&_size=${encodeURIComponent(String(limit))}${colParams}`,
+    ),
   );
   if (!res.ok) return { status: denialStatus(res.status) };
   const j = (await res.json()) as {
@@ -190,15 +206,30 @@ async function fetchTableEmbed(
     count?: number | null;
     next?: string | null;
   };
+  const allColumns = j.columns ?? [];
   const rows = j.rows ?? [];
   const count = typeof j.count === "number" ? j.count : null;
+  // Project to exactly the author's selection, in their order, dropping any PK
+  // `_col` forced back in. If every selected column has vanished from the
+  // schema, fall back to the full response rather than rendering nothing.
+  let outColumns = allColumns;
+  let outRows = rows;
+  if (wanted.length) {
+    const keep = wanted.filter((c) => allColumns.includes(c));
+    if (keep.length) {
+      const idx = keep.map((c) => allColumns.indexOf(c));
+      outColumns = keep;
+      outRows = rows.map((row) => idx.map((i) => row[i]));
+    }
+  }
   return {
     status: "ok",
     kind: "table",
     label: table,
     db,
-    columns: j.columns ?? [],
-    rows,
+    columns: outColumns,
+    allColumns,
+    rows: outRows,
     count,
     truncated: j.next != null || (count != null && count > rows.length),
     href: ref,
@@ -269,12 +300,21 @@ async function fetchDatabaseEmbed(db: string, ref: string): Promise<EmbedPayload
   return { status: "ok", kind: "database", label: db, db, tables, href: ref };
 }
 
-/** Fetch the read-only render payload for a ref. Network error → not_found. */
-export async function fetchEmbed(ref: string, limit?: number): Promise<EmbedPayload> {
+/**
+ * Fetch the read-only render payload for a ref. Network error → not_found.
+ * `columns` (from a table/view embed's `config.columns`) restricts a
+ * table/view to that column subset, in that order; ignored for row/database.
+ */
+export async function fetchEmbed(
+  ref: string,
+  limit?: number,
+  columns?: string[],
+): Promise<EmbedPayload> {
   const seg = refSegments(ref);
   try {
     if (seg.length === 1) return await fetchDatabaseEmbed(seg[0], ref);
-    if (seg.length === 2) return await fetchTableEmbed(seg[0], seg[1], ref, limit ?? DEFAULT_EMBED_LIMIT);
+    if (seg.length === 2)
+      return await fetchTableEmbed(seg[0], seg[1], ref, limit ?? DEFAULT_EMBED_LIMIT, columns);
     if (seg.length === 3) return await fetchRowEmbed(seg[0], seg[1], seg[2], ref);
     return { status: "not_found" };
   } catch {
