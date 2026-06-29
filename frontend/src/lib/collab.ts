@@ -203,6 +203,16 @@ export interface ConnectionOpts {
    * omitted = the core Datasette source.
    */
   onInsertDatasetteEmbed?: (sourceId?: string) => void;
+  /**
+   * Create a new paper titled `title` from the `[[`-autocomplete's
+   * "Create … page" row. The host owns the dialog + the
+   * ``POST /-/paper/api/docs`` call (the creator becomes the new paper's
+   * manager server-side); it resolves with the new doc id, or null when the
+   * user cancels. When omitted, the create row is hidden and `[[` only links
+   * to existing papers. The editor inserts the `paper_link` itself once it
+   * has the id.
+   */
+  onCreatePage?: (title: string) => Promise<number | null>;
 }
 
 type CommState =
@@ -1087,7 +1097,7 @@ export class EditorConnection {
         // Enter/Arrow/Escape are intercepted while the popup is open.
         // Each command returns false when inactive, so normal editing
         // keystrokes fall through unaffected.
-        keymap(wikiLinkKeymap()),
+        keymap(wikiLinkKeymap({ onCreatePage: this.opts.onCreatePage })),
         // The `@`-mention keymap must likewise precede baseKeymap so
         // Enter/Arrow/Escape are intercepted while its popup is open. Its
         // commands also return false when inactive, so they compose with the
@@ -1127,8 +1137,8 @@ export class EditorConnection {
         // `[[`-triggered wiki-link autocomplete: the state plugin tracks
         // the in-progress `[[query` span, the popup plugin renders the
         // floating result list and runs the debounced link-search fetch.
-        wikiLinkSuggestPlugin,
-        wikiLinkSuggestPopupPlugin(),
+        wikiLinkSuggestPlugin({ onCreatePage: this.opts.onCreatePage }),
+        wikiLinkSuggestPopupPlugin({ onCreatePage: this.opts.onCreatePage }),
         // `@`-triggered mention autocomplete: the state plugin tracks the
         // in-progress `@query` span, the popup plugin renders the floating
         // result list and runs the doc-scoped mention-search fetch.

@@ -26,7 +26,7 @@ import {
 function freshState(): EditorState {
   return EditorState.create({
     schema,
-    plugins: [wikiLinkSuggestPlugin],
+    plugins: [wikiLinkSuggestPlugin()],
   });
 }
 
@@ -219,7 +219,7 @@ describe("wikiLinkSuggest popup + keymap (real EditorView)", () => {
     const state = EditorState.create({
       schema,
       plugins: [
-        wikiLinkSuggestPlugin,
+        wikiLinkSuggestPlugin(),
         wikiLinkSuggestPopupPlugin(),
         keymap(wikiLinkKeymap()),
       ],
@@ -293,5 +293,96 @@ describe("wikiLinkSuggest popup + keymap (real EditorView)", () => {
     cancelWikiSuggest()(view.state, view.dispatch.bind(view));
     expect(curWs().active).toBe(false);
     expect(popup()!.style.display).toBe("none");
+  });
+});
+
+describe("wikiLinkSuggest create-page row", () => {
+  /** Minimal view stub: applies dispatches to its own `state`, no-op focus. */
+  function fakeView(initial: EditorState) {
+    const v = {
+      state: initial,
+      dispatch(tr: import("prosemirror-state").Transaction) {
+        v.state = v.state.apply(tr);
+      },
+      focus() {},
+    };
+    return v as unknown as EditorView & { state: EditorState };
+  }
+
+  /** Flush the async create flow (a microtask-deep promise chain). */
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  function withQuery(opts: { onCreatePage?: (t: string) => Promise<number | null> }, text: string) {
+    let state = EditorState.create({
+      schema,
+      plugins: [wikiLinkSuggestPlugin(opts)],
+    });
+    state = state.apply(state.tr.insertText(text));
+    return fakeView(state);
+  }
+
+  it("committing the create row mints a doc and inserts its paper_link", async () => {
+    const onCreatePage = vi.fn(async () => 99);
+    const opts = { onCreatePage };
+    const view = withQuery(opts, "see [[Foo");
+    // No results fetched: the only navigable row is the create row at index 0.
+    expect(wikiLinkKey.getState(view.state)!.index).toBe(0);
+
+    const acted = commitWikiSelection(opts)(view.state, view.dispatch, view);
+    expect(acted).toBe(true);
+    await flush();
+
+    // The query (trimmed) is what we asked the host to create.
+    expect(onCreatePage).toHaveBeenCalledWith("Foo");
+    // The `[[Foo` span became a paper_link pointing at the new id.
+    let docId: unknown = null;
+    view.state.doc.descendants((n) => {
+      if (n.type.name === "paper_link") docId = n.attrs.docId;
+    });
+    expect(docId).toBe(99);
+    expect(view.state.doc.textContent).not.toContain("[[");
+    expect(view.state.doc.textContent).toContain("see ");
+  });
+
+  it("a cancelled create (null) leaves the typed `[[query` untouched", async () => {
+    const onCreatePage = vi.fn(async () => null);
+    const opts = { onCreatePage };
+    const view = withQuery(opts, "[[Foo");
+
+    commitWikiSelection(opts)(view.state, view.dispatch, view);
+    await flush();
+
+    expect(onCreatePage).toHaveBeenCalled();
+    let hasLink = false;
+    view.state.doc.descendants((n) => {
+      if (n.type.name === "paper_link") hasLink = true;
+    });
+    expect(hasLink).toBe(false);
+    expect(view.state.doc.textContent).toContain("[[Foo");
+  });
+
+  it("ArrowDown walks past the results onto the create row, then clamps", () => {
+    const opts = { onCreatePage: async () => 1 };
+    const view = withQuery(opts, "[[fo");
+    setWikiResults(view, RESULTS);
+    expect(wikiLinkKey.getState(view.state)!.results).toHaveLength(3);
+
+    const down = () => moveWikiSelection(1)(view.state, view.dispatch);
+    down(); // 0 -> 1
+    down(); // 1 -> 2
+    down(); // 2 -> 3 (the create row sits at index === results.length)
+    expect(wikiLinkKey.getState(view.state)!.index).toBe(3);
+    down(); // clamps at the create row
+    expect(wikiLinkKey.getState(view.state)!.index).toBe(3);
+  });
+
+  it("without onCreatePage there is no create row to commit", () => {
+    // results.length === 0 and no create row → Enter falls through.
+    const view = withQuery({}, "[[fo");
+    const acted = commitWikiSelection({})(view.state, view.dispatch, view);
+    expect(acted).toBe(false);
+    // The index never extends past the (empty) result list.
+    moveWikiSelection(1)(view.state, view.dispatch);
+    expect(wikiLinkKey.getState(view.state)!.index).toBe(0);
   });
 });
