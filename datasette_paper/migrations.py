@@ -598,3 +598,15 @@ def m006_doc_tags(db: Database):
             ON _datasette_paper_doc_tag(tag);
         """
     )
+
+
+@migrations()
+def m007_drop_redundant_doc_tag_index(db: Database):
+    # ``idx_paper_doc_tag_doc`` (on _datasette_paper_doc_tag(doc_id), created in
+    # m006) duplicates the leftmost prefix of ``PRIMARY KEY (doc_id, tag)``:
+    # SQLite already serves ``doc_id`` lookups from the composite-PK index via
+    # the leftmost-prefix rule, so the standalone index was pure
+    # write-amplification with no read benefit. Drop it. The other m006 index,
+    # ``idx_paper_doc_tag_tag`` (on the trailing ``tag`` column), is retained —
+    # it serves WHERE tag IN (...) / GROUP BY tag and is not redundant.
+    db.executescript("DROP INDEX IF EXISTS idx_paper_doc_tag_doc;")
