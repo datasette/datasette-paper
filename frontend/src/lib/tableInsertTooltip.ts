@@ -28,6 +28,7 @@ import {
 } from "prosemirror-tables";
 import type { Command } from "prosemirror-state";
 import { TOOLBAR_ICONS } from "./icons";
+import { iconMarkup } from "./datasetteEmbed";
 import { countOtherTablesWithName, findTable, setTableName } from "./tables";
 
 function svgButton(
@@ -39,7 +40,7 @@ function svgButton(
   btn.className = "pm-tt-btn";
   btn.title = label;
   btn.setAttribute("aria-label", label);
-  btn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS[iconName]}</svg>`;
+  btn.innerHTML = iconMarkup(iconName);
   return btn;
 }
 
