@@ -334,9 +334,6 @@ WHERE doc_id = $doc_id::integer
   AND version > $after_version::integer
 ORDER BY version;
 
--- name: selectMaxVersion :value
-SELECT MAX(version) FROM _datasette_paper_step WHERE doc_id = $doc_id::integer;
-
 -- ============================================================================
 -- Snapshots
 -- ============================================================================

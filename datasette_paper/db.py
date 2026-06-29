@@ -35,6 +35,18 @@ class PaperDB:
     def __init__(self, database) -> None:
         self.database = database
 
+    async def _exec(self, query_fn, **kwargs):
+        """Run a single generated query inside one ``execute_write_fn`` closure.
+
+        Collapses the boilerplate for the many single-statement passthroughs.
+        Multi-statement operations (``insert_step``, ``replace_links``,
+        ``set_doc_tags``, ``hard_delete_doc``, ``insert_doc_with_snapshot``)
+        keep their explicit closures so the transaction stays atomic.
+        """
+        return await self.database.execute_write_fn(
+            lambda conn: query_fn(conn, **kwargs)
+        )
+
     # ------------------------------------------------------------------
     # Doc
     # ------------------------------------------------------------------
@@ -103,19 +115,13 @@ class PaperDB:
     async def update_doc_name(
         self, *, doc_id: int, name: str
     ) -> Optional[_queries.Doc]:
-        def write(conn):
-            return _queries.update_doc_name(conn, doc_id=doc_id, name=name)
-
-        return await self.database.execute_write_fn(write)
+        return await self._exec(_queries.update_doc_name, doc_id=doc_id, name=name)
 
     async def select_doc_by_id(self, doc_id: int) -> Optional[_queries.Doc]:
-        def read(conn):
-            return _queries.select_doc_by_id(conn, doc_id=doc_id)
-
-        return await self.database.execute_write_fn(read)
+        return await self._exec(_queries.select_doc_by_id, doc_id=doc_id)
 
     async def list_docs(self) -> list[_queries.Doc]:
-        return await self.database.execute_write_fn(_queries.list_docs)
+        return await self._exec(_queries.list_docs)
 
     async def list_docs_by_ids_states_and_kinds(
         self,
@@ -207,10 +213,7 @@ class PaperDB:
         await self.database.execute_write_fn(write)
 
     async def links_by_src(self, *, src_doc_id: int) -> list[_queries.LinkEdge]:
-        def read(conn):
-            return _queries.select_links_by_src(conn, src_doc_id=src_doc_id)
-
-        return await self.database.execute_write_fn(read)
+        return await self._exec(_queries.select_links_by_src, src_doc_id=src_doc_id)
 
     async def backlinks_by_dst(
         self, *, dst_doc_id: int, viewable_ids: list[int]
@@ -261,16 +264,10 @@ class PaperDB:
     # ------------------------------------------------------------------
 
     async def add_doc_tag(self, *, doc_id: int, tag: str) -> None:
-        def write(conn):
-            _queries.insert_doc_tag(conn, doc_id=doc_id, tag=tag)
-
-        await self.database.execute_write_fn(write)
+        await self._exec(_queries.insert_doc_tag, doc_id=doc_id, tag=tag)
 
     async def remove_doc_tag(self, *, doc_id: int, tag: str) -> None:
-        def write(conn):
-            _queries.delete_doc_tag(conn, doc_id=doc_id, tag=tag)
-
-        await self.database.execute_write_fn(write)
+        await self._exec(_queries.delete_doc_tag, doc_id=doc_id, tag=tag)
 
     async def set_doc_tags(self, *, doc_id: int, tags: list[str]) -> None:
         # Atomic replace: clear the doc's tags then re-insert the new set in
@@ -283,21 +280,14 @@ class PaperDB:
         await self.database.execute_write_fn(write)
 
     async def list_tags_for_doc(self, *, doc_id: int) -> list[str]:
-        def read(conn):
-            return _queries.list_tags_for_doc(conn, doc_id=doc_id)
-
-        rows = await self.database.execute_write_fn(read)
+        rows = await self._exec(_queries.list_tags_for_doc, doc_id=doc_id)
         return [r.tag for r in rows]
 
     async def list_tags_for_docs(self, *, doc_ids: list[int]) -> dict[int, list[str]]:
         # One query for the whole list page; fold (doc_id, tag) rows into a
         # per-doc map. Docs with no tags are simply absent.
         doc_ids_json = json.dumps(doc_ids)
-
-        def read(conn):
-            return _queries.list_tags_for_docs(conn, doc_ids_json=doc_ids_json)
-
-        rows = await self.database.execute_write_fn(read)
+        rows = await self._exec(_queries.list_tags_for_docs, doc_ids_json=doc_ids_json)
         out: dict[int, list[str]] = {}
         for r in rows:
             out.setdefault(r.doc_id, []).append(r.tag)
@@ -306,11 +296,7 @@ class PaperDB:
     async def list_all_tags(self, *, doc_ids: list[int]) -> list[tuple[str, int]]:
         # Distinct tags + counts over the given (ACL-visible) doc-id scope.
         doc_ids_json = json.dumps(doc_ids)
-
-        def read(conn):
-            return _queries.list_all_tags(conn, doc_ids_json=doc_ids_json)
-
-        rows = await self.database.execute_write_fn(read)
+        rows = await self._exec(_queries.list_all_tags, doc_ids_json=doc_ids_json)
         return [(r.tag, r.n) for r in rows]
 
     async def list_docs_by_ids_states_kinds_and_tags(
@@ -327,63 +313,40 @@ class PaperDB:
         # NULL (not "[]") signals "no tag filter" to the query — see
         # listDocsByIdsStatesKindsAndTags in queries.sql.
         tags_json = json.dumps(tags) if tags else None
-
-        def read(conn):
-            return _queries.list_docs_by_ids_states_kinds_and_tags(
-                conn,
-                doc_ids_json=doc_ids_json,
-                states_json=states_json,
-                kinds_json=kinds_json,
-                tags_json=tags_json,
-            )
-
-        return await self.database.execute_write_fn(read)
+        return await self._exec(
+            _queries.list_docs_by_ids_states_kinds_and_tags,
+            doc_ids_json=doc_ids_json,
+            states_json=states_json,
+            kinds_json=kinds_json,
+            tags_json=tags_json,
+        )
 
     # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------
 
     async def archive_doc(self, *, doc_id: int) -> None:
-        def write(conn):
-            _queries.archive_doc(conn, doc_id=doc_id)
-
-        await self.database.execute_write_fn(write)
+        await self._exec(_queries.archive_doc, doc_id=doc_id)
 
     async def unarchive_doc(self, *, doc_id: int) -> None:
-        def write(conn):
-            _queries.unarchive_doc(conn, doc_id=doc_id)
-
-        await self.database.execute_write_fn(write)
+        await self._exec(_queries.unarchive_doc, doc_id=doc_id)
 
     async def trash_doc(self, *, doc_id: int, delete_at: str) -> None:
-        def write(conn):
-            _queries.trash_doc(conn, doc_id=doc_id, delete_at=delete_at)
-
-        await self.database.execute_write_fn(write)
+        await self._exec(_queries.trash_doc, doc_id=doc_id, delete_at=delete_at)
 
     async def restore_doc(self, *, doc_id: int) -> None:
-        def write(conn):
-            _queries.restore_doc(conn, doc_id=doc_id)
-
-        await self.database.execute_write_fn(write)
+        await self._exec(_queries.restore_doc, doc_id=doc_id)
 
     async def set_doc_kind(self, *, doc_id: int, kind: str) -> None:
-        def write(conn):
-            _queries.set_doc_kind(conn, doc_id=doc_id, kind=kind)
-
-        await self.database.execute_write_fn(write)
+        await self._exec(_queries.set_doc_kind, doc_id=doc_id, kind=kind)
 
     async def set_doc_locked(self, *, doc_id: int, locked: bool) -> None:
-        def write(conn):
-            _queries.set_doc_locked(conn, doc_id=doc_id, locked=1 if locked else 0)
-
-        await self.database.execute_write_fn(write)
+        await self._exec(
+            _queries.set_doc_locked, doc_id=doc_id, locked=1 if locked else 0
+        )
 
     async def list_trashed_to_delete(self, *, now: str) -> list[_queries.Doc]:
-        def read(conn):
-            return _queries.list_trashed_to_delete(conn, now=now)
-
-        return await self.database.execute_write_fn(read)
+        return await self._exec(_queries.list_trashed_to_delete, now=now)
 
     async def hard_delete_doc(self, *, doc_id: int) -> None:
         """Delete the doc and all its child rows in one transaction.
@@ -432,18 +395,9 @@ class PaperDB:
     async def select_steps_after(
         self, *, doc_id: int, after_version: int
     ) -> list[_queries.Step]:
-        def read(conn):
-            return _queries.select_steps_after(
-                conn, doc_id=doc_id, after_version=after_version
-            )
-
-        return await self.database.execute_write_fn(read)
-
-    async def select_max_version(self, *, doc_id: int) -> Optional[int]:
-        def read(conn):
-            return _queries.select_max_version(conn, doc_id=doc_id)
-
-        return await self.database.execute_write_fn(read)
+        return await self._exec(
+            _queries.select_steps_after, doc_id=doc_id, after_version=after_version
+        )
 
     # ------------------------------------------------------------------
     # Snapshots
@@ -457,21 +411,15 @@ class PaperDB:
         doc_json: str,
         actor_id: Optional[str] = None,
     ) -> None:
-        def write(conn):
-            _queries.insert_snapshot(
-                conn,
-                doc_id=doc_id,
-                version=version,
-                doc_json=doc_json,
-                actor_id=actor_id,
-            )
-
-        await self.database.execute_write_fn(write)
+        await self._exec(
+            _queries.insert_snapshot,
+            doc_id=doc_id,
+            version=version,
+            doc_json=doc_json,
+            actor_id=actor_id,
+        )
 
     async def select_latest_snapshot(
         self, *, doc_id: int
     ) -> Optional[_queries.Snapshot]:
-        def read(conn):
-            return _queries.select_latest_snapshot(conn, doc_id=doc_id)
-
-        return await self.database.execute_write_fn(read)
+        return await self._exec(_queries.select_latest_snapshot, doc_id=doc_id)

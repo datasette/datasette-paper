@@ -553,14 +553,6 @@ ORDER BY version;
     return [Step(*row) for row in cursor.fetchall()]
 
 
-def select_max_version(conn: sqlite3.Connection, doc_id: int) -> Any | None:
-    sql = "SELECT MAX(version) FROM _datasette_paper_step WHERE doc_id = $doc_id::integer;"
-    params = {"doc_id::integer": doc_id}
-    cursor = conn.execute(sql, params)
-    row = cursor.fetchone()
-    return row[0] if row is not None else None
-
-
 def insert_snapshot(
     conn: sqlite3.Connection,
     doc_id: int,
