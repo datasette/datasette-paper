@@ -68,12 +68,27 @@
 
   // Refresh whenever the panel is open — including a docId change while open.
   // Reading `open` and `docId` registers them as effect dependencies.
+  //
+  // Backlinks change from edits in OTHER docs (whoever links to this one),
+  // with no local signal here, so a single fetch-on-open can go stale while
+  // the panel stays open. Re-fetch when the tab regains focus/visibility —
+  // the natural moment a user returns to this doc after creating a link to it
+  // elsewhere (e.g. the `[[`-create flow, which navigates away and back).
   $effect(() => {
-    if (open) {
-      // Touch docId so the effect re-runs on doc change while open.
-      void docId;
-      load();
-    }
+    if (!open) return;
+    // Touch docId so the effect re-runs (and re-binds listeners) on doc change.
+    void docId;
+    load();
+
+    const refresh = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   });
 
   function hint(item: LinkItem): string {

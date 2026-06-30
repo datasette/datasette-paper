@@ -111,6 +111,46 @@ describe("LinksPanel", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 
+  it("refetches when the tab regains focus while open", async () => {
+    render(LinksPanel, { docId: "1" });
+    await openPanel();
+    expect(screen.queryByRole("link")).toBeNull(); // no backlinks yet
+
+    const fetchMock = vi.mocked(fetch);
+    const backlinkCallsBefore = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).endsWith("/backlinks"),
+    ).length;
+
+    // A backlink lands elsewhere; returning to the tab should surface it.
+    backlinksPayload = [
+      { id: 3, occurrences: 1, status: "ok", title: "Late Backlink", href: "/3" },
+    ];
+    await fireEvent(window, new Event("focus"));
+
+    await vi.waitFor(() => {
+      const link = screen.getByRole("link", { name: /Late Backlink/ });
+      expect(link.getAttribute("href")).toBe("/3");
+    });
+    const backlinkCallsAfter = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).endsWith("/backlinks"),
+    ).length;
+    expect(backlinkCallsAfter).toBeGreaterThan(backlinkCallsBefore);
+  });
+
+  it("does not refetch on focus once the panel is closed", async () => {
+    render(LinksPanel, { docId: "1" });
+    const toggle = screen.getByRole("button", { name: /links/i });
+    await openPanel();
+    await fireEvent.click(toggle); // collapse
+
+    const fetchMock = vi.mocked(fetch);
+    const callsBefore = fetchMock.mock.calls.length;
+    await fireEvent(window, new Event("focus"));
+    // Give any (unwanted) async load a tick to fire.
+    await Promise.resolve();
+    expect(fetchMock.mock.calls.length).toBe(callsBefore);
+  });
+
   it("renders a backlink in the Linked from section", async () => {
     backlinksPayload = [
       {
