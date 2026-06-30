@@ -1112,6 +1112,26 @@ export class EditorConnection {
           ],
         }),
         history(),
+        // Suggestion-popup keymaps come FIRST, ahead of the list/code Enter
+        // handler, buildKeymap, and baseKeymap below. Each command returns
+        // false when its popup is inactive, so normal editing keystrokes fall
+        // through unaffected — but while a popup IS open they MUST win, and
+        // that only works if they're registered before any other Enter/Tab
+        // binding. (Registering them after buildKeymap, as before, let
+        // `splitListItem` swallow Enter inside a list/task item, so the popup's
+        // commit never fired — Enter would split the list instead of picking
+        // the highlighted row.) The popups never open at once (distinct `[[` /
+        // `@` / `#` / `${{` / `/` triggers), so ordering among them is moot.
+        //   `[[`  — wiki-link page picker (Enter/Arrow/Escape, + create row).
+        keymap(wikiLinkKeymap({ onCreatePage: this.opts.onCreatePage })),
+        //   `@`   — mention picker.
+        keymap(mentionKeymap()),
+        //   `#`   — tag picker.
+        keymap(tagKeymap()),
+        //   `${{` — source→column value picker.
+        keymap(valueKeymap()),
+        //   `/`   — slash command menu (also drives Tab while open).
+        keymap(slashKeymap(this.slashCommands)),
         keymap({
           "Mod-k": toggleLinkCommand(),
           "Mod-Shift-7": wrapInList(schema.nodes.task_list),
@@ -1166,29 +1186,6 @@ export class EditorConnection {
           Delete: deleteRowOrColSelection(),
         }),
         keymap(buildKeymap(schema)),
-        // The `[[` autocomplete keymap must precede baseKeymap so
-        // Enter/Arrow/Escape are intercepted while the popup is open.
-        // Each command returns false when inactive, so normal editing
-        // keystrokes fall through unaffected.
-        keymap(wikiLinkKeymap({ onCreatePage: this.opts.onCreatePage })),
-        // The `@`-mention keymap must likewise precede baseKeymap so
-        // Enter/Arrow/Escape are intercepted while its popup is open. Its
-        // commands also return false when inactive, so they compose with the
-        // `[[` keymap (the two popups never open at once — distinct triggers).
-        keymap(mentionKeymap()),
-        // The `#`-tag keymap likewise precedes baseKeymap. Same compose-by-
-        // returning-false contract; the `@`/`#`/`[[` popups never open at
-        // once (distinct triggers).
-        keymap(tagKeymap()),
-        // The `${{`-value keymap precedes baseKeymap so Enter/Arrow/Escape
-        // drive the source→column picker while it's open (same
-        // compose-by-returning-false contract; distinct `${{` trigger).
-        keymap(valueKeymap()),
-        // The `/` slash-menu keymap likewise precedes baseKeymap so
-        // Enter/Tab/Arrow/Escape drive the command popup while it's open.
-        // Same compose-by-returning-false contract; the `/` popup only opens
-        // in an empty top-level block, so it never collides with `@`/`#`/`[[`.
-        keymap(slashKeymap(this.slashCommands)),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({

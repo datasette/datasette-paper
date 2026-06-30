@@ -6,9 +6,12 @@ import {
   beforeEach,
   afterEach,
 } from "vitest";
-import { EditorState } from "prosemirror-state";
+import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
 import { keymap } from "prosemirror-keymap";
+import { baseKeymap } from "prosemirror-commands";
+import { buildKeymap } from "prosemirror-example-setup";
+import { splitListItem } from "prosemirror-schema-list";
 import { schema } from "../schema";
 import {
   wikiLinkKey,
@@ -384,5 +387,102 @@ describe("wikiLinkSuggest create-page row", () => {
     // The index never extends past the (empty) result list.
     moveWikiSelection(1)(view.state, view.dispatch);
     expect(wikiLinkKey.getState(view.state)!.index).toBe(0);
+  });
+});
+
+/**
+ * Regression guard for the keymap-ordering bug: Enter has competing handlers
+ * (`splitListItem` for task/list items via the list keymap + buildKeymap), so
+ * the `[[` keymap MUST be registered ahead of them. Earlier it sat *after*
+ * buildKeymap, so inside a list item `splitListItem` swallowed Enter and the
+ * popup's commit never fired — Enter split the list instead of picking the
+ * highlighted row. These tests drive a *real* Enter keydown through the same
+ * plugin ordering collab.ts uses (the unit tests above call commitWikiSelection
+ * directly, which bypasses keymap priority and so never caught this).
+ */
+describe("wikiLinkSuggest Enter through the keymap chain", () => {
+  let host: HTMLElement;
+  let view: EditorView;
+
+  afterEach(() => {
+    view.destroy();
+    host.remove();
+  });
+
+  /**
+   * Build a view whose plugins mirror collab.ts's Enter-handler ordering: the
+   * `[[` keymap first, THEN the list/task split keymaps. `inList` wraps the
+   * `[[query` paragraph in a bullet list so the competing `splitListItem`
+   * handlers are live.
+   */
+  function mount(query: string, inList: boolean): void {
+    host = document.createElement("div");
+    document.body.appendChild(host);
+
+    const para = schema.nodes.paragraph.create();
+    const body = inList
+      ? schema.nodes.bullet_list.create(null, schema.nodes.list_item.create(null, para))
+      : para;
+    const docNode = schema.nodes.doc.create(null, body);
+
+    let state = EditorState.create({
+      doc: docNode,
+      // Order matches collab.ts after the fix: suggestion keymap precedes the
+      // list/task split keymap and buildKeymap.
+      plugins: [
+        wikiLinkSuggestPlugin(),
+        keymap(wikiLinkKeymap()),
+        keymap({ Enter: splitListItem(schema.nodes.task_item) }),
+        keymap(buildKeymap(schema)),
+        keymap(baseKeymap),
+      ],
+    });
+    // Drop the cursor inside the (only) paragraph and type the trigger.
+    const cursor = TextSelection.near(state.doc.resolve(inList ? 3 : 1));
+    state = state.apply(state.tr.setSelection(cursor).insertText(query));
+    view = new EditorView(host, { state });
+    // Seed results synchronously (no fetch in this suite).
+    view.dispatch(
+      view.state.tr.setMeta(wikiLinkKey, { type: "setResults", results: RESULTS }),
+    );
+  }
+
+  /** Fire Enter through the plugin keydown chain, first-truthy-wins. */
+  function pressEnter(): boolean {
+    const event = new KeyboardEvent("keydown", { key: "Enter" });
+    return view.someProp("handleKeyDown", (f) => f(view, event)) ?? false;
+  }
+
+  function linkId(): unknown {
+    let id: unknown = null;
+    view.state.doc.descendants((n) => {
+      if (n.type.name === "paper_link") id = n.attrs.docId;
+    });
+    return id;
+  }
+
+  it("commits the highlighted result inside a list item (not split list)", () => {
+    mount("[[fo", true);
+    moveWikiSelection(1)(view.state, view.dispatch.bind(view)); // -> Beta (id 20)
+
+    expect(pressEnter()).toBe(true);
+
+    // Enter inserted the paper_link rather than splitting the list item.
+    expect(linkId()).toBe(20);
+    expect(view.state.doc.textContent).not.toContain("[[");
+    expect(wikiLinkKey.getState(view.state)!.active).toBe(false);
+    // Still a single list item — no split happened.
+    let listItems = 0;
+    view.state.doc.descendants((n) => {
+      if (n.type.name === "list_item") listItems += 1;
+    });
+    expect(listItems).toBe(1);
+  });
+
+  it("commits the highlighted result in a plain paragraph", () => {
+    mount("[[fo", false);
+    expect(pressEnter()).toBe(true);
+    expect(linkId()).toBe(10); // first result
+    expect(view.state.doc.textContent).not.toContain("[[");
   });
 });
