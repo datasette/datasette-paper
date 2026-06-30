@@ -848,6 +848,10 @@ export class EditorConnection {
   // no real network state, so the listeners are harmless there).
   private onlineHandler: (() => void) | null = null;
   private offlineHandler: (() => void) | null = null;
+  // `pagehide` flush — best-effort keepalive POST of unconfirmed steps when
+  // the page is torn down (navigation / tab close). Same bind-once-in-start,
+  // remove-on-close discipline as the online/offline handlers.
+  private pageHideHandler: (() => void) | null = null;
 
   constructor(opts: ConnectionOpts, report?: Reporter) {
     this.opts = opts;
@@ -899,8 +903,15 @@ export class EditorConnection {
         if (sendableSteps(this.view.state)) this._send();
       }
     };
+    this.pageHideHandler = () => {
+      this.flushPendingStepsBeacon();
+    };
     window.addEventListener("offline", this.offlineHandler);
     window.addEventListener("online", this.onlineHandler);
+    // Flush pending steps as the page goes away. `pagehide` fires on
+    // same-tab navigation (and bfcache), which is exactly when a regular
+    // in-flight POST /events would be aborted and the step lost.
+    window.addEventListener("pagehide", this.pageHideHandler);
     // Pick up the initial state — opened tabs that were offline at
     // mount should show the banner immediately.
     if (typeof navigator !== "undefined" && navigator.onLine === false) {
@@ -918,6 +929,10 @@ export class EditorConnection {
       window.removeEventListener("online", this.onlineHandler);
       this.onlineHandler = null;
     }
+    if (this.pageHideHandler) {
+      window.removeEventListener("pagehide", this.pageHideHandler);
+      this.pageHideHandler = null;
+    }
   }
 
   // ── URL helper ─────────────────────────────────────────────────────────────
@@ -926,15 +941,26 @@ export class EditorConnection {
     return "/-/paper/api/docs/" + this.opts.docId + path;
   }
 
-  /** POST a JSON body to an API path, attaching the CSRF header when present. */
-  private postJson(path: string, body: string): Promise<Response> {
+  /** POST a JSON body to an API path, attaching the CSRF header when present.
+   * `keepalive` lets the request outlive a page teardown (see
+   * flushPendingStepsBeacon). */
+  private postJson(
+    path: string,
+    body: string,
+    opts: { keepalive?: boolean } = {},
+  ): Promise<Response> {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
     };
     if (this.opts.csrfToken) {
       headers["X-CSRFToken"] = this.opts.csrfToken;
     }
-    return fetch(this.apiUrl(path), { method: "POST", headers, body });
+    return fetch(this.apiUrl(path), {
+      method: "POST",
+      headers,
+      body,
+      keepalive: opts.keepalive,
+    });
   }
 
   // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -1557,6 +1583,45 @@ export class EditorConnection {
 
   // ── Send ──────────────────────────────────────────────────────────────────
 
+  /** Serialize the current unconfirmed steps into a POST /events body. */
+  private eventsBody(sendable: SendableResult): string {
+    return JSON.stringify({
+      version: getVersion(this.view!.state),
+      clientID: sendable.clientID,
+      steps: sendable.steps.map((s) => s.toJSON()),
+    });
+  }
+
+  /**
+   * Last-ditch flush when the page is being torn down (navigation / tab
+   * close). A normal POST /events fired from dispatch is a plain fetch that
+   * the browser ABORTS the instant navigation starts — so a step inserted
+   * right before the user clicks away never reaches the server. The
+   * `[[`-create flow hits this: it drops a `paper_link` into the *source*
+   * doc, then the user navigates straight into the freshly created target,
+   * aborting that POST — the step is lost and the backlink edge (rebuilt
+   * server-side from the step) never gets indexed.
+   *
+   * `keepalive: true` lets the request outlive the page. Fire-and-forget: we
+   * can't read the response, and we deliberately don't touch `sending` or the
+   * unconfirmed buffer. If a normal in-flight POST happened to win the race,
+   * this one just arrives at a stale version and the server 409s it — so it's
+   * at-least-once, never a duplicate apply.
+   */
+  private flushPendingStepsBeacon(): void {
+    if (!this.view || this.comm === "detached") return;
+    const sendable = sendableSteps(this.view.state) as SendableResult | null;
+    if (!sendable) return;
+    try {
+      void this.postJson("/events", this.eventsBody(sendable), {
+        keepalive: true,
+      });
+    } catch {
+      // Best-effort during unload; nothing actionable if the browser
+      // refuses the keepalive request (e.g. body over the 64KB cap).
+    }
+  }
+
   private async _send(): Promise<void> {
     if (!this.view || this.sending) return;
 
@@ -1566,11 +1631,7 @@ export class EditorConnection {
     this.sending = true;
     this.comm = "send";
 
-    const body = JSON.stringify({
-      version: getVersion(this.view.state),
-      clientID: sendable.clientID,
-      steps: sendable.steps.map((s) => s.toJSON()),
-    });
+    const body = this.eventsBody(sendable);
 
     try {
       const resp = await this.postJson("/events", body);

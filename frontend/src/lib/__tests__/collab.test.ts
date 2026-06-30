@@ -442,6 +442,106 @@ describe("send() 200 response", () => {
   });
 });
 
+describe("pagehide keepalive flush", () => {
+  it("re-POSTs unconfirmed steps with keepalive when the page is torn down", async () => {
+    const el = makeEl();
+
+    // The normal POST /events never resolves — models an in-flight request
+    // that navigation would abort, leaving the step unconfirmed.
+    const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+      if (opts?.method === "POST" && (url as string).endsWith("/events")) {
+        return new Promise(() => {}); // hang forever
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ ...BOOTSTRAP }) });
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    // Local edit → _send fires a POST that hangs; the step stays unconfirmed.
+    const view = conn.view!;
+    view.dispatch(view.state.tr.insertText("X", 1));
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some((c) => {
+          const [url, opts] = c as [string, RequestInit];
+          return url.endsWith("/events") && opts?.method === "POST";
+        }),
+      ).toBe(true);
+    });
+    expect(sendableSteps(view.state)).not.toBeNull();
+
+    const postsBefore = fetchMock.mock.calls.filter((c) => {
+      const [url, opts] = c as [string, RequestInit];
+      return url.endsWith("/events") && opts?.method === "POST";
+    }).length;
+
+    // The page is going away — pagehide must flush the pending step with
+    // keepalive so it still reaches the server.
+    window.dispatchEvent(new Event("pagehide"));
+
+    const keepalivePost = fetchMock.mock.calls.find((c) => {
+      const [url, opts] = c as [string, RequestInit];
+      return url.endsWith("/events") && opts?.method === "POST" && opts?.keepalive === true;
+    });
+    expect(keepalivePost).toBeDefined();
+    const body = JSON.parse((keepalivePost![1] as RequestInit).body as string);
+    expect(body.version).toBe(BOOTSTRAP.version);
+    expect(Array.isArray(body.steps)).toBe(true);
+    expect(body.steps.length).toBeGreaterThan(0);
+
+    // It's an extra POST on top of the (hung) original, not a no-op.
+    const postsAfter = fetchMock.mock.calls.filter((c) => {
+      const [url, opts] = c as [string, RequestInit];
+      return url.endsWith("/events") && opts?.method === "POST";
+    }).length;
+    expect(postsAfter).toBe(postsBefore + 1);
+
+    conn.close();
+  });
+
+  it("does not flush when there are no unconfirmed steps", async () => {
+    const el = makeEl();
+    const fetchMock = makeBootstrapFetch();
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    window.dispatchEvent(new Event("pagehide"));
+
+    const anyPost = fetchMock.mock.calls.some((c) => {
+      const [url, opts] = c as [string, RequestInit];
+      return url.endsWith("/events") && opts?.method === "POST";
+    });
+    expect(anyPost).toBe(false);
+
+    conn.close();
+  });
+
+  it("stops flushing after close()", async () => {
+    const el = makeEl();
+    const fetchMock = vi.fn().mockImplementation((url: string, opts?: RequestInit) => {
+      if (opts?.method === "POST" && (url as string).endsWith("/events")) {
+        return new Promise(() => {});
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => ({ ...BOOTSTRAP }) });
+    });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    conn.view!.dispatch(conn.view!.state.tr.insertText("X", 1));
+
+    conn.close();
+    const postsBefore = fetchMock.mock.calls.length;
+    // The listener was removed on close, so this is inert.
+    window.dispatchEvent(new Event("pagehide"));
+    expect(fetchMock.mock.calls.length).toBe(postsBefore);
+  });
+});
+
 // ─── Test 3: send() 409 ────────────────────────────────────────────────────
 
 describe("send() 409 response", () => {
