@@ -147,11 +147,11 @@ async def test_filter_docs_by_tag_intersection():
 
 @pytest.mark.asyncio
 async def test_doc_tag_indexes_after_migrations():
-    """m007 drops the redundant doc_id index but keeps the tag index.
+    """m006 indexes the tag column only, not doc_id.
 
-    ``idx_paper_doc_tag_doc`` (doc_id) duplicates the leftmost prefix of
-    ``PRIMARY KEY (doc_id, tag)``, so m007 removes it. ``idx_paper_doc_tag_tag``
-    serves trailing-column (tag) lookups and must remain.
+    ``idx_paper_doc_tag_doc`` (doc_id) would duplicate the leftmost prefix of
+    ``PRIMARY KEY (doc_id, tag)``, so m006 never creates it. The trailing-column
+    ``idx_paper_doc_tag_tag`` serves tag lookups and must exist.
     """
     paper = await make_paper_db()
     rows = (

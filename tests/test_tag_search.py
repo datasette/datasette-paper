@@ -4,7 +4,7 @@ GET /-/paper/api/tags/{slug}/refs — docs whose BODY contains the inline `#slug
 tag node, ACL-filtered to the requester's viewable set. Separate namespace from
 the doc-level `?tag=` filter / `_datasette_paper_doc_tag` table.
 
-Backed by the derived ``_datasette_paper_inline_tag`` index (migration m008),
+Backed by the derived ``_datasette_paper_inline_tag`` index (migration m007),
 maintained by the write-tail reindex (and, in tests, by ``plant_snapshot``):
 an exact, indexed JOIN — no ``step_json`` scan and no per-candidate
 re-materialization. Tests plant synthetic snapshots (which also rebuild the

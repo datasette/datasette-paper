@@ -378,7 +378,7 @@ WHERE doc_id = $doc_id::integer
 -- ============================================================================
 -- Inline #tag index (derived from the materialized doc body)
 --
--- ``_datasette_paper_inline_tag`` (migration m008) is a derived index of the
+-- ``_datasette_paper_inline_tag`` (migration m007) is a derived index of the
 -- inline ``#tag`` nodes in each doc's live body, rebuilt wholesale per doc by
 -- the write-tail reindex (mirrors _datasette_paper_link / reindex_links).
 -- ``GET /tags/{slug}/refs`` JOINs it on an exact, indexed tag match — no more

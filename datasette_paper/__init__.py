@@ -258,15 +258,6 @@ async def startup(datasette):
     # on every startup after the first. Safe when acl isn't installed.
     await migrate_shares_to_acl(datasette)
 
-    # One-time backfill: reindex link edges for docs created before the
-    # write-tail reindex existed. Marker-guarded → no-op after the first boot.
-    from .instance import backfill_inline_tags, backfill_links
-
-    await backfill_links(datasette)
-    # One-time backfill: populate the inline-#tag index (migration m008) for
-    # docs that carried inline tags before the index existed. Marker-guarded.
-    await backfill_inline_tags(datasette)
-
 
 # bootstrap-icons / file-text-fill — kept in sync with the icon used in
 # DocHeader.svelte to the left of the doc title. If you swap the icon,

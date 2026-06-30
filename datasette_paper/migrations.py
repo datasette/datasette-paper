@@ -592,8 +592,9 @@ def m006_doc_tags(db: Database):
             created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
             PRIMARY KEY (doc_id, tag)
         );
-        CREATE INDEX IF NOT EXISTS idx_paper_doc_tag_doc
-            ON _datasette_paper_doc_tag(doc_id);
+        -- Only the trailing-column index is worth keeping: SQLite serves
+        -- ``doc_id`` lookups from the leftmost prefix of the composite PK, so a
+        -- standalone idx on doc_id would be pure write-amplification.
         CREATE INDEX IF NOT EXISTS idx_paper_doc_tag_tag
             ON _datasette_paper_doc_tag(tag);
         """
@@ -601,19 +602,7 @@ def m006_doc_tags(db: Database):
 
 
 @migrations()
-def m007_drop_redundant_doc_tag_index(db: Database):
-    # ``idx_paper_doc_tag_doc`` (on _datasette_paper_doc_tag(doc_id), created in
-    # m006) duplicates the leftmost prefix of ``PRIMARY KEY (doc_id, tag)``:
-    # SQLite already serves ``doc_id`` lookups from the composite-PK index via
-    # the leftmost-prefix rule, so the standalone index was pure
-    # write-amplification with no read benefit. Drop it. The other m006 index,
-    # ``idx_paper_doc_tag_tag`` (on the trailing ``tag`` column), is retained —
-    # it serves WHERE tag IN (...) / GROUP BY tag and is not redundant.
-    db.executescript("DROP INDEX IF EXISTS idx_paper_doc_tag_doc;")
-
-
-@migrations()
-def m008_inline_tag_index(db: Database):
+def m007_inline_tag_index(db: Database):
     # Derived index of inline ``#tag`` nodes found in the materialized doc
     # body, rebuilt wholesale per doc by the write-tail reindex (mirrors
     # _datasette_paper_link / reindex_links). Replaces the old

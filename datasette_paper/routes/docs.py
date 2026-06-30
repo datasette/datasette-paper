@@ -519,7 +519,7 @@ async def tag_refs(datasette, request, tag: str):
     ``_datasette_paper_doc_tag`` table — this reflects the document body.
 
     Backed by the derived ``_datasette_paper_inline_tag`` index (migration
-    m008), maintained by the write-tail reindex: an exact, indexed JOIN, no
+    m007), maintained by the write-tail reindex: an exact, indexed JOIN, no
     ``step_json`` scan and no per-candidate re-materialization.
 
     → 200 ``{"tag": slug, "docs": [{id, name, state, kind, occurrences,

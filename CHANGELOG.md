@@ -78,11 +78,9 @@ view/edit-gated as noted in `docs/PERMISSIONS.md`.
 
 ### Migrating
 
-- **Schema migrations run automatically at startup** (`m007` drops the
-  redundant doc-tag index; `m008` adds the inline-`#tag` index). They're
-  append-only — no manual step. One-time backfills (`backfill_links`,
-  `backfill_inline_tags`) also run once at startup to populate the derived
-  link/tag indexes for pre-existing docs.
+- **Schema migrations run automatically at startup** (`m006` adds the
+  document-level tag table; `m007` adds the inline-`#tag` index). They're
+  append-only — no manual step.
 - **`datasette-plugin-router>=0.0.1a4`** and
   **`datasette-user-profiles>=0.1.0a8`** are now required (see
   `pyproject.toml`).
