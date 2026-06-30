@@ -1,6 +1,6 @@
 # changelog
 
-## 0.0.2a3 (unreleased)
+## 0.0.2a3 (2026-06-29)
 
 This cycle turns paper from a collaborative rich-text editor into a
 **data-aware document platform**: papers can reference people (`@mentions`),
