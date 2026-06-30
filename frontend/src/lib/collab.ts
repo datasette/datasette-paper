@@ -16,6 +16,7 @@ import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { tableRowDragPlugin } from "./tableRowDrag";
 import { linkTooltipPlugin } from "./linkTooltip";
+import { linkOpenPlugin } from "./linkOpen";
 import {
   handleImagePaste,
   handleImageDrop,
@@ -1231,10 +1232,13 @@ export class EditorConnection {
         tableInsertTooltipPlugin(this.opts.docId),
         // Hover-grip on each table row's left edge that drags to reorder.
         tableRowDragPlugin(),
-        // Hover tooltip over `<a>` link marks (edit-mode only) — shows the
-        // URL and Open/Copy actions since ProseMirror eats anchor clicks
-        // while editing.
+        // Hover tooltip over plain `<a>` link marks (edit-mode only): shows the
+        // URL + Open/Copy. Scoped to class-less links so embed titles are left
+        // alone.
         linkTooltipPlugin(),
+        // In edit mode a click on a plain `<a>` link mark opens its URL in a
+        // new tab (deterministic across browsers); view mode navigates natively.
+        linkOpenPlugin(),
         // `[[`-triggered wiki-link autocomplete: the state plugin tracks
         // the in-progress `[[query` span, the popup plugin renders the
         // floating result list and runs the debounced link-search fetch.

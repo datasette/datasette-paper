@@ -26,9 +26,11 @@ template injects the matching JS+CSS via `datasette_vite.vite_entry`.
   duplicate warning, API link). Anchored centered above the enclosing
   table; not a Svelte component.
 - `src/lib/linkTooltip.ts` — `Plugin.view` showing a hover tooltip on
-  inline `<a>` link marks in edit mode (URL display + Open / Copy).
-  View-mode hover is suppressed; the browser handles anchor clicks
-  natively when not editing.
+  plain `<a>` link marks in edit mode (URL display + Open / Copy). Scoped
+  to class-less link marks, so embed/NodeView anchors are skipped.
+- `src/lib/linkOpen.ts` — `Plugin` whose `handleDOMEvents.click` opens a
+  plain `<a>` link mark in a new tab when clicked in edit mode (same
+  class-less scoping). View mode navigates natively.
 - `src/lib/PaperApp.svelte` / `lib/PaperIndex.svelte` — page wrappers.
 - `src/lib/icons.ts` — bootstrap-icons inner-path data, indexed by name.
 - `src/lib/client.ts` — openapi-fetch with default

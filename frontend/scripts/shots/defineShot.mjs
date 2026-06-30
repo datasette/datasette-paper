@@ -20,7 +20,7 @@
 //   capture — async (page, file, {ids, ctx}); default = full-page screenshot.
 //             Use for element / dialog / shotUnion captures.
 //
-// ids keys available (from seed()): richId, mentionId, inlineTagId, slashId,
+// ids keys available (from seed()): richId, linkId, mentionId, inlineTagId, slashId,
 //   embedPickerId, inlineDbId, inlineTableId, inlineRowId, blockDbId,
 //   blockTableId, blockRowId, blockColumnsId, sqlBlockId, sqlBlockHiddenId,
 //   inlineValueId.

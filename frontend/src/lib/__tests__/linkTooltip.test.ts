@@ -129,6 +129,28 @@ function tooltipRoot(host: HTMLElement): HTMLElement | null {
   return host.querySelector(".pm-link-tooltip-root");
 }
 
+function editDialog(host: HTMLElement): HTMLElement | null {
+  return host.querySelector(".pm-link-edit-dialog");
+}
+
+/** First link-marked text node in the doc → its text + href. */
+function firstLink(
+  conn: EditorConnection,
+): { text: string; href: string } | null {
+  const view = conn.view!;
+  const linkType = view.state.schema.marks.link;
+  let out: { text: string; href: string } | null = null;
+  view.state.doc.descendants((node) => {
+    if (out) return false;
+    if (node.isText) {
+      const m = linkType.isInSet(node.marks);
+      if (m) out = { text: node.text ?? "", href: String(m.attrs.href) };
+    }
+    return true;
+  });
+  return out;
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe("linkTooltipPlugin", () => {
@@ -210,6 +232,127 @@ describe("linkTooltipPlugin", () => {
 
     conn.close();
     vi.useRealTimers();
+  });
+
+  it("Edit opens a prefilled dialog and rewrites the link text + URL on Save", async () => {
+    const host = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection({ docId: "test-doc", place: host });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const a = buildLinkDoc(conn, "old text", "https://old.test/a");
+    a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+
+    const root = tooltipRoot(host)!;
+    const editBtn = root.querySelector(
+      "button.pm-link-tooltip-edit",
+    ) as HTMLButtonElement;
+    editBtn.click();
+
+    const dialog = editDialog(host)!;
+    expect(dialog.style.display).toBe("block");
+    expect(root.style.display).toBe("none"); // hover bar swapped out
+
+    const labelInput = dialog.querySelector(
+      ".pm-link-edit-field:nth-of-type(1) .pm-link-edit-input",
+    ) as HTMLInputElement;
+    const urlInput = dialog.querySelector(
+      ".pm-link-edit-field:nth-of-type(2) .pm-link-edit-input",
+    ) as HTMLInputElement;
+    // Prefilled from the current link.
+    expect(labelInput.value).toBe("old text");
+    expect(urlInput.value).toBe("https://old.test/a");
+
+    labelInput.value = "new text";
+    urlInput.value = "https://new.test/b";
+    (dialog.querySelector(".pm-link-edit-save") as HTMLButtonElement).click();
+
+    expect(firstLink(conn)).toEqual({
+      text: "new text",
+      href: "https://new.test/b",
+    });
+    expect(dialog.style.display).toBe("none"); // closed after save
+
+    conn.close();
+  });
+
+  it("Edit rejects an unsafe URL and leaves the doc unchanged", async () => {
+    const host = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection({ docId: "test-doc", place: host });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const a = buildLinkDoc(conn, "safe", "https://ok.test");
+    a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    (
+      tooltipRoot(host)!.querySelector(
+        "button.pm-link-tooltip-edit",
+      ) as HTMLButtonElement
+    ).click();
+
+    const dialog = editDialog(host)!;
+    const urlInput = dialog.querySelector(
+      ".pm-link-edit-field:nth-of-type(2) .pm-link-edit-input",
+    ) as HTMLInputElement;
+    urlInput.value = "javascript:alert(1)";
+    (dialog.querySelector(".pm-link-edit-save") as HTMLButtonElement).click();
+
+    // Error shown, dialog stays open, link untouched.
+    expect(dialog.querySelector(".pm-link-edit-err")?.textContent).toMatch(
+      /http/,
+    );
+    expect(dialog.style.display).toBe("block");
+    expect(firstLink(conn)).toEqual({ text: "safe", href: "https://ok.test" });
+
+    conn.close();
+  });
+
+  it("Edit dialog closes on Cancel without changing the doc", async () => {
+    const host = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection({ docId: "test-doc", place: host });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const a = buildLinkDoc(conn, "keep", "https://keep.test");
+    a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    (
+      tooltipRoot(host)!.querySelector(
+        "button.pm-link-tooltip-edit",
+      ) as HTMLButtonElement
+    ).click();
+
+    const dialog = editDialog(host)!;
+    const labelInput = dialog.querySelector(
+      ".pm-link-edit-field:nth-of-type(1) .pm-link-edit-input",
+    ) as HTMLInputElement;
+    labelInput.value = "discarded";
+    (dialog.querySelector(".pm-link-edit-cancel") as HTMLButtonElement).click();
+
+    expect(dialog.style.display).toBe("none");
+    expect(firstLink(conn)).toEqual({ text: "keep", href: "https://keep.test" });
+
+    conn.close();
+  });
+
+  it("does not show for classed anchors (embed/NodeView links are skipped)", async () => {
+    const host = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection({ docId: "test-doc", place: host });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const a = buildLinkDoc(conn, "x", "https://x.test");
+    // Stamp a `pm-*` class (as every NodeView/embed anchor carries) → skipped.
+    a.className = "pm-block-embed-label--link";
+    const root = tooltipRoot(host)!;
+
+    a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    expect(root.style.display).toBe("none");
+
+    conn.close();
   });
 
   it("view-mode (editable=false) suppresses the tooltip even on hover", async () => {

@@ -38,6 +38,14 @@ live over SSE, and the header shows who's *currently* online.
 - [ ] Write the README
 `;
 
+// A short doc with a normal external link, for the link hover/Edit shot. Kept
+// separate so its framing isn't perturbed by the other shots.
+const LINK = `# Project links
+
+The [Datasette](https://datasette.io) project powers this collaborative editor.
+Hover a link while editing to reveal its Edit · Open · Copy actions.
+`;
+
 // A short doc that shows `@`-mentions resolved to live display names. Kept
 // separate from RICH so the other shots' framing is unaffected.
 const MENTIONS = `# Standup — June 22
@@ -185,6 +193,7 @@ export async function seed(ctx) {
   const budgetId = await create("Budget 2026", "bob");
   // The rich doc is owned by ACTOR so its share dialog shows the manager view.
   const richId = await create("Q3 Planning", ACTOR, RICH);
+  const linkId = await create("Project links", ACTOR, LINK);
   const mentionId = await create("Standup", ACTOR, MENTIONS);
   const inlineTagId = await create("Release notes", ACTOR, INLINE_TAGS);
   // Two more #roadmap-tagged docs so the tag results-page shot has a real list.
@@ -214,6 +223,7 @@ export async function seed(ctx) {
   const tocId = await create("Engineering handbook", ACTOR, TOC);
   return {
     richId,
+    linkId,
     mentionId,
     inlineTagId,
     slashId,
