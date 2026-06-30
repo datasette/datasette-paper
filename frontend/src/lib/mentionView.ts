@@ -16,6 +16,7 @@ import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
 import type { ActorResolver, ActorStatus } from "./actorResolver";
 
+// @feat mention: NodeView — resolve actorId to a name, render inline chip
 export class MentionView implements NodeView {
   dom: HTMLSpanElement;
   private actorId: string | null;

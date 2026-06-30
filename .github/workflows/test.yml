@@ -29,6 +29,8 @@ jobs:
         run: just format-backend-check
       - name: Lint
         run: just check-backend
+      - name: Feature markers in sync
+        run: just check-features
       - name: Backend tests
         run: just test
 

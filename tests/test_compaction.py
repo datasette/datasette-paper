@@ -71,6 +71,7 @@ async def test_snapshot_prunes_superseded_steps_and_snapshots(ds_paper, monkeypa
 
 
 @pytest.mark.asyncio
+# @feat snapshot-log: test: doc rehydrates identically after snapshot prunes the log
 async def test_doc_still_materializes_after_compaction(ds_paper, monkeypatch):
     monkeypatch.setattr(instance_module, "SNAPSHOT_THRESHOLD", 5)
 

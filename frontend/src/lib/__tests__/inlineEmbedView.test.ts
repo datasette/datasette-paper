@@ -1,3 +1,4 @@
+// @feat inline-embed: tests pill render states + denied/not_found leak guard
 /**
  * NodeView tests for inline_embed: the inline pill renders ok / loading /
  * denied / not_found, never leaking a label on denied/not_found.

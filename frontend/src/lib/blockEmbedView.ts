@@ -33,6 +33,7 @@ import type { DatasetteStatus } from "./datasetteResolver";
 const ROW_LIMIT_OPTIONS = [10, 25, 100];
 const DEFAULT_ROW_LIMIT = 10;
 
+// @feat block-embed: NodeView — fetch+render table/row/db, XSS-safe cells
 export class BlockEmbedView implements NodeView {
   dom: HTMLDivElement;
   private view: EditorView;

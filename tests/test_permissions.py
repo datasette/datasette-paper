@@ -129,6 +129,7 @@ async def test_full_grant_unblocks_full_owner_path():
 
 
 @pytest.mark.asyncio
+# @feat permissions: test: owner gets all three actions via seeded grant
 async def test_owner_can_view_edit_manage_own_paper():
     """Creator gets a Manager grant on create — full access, no lockout."""
     from datasette_paper.permissions import PaperDocResource

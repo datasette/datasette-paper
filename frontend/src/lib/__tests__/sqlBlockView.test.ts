@@ -1,3 +1,4 @@
+// @feat sql-block: tests auto-run, 403 leak discipline, XSS, hidden toggle
 /**
  * NodeView tests for sql_block: auto-run on mount renders a results table,
  * leak discipline on 403, SQL error display, XSS (text nodes only), the

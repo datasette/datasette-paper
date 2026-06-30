@@ -202,6 +202,7 @@ def test_substitute_walks_nested_content():
 
 
 @pytest.mark.asyncio
+# @feat placeholder: end-to-end: created doc has no placeholder nodes left
 async def test_create_from_template_substitutes_placeholders():
     """The new doc has no placeholder nodes left — keys are resolved
     against the creating actor's context."""

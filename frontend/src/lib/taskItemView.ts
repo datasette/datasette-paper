@@ -7,6 +7,7 @@
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView, ViewMutationRecord } from "prosemirror-view";
 
+// @feat task-list: NodeView — real checkbox dispatches setNodeMarkup over collab
 export class TaskItemView implements NodeView {
   dom: HTMLLIElement;
   contentDOM: HTMLDivElement;

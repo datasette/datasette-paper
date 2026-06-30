@@ -38,6 +38,7 @@ export interface CursorReporterOpts {
   debounceMs?: number;
 }
 
+// @feat presence: watch selection, POST presence; remote cursors decorate, self-filtered
 export function cursorReporterPlugin(opts: CursorReporterOpts): Plugin {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let lastSent = "";

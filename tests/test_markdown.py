@@ -172,6 +172,7 @@ def _task_item(text, checked=False):
     }
 
 
+# @feat task-list: tests task_list GFM checkbox rendering
 def test_task_list_renders_gfm_checkboxes():
     md = doc_to_markdown(
         _doc(
@@ -546,6 +547,7 @@ def test_paper_link_renders_double_bracket():
     assert "[[12]]" in md
 
 
+# @feat mention: serialize falls back to actor id with no name map
 def test_mention_without_name_map_falls_back_to_actor_id():
     md = doc_to_markdown(
         _doc(_para(_text("Hi "), {"type": "mention", "attrs": {"actorId": "alice"}}))
@@ -568,6 +570,7 @@ def test_mention_percent_encodes_awkward_actor_ids():
     assert md == "[@team/eng dept](paper:/actor/team%2Feng%20dept)\n"
 
 
+# @feat tag: serialize tag atom to a paper:/tag/ scheme link
 def test_tag_serializes_as_paper_scheme_link():
     md = doc_to_markdown(
         _doc(_para(_text("Our "), {"type": "tag", "attrs": {"tag": "roadmap"}}))

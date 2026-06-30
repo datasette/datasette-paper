@@ -257,6 +257,7 @@ async def migrate_shares_to_acl(datasette, *, force: bool = False) -> dict:
 
 
 @migrations()
+# @feat snapshot-log: schema home — _datasette_paper_step (append-only log) + _datasette_paper_snapshot tables
 def m001_internal(db: Database):
     # Papers live in Datasette's internal DB (set via `--internal <path>`
     # on the CLI). All tables live under the ``_datasette_paper_*``

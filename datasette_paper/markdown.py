@@ -123,7 +123,7 @@ def _render_block(node: dict) -> str:
     if t == "code_block":
         text = "".join(c.get("text", "") for c in content)
         return "```\n" + text + "\n```\n"
-    if t == "sql_block":
+    if t == "sql_block":  # @feat sql-block: serialize to a ```sql db=NAME fence
         # An editable SQL query fenced with an info string of `sql db=NAME`
         # (+ a trailing `hidden` when the editor is collapsed). The `db=`
         # token is ALWAYS emitted — even for a db-less block, where it
@@ -139,7 +139,9 @@ def _render_block(node: dict) -> str:
         if attrs.get("hidden"):
             info += " hidden"
         return "```" + info + "\n" + text + "\n```\n"
-    if t == "source":
+    if (
+        t == "source"
+    ):  # @feat source: serialize node to a ```source name=NAME db=DB fence
         # A named SQL query (a "source") fenced with an info string of
         # `source name=NAME db=DB`. The leading `source` token + `name=` are
         # the discriminators (markdown_parser.py keys off `source`). Inline
@@ -168,11 +170,17 @@ def _render_block(node: dict) -> str:
         return _render_list(node, ordered=False)
     if t == "ordered_list":
         return _render_list(node, ordered=True)
-    if t == "task_list":
+    if (
+        t == "task_list"
+    ):  # @feat task-list: serialize task_list to GFM - [ ] / - [x] checkbox markdown
         return _render_task_list(node)
-    if t == "table":
+    if (
+        t == "table"
+    ):  # @feat tables: serialize table to a GFM pipe table (+ name sidecar)
         return _render_table(node)
-    if t == "block_embed":
+    if (
+        t == "block_embed"
+    ):  # @feat block-embed: serialize atom to a paper-embed JSON fence
         attrs = node.get("attrs") or {}
         payload = {
             "ref": attrs.get("ref") or "",
@@ -327,6 +335,7 @@ def _render_list(node: dict, ordered: bool) -> str:
     return "\n".join(out) + "\n"
 
 
+# @feat task-list: walk doc, collect task_items (text/checked/depth) for /tasks
 def extract_tasks(doc: dict) -> List[dict]:
     """Walk a ProseMirror doc and collect every task_item.
 
@@ -633,16 +642,22 @@ def _render_inlines(nodes: list) -> str:
                 out.append(f'![{alt}]({src} "{_escape_image_title(title)}")')
             else:
                 out.append(f"![{alt}]({src})")
-        elif t == "placeholder":
+        elif (
+            t == "placeholder"
+        ):  # @feat placeholder: serialize the atom to literal {{key}} (write-only)
             # Round-trip placeholders as `{{key}}` so the markdown export of
             # a template is self-documenting: anyone reading the markdown can
             # see where substitutions will land.
             key = n.get("attrs", {}).get("key", "")
             out.append("{{" + str(key) + "}}")
-        elif t == "paper_link":
+        elif (
+            t == "paper_link"
+        ):  # @feat paper-link: serialize the atom to [[id]] markdown
             doc_id = (n.get("attrs") or {}).get("docId")
             out.append(f"[[{doc_id}]]")
-        elif t == "mention":
+        elif (
+            t == "mention"
+        ):  # @feat mention: serialize the atom to [@label](paper:/actor/id) markdown
             actor_id = (n.get("attrs") or {}).get("actorId") or ""
             label = _actor_names.get().get(actor_id) or actor_id
             # `[@Name](url "paper:/actor/<id>")` (or bare `paper:/actor/<id>`
@@ -653,7 +668,9 @@ def _render_inlines(nodes: list) -> str:
             canonical = f"paper:/actor/{quote(actor_id, safe='')}"
             _kind, url = _resolve_resource("actor", actor_id)
             out.append(_ref_link("@" + label, canonical, url))
-        elif t == "tag":
+        elif (
+            t == "tag"
+        ):  # @feat tag: serialize the atom to [#tag](paper:/tag/slug) markdown
             tag = (n.get("attrs") or {}).get("tag") or ""
             # `[#tag](url "paper:/tag/<slug>")` (or bare href) — `#` inside the
             # link text so it renders as a single "#tag" link; the canonical
@@ -664,7 +681,9 @@ def _render_inlines(nodes: list) -> str:
             canonical = f"paper:/tag/{quote(tag, safe='')}"
             _kind, url = _resolve_resource("tag", tag)
             out.append(_ref_link("#" + tag, canonical, url))
-        elif t == "inline_embed":
+        elif (
+            t == "inline_embed"
+        ):  # @feat inline-embed: serialize atom to a paper:/embed/<kind>/<ref> link
             ref = (n.get("attrs") or {}).get("ref") or ""
             # `[label](url "paper:/embed/<kind>/<ref>")` (or bare canonical
             # href). The canonical ref's slashes stay raw (`safe='/'`) so the
@@ -684,7 +703,9 @@ def _render_inlines(nodes: list) -> str:
             kind = kind or "datasette"
             canonical = f"paper:/embed/{kind}{encoded_ref}"
             out.append(_ref_link(ref, canonical, url))
-        elif t == "value":
+        elif (
+            t == "value"
+        ):  # @feat value: serialize atom to ${{source.column}} (+ optional format)
             # An inline computed SQL value, referencing a `source` block by
             # name. Round-trips as `${{source.column}}`. The leading `$` keeps
             # it disjoint from the `placeholder` node's bare `{{key}}` above, so

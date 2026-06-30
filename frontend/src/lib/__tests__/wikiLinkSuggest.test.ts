@@ -1,3 +1,4 @@
+// @feat paper-link: tests the autocomplete state machine + atom insertion
 import {
   describe,
   it,

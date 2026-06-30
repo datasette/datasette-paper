@@ -52,6 +52,7 @@ function scanSources(doc: PMNode): Map<string, { db: string | null; sql: string 
   return found;
 }
 
+// @feat source: scan source nodes, run each query once, fan rows to value views
 export class SourceStore {
   private defs = new Map<string, Def>();
   private states = new Map<string, SourceState>();

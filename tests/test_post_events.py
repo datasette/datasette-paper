@@ -59,6 +59,7 @@ async def test_post_at_version_0_succeeds(ds_paper):
 
 
 @pytest.mark.asyncio
+# @feat collab-sse: test: stale-version POST returns 409
 async def test_post_stale_version_409(ds):
     doc_id = await _create_doc(ds)
 

@@ -1,3 +1,4 @@
+// @feat paper-link: tests the NodeView render states (loading / ok / archived / denied)
 /**
  * Tests for PaperLinkView — the inline-atom NodeView that renders a
  * `paper_link` by resolving its `docId` through the LinkResolver. Each test

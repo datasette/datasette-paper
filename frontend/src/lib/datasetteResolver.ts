@@ -121,6 +121,7 @@ function terminalOrNull(status: number | undefined): DatasetteStatus | null {
   return null;
 }
 
+// @feat inline-embed: resolve ref to label/kind via native Datasette JSON, cache+notify
 export class DatasetteResolver {
   private resolve: (ref: string) => Promise<DatasetteStatus | null>;
   private cache = new Map<string, DatasetteStatus>();

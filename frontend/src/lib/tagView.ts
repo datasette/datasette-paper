@@ -18,6 +18,7 @@ export function tagHref(slug: string): string {
   return `/-/paper/tag/${encodeURIComponent(slug)}`;
 }
 
+// @feat tag: NodeView — render .pm-tag anchor to the tag-search page
 export class TagView implements NodeView {
   dom: HTMLAnchorElement;
   private view: EditorView;

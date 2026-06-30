@@ -238,6 +238,7 @@ async def test_sse_backlog_replay(ds):
 
 
 @pytest.mark.asyncio
+# @feat collab-sse: test: evicted-history SSE subscribe returns 410
 async def test_sse_stale_version_410(ds_paper):
     import collections
 

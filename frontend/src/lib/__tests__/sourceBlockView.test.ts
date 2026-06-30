@@ -1,3 +1,4 @@
+// @feat source: tests source card render + setNodeMarkup on name edit
 /**
  * NodeView tests for `source`: the card renders name + db + SQL editor + a
  * column probe (no results table); editing the name dispatches a setNodeMarkup;

@@ -153,6 +153,7 @@ _link_mark_spec = {
 _marks = {**basic_schema.spec["marks"], "link": _link_mark_spec}
 
 # Custom task_list / task_item — mirrors frontend/src/lib/schema.ts.
+# @feat task-list: server task_list node spec (task_item follows; mirrors schema.ts)
 _task_list_spec = {
     "group": "block",
     "content": "task_item+",
@@ -180,6 +181,7 @@ _cell_attrs = {
     "colwidth": {"default": None},
 }
 
+# @feat tables: server table node spec with custom name attr (row/cell/header follow)
 _table_spec = {
     "group": "block",
     "content": "table_row+",
@@ -227,6 +229,7 @@ _table_header_spec = {
 # should never contain a placeholder node; the materializer tolerates
 # them either way (the node is a valid inline atom — it just won't be
 # substituted outside the template-clone flow).
+# @feat placeholder: server node spec (mirrors schema.ts) for node_from_json / Step.apply
 _placeholder_spec = {
     "group": "inline",
     "inline": True,
@@ -249,6 +252,7 @@ _placeholder_spec = {
 # frontend/src/lib/schema.ts. id-only (`docId`); markdown round-trips as
 # `[[id]]` via datasette_paper/markdown.py. toDOM is never rendered
 # server-side but must be structurally valid for node_from_json/Step.apply.
+# @feat paper-link: server-side node spec (mirrors schema.ts) for node_from_json / Step.apply
 _paper_link_spec = {
     "group": "inline",
     "inline": True,
@@ -272,6 +276,7 @@ _paper_link_spec = {
 # `[@label](paper:/actor/<id>)` via datasette_paper/markdown.py. toDOM is never
 # rendered server-side but must be structurally valid for
 # node_from_json/Step.apply.
+# @feat mention: server node spec (mirrors schema.ts) for node_from_json / Step.apply
 _mention_spec = {
     "group": "inline",
     "inline": True,
@@ -295,6 +300,7 @@ _mention_spec = {
 # `[#label](paper:/tag/<slug>)` via datasette_paper/markdown.py. No async resolver
 # (the tag is its own label). toDOM must be structurally valid for
 # node_from_json/Step.apply but is never rendered server-side.
+# @feat tag: server node spec (mirrors schema.ts) for node_from_json / Step.apply
 _tag_spec = {
     "group": "inline",
     "inline": True,
@@ -320,6 +326,7 @@ _tag_spec = {
 # (optionally `| kind:arg`) via datasette_paper/markdown.py. toDOM is never
 # rendered server-side but must be structurally valid for
 # node_from_json/Step.apply.
+# @feat value: server node spec (mirrors schema.ts); source/column/format attrs
 _value_spec = {
     "group": "inline",
     "inline": True,
@@ -350,6 +357,7 @@ _value_spec = {
 # datasette_paper/markdown.py. The display label is resolved per-viewer by the
 # NodeView and never persisted. toDOM is never rendered server-side but must be
 # structurally valid for node_from_json/Step.apply.
+# @feat inline-embed: server node spec (mirrors schema.ts) for node_from_json / Step.apply
 _inline_embed_spec = {
     "group": "inline",
     "inline": True,
@@ -374,6 +382,7 @@ _inline_embed_spec = {
 # as a ```paper-embed JSON fence via datasette_paper/markdown.py. `config` is a
 # provider-defined bag carried verbatim; it survives the DOM round-trip
 # JSON-stringified in `data-embed-config` (parsed defensively → {}).
+# @feat block-embed: server node spec (mirrors schema.ts) with ref/mode/config attrs
 _block_embed_spec = {
     "group": "block",
     "atom": True,
@@ -433,6 +442,7 @@ _toc_spec = {
 # persisted. markdown round-trips as a ```sql db=NAME fence via
 # datasette_paper/markdown.py. toDOM is never rendered server-side but must be
 # structurally valid for node_from_json/Step.apply.
+# @feat sql-block: server node spec (mirrors schema.ts) for node_from_json / Step.apply
 _sql_block_spec = {
     "group": "block",
     "content": "text*",
@@ -460,6 +470,7 @@ _sql_block_spec = {
 # no results table. markdown round-trips as a ```source name=NAME db=DB fence
 # via datasette_paper/markdown.py. toDOM is never rendered server-side but must
 # be structurally valid for node_from_json/Step.apply.
+# @feat source: server node spec (mirrors schema.ts); name/db attrs, editable text
 _source_spec = {
     "group": "block",
     "content": "text*",

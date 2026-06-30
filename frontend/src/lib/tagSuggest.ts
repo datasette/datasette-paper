@@ -113,6 +113,7 @@ function recompute(
   };
 }
 
+// @feat tag: #-trigger autocomplete state machine + atom insertion
 export const tagSuggestPlugin = new Plugin<TagState>({
   key: tagKey,
   state: {

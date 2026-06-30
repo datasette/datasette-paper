@@ -45,6 +45,7 @@ const baseMarks = basic.spec.marks
 // create-from-template time so resulting docs never contain a
 // `placeholder` node. Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as `{{key}}` literal.
+// @feat placeholder: client NodeSpec inline atom (mirrors pm_schema.py)
 const placeholderNode: NodeSpec = {
   group: "inline",
   inline: true,
@@ -77,6 +78,7 @@ const placeholderNode: NodeSpec = {
 // `[[` autocomplete (later task) and rendered by a NodeView (TASK-04). The
 // toDOM here is a static fallback. Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as `[[id]]`.
+// @feat paper-link: client-side node spec (mirrors pm_schema.py) — the inline atom
 const paperLinkNode: NodeSpec = {
   group: "inline",
   inline: true,
@@ -108,6 +110,7 @@ const paperLinkNode: NodeSpec = {
 // autocomplete and rendered by a NodeView (mentionView.ts). The toDOM here is
 // a static fallback. Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as `[@label](paper:/actor/id)`.
+// @feat mention: client NodeSpec inline atom (mirrors pm_schema.py)
 const mentionNode: NodeSpec = {
   group: "inline",
   inline: true,
@@ -138,6 +141,7 @@ const mentionNode: NodeSpec = {
 // static fallback. Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as `[#label](paper:/tag/slug)`. Unlike
 // mentions there is no async resolver — the tag is its own label.
+// @feat tag: client NodeSpec inline atom (mirrors pm_schema.py)
 const tagNode: NodeSpec = {
   group: "inline",
   inline: true,
@@ -170,6 +174,7 @@ const tagNode: NodeSpec = {
 // (the column name). Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as `${{source.column}}` (the `$`
 // prefix keeps it disjoint from the `placeholder` node's bare `{{key}}`).
+// @feat value: client NodeSpec for the inline computed-value atom
 const valueNode: NodeSpec = {
   group: "inline",
   inline: true,
@@ -216,6 +221,7 @@ const valueNode: NodeSpec = {
 // a static fallback. Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as
 // `[label](paper:/embed/<kind>/<ref>)`.
+// @feat inline-embed: client NodeSpec for the inline-embed ref atom
 const inlineEmbedNode: NodeSpec = {
   group: "inline",
   inline: true,
@@ -247,6 +253,7 @@ const inlineEmbedNode: NodeSpec = {
 // NodeView (blockEmbedView.ts) and never persisted in attrs. The toDOM
 // here is a static fallback. Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as a ```paper-embed JSON fence.
+// @feat block-embed: client NodeSpec for the block-embed atom
 const blockEmbedNode: NodeSpec = {
   group: "block",
   atom: true,
@@ -338,6 +345,7 @@ function parseEmbedConfig(raw: string | null): Record<string, unknown> {
 // a results-only view. Results are fetched per-viewer by a NodeView
 // (sqlBlockView.ts) and never persisted. Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as a ```sql db=NAME fence.
+// @feat sql-block: client node spec (mirrors pm_schema.py)
 const sqlBlockNode: NodeSpec = {
   group: "block",
   content: "text*",
@@ -375,6 +383,7 @@ const sqlBlockNode: NodeSpec = {
 // inline chips, deduped through sourceStore.ts). Rendered by a NodeView
 // (sourceBlockView.ts). Mirrors datasette_paper/pm_schema.py;
 // datasette_paper/markdown.py round-trips it as a ```source name=NAME db=DB fence.
+// @feat source: client NodeSpec for the named-source block node
 const sourceNode: NodeSpec = {
   group: "block",
   content: "text*",
@@ -405,6 +414,7 @@ const sourceNode: NodeSpec = {
   ],
 };
 
+// @feat task-list: client task_list / task_item specs (mirrors pm_schema.py)
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
     group: "block",
@@ -443,6 +453,7 @@ const taskNodes: Record<string, NodeSpec> = {
 // rides through ProseMirror steps like any other doc content.
 const tNodes = tableNodes({ tableGroup: "block", cellContent: "block+", cellAttributes: {} });
 const tableSpec = tNodes.table as NodeSpec;
+// @feat tables: client table spec — appends name attr onto tableNodes
 const tableWithName: NodeSpec = {
   ...tableSpec,
   attrs: { ...(tableSpec.attrs ?? {}), name: { default: null } },

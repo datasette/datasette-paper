@@ -91,6 +91,7 @@ async def test_post_presence_endpoint(ds_paper):
 
 
 @pytest.mark.asyncio
+# @feat presence: test: presence payload name fallback
 async def test_presence_payload_includes_name_fallback(ds_paper):
     """Without a profile source the name falls back to the actor id."""
     ds, db = ds_paper

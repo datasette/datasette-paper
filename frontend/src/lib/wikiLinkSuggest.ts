@@ -1,3 +1,4 @@
+// @feat paper-link: `[[`-triggered autocomplete — detect query, pick target, insert the atom
 /**
  * `[[`-triggered wiki-link autocomplete — state + decorations only.
  *

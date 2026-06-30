@@ -1,3 +1,4 @@
+// @feat value: tests value render states off a fake SourceStore
 /**
  * Tests for ValueView — the inline-atom NodeView that renders a live SQL value
  * by subscribing to the SourceStore. A FAKE store emits a single state

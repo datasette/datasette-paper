@@ -91,6 +91,7 @@ function recompute(_tr: Transaction, prev: ValueState, newState: EditorState): V
   };
 }
 
+// @feat value: ${{-triggered two-stage source/column autocomplete
 export const valueSuggestPlugin = new Plugin<ValueState>({
   key: valueKey,
   state: {

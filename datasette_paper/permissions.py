@@ -31,6 +31,7 @@ PAPER_DOC_RESOURCE_TYPE = "paper-doc"
 PAPER_VIEW = "paper-view"
 PAPER_EDIT = "paper-edit"
 PAPER_MANAGE = "paper-manage"
+# @feat permissions: the three per-doc actions (+2 global) acl resolves
 PAPER_DOC_ACTIONS = (PAPER_VIEW, PAPER_EDIT, PAPER_MANAGE)
 
 # All docs live in one internal database, so the resource ``parent`` is a fixed
@@ -92,6 +93,7 @@ class PaperDocResource(Resource):
 
 
 @hookimpl
+# @feat permissions: the only bespoke SQL: per-doc locked deny for paper-edit
 async def permission_resources_sql(datasette, actor, action):
     """Emit the ``locked`` deny for ``paper-edit``; delegate everything else.
 
@@ -116,6 +118,7 @@ async def permission_resources_sql(datasette, actor, action):
     ]
 
 
+# @feat permissions: owner = seeded Manager acl grant on create
 async def seed_owner_manager_grant(datasette, doc_id, created_by) -> None:
     """Grant the doc creator the Manager role on the new doc (= ownership).
 

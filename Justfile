@@ -48,6 +48,7 @@ check-backend:
 
 check:
     just check-backend
+    just check-features
     just check-frontend
 
 # --- Lint ---
@@ -129,6 +130,18 @@ check-queries-fresh:
         echo "::error:: _queries.py is stale — run \`just codegen-queries\`"
         exit 1
     }
+
+# Validate that the FEATURES.md registry and the in-code `@feat` markers
+# stay in sync: no orphan/empty markers, every feature has a test marker,
+# the start file is real, and schema-lockstep features touch all four
+# mirror files. Both sides are hand-authored — this only checks, never
+# generates. tools/features_check.py is project-agnostic; the flags below
+# carry the datasette-paper specifics (scan roots + the schema lock-step
+# mirror set from CLAUDE.md).
+check-features:
+    uv run --prerelease=allow python tools/features_check.py \
+        --scan datasette_paper --scan frontend/src --scan tests \
+        --lockstep frontend/src/lib/schema.ts,datasette_paper/pm_schema.py,datasette_paper/markdown.py,datasette_paper/markdown_parser.py
 
 # --- Tests ---
 

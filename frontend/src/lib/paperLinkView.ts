@@ -1,3 +1,4 @@
+// @feat paper-link: NodeView — resolve docId to title/state and render the inline link
 /**
  * NodeView for `paper_link`: an inline atom that renders a cross-document
  * link by its `docId` alone. The view subscribes to the per-connection

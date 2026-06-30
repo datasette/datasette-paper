@@ -23,6 +23,7 @@ from typing import List, Optional
 from .markdown import _flatten_text
 
 
+# @feat tables: walk doc, return [{name,header,rows,position}] for /tables endpoints
 def extract_tables(doc: dict) -> List[dict]:
     """Return every table in document order with header/rows flattened to strings."""
     out: List[dict] = []

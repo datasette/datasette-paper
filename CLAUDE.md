@@ -19,6 +19,25 @@ re-bootstrap), 400 = bad version.
 File-level docstrings cover most "what does this module do" questions —
 this doc only flags things you wouldn't find by reading any one file.
 
+## Finding feature code
+
+Named capabilities carry a greppable marker, so you don't have to crawl the
+tree to find them. To locate a feature end-to-end: read `FEATURES.md` (the
+registry — slug → one-line description + the file to start in), then
+`grep -rn "@feat <slug>"`. One grep returns every load-bearing site (schema
+mirrors, markdown serialize/parse, NodeViews, tests), each marker
+self-describing what that codepath does. The markers are the source of truth
+for *where* a feature lives; `FEATURES.md` for *what* it is.
+
+Adding or changing a feature: keep its `@feat <slug>: <what this does>`
+markers truthful (one per load-bearing site, ≥1 in a test) and add a
+`FEATURES.md` row. `just check-features` validates the two stay in sync and
+that schema features touch all four lock-step files (rule 1). The checker
+(`tools/features_check.py`) is project-agnostic — repo specifics live in the
+recipe's flags. NOTE: markers are plain comments, so put them in the host
+file's comment syntax — never inside a `db.executescript("""…""")` SQL string
+(use `--` there, or anchor on a real Python line outside the string).
+
 ## Cross-cutting load-bearing rules
 
 These each took a real bug to surface; tests cover them but they aren't
@@ -80,6 +99,7 @@ Run these (and fix anything they flag) before staging:
 ```
 just format-backend      # ruff format the backend
 just check-backend       # ruff check the backend
+just check-features      # @feat markers ↔ FEATURES.md in sync
 just verify-frontend     # vitest + svelte-check + tsc + eslint
 ```
 

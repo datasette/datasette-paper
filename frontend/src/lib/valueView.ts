@@ -26,6 +26,7 @@ import type { EditorView, NodeView } from "prosemirror-view";
 import { cellFor, type SourceStore, type SourceState } from "./sourceStore";
 import { formatValue, type ValueFormat, type ValueFormatKind } from "./formatValue";
 
+// @feat value: NodeView — subscribe to SourceStore, render live value/states
 export class ValueView implements NodeView {
   dom: HTMLSpanElement;
   private textNode: Text;

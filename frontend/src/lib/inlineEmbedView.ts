@@ -37,6 +37,7 @@ export function inlineEmbedLabel(status: Extract<DatasetteStatus, { status: "ok"
   return status.label;
 }
 
+// @feat inline-embed: NodeView — resolve ref to label/kind, render pill states
 export class InlineEmbedView implements NodeView {
   dom: HTMLAnchorElement;
   private ref: string | null;

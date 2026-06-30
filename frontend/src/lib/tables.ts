@@ -1,3 +1,4 @@
+// @feat tables: insertTable / findTable / setTableName / countOtherTablesWithName commands
 /**
  * Small wrappers around prosemirror-tables for the toolbar.
  *

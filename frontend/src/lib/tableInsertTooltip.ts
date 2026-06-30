@@ -1,3 +1,4 @@
+// @feat tables: Plugin.view — in-table row/col/delete controls + name input
 /**
  * Floating table-controls tooltip — appears when the cursor is inside
  * a `table` node, anchored centered above the table. Hosts row/col +

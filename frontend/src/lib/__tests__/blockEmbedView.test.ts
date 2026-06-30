@@ -1,3 +1,4 @@
+// @feat block-embed: tests block render modes built from native Datasette JSON
 /**
  * NodeView tests for block_embed: renders table / row / database / denied /
  * not_found, building each from a NATIVE Datasette `.json` response, with all

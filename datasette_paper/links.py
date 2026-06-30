@@ -6,6 +6,7 @@ repeats), so the write-tail reindex can collapse them to per-dst counts.
 """
 
 
+# @feat paper-link: extract outgoing [[id]] edges from the doc, for the write-tail reindex
 def extract_links(doc: dict) -> list[int]:
     """Every paper_link target docId in document order (with repeats)."""
     out: list[int] = []

@@ -992,6 +992,7 @@ async def sweep_subscribers(datasette, request, doc_id: int):
     return Response.json({"revoked": revoked})
 
 
+# @feat permissions: Manager-only gate for owner ops (lock/archive/…)
 async def _ensure_owner(datasette, request, doc_id: int):
     """View-permission check, then escalate to manage-only.
 

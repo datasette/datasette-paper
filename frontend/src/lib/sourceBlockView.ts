@@ -31,6 +31,7 @@ export function normalizeSourceName(raw: string): string {
     .replace(/^_+|_+$/g, "");
 }
 
+// @feat source: NodeView — editable SQL card with name/db/collapse
 export class SourceBlockView implements NodeView {
   dom: HTMLDivElement;
   contentDOM: HTMLElement;

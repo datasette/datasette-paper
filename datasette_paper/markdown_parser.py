@@ -158,6 +158,7 @@ def _tokens_to_doc(tokens) -> dict:
 
         elif t == "bullet_list_open":
             if _has_class(tok, "contains-task-list"):
+                # @feat task-list: parse a contains-task-list <ul> into a task_list node
                 push({"type": "task_list", "content": []})
                 list_kind_stack.append("task_list")
             else:
@@ -237,6 +238,7 @@ def _tokens_to_doc(tokens) -> dict:
                     name = None
                 pending_table_name = name if isinstance(name, str) else None
                 continue
+            # @feat block-embed: parse paper-embed JSON fence back into block_embed atom
             if t == "fence" and info == "paper-embed":
                 try:
                     data = json.loads(text)
@@ -273,6 +275,7 @@ def _tokens_to_doc(tokens) -> dict:
             # query ("source") that inline `value` atoms reference by name.
             # The leading `source` token is the discriminator (checked before
             # the `sql` branch so neither shadows the other).
+            # @feat source: parse a source-prefixed fence back into a source node
             if t == "fence" and info.split()[:1] == ["source"]:
                 name = None
                 db = None
@@ -309,6 +312,7 @@ def _tokens_to_doc(tokens) -> dict:
                         db = token[len("db=") :] or None
                     elif token == "hidden":
                         hidden = True
+                # @feat sql-block: parse a ```sql db=NAME fence into a sql_block node
                 sql_block: dict = {
                     "type": "sql_block",
                     "attrs": {"db": db, "hidden": hidden},
@@ -323,6 +327,7 @@ def _tokens_to_doc(tokens) -> dict:
                 cb["content"].append({"type": "text", "text": text})
             append(cb)
 
+        # @feat tables: parse a GFM table open into a table node, consuming pending name
         elif t == "table_open":
             # Consume any name stashed by a preceding `paper-table` sidecar
             # fence; reset so it can't leak onto a later unnamed table.
@@ -588,8 +593,10 @@ def _paper_ref_to_node(kind: str, value: str) -> dict | None:
       kind is informational at parse time — the frontend re-derives the provider
       from ``ref_prefixes`` — so it isn't stored (the schema has no `kind` attr).
     """
+    # @feat mention: parse paper:/actor/ ref into a mention atom
     if kind == "actor":
         return {"type": "mention", "attrs": {"actorId": unquote(value)}}
+    # @feat tag: parse paper:/tag/ ref, normalize slug, build tag atom
     if kind == "tag":
         # Normalize through the same rule as typed / doc-level tags so a
         # hand-authored ref can't smuggle in a slug the editor could never
@@ -598,6 +605,7 @@ def _paper_ref_to_node(kind: str, value: str) -> dict | None:
         if tag is None:
             return None
         return {"type": "tag", "attrs": {"tag": tag}}
+    # @feat inline-embed: parse paper:/embed ref link back into inline_embed atom
     if kind == "embed":
         # value is "<provider-kind>/<ref-without-leading-slash>". Split once;
         # the entire remainder is the ref (it can contain raw slashes). The ref
@@ -680,6 +688,7 @@ def _split_text_nodes(nodes, regex, make_atom):
     return out
 
 
+# @feat paper-link: parse [[id]] markdown back into paper_link atoms
 def _split_paper_links(nodes: list[dict]) -> list[dict]:
     """Split `[[<int>]]` occurrences inside text nodes into `paper_link` atoms.
 
@@ -695,6 +704,7 @@ def _split_paper_links(nodes: list[dict]) -> list[dict]:
 
 
 # `${{source.column}}` — the leading `$` is what keeps this disjoint from the
+# @feat placeholder: (write-only) bare {{key}} is intentionally NOT parsed back
 # `placeholder` node's bare `{{key}}` (which markdown.py emits but never parses
 # back), so the two never collide. The source is always a bare `\w+` (names are
 # normalized to `[a-z0-9_]+`); the column is either a bare `\w+` OR a bracketed
@@ -743,6 +753,7 @@ def _decode_value_format(s):
     return None
 
 
+# @feat value: split ${{source.column}} text matches into value atoms
 def _split_sql_values(nodes: list[dict]) -> list[dict]:
     """Split `${{source.column}}` occurrences inside text nodes into `value`
     atoms. The `value` atom carries no marks.

@@ -32,6 +32,7 @@ async def _send_status(send, status: int, body: bytes) -> None:
     await send({"type": "http.response.body", "body": body, "more_body": False})
 
 
+# @feat collab-sse: raw-ASGI SSE route: backlog + live broadcast, 410/400/403
 async def sse_events(datasette, request, send, receive):
     """GET /-/paper/api/docs/<doc_id>/events — Server-Sent Events.
 
@@ -181,6 +182,7 @@ async def sse_events(datasette, request, send, receive):
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/presence$")
+# @feat presence: presence POST route over the same SSE channel
 async def post_presence(
     datasette, request, doc_id: str, body: Annotated[PresenceBody, Body()]
 ):
@@ -206,6 +208,7 @@ async def post_presence(
 
 
 @router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/events$")
+# @feat collab-sse: step submission route: Conflict/BadVersion/Gone → 409/400/410
 async def post_events(
     datasette, request, doc_id: str, body: Annotated[EventsBody, Body()]
 ):

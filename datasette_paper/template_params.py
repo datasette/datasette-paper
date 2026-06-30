@@ -113,6 +113,7 @@ def resolve_key(key: str, ctx: ResolverContext) -> str:
     return resolver(ctx)
 
 
+# @feat placeholder: walk doc, replace each placeholder node with resolved text
 def substitute_placeholders(doc_json: dict, ctx: ResolverContext) -> dict:
     """Walk *doc_json* and replace every placeholder node with text.
 

@@ -1,3 +1,4 @@
+# @feat paper-link: tests the write-tail edge reindex into _datasette_paper_link
 """Tests for the write-tail paper_link edge reindex.
 
 Every write funnels through ``Instance._persist_and_broadcast``, whose tail

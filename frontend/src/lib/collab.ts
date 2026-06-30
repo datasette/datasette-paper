@@ -771,6 +771,7 @@ function clipboardMarkdownParser(
  * State machine: start → loaded (streaming) → send → loaded
  *                                                   ↘ recover → loaded
  */
+// @feat collab-sse: client state machine: collab session lifecycle (start→send→recover)
 export class EditorConnection {
   private opts: ConnectionOpts;
   readonly report: Reporter;
@@ -1656,6 +1657,7 @@ export class EditorConnection {
             this._send();
           }
         }
+      // @feat collab-sse: 409 stale: reopen stream, deferred resend at new version
       } else if (resp.status === 409) {
         // Version conflict — reopen stream to catch up. Retry send on the
         // next animation frame: by then prior in-flight SSE broadcasts will

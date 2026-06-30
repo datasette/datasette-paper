@@ -160,6 +160,7 @@ class Instance:
         self._write_lock: asyncio.Lock = asyncio.Lock()
 
     @classmethod
+    # @feat snapshot-log: load latest snapshot + steps_after into the in-memory tail
     async def hydrate(cls, db: PaperDB, doc_id: int) -> "Instance":
         """Load instance state from the database."""
         snapshot = await db.select_latest_snapshot(doc_id=doc_id)
@@ -189,6 +190,7 @@ class Instance:
             steps_tail=steps_tail,
         )
 
+    # @feat snapshot-log: apply steps_tail over snapshot via prosemirror-py (cached)
     def materialize_live_doc(self) -> dict:
         """Return the live doc as a JSON dict (snapshot + applied steps_tail).
 
@@ -329,6 +331,7 @@ class Instance:
                 raise InvalidStepError(i, result.failed)
             doc = result.doc
 
+    # @feat collab-sse: server version check under write-lock: BadVersion/Conflict + validate
     async def add_events(
         self,
         version: int,
@@ -481,6 +484,7 @@ class Instance:
         except Exception:
             logger.exception("inline-tag reindex failed for doc %s", self.doc_id)
 
+    # @feat snapshot-log: write-tail reindex of derived rows off the materialized doc
     async def reindex_links(self) -> None:
         """Rebuild this doc's outgoing link edges from the live doc.
 
@@ -803,6 +807,7 @@ class Instance:
 
     # ── Presence ──────────────────────────────────────────────────────────────
 
+    # @feat presence: track per-subscriber cursor state + name fallback, broadcast
     def update_presence(
         self,
         client_id: int,
@@ -866,6 +871,7 @@ class Instance:
         for q in list(self.subscribers):
             q.put_nowait(payload)
 
+    # @feat snapshot-log: write periodic snapshot, prune folded steps, compact log
     async def record_client_doc(
         self,
         version: int,

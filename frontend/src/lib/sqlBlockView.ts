@@ -31,6 +31,7 @@ import { rowsToCsv, rowsToJson } from "./tableExport";
 const PAGE_SIZE_OPTIONS = [10, 25, 100];
 const DEFAULT_PAGE_SIZE = 10;
 
+// @feat sql-block: NodeView — editable SQL, per-viewer results, XSS discipline
 export class SqlBlockView implements NodeView {
   dom: HTMLDivElement;
   contentDOM: HTMLElement;

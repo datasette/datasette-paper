@@ -125,6 +125,7 @@ function recompute(
   };
 }
 
+// @feat mention: @-trigger autocomplete state machine + atom insertion
 export const mentionSuggestPlugin = new Plugin<MentionState>({
   key: mentionKey,
   state: {

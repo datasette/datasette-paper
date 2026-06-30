@@ -134,6 +134,7 @@ export function cellText(value: CellValue): string {
 }
 
 /** A ProseMirror command that inserts a `block_embed` block at the selection. */
+// @feat block-embed: insert command + native-JSON fetch helpers for block_embed
 export function insertDatasetteEmbed(ref: string, mode = "table"): Command {
   return (state, dispatch) => {
     const node = schema.nodes.block_embed.create({ ref, mode });

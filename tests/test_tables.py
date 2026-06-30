@@ -47,6 +47,7 @@ def _table(name=None, *rows):
 # ---------------------------------------------------------------------------
 
 
+# @feat tables: tests extract_tables header detection + /tables endpoints
 def test_extract_tables_picks_up_named_table_with_header_row():
     doc = _doc(
         _table(
