@@ -1,5 +1,59 @@
 # changelog
 
+## 0.0.2a4 (2026-07-01)
+
+A follow-on polish cycle for the data-aware features shipped in `0.0.2a3`:
+a right-hand **Sources / Links sidebar**, reworked edit-mode link handling,
+a cleaner listing page, and a batch of collab/backlink and editor-input bug
+fixes.
+
+### Features
+
+- **Sources / Links sidebar.** A right-hand sidebar surfaces the document's
+  `source` blocks (and its Links panel) alongside the editor, so named
+  queries are discoverable without scrolling the doc.
+- **Reworked edit-mode link UX.** In edit mode a click now opens a plain
+  link in a new tab; hovering shows an Edit dialog (URL + Open / Copy)
+  instead of the old inline behavior.
+- **Value popover can retarget its source.** The inline-value popover now
+  lets you switch which `source` a value references, not just which column.
+- **Split embed slash command.** The native Datasette embed slash command
+  is now two entries — one for tables, one for databases.
+- **Polished listing page** (issue
+  [#55](https://github.com/datasette/datasette-paper/issues/55)).
+
+### Bug fixes
+
+- Reindex inline `#tags` and links when a doc is created from markdown or a
+  template (previously only indexed on later edits).
+- Flush pending collab steps on `pagehide` so backlinks survive navigation,
+  and refresh the Links panel on tab focus/visibility.
+- Fix copy/paste degrading embed / wikilink atoms into plain links.
+- Fix `Cmd+Left` triggering browser Back on lines that start with a link.
+- Fix the `[[` wikilink popup Enter not committing inside lists.
+- Grow the `source` name input to fit its content.
+
+### Internal
+
+- Add `@feat` feature markers + a `FEATURES.md` registry across all
+  features (with a `just check-features` sync gate).
+
+### All changes
+
+- Add a right-hand sidebar for Sources (and Links) ([`c1c0d80`](https://github.com/datasette/datasette-paper/commit/c1c0d80))
+- Rework edit-mode link UX: click opens in new tab, hover Edit dialog ([`61adc09`](https://github.com/datasette/datasette-paper/commit/61adc09))
+- Let the value popover retarget its source, not just the column ([`ce398cb`](https://github.com/datasette/datasette-paper/commit/ce398cb))
+- Split the native Datasette embed slash command into table/database ([`b9662d0`](https://github.com/datasette/datasette-paper/commit/b9662d0))
+- Polish the listing page ([issue #55](https://github.com/datasette/datasette-paper/issues/55), [`cc4dd56`](https://github.com/datasette/datasette-paper/commit/cc4dd56))
+- Grow the source name input to fit its content ([`1444926`](https://github.com/datasette/datasette-paper/commit/1444926))
+- Reindex inline tags + links when creating a doc from markdown/template ([`4507148`](https://github.com/datasette/datasette-paper/commit/4507148))
+- Fix Cmd+Left triggering browser Back on lines starting with a link ([`73ce4cc`](https://github.com/datasette/datasette-paper/commit/73ce4cc))
+- Fix copy/paste degrading embed/wikilink atoms to plain links ([`277dbdb`](https://github.com/datasette/datasette-paper/commit/277dbdb))
+- Refresh LinksPanel backlinks on tab focus/visibility ([`81df84c`](https://github.com/datasette/datasette-paper/commit/81df84c))
+- Flush pending collab steps on pagehide so backlinks survive navigation ([`452cc91`](https://github.com/datasette/datasette-paper/commit/452cc91))
+- Fix `[[` popup Enter not committing inside lists ([`2c15153`](https://github.com/datasette/datasette-paper/commit/2c15153))
+- Add @feat feature markers + FEATURES.md registry across all features ([`f9ebca7`](https://github.com/datasette/datasette-paper/commit/f9ebca7))
+
 ## 0.0.2a3 (2026-06-29)
 
 This cycle turns paper from a collaborative rich-text editor into a
