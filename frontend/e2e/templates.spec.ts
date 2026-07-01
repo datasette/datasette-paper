@@ -54,15 +54,15 @@ test("New paper form lets you pick a template", async ({ page }) => {
 
   await page.goto("/-/paper/");
 
-  // The template-picker <select> renders with a "Blank" option plus
-  // one for every template the actor can see. Scope to #app-root: the
-  // datasette-debug-bar plugin (pulled in via the acl deps) injects its
-  // own "act as" <select>, so a bare locator("select") is ambiguous.
+  // The template-picker <select> renders with a "No template" option
+  // plus one for every template the actor can see. Scope to #app-root:
+  // the datasette-debug-bar plugin (pulled in via the acl deps) injects
+  // its own "act as" <select>, so a bare locator("select") is ambiguous.
   const select = page.locator("#app-root select");
   await expect(select).toBeVisible();
   // Wait for the template-list fetch to populate the dropdown.
   await expect(select.locator("option")).toContainText([
-    "Blank",
+    "No template",
     `From: ${tmpl.name}`,
   ]);
 });
@@ -99,7 +99,7 @@ test("creating a paper from a template clones the content", async ({ page }) => 
 
 test("blank create still produces an empty doc", async ({ page }) => {
   await page.goto("/-/paper/");
-  // Default option is "Blank"; type a name and submit.
+  // Default option is "No template"; type a name and submit.
   await page.getByPlaceholder("Paper name").fill("Untouched blank");
   await page.getByRole("button", { name: "New paper", exact: true }).click();
 

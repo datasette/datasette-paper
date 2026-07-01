@@ -38,6 +38,52 @@
 
   type IndexTab = DocState | "templates";
 
+  // Per-tab presentation: the tab-bar label, the URL hash slug that
+  // deep-links to it (#active/#archive/#trash/#templates), a short
+  // tooltip on the tab button, and a one-line description shown above
+  // the listing while the tab is selected.
+  const TAB_META: Record<
+    IndexTab,
+    { label: string; hash: string; title: string; description: string }
+  > = {
+    active: {
+      label: "Active",
+      hash: "active",
+      title: "Papers you're currently working on",
+      description: "Papers you're currently working on.",
+    },
+    archived: {
+      label: "Archive",
+      hash: "archive",
+      title: "Papers you've archived — hidden from Active but kept",
+      description:
+        "Archived papers are hidden from Active but kept. Unarchive one to bring it back.",
+    },
+    trashed: {
+      label: "Trash",
+      hash: "trash",
+      title: "Papers you've trashed — restore within 7 days",
+      description:
+        "Trashed papers are scheduled to be deleted 7 days after they were trashed. Restore one to recover it.",
+    },
+    templates: {
+      label: "Templates",
+      hash: "templates",
+      title: "Reusable starting points for new papers",
+      description:
+        "Templates are reusable starting points. Pick one in “New paper” to copy its contents.",
+    },
+  };
+
+  const TAB_ORDER: IndexTab[] = ["active", "archived", "trashed", "templates"];
+
+  // Reverse lookup: URL hash slug → tab. Built from TAB_META so the two
+  // never drift.
+  function tabFromHash(): IndexTab | null {
+    const slug = window.location.hash.replace(/^#/, "");
+    return TAB_ORDER.find((t) => TAB_META[t].hash === slug) ?? null;
+  }
+
   let tab = $state<IndexTab>("active");
   let loading = $state(false);
   let error = $state<string | null>(null);
@@ -150,6 +196,11 @@
 
   function selectTab(target: IndexTab): void {
     tab = target;
+    // Reflect the active tab in the URL hash so it's deep-linkable and
+    // survives reload / back-forward. Assigning the same value is a
+    // no-op and won't refire hashchange.
+    const slug = `#${TAB_META[target].hash}`;
+    if (window.location.hash !== slug) window.location.hash = slug;
     if (bucket(target) === null) void loadTab(target);
   }
 
@@ -168,6 +219,37 @@
     creating = false;
     if (err || !data) {
       error = "Failed to create paper";
+      return;
+    }
+    const created = data as unknown as DocRow;
+    window.location.href = `/-/paper/doc/${created.id}`;
+  }
+
+  // Sentinel option value for the "Create a template" action in the
+  // picker — chosen instead of a real template id.
+  const NEW_TEMPLATE = "__new_template__";
+
+  // Selecting "Create a template" in the picker: reset the select (it's
+  // an action, not a seed choice) and create a blank template, seeded
+  // with the typed name if there is one. Templates are just papers with
+  // kind='template', so this is one POST then a nav to the editor.
+  function onTemplatePick(): void {
+    if (newTemplateId !== NEW_TEMPLATE) return;
+    newTemplateId = "";
+    void createTemplate();
+  }
+
+  async function createTemplate(): Promise<void> {
+    if (creating) return;
+    creating = true;
+    error = null;
+    const name = newName.trim() || "Untitled template";
+    const { data, error: err } = await client.POST("/-/paper/api/docs", {
+      body: { name, kind: "template" } as never,
+    });
+    creating = false;
+    if (err || !data) {
+      error = "Failed to create template";
       return;
     }
     const created = data as unknown as DocRow;
@@ -278,7 +360,10 @@
     const target = Date.parse(deleteAt);
     if (Number.isNaN(target)) return "";
     const diffMs = target - nowTick;
-    if (diffMs <= 0) return "Deleting…";
+    // Past its retention window: due for deletion on the next cleanup
+    // sweep. Not "Deleting…" — that reads as an in-progress action, but
+    // the row just sits here until the sweep runs.
+    if (diffMs <= 0) return "Due for deletion";
     const days = Math.floor(diffMs / 86_400_000);
     if (days >= 1) return `Deletes in ${days} day${days === 1 ? "" : "s"}`;
     const hours = Math.floor(diffMs / 3_600_000);
@@ -364,14 +449,22 @@
     else pickerTemplates = templates;
   });
 
+  // Back/forward or a hand-edited hash switches tabs without a reload.
+  function onHashChange(): void {
+    const target = tabFromHash();
+    if (target && target !== tab) selectTab(target);
+  }
+
   onMount(() => {
-    selectTab("active");
+    selectTab(tabFromHash() ?? "active");
     void ensurePickerTemplates();
     void loadVocab();
+    window.addEventListener("hashchange", onHashChange);
     nowTimer = setInterval(() => {
       nowTick = Date.now();
     }, 60_000);
     return () => {
+      window.removeEventListener("hashchange", onHashChange);
       if (nowTimer) clearInterval(nowTimer);
     };
   });
@@ -385,6 +478,18 @@
   function toggleGraph(): void {
     showGraph = !showGraph;
   }
+  function closeGraph(): void {
+    showGraph = false;
+  }
+  // Dismiss the graph dialog on Escape while it's open.
+  $effect(() => {
+    if (!showGraph) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") showGraph = false;
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 </script>
 
 <div class="paper-index">
@@ -393,17 +498,41 @@
     <button
       type="button"
       class="graph-toggle"
+      aria-haspopup="dialog"
       aria-expanded={showGraph}
       onclick={toggleGraph}
     >
-      {showGraph ? "Hide graph" : "Graph"}
+      Graph
     </button>
   </div>
 
   {#if showGraph}
-    <section class="graph-panel">
-      <LinkGraph />
-    </section>
+    <!-- Backdrop closes on click outside the dialog; Escape is handled above. -->
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div
+      class="graph-backdrop"
+      onclick={(e) => {
+        if (e.target === e.currentTarget) closeGraph();
+      }}
+    >
+      <div
+        class="graph-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Link graph"
+      >
+        <div class="graph-dialog-header">
+          <h2>Link graph</h2>
+          <button
+            type="button"
+            class="graph-close"
+            aria-label="Close"
+            onclick={closeGraph}>×</button
+          >
+        </div>
+        <LinkGraph />
+      </div>
+    </div>
   {/if}
 
   {#if error}
@@ -420,15 +549,17 @@
     />
     <select
       bind:value={newTemplateId}
+      onchange={onTemplatePick}
       disabled={creating}
-      title="Start from a template, or blank"
+      title="Start from a template, or with no template"
     >
-      <option value="">Blank</option>
+      <option value="">No template</option>
       {#if pickerTemplates}
         {#each pickerTemplates as t (t.id)}
           <option value={String(t.id)}>From: {t.name}</option>
         {/each}
       {/if}
+      <option value={NEW_TEMPLATE}>＋ Create a template…</option>
     </select>
     <button type="submit" disabled={creating || !newName.trim()}>
       {creating ? "Creating…" : "New paper"}
@@ -436,43 +567,21 @@
   </form>
 
   <div class="tabs" role="tablist">
-    <button
-      type="button"
-      role="tab"
-      aria-selected={tab === "active"}
-      class:active={tab === "active"}
-      onclick={() => selectTab("active")}
-    >
-      {tabLabel("Active", active)}
-    </button>
-    <button
-      type="button"
-      role="tab"
-      aria-selected={tab === "archived"}
-      class:active={tab === "archived"}
-      onclick={() => selectTab("archived")}
-    >
-      {tabLabel("Archive", archived)}
-    </button>
-    <button
-      type="button"
-      role="tab"
-      aria-selected={tab === "trashed"}
-      class:active={tab === "trashed"}
-      onclick={() => selectTab("trashed")}
-    >
-      {tabLabel("Trash", trashed)}
-    </button>
-    <button
-      type="button"
-      role="tab"
-      aria-selected={tab === "templates"}
-      class:active={tab === "templates"}
-      onclick={() => selectTab("templates")}
-    >
-      {tabLabel("Templates", templates)}
-    </button>
+    {#each TAB_ORDER as t (t)}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={tab === t}
+        class:active={tab === t}
+        title={TAB_META[t].title}
+        onclick={() => selectTab(t)}
+      >
+        {tabLabel(TAB_META[t].label, bucket(t))}
+      </button>
+    {/each}
   </div>
+
+  <p class="tab-desc">{TAB_META[tab].description}</p>
 
   {#if vocab.length}
     <div class="tag-filter" role="group" aria-label="Filter by tag">
@@ -506,15 +615,18 @@
     {:else if tab === "trashed"}
       <p>Trash is empty.</p>
     {:else}
-      <p>No templates yet. Create one from the menu on any active paper.</p>
+      <p>
+        No templates yet. Pick “Create a template” in New paper, or use the
+        menu on any active paper.
+      </p>
     {/if}
   {:else}
     <table>
       <thead>
         <tr>
           <th>Name</th>
-          <th>Created by</th>
-          <th>Updated</th>
+          <th><span class="sr-only">Created by</span></th>
+          <th>Last updated</th>
           {#if tab === "trashed"}
             <th>Status</th>
           {/if}
@@ -548,7 +660,11 @@
                 </span>
               {/if}
             </td>
-            <td title={doc.created_by ?? ""}>
+            <td
+              class="col-creator"
+              data-label={doc.created_by ? "Created by" : undefined}
+              title={doc.created_by ?? ""}
+            >
               {#if doc.created_by}
                 <span class="creator">
                   {#if doc.created_by_avatar}
@@ -565,9 +681,13 @@
                 </span>
               {/if}
             </td>
-            <td title={doc.updated_at}>{relativeTime(doc.updated_at)}</td>
+            <td data-label="Last updated" title={doc.updated_at}
+              >{relativeTime(doc.updated_at)}</td
+            >
             {#if tab === "trashed"}
-              <td class="delete-at">{deletesInLabel(doc.delete_at)}</td>
+              <td class="delete-at" data-label="Status">
+                {deletesInLabel(doc.delete_at)}
+              </td>
             {/if}
             <td class="actions">
               {#if doc.is_owner}
@@ -823,12 +943,68 @@
   .graph-toggle:hover {
     background: #f0f3f6;
   }
-  .graph-panel {
-    margin: 1em 0;
-    padding: 12px;
-    border: 1px solid #e0e4e8;
-    border-radius: 6px;
-    background: #fafbfc;
+  .graph-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    padding: 16px;
+  }
+  .graph-dialog {
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
+    padding: 12px 16px 16px;
+    max-width: min(720px, 95vw);
+    max-height: 90vh;
+    overflow: auto;
+  }
+  .graph-dialog-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1em;
+    margin-bottom: 8px;
+  }
+  .graph-dialog-header h2 {
+    margin: 0;
+    font-size: 1.05em;
+    color: #1a1a1a;
+  }
+  .graph-close {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    color: #6a737d;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .graph-close:hover {
+    background: #f0f3f6;
+    color: #1a1a1a;
+  }
+  /* Visually hidden but available to assistive tech (kept for the
+   * headerless "Created by" column). */
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .tab-desc {
+    color: #6a737d;
+    font-size: 0.9em;
+    margin: 10px 0 0;
   }
   .error {
     background: #ffd6d6;
@@ -1029,5 +1205,67 @@
     border-radius: 50%;
     object-fit: cover;
     flex-shrink: 0;
+  }
+
+  /* ── Narrow viewports: collapse the table into stacked cards ──
+   * Each row becomes a bordered card; the column headers are hidden and
+   * each cell carries its label via a data-label ::before. The actions
+   * menu floats to the card's top-right. */
+  @media (max-width: 640px) {
+    .index-header {
+      flex-wrap: wrap;
+    }
+    form {
+      flex-wrap: wrap;
+    }
+    form input[type="text"],
+    form select {
+      flex: 1 1 100%;
+    }
+    .tabs {
+      flex-wrap: wrap;
+    }
+    table,
+    thead,
+    tbody,
+    tr,
+    td {
+      display: block;
+    }
+    thead {
+      /* Hide the header row visually; cells self-label below. */
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+    }
+    table {
+      margin-top: 0;
+    }
+    tbody tr {
+      position: relative;
+      border: 1px solid #e0e4e8;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-top: 12px;
+    }
+    tbody td {
+      border: none;
+      padding: 3px 0;
+    }
+    /* Cells with a data-label print "Label: " before their value. The
+     * Name cell has no label, so it reads as the card title. */
+    td[data-label]::before {
+      content: attr(data-label) ": ";
+      color: #6a737d;
+      font-size: 0.85em;
+    }
+    td.actions {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      padding: 0;
+    }
   }
 </style>
