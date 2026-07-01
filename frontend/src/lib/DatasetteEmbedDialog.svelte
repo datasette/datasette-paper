@@ -22,10 +22,15 @@
   let {
     open = $bindable(false),
     source = undefined,
+    filter = undefined,
     oninsert,
   }: {
     open?: boolean;
     source?: string;
+    // Restricts the core Datasette picker to one resource kind: "table" lists
+    // tables + views, "database" lists databases. Ignored for provider sources
+    // (they own their own search); undefined lists everything.
+    filter?: "table" | "database";
     oninsert: (ref: string, mode: string) => void;
   } = $props();
 
@@ -66,7 +71,20 @@
       ? `Insert ${sourceSpec.label}`
       : source
         ? `Insert ${sourceLabel}`
-        : "Insert Datasette embed",
+        : filter === "database"
+          ? "Embed a database"
+          : filter === "table"
+            ? "Embed a table"
+            : "Insert Datasette embed",
+  );
+
+  // Core-picker search placeholder, narrowed to the active kind filter.
+  const corePlaceholder = $derived(
+    filter === "database"
+      ? "Search databases…"
+      : filter === "table"
+        ? "Search tables, views…"
+        : "Search tables, views, databases…",
   );
 
   function reset() {
@@ -129,12 +147,22 @@
       return;
     }
     const hits = await searchResources(q, 20);
-    results = hits.map((h) => ({
-      ref: h.ref,
-      label: h.label,
-      kind: h.kind,
-      secondary: h.db,
-    }));
+    results = hits
+      .filter((h) => matchesFilter(h.kind))
+      .map((h) => ({
+        ref: h.ref,
+        label: h.label,
+        kind: h.kind,
+        secondary: h.db,
+      }));
+  }
+
+  // "table" keeps tables + views (both embed as a table); "database" keeps only
+  // databases; undefined keeps everything. Only the core picker is filtered.
+  function matchesFilter(kind: string): boolean {
+    if (!filter) return true;
+    if (filter === "database") return kind === "database";
+    return kind === "table" || kind === "view";
   }
 
   function onQueryInput() {
@@ -181,7 +209,7 @@
   <input
     class="ds-embed-search"
     type="text"
-    placeholder={sourceSpec ? `Search ${sourceSpec.label}…` : "Search tables, views, databases…"}
+    placeholder={sourceSpec ? `Search ${sourceSpec.label}…` : corePlaceholder}
     bind:value={query}
     oninput={onQueryInput}
   />

@@ -17,6 +17,7 @@
   import type { SourceStore } from "./sourceStore";
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
+  import type { EmbedKindFilter } from "./slashMenu";
   import CreatePageDialog from "./CreatePageDialog.svelte";
   import { insertImage } from "./image";
   import { insertDatasetteEmbed } from "./datasetteEmbed";
@@ -31,6 +32,9 @@
   // Which embed source the picker is scoped to: undefined = core Datasette,
   // otherwise a third-party provider source id.
   let embedSource = $state<string | undefined>(undefined);
+  // Restricts the core picker to one resource kind ("table" / "database"), set
+  // by the `/` menu's split embed commands; undefined = list everything.
+  let embedFilter = $state<EmbedKindFilter | undefined>(undefined);
   // Create-page dialog, driven by the `[[`-autocomplete's "Create … page"
   // row. `createResolver` bridges the imperative editor flow (which awaits a
   // doc id) to the declarative dialog: onCreatePage opens it and parks a
@@ -111,8 +115,9 @@
         onInsertImage: () => {
           imageDialogOpen = true;
         },
-        onInsertDatasetteEmbed: (sourceId) => {
+        onInsertDatasetteEmbed: (sourceId, filter) => {
           embedSource = sourceId;
+          embedFilter = filter;
           embedDialogOpen = true;
         },
         onCreatePage,
@@ -286,6 +291,7 @@
       onInsertImage={() => (imageDialogOpen = true)}
       onInsertEmbed={(sourceId) => {
         embedSource = sourceId;
+        embedFilter = undefined;
         embedDialogOpen = true;
       }}
     />
@@ -295,6 +301,7 @@
   <DatasetteEmbedDialog
     bind:open={embedDialogOpen}
     source={embedSource}
+    filter={embedFilter}
     oninsert={onEmbedInsert}
   />
   <CreatePageDialog

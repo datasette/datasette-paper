@@ -143,7 +143,8 @@ describe("section taxonomy (group tags)", () => {
     expect(byId.get("table")).toBe("media");
     expect(byId.get("image")).toBe("media");
     expect(byId.get("sql_block")).toBe("datasette");
-    expect(byId.get("block_embed")).toBe("datasette");
+    expect(byId.get("block_embed_table")).toBe("datasette");
+    expect(byId.get("block_embed_database")).toBe("datasette");
   });
 
   it("tags provider sources with the embeds group", () => {
@@ -236,9 +237,11 @@ describe("commitSlashSelection", () => {
   it("runs a dialog-backed command via its callback", () => {
     const openDatasetteEmbed = vi.fn();
     const cmds = buildSlashCommands({ openDatasetteEmbed });
-    const { view } = fakeView(stateWith([schema.node("paragraph")], 1, "/datasette", cmds));
+    // "/embed" matches the two native embed commands; index 0 = "Embed a table".
+    const { view } = fakeView(stateWith([schema.node("paragraph")], 1, "/embed", cmds));
     commitSlashSelection(cmds)(view.state, view.dispatch, view);
     expect(openDatasetteEmbed).toHaveBeenCalledTimes(1);
+    expect(openDatasetteEmbed).toHaveBeenCalledWith(undefined, "table");
   });
 
   it("inserts a table from the table command", () => {
@@ -284,6 +287,27 @@ describe("inline-value slash commands", () => {
     expect(filterSlashCommands(commands, state, "metric").some((c) => c.id === "value")).toBe(
       true,
     );
+  });
+});
+
+describe("datasette group ordering + native embed split", () => {
+  it("orders the datasette group: SQL, embed table, embed database, value, source", () => {
+    const ids = commands.filter((c) => c.group === "datasette").map((c) => c.id);
+    expect(ids).toEqual([
+      "sql_block",
+      "block_embed_table",
+      "block_embed_database",
+      "value",
+      "source",
+    ]);
+  });
+
+  it("Embed a database opens the core picker filtered to databases", () => {
+    const openDatasetteEmbed = vi.fn();
+    const cmds = buildSlashCommands({ openDatasetteEmbed });
+    const cmd = cmds.find((c) => c.id === "block_embed_database")!;
+    cmd.run({} as unknown as EditorView);
+    expect(openDatasetteEmbed).toHaveBeenCalledWith(undefined, "database");
   });
 });
 

@@ -119,3 +119,42 @@ export async function waitInlineValues(page) {
     { timeout: 10_000 },
   );
 }
+
+// Open the `/` slash menu in a guaranteed-empty top-level paragraph. The
+// slash-menu shots share one seeded doc, and typing "/" persists — so a doc may
+// already hold a leftover "/" from an earlier shot. Select-all + Backspace
+// clears it (a no-op on an already-empty doc) so the trigger fires cleanly.
+export async function openFreshSlashMenu(page) {
+  await page.locator(".ProseMirror").click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("/");
+  await page.locator(".pm-slash-menu").waitFor({ state: "visible", timeout: 10_000 });
+}
+
+// Move the `/` slash menu's keyboard highlight (ArrowDown) onto the item whose
+// label is `label`. The popup rebuilds its DOM on every editor update (cursor
+// reporter transactions fire periodically), each time re-scrolling the *active*
+// item into view — so directly setting scrollTop is wiped, but the persisted
+// active index is not. Highlighting a section's LAST item therefore keeps that
+// whole section framed at the bottom of the scrollable popup across re-renders,
+// which an element screenshot of `.pm-slash-menu` then captures stably.
+// DOM-checked (not a fixed press count) so it survives command-list changes.
+export async function highlightSlashItem(page, label) {
+  for (let i = 0; i < 50; i++) {
+    const active = await page
+      .locator(".pm-slash-item--active")
+      .textContent()
+      .catch(() => null);
+    if (active && active.trim() === label) {
+      // Let one more render settle the active-item scroll, then it's stable.
+      await page.locator(".pm-slash-item--active", { hasText: label }).waitFor({
+        state: "visible",
+        timeout: 5_000,
+      });
+      return;
+    }
+    await page.keyboard.press("ArrowDown");
+  }
+  throw new Error(`slash menu never highlighted "${label}"`);
+}

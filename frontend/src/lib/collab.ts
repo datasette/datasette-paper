@@ -88,6 +88,7 @@ import {
   slashMenuPopupPlugin,
   slashKeymap,
   type SlashCommand,
+  type EmbedKindFilter,
 } from "./slashMenu";
 import {
   cursorReporterPlugin,
@@ -202,11 +203,12 @@ export interface ConnectionOpts {
   onInsertImage?: () => void;
   /**
    * Open the embed picker dialog — invoked by the `/` slash menu's
-   * "Datasette embed" command and any third-party provider source commands
-   * (PaperApp-owned Svelte component). `sourceId` selects a provider source;
-   * omitted = the core Datasette source.
+   * "Embed a table" / "Embed a database" commands and any third-party provider
+   * source commands (PaperApp-owned Svelte component). `sourceId` selects a
+   * provider source; omitted = the core Datasette source. `filter` restricts the
+   * core picker to tables/views or databases.
    */
-  onInsertDatasetteEmbed?: (sourceId?: string) => void;
+  onInsertDatasetteEmbed?: (sourceId?: string, filter?: EmbedKindFilter) => void;
   /**
    * Create a new paper titled `title` from the `[[`-autocomplete's
    * "Create … page" row. The host owns the dialog + the
@@ -870,7 +872,8 @@ export class EditorConnection {
     this.sourceStore = new SourceStore();
     this.slashCommands = buildSlashCommands({
       openImageDialog: () => this.opts.onInsertImage?.(),
-      openDatasetteEmbed: (sourceId) => this.opts.onInsertDatasetteEmbed?.(sourceId),
+      openDatasetteEmbed: (sourceId, filter) =>
+        this.opts.onInsertDatasetteEmbed?.(sourceId, filter),
     });
     this.installNetworkListeners();
     this.start();

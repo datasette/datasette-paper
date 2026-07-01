@@ -387,38 +387,37 @@ export function slashMenuPopupPlugin(commands: SlashCommand[]): Plugin {
   });
 }
 
+/**
+ * Restricts the core embed picker to one resource kind. The `/` menu splits the
+ * native Datasette embed into two commands ("Embed a table" / "Embed a
+ * database") that pass this so the dialog only lists matching resources;
+ * omitted (toolbar dropdown, provider sources) lists everything.
+ */
+export type EmbedKindFilter = "table" | "database";
+
 export interface SlashCommandCallbacks {
   /** Open the image insert dialog (PaperApp-owned Svelte component). */
   openImageDialog?: () => void;
   /**
    * Open the embed picker dialog (PaperApp-owned). `sourceId` selects a
    * third-party provider source; omitted/undefined = the core Datasette source.
+   * `filter` restricts the core picker to tables/views or databases.
    */
-  openDatasetteEmbed?: (sourceId?: string) => void;
+  openDatasetteEmbed?: (sourceId?: string, filter?: EmbedKindFilter) => void;
 }
 
 /**
- * Map one shared `EmbedInsertSource` (embedProviders.ts) to its `/`-menu
- * command. The native Datasette source (id undefined) keeps its historical id
- * `block_embed` / keywords / `datasette` group; provider sources get an
- * `embed_source:<id>` id, the `embeds` group, and the `icon in TOOLBAR_ICONS`
- * fallback. The source *set* (native + providers, in order) is owned by
- * `embedInsertSources()`; only these slash-menu-specific fields live here.
+ * Map one third-party provider `EmbedInsertSource` (embedProviders.ts) to its
+ * `/`-menu command: an `embed_source:<id>` id, the `embeds` group, and the
+ * `icon in TOOLBAR_ICONS` fallback. The native Datasette embed is NOT routed
+ * through here — the `/` menu owns two dedicated table/database commands
+ * (buildSlashCommands, datasette group). Callers filter out the native
+ * `embedInsertSources()` entry (undefined id) before calling this.
  */
 function embedSlashCommand(
-  source: EmbedInsertSource,
+  source: EmbedInsertSource & { id: string },
   cb: SlashCommandCallbacks,
 ): SlashCommand {
-  if (source.id === undefined) {
-    return {
-      id: "block_embed",
-      label: source.label,
-      keywords: ["datasette", "table", "data", "embed", "database", "query"],
-      icon: source.icon && source.icon in TOOLBAR_ICONS ? source.icon : "database",
-      group: "datasette",
-      run: () => cb.openDatasetteEmbed?.(),
-    };
-  }
   const id = source.id;
   return {
     id: `embed_source:${id}`,
@@ -436,11 +435,11 @@ function embedSlashCommand(
  * without its bundle being loaded. Picking a source opens the dialog, which
  * lazy-injects that provider's bundle before searching (see embedProviders.ts /
  * DatasetteEmbedDialog). Drops the native first entry of `embedInsertSources()`
- * — the registry's hardcoded `block_embed` covers that.
+ * — the two dedicated table/database commands (buildSlashCommands) cover that.
  */
 export function providerSlashCommands(cb: SlashCommandCallbacks): SlashCommand[] {
   return embedInsertSources()
-    .filter((source) => source.id !== undefined)
+    .filter((source): source is EmbedInsertSource & { id: string } => source.id !== undefined)
     .map((source) => embedSlashCommand(source, cb));
 }
 
@@ -527,14 +526,24 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       // header <select> lets the user change it.
       run: runCommand(insertSqlBlock()),
     },
+    // The native Datasette embed, split into two picker entries — each opens the
+    // shared dialog filtered to its resource kind. Provider sources still come
+    // from the `providerSlashCommands` spread below (embeds group).
     {
-      id: "source",
-      label: "Data source",
-      keywords: ["source", "sql", "query", "value", "metric", "data", "inline"],
+      id: "block_embed_table",
+      label: "Embed a table",
+      keywords: ["datasette", "table", "view", "data", "embed", "query"],
+      icon: "table",
+      group: "datasette",
+      run: () => cb.openDatasetteEmbed?.(undefined, "table"),
+    },
+    {
+      id: "block_embed_database",
+      label: "Embed a database",
+      keywords: ["datasette", "database", "db", "data", "embed"],
       icon: "database",
       group: "datasette",
-      // A named query that inline ${{name.column}} values reference.
-      run: runCommand(insertSource()),
+      run: () => cb.openDatasetteEmbed?.(undefined, "database"),
     },
     {
       id: "value",
@@ -547,6 +556,15 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
         view.dispatch(view.state.tr.insertText("${{"));
         view.focus();
       },
+    },
+    {
+      id: "source",
+      label: "Data source",
+      keywords: ["source", "sql", "query", "value", "metric", "data", "inline"],
+      icon: "database",
+      group: "datasette",
+      // A named query that inline ${{name.column}} values reference.
+      run: runCommand(insertSource()),
     },
     {
       id: "table",
@@ -591,9 +609,10 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       group: "media",
       run: () => cb.openImageDialog?.(),
     },
-    // Native Datasette + every provider source — same shared list the toolbar
-    // dropdown uses (embedInsertSources). The native entry is always first.
-    ...embedInsertSources().map((source) => embedSlashCommand(source, cb)),
+    // Every third-party provider source (embeds group). The native Datasette
+    // embed is handled by the two explicit datasette-group commands above, so
+    // this drops the native first entry of `embedInsertSources()`.
+    ...providerSlashCommands(cb),
   ];
   return commands;
 }
