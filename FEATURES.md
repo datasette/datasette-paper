@@ -29,3 +29,4 @@ this table and the markers in sync.
 | `presence` | Live cursors / presence riding the same SSE channel — selection reporting, remote-cursor decorations, self-filtered by clientID+actorID | `frontend/src/lib/cursors.ts` |
 | `permissions` | Per-doc access model — five actions resolved via datasette-acl, the bespoke `locked` read-only edit-deny, owner=Manager seeding, route gating (see docs/PERMISSIONS.md) | `datasette_paper/permissions.py` |
 | `snapshot-log` | Storage model — append-only step log + periodic snapshots; the live doc is materialized by replaying the steps_tail over the latest snapshot, with compaction | `datasette_paper/instance.py` |
+| `line-boundary` | Cmd/Home + Left/Right move the caret to the *visual* line start/end ourselves, so a line that begins with a link mark can't leak the keystroke to Chromium's Back shortcut | `frontend/src/lib/lineBoundary.ts` |

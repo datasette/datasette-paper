@@ -43,6 +43,7 @@ import {
   valueKeymap,
 } from "./valueSuggest";
 import { keymap } from "prosemirror-keymap";
+import { lineBoundaryKeymap } from "./lineBoundary";
 import { baseKeymap, toggleMark, chainCommands } from "prosemirror-commands";
 import { buildKeymap } from "prosemirror-example-setup";
 import {
@@ -1214,6 +1215,11 @@ export class EditorConnection {
           Delete: deleteRowOrColSelection(),
         }),
         keymap(buildKeymap(schema)),
+        // Own line-boundary motion (Cmd/Home + Left/Right). Chromium's native
+        // handling breaks when a line begins with a link mark and leaks the
+        // keystroke to the browser's Back shortcut; this consumes it. Ahead of
+        // baseKeymap (which binds none of these) for clarity.
+        keymap(lineBoundaryKeymap()),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({
