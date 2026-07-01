@@ -13,8 +13,11 @@
  *   error          → "error"        (.pm-value--error, title = message)
  *
  * Clicking the chip opens a small popover (anchored, outside-click teardown —
- * same open/close pattern as sqlBlockView's export menu) to edit the column +
- * `format`. Edits dispatch a `setNodeMarkup` so they flow through collab. The
+ * same open/close pattern as sqlBlockView's export menu) to retarget the chip
+ * (source + column) and set its `format`. Edits dispatch a `setNodeMarkup` so
+ * they flow through collab. Picking a different source repopulates the column
+ * list from that source's fetched columns (keeping the current column only if
+ * it still exists there). The
  * <select> rows commit on change; the free-text inputs (fallback / decimals /
  * currency) commit on blur or Enter — never per keystroke — so a multi-char
  * edit appends one collab step, not one per character (mirrors
@@ -128,7 +131,7 @@ export class ValueView implements NodeView {
     return true;
   }
 
-  // ── Popover (click-to-edit column + format) ────────────────────────────────
+  // ── Popover (click-to-edit source + column + format) ───────────────────────
 
   private onChipMouseDown = (e: MouseEvent): void => {
     // A click on the popover itself must not toggle it shut.
@@ -142,30 +145,57 @@ export class ValueView implements NodeView {
     const pop = document.createElement("div");
     pop.className = "pm-value-popover";
 
-    const state = this.source ? this.store.getState(this.source) : { status: "missing" as const };
-    const columns = state.status === "ok" ? state.columns : [];
-
-    // Column <select> — the source's columns, plus the current one if absent.
-    const colRow = this.field("Column");
-    const colSel = document.createElement("select");
-    colSel.className = "pm-value-popover-select";
-    const colNames = [...columns];
-    if (this.column && !colNames.includes(this.column)) colNames.unshift(this.column);
-    if (colNames.length === 0 && this.column == null) {
+    // Source <select> — every known source, plus the current one if absent.
+    const srcRow = this.field("Source");
+    const srcSel = document.createElement("select");
+    srcSel.className = "pm-value-popover-select";
+    const srcNames = this.store.sourceNames();
+    if (this.source && !srcNames.includes(this.source)) srcNames.unshift(this.source);
+    if (srcNames.length === 0) {
       const opt = document.createElement("option");
       opt.value = "";
-      opt.textContent = "(no columns)";
-      colSel.appendChild(opt);
+      opt.textContent = "(no sources)";
+      srcSel.appendChild(opt);
     }
-    for (const name of colNames) {
+    for (const name of srcNames) {
       const opt = document.createElement("option");
       opt.value = name;
-      opt.textContent = name; // DB-derived → text only
-      if (name === this.column) opt.selected = true;
-      colSel.appendChild(opt);
+      opt.textContent = name; // source names are user text → set as textContent
+      if (name === this.source) opt.selected = true;
+      srcSel.appendChild(opt);
     }
+    srcRow.appendChild(srcSel);
+    pop.appendChild(srcRow);
+
+    // Value <select> — the selected source's columns, plus the current one if
+    // absent. Rebuilt whenever the source changes (see the srcSel handler).
+    const colRow = this.field("Value");
+    const colSel = document.createElement("select");
+    colSel.className = "pm-value-popover-select";
     colRow.appendChild(colSel);
     pop.appendChild(colRow);
+
+    const populateColumns = (sourceName: string | null, selected: string | null): void => {
+      colSel.replaceChildren();
+      const st = sourceName ? this.store.getState(sourceName) : { status: "missing" as const };
+      const colNames = st.status === "ok" ? [...st.columns] : [];
+      if (selected && !colNames.includes(selected)) colNames.unshift(selected);
+      if (colNames.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "(no columns)";
+        colSel.appendChild(opt);
+        return;
+      }
+      for (const name of colNames) {
+        const opt = document.createElement("option");
+        opt.value = name;
+        opt.textContent = name; // DB-derived → text only
+        if (name === selected) opt.selected = true;
+        colSel.appendChild(opt);
+      }
+    };
+    populateColumns(this.source, this.column);
 
     // Format kind <select>.
     const kindRow = this.field("Format");
@@ -224,8 +254,9 @@ export class ValueView implements NodeView {
         // Raw kind but a custom fallback → keep it on a text format.
         format = { kind: "text", fallback: fbInput.value };
       }
+      const source = srcSel.value || null;
       const column = colSel.value || null;
-      this.commit(column, format);
+      this.commit(source, column, format);
     };
 
     // Free-text inputs commit on blur or Enter, never on every `input` event,
@@ -291,6 +322,21 @@ export class ValueView implements NodeView {
       }
     };
 
+    // Retargeting the source rebuilds the column list from that source's own
+    // columns, keeping the current column only if it survives the move (or the
+    // new source hasn't been fetched yet, so we can't tell). Then commit.
+    srcSel.addEventListener("change", () => {
+      const newSource = srcSel.value || null;
+      const st = newSource ? this.store.getState(newSource) : { status: "missing" as const };
+      let keep: string | null;
+      if (st.status === "ok") {
+        keep = this.column && st.columns.includes(this.column) ? this.column : (st.columns[0] ?? null);
+      } else {
+        keep = this.column; // not loaded — don't clobber the selection
+      }
+      populateColumns(newSource, keep);
+      apply();
+    });
     colSel.addEventListener("change", apply);
     kindSel.addEventListener("change", () => {
       renderOpts();
@@ -332,10 +378,10 @@ export class ValueView implements NodeView {
     if (e.key === "Escape") this.closePopover();
   };
 
-  private commit(column: string | null, format: ValueFormat): void {
+  private commit(source: string | null, column: string | null, format: ValueFormat): void {
     const pos = this.getPos();
     if (pos == null) return;
-    const attrs = { source: this.source, column, format };
+    const attrs = { source, column, format };
     this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, null, attrs));
   }
 

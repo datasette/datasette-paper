@@ -105,6 +105,12 @@ export class SourceStore {
     return this.defs.has(name) ? { status: "loading" } : { status: "missing" };
   }
 
+  /** Names of every `source` known from the last doc scan, sorted for a stable
+   *  dropdown order. Used by the value popover to let you retarget a chip. */
+  sourceNames(): string[] {
+    return [...this.defs.keys()].sort();
+  }
+
   private async run(name: string): Promise<void> {
     const def = this.defs.get(name);
     if (!def) return;

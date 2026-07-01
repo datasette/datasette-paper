@@ -13,13 +13,14 @@ import { ValueView } from "../valueView";
 import type { SourceStore, SourceState } from "../sourceStore";
 import type { ValueFormat } from "../formatValue";
 
-function fakeStore(state: SourceState): SourceStore {
+function fakeStore(state: SourceState, names: string[] = []): SourceStore {
   return {
     subscribe(_name: string, cb: (s: SourceState) => void) {
       cb(state);
       return () => {};
     },
     getState: () => state,
+    sourceNames: () => names,
     sync() {},
   } as unknown as SourceStore;
 }
@@ -131,16 +132,26 @@ describe("ValueView", () => {
     expect(view.dom.children.length).toBe(0);
   });
 
-  it("clicking the chip opens a popover with the source's columns + format kinds", () => {
-    const view = buildView({ source: "revenue", column: "total" }, okState(["total", "n"], [1, 2]));
+  it("clicking the chip opens a popover with source, column, and format-kind selects", () => {
+    const node = schema.nodes.value.create({ source: "revenue", column: "total" });
+    const view = new ValueView(
+      node,
+      {} as unknown as EditorView,
+      () => 0,
+      fakeStore(okState(["total", "n"], [1, 2]), ["expenses", "revenue"]),
+    );
     expect(view.dom.querySelector(".pm-value-popover")).toBeNull();
     view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     const pop = view.dom.querySelector(".pm-value-popover");
     expect(pop).not.toBeNull();
     const selects = pop!.querySelectorAll("select");
-    const colOpts = [...selects[0].options].map((o) => o.value);
+    // [0] source, [1] value/column, [2] format kind.
+    const srcOpts = [...selects[0].options].map((o) => o.value);
+    expect(srcOpts).toEqual(["expenses", "revenue"]);
+    expect(selects[0].value).toBe("revenue");
+    const colOpts = [...selects[1].options].map((o) => o.value);
     expect(colOpts).toEqual(["total", "n"]);
-    const kindOpts = [...selects[1].options].map((o) => o.value);
+    const kindOpts = [...selects[2].options].map((o) => o.value);
     expect(kindOpts).toEqual(["", "number", "currency", "percent", "date", "text"]);
     // A second click toggles it shut.
     view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
@@ -154,13 +165,42 @@ describe("ValueView", () => {
     const view = new ValueView(node, fakeView(dispatched), () => 3, fakeStore(okState(["total"], [1])));
     view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
     const pop = view.dom.querySelector(".pm-value-popover")!;
-    const kindSel = pop.querySelectorAll("select")[1];
+    const kindSel = pop.querySelectorAll("select")[2];
     kindSel.value = "currency";
     kindSel.dispatchEvent(new Event("change"));
     expect(dispatched).toHaveLength(1);
-    const attrs = (dispatched[0] as { attrs: { column: string; format: ValueFormat } }).attrs;
+    const attrs = (dispatched[0] as { attrs: { source: string; column: string; format: ValueFormat } })
+      .attrs;
+    expect(attrs.source).toBe("revenue");
     expect(attrs.column).toBe("total");
     expect(attrs.format).toEqual({ kind: "currency" });
+    view.destroy();
+  });
+
+  it("changing the source retargets the chip and rebuilds its column list", () => {
+    const dispatched: unknown[] = [];
+    const node = schema.nodes.value.create({ source: "revenue", column: "total", format: null });
+    // The fake store returns the SAME state for any source name; here that state
+    // carries the expenses columns, so retargeting should surface them.
+    const store = fakeStore(okState(["cost", "qty"], [9, 3]), ["expenses", "revenue"]);
+    const view = new ValueView(node, fakeView(dispatched), () => 3, store);
+    view.dom.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    const pop = view.dom.querySelector(".pm-value-popover")!;
+
+    const srcSel = pop.querySelectorAll("select")[0];
+    srcSel.value = "expenses";
+    srcSel.dispatchEvent(new Event("change"));
+
+    // Commits the new source, and the column snaps to the new source's first
+    // column since "total" isn't among them.
+    expect(dispatched).toHaveLength(1);
+    const attrs = (dispatched[0] as { attrs: { source: string; column: string } }).attrs;
+    expect(attrs.source).toBe("expenses");
+    expect(attrs.column).toBe("cost");
+
+    // The value <select> now lists the new source's columns.
+    const colOpts = [...pop.querySelectorAll("select")[1].options].map((o) => o.value);
+    expect(colOpts).toEqual(["cost", "qty"]);
     view.destroy();
   });
 
@@ -173,7 +213,7 @@ describe("ValueView", () => {
 
     // Choosing the currency kind commits once (a <select> change), and reveals
     // the currency text input.
-    const kindSel = pop.querySelectorAll("select")[1];
+    const kindSel = pop.querySelectorAll("select")[2];
     kindSel.value = "currency";
     kindSel.dispatchEvent(new Event("change"));
     expect(dispatched).toHaveLength(1);
