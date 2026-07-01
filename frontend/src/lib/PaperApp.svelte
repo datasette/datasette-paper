@@ -13,8 +13,8 @@
   import type { ReporterState } from "./reporter";
   import Toolbar from "./Toolbar.svelte";
   import DocHeader from "./DocHeader.svelte";
-  import LinksPanel from "./LinksPanel.svelte";
-  import SourcesPanel from "./SourcesPanel.svelte";
+  import Sidebar from "./Sidebar.svelte";
+  import type { SourceStore } from "./sourceStore";
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
   import CreatePageDialog from "./CreatePageDialog.svelte";
@@ -44,6 +44,8 @@
   type StatusObj = { state: ReporterState; message: string };
   let status: StatusObj = $state({ state: "ok", message: "" });
   let view: EditorView | null = $state(null);
+  // Per-connection source store, surfaced to the Sources panel for value counts.
+  let sourceStore = $state<SourceStore | null>(null);
   let users = $state(0);
   let mode: "edit" | "view" = $state("edit");
   let permissions = $state<BootstrapPermissions | null>(null);
@@ -117,6 +119,7 @@
       },
       reporter,
     );
+    sourceStore = conn.getSourceStore();
 
     return () => {
       unsub?.();
@@ -238,6 +241,8 @@
 </script>
 
 <div class="datasette-paper-app" class:view-mode={mode === "view"}>
+  <div class="paper-layout">
+    <div class="paper-main">
   <DocHeader
     {docId}
     {users}
@@ -286,10 +291,6 @@
     />
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
-  <LinksPanel {docId} />
-  {#if canEdit && mode === "edit"}
-    <SourcesPanel {view} />
-  {/if}
   <ImageDialog bind:open={imageDialogOpen} oninsert={onImageInsert} />
   <DatasetteEmbedDialog
     bind:open={embedDialogOpen}
@@ -301,13 +302,35 @@
     initialTitle={createInitialTitle}
     onresult={onCreateResult}
   />
+    </div>
+    <Sidebar {view} {docId} {sourceStore} showSources={canEdit && mode === "edit"} />
+  </div>
 </div>
 
 <style>
   .datasette-paper-app {
+    /* ≥1400px: the column stays centred at 740px and the rail floats in the
+     * right gutter (Sidebar.svelte, fixed), so the editor never shifts. */
     max-width: 740px;
     margin: 0 auto;
     padding: 0 16px;
+  }
+  /* 800–1400px: not enough gutter to float the rail beside a centred column,
+   * so lay the editor and rail out side by side — the editor shares the row and
+   * shrinks. Below 800px the rail stacks under the document (Sidebar.svelte). */
+  @media (min-width: 800px) and (max-width: 1399.98px) {
+    .datasette-paper-app {
+      max-width: 1080px;
+    }
+    .paper-layout {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+    }
+    .paper-main {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
   }
   .status-banner {
     padding: 6px 10px;

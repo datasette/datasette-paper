@@ -1771,6 +1771,12 @@ export class EditorConnection {
     if (this.view) this.view.setProps({ editable: () => effective });
   }
 
+  /** The per-connection source store, so the Sources panel can read each
+   *  source's column count (deduped/cached — same runs that feed value chips). */
+  getSourceStore(): SourceStore {
+    return this.sourceStore;
+  }
+
   // ── Close ─────────────────────────────────────────────────────────────────
 
   /** Tear down cleanly. Idempotent. */

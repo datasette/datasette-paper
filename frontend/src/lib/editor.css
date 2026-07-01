@@ -812,6 +812,29 @@
 .editor-host .pm-source-card.is-collapsed .pm-source-card-code {
   display: none;
 }
+/* Collapsed = a compact pill: shrink to content, drop the code + probe rows,
+ * and fold the header into a single rounded chip. Editing happens in the
+ * sidebar Sources panel (or after expanding via "Show SQL"). */
+.editor-host .pm-source-card.is-collapsed {
+  width: fit-content;
+  max-width: 100%;
+  margin: 8px 0;
+  background: #f1f5f9;
+}
+.editor-host .pm-source-card.is-collapsed .pm-source-card-head {
+  border-bottom: none;
+  border-radius: 8px;
+  padding: 3px 8px;
+}
+.editor-host .pm-source-card.is-collapsed .pm-source-card-spacer {
+  display: none;
+}
+.editor-host .pm-source-card.is-collapsed .pm-source-card-probe {
+  display: none;
+}
+.editor-host .pm-source-card.is-collapsed .pm-source-card-toggle {
+  margin-left: 4px;
+}
 .editor-host .pm-source-card-probe {
   padding: 5px 10px;
   border-top: 1px solid #e2e8f0;

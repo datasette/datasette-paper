@@ -22,8 +22,7 @@ test.describe("inline sql values", () => {
 
     const app = page.locator("#app-root");
 
-    // Open the Sources panel and add a source.
-    await app.locator(".sources-panel-toggle").click();
+    // The Sources panel starts expanded in the right sidebar; add a source.
     await app.locator(".sources-panel-add").click();
     await app.locator(".sources-panel-field input").fill("vendors");
     await app.locator(".sources-panel-field select").selectOption(E2E_DB);

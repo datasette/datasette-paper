@@ -1,18 +1,16 @@
 import { defineShot } from "../defineShot.mjs";
 
-// The doc-level Sources panel (list + add/edit/delete + Test).
+// The Sources panel in the right sidebar (list + add/edit/delete + Test).
+// It starts expanded in the rail, so no toggle click is needed.
 export default defineShot({
   name: "sources-panel",
   order: 23,
   doc: "inlineValueId",
   prepare: async (page) => {
-    const toggle = page.locator(".sources-panel-toggle");
-    await toggle.waitFor({ state: "visible", timeout: 10_000 });
-    await toggle.click();
     await page.locator(".sources-panel-item").first().waitFor({
       state: "visible",
       timeout: 10_000,
     });
   },
-  capture: (page, file) => page.locator(".sources-panel").screenshot({ path: file }),
+  capture: (page, file) => page.locator(".paper-sidebar").screenshot({ path: file }),
 });

@@ -199,7 +199,8 @@
     color: #888;
   }
   .links-panel-body {
-    padding: 4px 0 8px;
+    /* Slight indent so the body reads as nested under the toggle header. */
+    padding: 4px 0 8px 10px;
   }
   .links-panel-state {
     color: #888;

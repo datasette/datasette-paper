@@ -100,12 +100,78 @@ describe("SourcesPanel", () => {
     expect(v.names()).toEqual(["net_revenue"]);
   });
 
-  it("Delete removes the source node", async () => {
+  it("Delete asks for confirmation before removing the source node", async () => {
     const v = makeView([sourceNode("revenue", "data", "q")]);
     render(SourcesPanel, { view: v.view });
     await open();
-    await fireEvent.click(screen.getByText("Delete"));
+    // Arming the trash icon shows a confirmation; nothing is deleted yet.
+    await fireEvent.click(screen.getByRole("button", { name: "Delete source" }));
+    expect(v.countSources()).toBe(1);
+    // Confirming removes it.
+    await fireEvent.click(screen.getByRole("button", { name: "Delete" }));
     expect(v.countSources()).toBe(0);
+  });
+
+  it("shows how many times each source is used", async () => {
+    const value = schema.nodes.value.create({
+      source: "revenue",
+      column: "total",
+      format: null,
+    });
+    const doc = schema.node("doc", null, [
+      sourceNode("revenue", "data", "select 1 as total"),
+      sourceNode("costs", "data", "select 2 as c"),
+      schema.node("paragraph", null, [value]),
+    ]);
+    const state = EditorState.create({ doc, schema });
+    const view = {
+      get state() {
+        return state;
+      },
+      dispatch() {},
+      focus() {},
+    } as unknown as EditorView;
+    render(SourcesPanel, { view });
+    await open();
+    // `revenue` is referenced once; `costs` by nothing.
+    expect(screen.getByText("Used 1 time")).toBeTruthy();
+    expect(screen.getByText("Not used")).toBeTruthy();
+  });
+
+  it("shows the column count from the store as 'N values, used N times'", async () => {
+    const value = schema.nodes.value.create({
+      source: "revenue",
+      column: "total",
+      format: null,
+    });
+    const doc = schema.node("doc", null, [
+      sourceNode("revenue", "data", "select 1 as total, 2 as n"),
+      schema.node("paragraph", null, [value]),
+    ]);
+    const state = EditorState.create({ doc, schema });
+    const view = {
+      get state() {
+        return state;
+      },
+      dispatch() {},
+      focus() {},
+    } as unknown as EditorView;
+    // Fake store: `revenue` resolves to two columns.
+    const sourceStore = {
+      subscribe(name: string, cb: (s: unknown) => void) {
+        cb(
+          name === "revenue"
+            ? { status: "ok", columns: ["total", "n"], row: [1, 2] }
+            : { status: "missing" },
+        );
+        return () => {};
+      },
+    } as unknown as import("../sourceStore").SourceStore;
+    render(SourcesPanel, { view, sourceStore });
+    await open();
+    await vi.waitFor(() =>
+      expect(screen.getByText("2 values, used 1 time")).toBeTruthy(),
+    );
   });
 
   it("Test runs the query and shows the probed columns", async () => {

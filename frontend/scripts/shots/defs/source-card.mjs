@@ -7,6 +7,9 @@ export default defineShot({
   doc: "inlineValueId",
   prepare: async (page) => {
     await page.locator(".pm-source-card").waitFor({ state: "visible", timeout: 10_000 });
+    // The card renders as a collapsed pill by default; expand it so the shot
+    // shows the full SQL editor + probe.
+    await page.locator(".pm-source-card-toggle").click();
     await page.waitForFunction(
       () => {
         const p = document.querySelector(".pm-source-card-probe");

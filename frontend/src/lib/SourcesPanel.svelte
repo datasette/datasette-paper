@@ -11,16 +11,31 @@
    * an inline expanding form rather than a separate <dialog> — simpler, and it
    * keeps the panel self-contained.
    */
+  import { untrack } from "svelte";
   import type { EditorView } from "prosemirror-view";
   import { schema } from "./schema";
   import { normalizeSourceName } from "./sourceBlockView";
   import { listQueryableDatabases, runSqlQuery, type SqlResult } from "./sqlQuery";
+  import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+  import type { SourceStore } from "./sourceStore";
 
-  let { view }: { view: EditorView | null } = $props();
+  // `initiallyOpen` lets a host (the right sidebar) expand the panel on mount;
+  // stacked inline it defaults collapsed. `sourceStore` (when provided) is the
+  // live source runner, read for each source's column count ("N values").
+  let {
+    view,
+    initiallyOpen = false,
+    sourceStore = null,
+  }: {
+    view: EditorView | null;
+    initiallyOpen?: boolean;
+    sourceStore?: SourceStore | null;
+  } = $props();
 
   type Row = { name: string | null; db: string | null; sql: string; pos: number };
 
-  let open = $state(false);
+  // Capture the host's initial preference once; toggling is local thereafter.
+  let open = $state(untrack(() => initiallyOpen));
   let dbs = $state<string[]>([]);
   let tick = $state(0);
 
@@ -68,6 +83,60 @@
     return Object.keys(counts).filter((n) => counts[n] > 1);
   });
 
+  // How many `value` atoms reference each source name, so a row can show
+  // "Used N times" (and flag unused sources). Walk the doc counting value
+  // nodes by their `source` attr.
+  const usage = $derived.by<Record<string, number>>(() => {
+    void tick;
+    const counts: Record<string, number> = {};
+    if (!view) return counts;
+    view.state.doc.descendants((node) => {
+      if (node.type.name === "value" && node.attrs.source) {
+        const name = String(node.attrs.source);
+        counts[name] = (counts[name] ?? 0) + 1;
+      }
+    });
+    return counts;
+  });
+
+  // Column counts per source ("N values"), fed live from the source store — the
+  // same deduped runs that resolve value chips, so no extra queries here. Keyed
+  // by name; absent until a source resolves (or when no store is wired).
+  let columnCounts = $state<Record<string, number>>({});
+  // Stable dependency: only re-subscribe when the *set* of names changes, not on
+  // every RAF tick (sources is rebuilt each frame).
+  const sourceNamesKey = $derived(
+    sources
+      .map((s) => s.name)
+      .filter((n): n is string => !!n)
+      .join("\n"),
+  );
+  $effect(() => {
+    const key = sourceNamesKey;
+    if (!sourceStore) return;
+    const names = key ? key.split("\n") : [];
+    const unsubs = names.map((name) =>
+      sourceStore.subscribe(name, (state) => {
+        columnCounts[name] = state.status === "ok" ? state.columns.length : 0;
+      }),
+    );
+    return () => unsubs.forEach((u) => u());
+  });
+
+  function isUnused(s: Row): boolean {
+    return (s.name ? (usage[s.name] ?? 0) : 0) === 0;
+  }
+
+  function usageLabel(s: Row): string {
+    const n = s.name ? (usage[s.name] ?? 0) : 0;
+    const usedPart = n === 0 ? "not used" : `used ${n} ${n === 1 ? "time" : "times"}`;
+    const cols = s.name && s.name in columnCounts ? columnCounts[s.name] : null;
+    // Without a known column count (no store / not resolved yet) show the
+    // stand-alone usage phrase; otherwise prefix "N values".
+    if (cols === null) return n === 0 ? "Not used" : `Used ${n} ${n === 1 ? "time" : "times"}`;
+    return `${cols} value${cols === 1 ? "" : "s"}, ${usedPart}`;
+  }
+
   // Inline editor state. `editingPos === null` while adding; a number while
   // editing an existing source; `undefined` when the form is closed.
   let editingPos = $state<number | null | undefined>(undefined);
@@ -76,6 +145,9 @@
   let draftSql = $state("");
   let probe = $state<SqlResult | null>(null);
   let probing = $state(false);
+  // Deleting is two-step: the trash icon arms a per-row confirmation (holds the
+  // source's pos) rather than deleting immediately.
+  let confirmDeletePos = $state<number | null>(null);
 
   function toggle(): void {
     open = !open;
@@ -87,6 +159,7 @@
     draftDb = dbs[0] ?? "";
     draftSql = "";
     probe = null;
+    confirmDeletePos = null;
   }
 
   function openEdit(s: Row): void {
@@ -95,6 +168,7 @@
     draftDb = s.db ?? "";
     draftSql = s.sql;
     probe = null;
+    confirmDeletePos = null;
   }
 
   function closeForm(): void {
@@ -138,19 +212,24 @@
       view.dispatch(state.tr.delete(s.pos, s.pos + node.nodeSize));
       view.focus();
     }
+    confirmDeletePos = null;
     if (editingPos === s.pos) closeForm();
   }
-
-  /** Drop a value chip at the cursor referencing this source's first column. */
-  async function insertValue(s: Row): Promise<void> {
-    if (!view || !s.name) return;
-    const result = await runSqlQuery(s.db ?? "", s.sql);
-    const column = result.status === "ok" ? (result.columns?.[0] ?? null) : null;
-    const node = schema.nodes.value.create({ source: s.name, column, format: null });
-    view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
-    view.focus();
-  }
 </script>
+
+{#snippet icon(name: ToolbarIconName)}
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+    {@html TOOLBAR_ICONS[name]}
+  </svg>
+{/snippet}
 
 <section class="sources-panel">
   <button
@@ -175,20 +254,47 @@
         <ul class="sources-panel-list">
           {#each sources as s (s.pos)}
             <li class="sources-panel-item">
-              <span class="sources-panel-name">
-                {s.name ?? "(unnamed)"}
-                {#if s.name && dupNames.includes(s.name)}
-                  <span class="sources-panel-warn" title="Duplicate source name">⚠</span>
-                {/if}
-              </span>
-              <span class="sources-panel-db">{s.db ?? "—"}</span>
-              <span class="sources-panel-actions">
-                <button type="button" onclick={() => insertValue(s)} disabled={!s.name}
-                  >Insert value</button
-                >
-                <button type="button" onclick={() => openEdit(s)}>Edit</button>
-                <button type="button" onclick={() => del(s)}>Delete</button>
-              </span>
+              <div class="sources-panel-item-head">
+                <span class="sources-panel-name" title={s.name ?? "(unnamed)"}>
+                  {s.name ?? "(unnamed)"}
+                  {#if s.name && dupNames.includes(s.name)}
+                    <span class="sources-panel-warn" title="Duplicate source name">⚠</span>
+                  {/if}
+                </span>
+                <span class="sources-panel-row-actions">
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label="Edit source"
+                    title="Edit source"
+                    onclick={() => openEdit(s)}>{@render icon("pencil")}</button
+                  >
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    aria-label="Delete source"
+                    title="Delete source"
+                    onclick={() => (confirmDeletePos = s.pos)}>{@render icon("trash3")}</button
+                  >
+                </span>
+              </div>
+              {#if s.db}
+                <a class="sources-panel-db" href={`/${encodeURIComponent(s.db)}`} title={`Open ${s.db} in Datasette`}>
+                  {@render icon("database")}<span>{s.db}</span>
+                </a>
+              {:else}
+                <span class="sources-panel-db is-none">{@render icon("database")}<span>—</span></span>
+              {/if}
+              <span class="sources-panel-usage" class:is-unused={isUnused(s)}
+                >{usageLabel(s)}</span
+              >
+              {#if confirmDeletePos === s.pos}
+                <div class="sources-panel-confirm">
+                  <span class="sources-panel-confirm-text">Delete this source?</span>
+                  <button type="button" onclick={() => (confirmDeletePos = null)}>Cancel</button>
+                  <button type="button" class="danger" onclick={() => del(s)}>Delete</button>
+                </div>
+              {/if}
             </li>
           {/each}
         </ul>
@@ -263,7 +369,8 @@
     color: #94a3b8;
   }
   .sources-panel-body {
-    padding: 6px 0 4px;
+    /* Slight indent so the body reads as nested under the toggle header. */
+    padding: 6px 0 4px 10px;
   }
   .sources-panel-none {
     color: #94a3b8;
@@ -276,30 +383,75 @@
   }
   .sources-panel-item {
     display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 5px 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+    padding: 8px 0;
     border-bottom: 1px solid #f1f5f9;
   }
+  /* Name row: title left, edit/delete icons floated right. */
+  .sources-panel-item-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
   .sources-panel-name {
+    flex: 1;
+    min-width: 0;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-weight: 500;
+    font-weight: 600;
+    font-size: 13px;
     color: #1e293b;
+    /* Title: never let a long source name blow out the panel width. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .sources-panel-warn {
     color: #b45309;
     cursor: help;
   }
-  .sources-panel-db {
-    color: #64748b;
-    font-size: 12px;
-  }
-  .sources-panel-actions {
-    margin-left: auto;
+  .sources-panel-row-actions {
+    flex-shrink: 0;
     display: flex;
-    gap: 4px;
+    gap: 2px;
   }
-  .sources-panel-actions button,
+  /* Database: icon + name, linking to the Datasette database page. */
+  .sources-panel-db {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    width: fit-content;
+    max-width: 100%;
+    font-size: 12px;
+    color: #0b5cad;
+    text-decoration: none;
+  }
+  .sources-panel-db > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  a.sources-panel-db:hover {
+    text-decoration: underline;
+  }
+  .sources-panel-db.is-none {
+    color: #94a3b8;
+  }
+  .sources-panel-db :global(svg) {
+    flex-shrink: 0;
+    opacity: 0.75;
+  }
+  /* "Used N times" on its own line after the database. */
+  .sources-panel-usage {
+    font-size: 12px;
+    color: #64748b;
+  }
+  .sources-panel-usage.is-unused {
+    color: #94a3b8;
+    font-style: italic;
+  }
+  .sources-panel-item button,
   .sources-panel-add,
   .sources-panel-form-actions button {
     border: 1px solid #cbd5e1;
@@ -310,9 +462,40 @@
     color: #334155;
     cursor: pointer;
   }
-  .sources-panel-actions button:disabled {
+  .sources-panel-item button:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+  /* Edit / Delete are square icon buttons. */
+  .sources-panel-item .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3px;
+    color: #475569;
+  }
+  .sources-panel-item .icon-btn:hover {
+    color: #1e293b;
+    background: #f1f5f9;
+  }
+  .sources-panel-confirm {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px;
+    margin-top: 2px;
+  }
+  .sources-panel-confirm-text {
+    font-size: 12px;
+    color: #b91c1c;
+  }
+  .sources-panel-item button.danger {
+    border-color: #dc2626;
+    background: #dc2626;
+    color: #fff;
+  }
+  .sources-panel-item button.danger:hover {
+    background: #b91c1c;
   }
   .sources-panel-add {
     margin-top: 8px;

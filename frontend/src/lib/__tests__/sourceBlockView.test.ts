@@ -102,12 +102,13 @@ describe("SourceBlockView", () => {
     expect((markup as { attrs: { name: string } }).attrs.name).toBe("net_revenue");
   });
 
-  it("collapse toggle hides the SQL editor", async () => {
+  it("renders collapsed as a pill by default; toggle expands the SQL editor", async () => {
     const { view } = await build({ name: "revenue" }, ok(["n"]));
     const toggle = view.dom.querySelector(".pm-source-card-toggle") as HTMLButtonElement;
-    expect(view.dom.classList.contains("is-collapsed")).toBe(false);
-    toggle.click();
+    // Defaults collapsed now that the sidebar Sources panel is the primary editor.
     expect(view.dom.classList.contains("is-collapsed")).toBe(true);
+    toggle.click();
+    expect(view.dom.classList.contains("is-collapsed")).toBe(false);
   });
 
   it("prompts to name an unnamed source", async () => {

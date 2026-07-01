@@ -11,8 +11,11 @@
  * no fetch of its own.
  *
  * `name` + `db` are node attrs (they collaborate); the SQL is content. Collapse
- * is a local presentation toggle (not persisted). XSS rule: every db-derived
- * string (probe columns, error text) enters the DOM as a text node only.
+ * is a local presentation toggle (not persisted) and defaults **on**: since the
+ * primary edit surface is now the right-sidebar Sources panel, the in-doc node
+ * renders as a compact pill (name + db) by default and expands to the full SQL
+ * editor on demand. XSS rule: every db-derived string (probe columns, error
+ * text) enters the DOM as a text node only.
  */
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView, ViewMutationRecord } from "prosemirror-view";
@@ -41,7 +44,9 @@ export class SourceBlockView implements NodeView {
   private nameInput!: HTMLInputElement;
   private dbSelect!: HTMLSelectElement;
   private toggleBtn!: HTMLButtonElement;
-  private collapsed = false;
+  // Default collapsed: the sidebar Sources panel is the primary editor, so the
+  // in-doc node reads as a pill until the reader expands it.
+  private collapsed = true;
   private unsubscribe: (() => void) | null = null;
 
   constructor(
