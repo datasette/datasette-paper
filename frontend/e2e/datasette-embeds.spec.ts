@@ -4,7 +4,7 @@
  * The webServer attaches a `data` database with a `vendors` table (30 rows),
  * so the embed NodeView resolves and renders real data. Covers:
  *   - the slash menu opens in an empty block and runs a command (Heading 1)
- *   - the "Datasette embed" command opens the picker, inserts an embed, and
+ *   - the "Embed a table" command (/embed) opens the picker, inserts an embed, and
  *     the embed renders a capped table — surviving a reload (proves the node
  *     persists `ref` only and the NodeView re-fetches on mount).
  *   - the ⋮ "Columns…" picker restricts the embed to a column subset (hiding
@@ -41,11 +41,13 @@ test.describe("slash menu + datasette embed", () => {
 
     const editor = page.locator(".ProseMirror");
     await editor.click();
-    await page.keyboard.type("/datasette");
+    await page.keyboard.type("/embed");
 
+    // The native embed is now two commands ("Embed a table" / "Embed a
+    // database"); pick the table one, which lists tables + views.
     const menu = page.locator(".pm-slash-menu");
     await expect(menu).toBeVisible({ timeout: 10000 });
-    await page.keyboard.press("Enter");
+    await menu.locator(".pm-slash-item", { hasText: "Embed a table" }).click();
 
     // The picker dialog opens; search for the vendors table and choose it.
     const dialog = page.locator(".ds-embed-dialog");
@@ -117,9 +119,10 @@ test.describe("slash menu + datasette embed", () => {
     // Insert a vendors embed via the slash-menu picker.
     const editor = page.locator(".ProseMirror");
     await editor.click();
-    await page.keyboard.type("/datasette");
-    await expect(page.locator(".pm-slash-menu")).toBeVisible({ timeout: 10000 });
-    await page.keyboard.press("Enter");
+    await page.keyboard.type("/embed");
+    const menu = page.locator(".pm-slash-menu");
+    await expect(menu).toBeVisible({ timeout: 10000 });
+    await menu.locator(".pm-slash-item", { hasText: "Embed a table" }).click();
     const dialog = page.locator(".ds-embed-dialog");
     await expect(dialog).toBeVisible({ timeout: 10000 });
     await dialog.locator(".ds-embed-search").fill("vendors");
