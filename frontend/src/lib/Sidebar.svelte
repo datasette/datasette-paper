@@ -4,14 +4,16 @@
    *
    * Each panel is a self-contained, self-collapsing component — the rail only
    * stacks them (with a divider between sections) and provides the card / sticky
-   * / scroll chrome. It holds Sources (edit-mode only, `showSources`) and Links
-   * (both modes). To add another panel, wrap it in a `.sidebar-section` below.
+   * / scroll chrome. It holds Authors (both modes; editable only for managers),
+   * Sources (edit-mode only, `showSources`) and Links (both modes). To add
+   * another panel, wrap it in a `.sidebar-section` below.
    *
    * ≥1400px it floats in the right gutter (fixed); 800–1400px it's a sticky rail
    * beside the editor; below 800px it stacks under the document (see the media
    * queries).
    */
   import type { EditorView } from "prosemirror-view";
+  import AuthorsPanel from "./AuthorsPanel.svelte";
   import SourcesPanel from "./SourcesPanel.svelte";
   import LinksPanel from "./LinksPanel.svelte";
   import type { SourceStore } from "./sourceStore";
@@ -21,15 +23,22 @@
     docId,
     sourceStore = null,
     showSources = false,
+    canManage = false,
   }: {
     view: EditorView | null;
     docId: string;
     sourceStore?: SourceStore | null;
     showSources?: boolean;
+    canManage?: boolean;
   } = $props();
 </script>
 
 <aside class="paper-sidebar" aria-label="Document panels">
+  <!-- The byline shows for every viewer; only its editor affordances are
+       gated on canManage (not on showSources / edit mode). -->
+  <div class="sidebar-section">
+    <AuthorsPanel {docId} {canManage} />
+  </div>
   {#if showSources}
     <div class="sidebar-section">
       <SourcesPanel {view} {sourceStore} initiallyOpen />
@@ -48,6 +57,7 @@
   }
   /* The panels carry their own top margin/rule (for standalone stacking); drop
    * it so the rail owns spacing and each section supplies its own divider. */
+  .paper-sidebar :global(.authors-panel),
   .paper-sidebar :global(.sources-panel),
   .paper-sidebar :global(.links-panel) {
     margin: 0;

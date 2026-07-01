@@ -92,6 +92,16 @@ class TagRef:
     occurrences: int
 
 
+@dataclass
+class ListAuthorsForDocRow:
+    actor_id: str
+
+
+@dataclass
+class NextAuthorPositionRow:
+    next_position: Any
+
+
 def insert_doc(
     conn: sqlite3.Connection,
     name: str,
@@ -663,3 +673,68 @@ ORDER BY d.updated_at DESC, d.id DESC;
     params = {"tag::text": tag, "viewable_json::text": viewable_json}
     cursor = conn.execute(sql, params)
     return [TagRef(*row) for row in cursor.fetchall()]
+
+
+def insert_doc_author(
+    conn: sqlite3.Connection,
+    doc_id: int,
+    actor_id: str,
+    position: int,
+    added_by: str | None,
+) -> None:
+    sql = """\
+INSERT OR IGNORE INTO _datasette_paper_doc_author (doc_id, actor_id, position, added_by)
+VALUES ($doc_id::integer, $actor_id::text, $position::integer, $added_by::text::);
+"""
+    params = {
+        "doc_id::integer": doc_id,
+        "actor_id::text": actor_id,
+        "position::integer": position,
+        "added_by::text::": added_by,
+    }
+    conn.execute(sql, params)
+    return None
+
+
+def delete_doc_author(conn: sqlite3.Connection, doc_id: int, actor_id: str) -> None:
+    sql = """\
+DELETE FROM _datasette_paper_doc_author
+WHERE doc_id = $doc_id::integer AND actor_id = $actor_id::text;
+"""
+    params = {"doc_id::integer": doc_id, "actor_id::text": actor_id}
+    conn.execute(sql, params)
+    return None
+
+
+def delete_authors_for_doc(conn: sqlite3.Connection, doc_id: int) -> None:
+    sql = "DELETE FROM _datasette_paper_doc_author WHERE doc_id = $doc_id::integer;"
+    params = {"doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def list_authors_for_doc(
+    conn: sqlite3.Connection, doc_id: int
+) -> list[ListAuthorsForDocRow]:
+    sql = """\
+SELECT actor_id
+FROM _datasette_paper_doc_author
+WHERE doc_id = $doc_id::integer
+ORDER BY position;
+"""
+    params = {"doc_id::integer": doc_id}
+    cursor = conn.execute(sql, params)
+    return [ListAuthorsForDocRow(*row) for row in cursor.fetchall()]
+
+
+def next_author_position(
+    conn: sqlite3.Connection, doc_id: int
+) -> list[NextAuthorPositionRow]:
+    sql = """\
+SELECT COALESCE(MAX(position), -1) + 1 AS next_position
+FROM _datasette_paper_doc_author
+WHERE doc_id = $doc_id::integer;
+"""
+    params = {"doc_id::integer": doc_id}
+    cursor = conn.execute(sql, params)
+    return [NextAuthorPositionRow(*row) for row in cursor.fetchall()]

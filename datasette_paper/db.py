@@ -346,6 +346,59 @@ class PaperDB:
         )
 
     # ------------------------------------------------------------------
+    # Document authors (the manager-curated byline)
+    # ------------------------------------------------------------------
+    # @feat authors: persistence for the ordered byline. add appends at
+    # max(position)+1 (removals may leave harmless gaps — order is always by
+    # position); replace renumbers densely. Eligibility (edit/manage access) is
+    # enforced in the route, not here — db.py only persists.
+
+    async def list_authors_for_doc(self, *, doc_id: int) -> list[str]:
+        rows = await self._exec(_queries.list_authors_for_doc, doc_id=doc_id)
+        return [r.actor_id for r in rows]
+
+    async def add_doc_author(
+        self, *, doc_id: int, actor_id: str, added_by: str | None
+    ) -> None:
+        # Append at the next slot, computed + inserted in one transaction so
+        # concurrent adds can't land on the same position.
+        def write(conn):
+            rows = _queries.next_author_position(conn, doc_id=doc_id)
+            position = rows[0].next_position
+            _queries.insert_doc_author(
+                conn,
+                doc_id=doc_id,
+                actor_id=actor_id,
+                position=position,
+                added_by=added_by,
+            )
+
+        await self.database.execute_write_fn(write)
+
+    async def remove_doc_author(self, *, doc_id: int, actor_id: str) -> None:
+        # Plain delete — leaving a position gap is fine (ORDER BY position),
+        # and it preserves the surviving rows' provenance. Absent id: no-op.
+        await self._exec(_queries.delete_doc_author, doc_id=doc_id, actor_id=actor_id)
+
+    async def set_doc_authors(
+        self, *, doc_id: int, actor_ids: list[str], added_by: str | None
+    ) -> None:
+        # Atomic replace: clear then re-insert densely in list order (mirror
+        # set_doc_tags). This is the reorder + set primitive.
+        def write(conn):
+            _queries.delete_authors_for_doc(conn, doc_id=doc_id)
+            for position, actor_id in enumerate(actor_ids):
+                _queries.insert_doc_author(
+                    conn,
+                    doc_id=doc_id,
+                    actor_id=actor_id,
+                    position=position,
+                    added_by=added_by,
+                )
+
+        await self.database.execute_write_fn(write)
+
+    # ------------------------------------------------------------------
     # State transitions (archive / trash)
     # ------------------------------------------------------------------
 
@@ -390,6 +443,7 @@ class PaperDB:
             # kept (see m005: resolve-time decides 'not found').
             _queries.delete_links_for_src(conn, src_doc_id=doc_id)
             _queries.delete_tags_for_doc(conn, doc_id=doc_id)
+            _queries.delete_authors_for_doc(conn, doc_id=doc_id)
             _queries.hard_delete_doc(conn, doc_id=doc_id)
 
         await self.database.execute_write_fn(write)

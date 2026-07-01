@@ -64,6 +64,32 @@ class ReplaceDocTagsBody(BaseModel):
         return v or []
 
 
+class AuthorBody(BaseModel):
+    """``{"actor_id": "..."}`` for the author add/remove endpoints.
+
+    ``Any`` so the handler owns the exact ``"invalid actor_id"`` 400 after
+    ``str().strip()`` (mirrors ``TagBody``).
+    """
+
+    actor_id: Any = None
+
+
+class ReplaceAuthorsBody(BaseModel):
+    """``{"authors": [...]}`` — full ordered byline replacement (reorder + set).
+
+    The handler dedupes preserving order and validates every id against the
+    eligible set (grandfathering already-credited authors). ``null`` → ``[]``
+    clears the byline.
+    """
+
+    authors: list[Any] = []
+
+    @field_validator("authors", mode="before")
+    @classmethod
+    def _none_to_empty(cls, v):
+        return v or []
+
+
 class CreateDocBody(BaseModel):
     """``POST /api/docs`` body.
 

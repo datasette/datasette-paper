@@ -66,6 +66,8 @@
   let canEdit = $derived(permissions?.canEdit ?? true);
   let isOwner = $derived(permissions?.isOwner ?? false);
   let locked = $derived(permissions?.locked ?? false);
+  // Managers curate the authors byline; everyone else sees it read-only.
+  let canManage = $derived(permissions?.canManage ?? false);
   let kind = $state<"doc" | "template">("doc");
   // Current actor id from the bootstrap, forwarded to the share dialog.
   let selfActor = $state<string | null>(null);
@@ -310,7 +312,13 @@
     onresult={onCreateResult}
   />
     </div>
-    <Sidebar {view} {docId} {sourceStore} showSources={canEdit && mode === "edit"} />
+    <Sidebar
+      {view}
+      {docId}
+      {sourceStore}
+      {canManage}
+      showSources={canEdit && mode === "edit"}
+    />
   </div>
 </div>
 

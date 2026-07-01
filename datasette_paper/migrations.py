@@ -635,3 +635,31 @@ def m007_inline_tag_index(db: Database):
             ON _datasette_paper_inline_tag(tag);
         """
     )
+
+
+@migrations()
+def m008_doc_authors(db: Database):
+    # @feat authors: append-only table backing the manager-curated byline —
+    # an ordered list of credited actors, document metadata (NOT doc content,
+    # so not in the schema lock-step). Mirrors _datasette_paper_doc_tag plus a
+    # `position` column because a byline is ordered, not a set.
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _datasette_paper_doc_author (
+            --! Ordered byline of actors credited on a doc. Manager-curated
+            --! metadata, distinct from created_by (one creator) and from acl
+            --! grants (who can access). An actor is credited at most once.
+            doc_id   INTEGER NOT NULL REFERENCES _datasette_paper_doc(id) ON DELETE CASCADE,
+            --- Credited actor id (opaque; no FK, like created_by / step.actor_id).
+            actor_id TEXT NOT NULL,
+            --- Byline order: dense, 0-based; rewritten wholesale on replace.
+            position INTEGER NOT NULL,
+            --- Provenance: the manager actor id who added the credit (nullable).
+            added_by TEXT,
+            added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            PRIMARY KEY (doc_id, actor_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_author_doc
+            ON _datasette_paper_doc_author(doc_id, position);
+        """
+    )
