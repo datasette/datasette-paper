@@ -5,6 +5,15 @@
 {% block body_class %}{{ body_class or "" }}{% endblock %}
 
 {% block extra_head %}
+{# @feat pwa: the <head> tags (manifest link, apple + theme-color meta) that
+   make every paper page installable/standalone. theme-color must stay in
+   lock-step with the manifest's theme_color (routes/docs.py:paper_manifest). #}
+<link rel="manifest" href="{{ urls.path('/-/paper/manifest.webmanifest') }}">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Papers">
+<link rel="apple-touch-icon" href="{{ urls.static_plugins('datasette_paper', 'icons/apple-touch-icon.png') }}">
 {{ datasette_paper_vite_entry(entrypoint) | safe }}
 <script type="application/json" id="pageData">{{ page_data | tojson }}</script>
 {% endblock %}
