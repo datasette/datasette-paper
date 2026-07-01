@@ -10,7 +10,23 @@
 import { describe, it, expect } from "vitest";
 import { TextSelection } from "prosemirror-state";
 import { EditorState } from "prosemirror-state";
+import { DOMParser as PMDOMParser, DOMSerializer } from "prosemirror-model";
 import { schema } from "../schema";
+
+/**
+ * Round-trip a node through the clipboard DOM: serialize with the schema's
+ * DOMSerializer (what `toDOM` produces on copy) then re-parse with the
+ * schema's DOMParser (what runs on HTML paste). Returns the first inline
+ * child of the resulting paragraph.
+ */
+function domRoundTrip(node: import("prosemirror-model").Node) {
+  const para = schema.node("paragraph", null, [node]);
+  const dom = DOMSerializer.fromSchema(schema).serializeNode(para) as HTMLElement;
+  const container = document.createElement("div");
+  container.appendChild(dom);
+  const parsed = PMDOMParser.fromSchema(schema).parse(container);
+  return parsed.firstChild!.firstChild!;
+}
 
 describe("placeholder node", () => {
   it("exists on the schema as an inline atom", () => {
@@ -91,6 +107,16 @@ describe("paper_link node", () => {
     expect(inserted.type.name).toBe("paper_link");
     expect(inserted.attrs.docId).toBe(7);
   });
+
+  // Same clipboard hazard as inline_embed: the `toDOM` <a data-paper-link
+  // href> must not be captured by the stock `link` mark's `a[href]` rule.
+  it("survives a clipboard DOM round-trip (not degraded to a link mark)", () => {
+    const node = schema.nodes.paper_link.create({ docId: 7 });
+    const back = domRoundTrip(node);
+    expect(back.type.name).toBe("paper_link");
+    expect(back.attrs.docId).toBe(7);
+    expect(back.marks.some((m) => m.type.name === "link")).toBe(false);
+  });
 });
 
 describe("inline_embed node", () => {
@@ -134,6 +160,17 @@ describe("inline_embed node", () => {
     const inserted = para.firstChild!;
     expect(inserted.type.name).toBe("inline_embed");
     expect(inserted.attrs.ref).toBe("/fixtures/facetable/1");
+  });
+
+  // Copy/paste inside the editor round-trips through the clipboard as HTML;
+  // the `toDOM` <a data-inline-embed href> must re-parse as an inline_embed
+  // and not be swallowed by the stock `link` mark's `a[href]` rule.
+  it("survives a clipboard DOM round-trip (not degraded to a link mark)", () => {
+    const node = schema.nodes.inline_embed.create({ ref: "/-/sample-embeds/playlists/summer-mix" });
+    const back = domRoundTrip(node);
+    expect(back.type.name).toBe("inline_embed");
+    expect(back.attrs.ref).toBe("/-/sample-embeds/playlists/summer-mix");
+    expect(back.marks.some((m) => m.type.name === "link")).toBe(false);
   });
 });
 

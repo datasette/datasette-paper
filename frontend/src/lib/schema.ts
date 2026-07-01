@@ -88,6 +88,10 @@ const paperLinkNode: NodeSpec = {
   attrs: { docId: { default: null } },
   parseDOM: [
     {
+      // Beat the stock `link` mark's `a[href]` rule (priority 50): our toDOM
+      // emits an href, and marks are matched before nodes at equal priority,
+      // so without this a copy/paste degrades this atom to a plain link.
+      priority: 60,
       tag: "a[data-paper-link]",
       getAttrs: (el) => {
         const docId = (el as HTMLElement).getAttribute("data-paper-link");
@@ -231,6 +235,10 @@ const inlineEmbedNode: NodeSpec = {
   attrs: { ref: { default: null } },
   parseDOM: [
     {
+      // Beat the stock `link` mark's `a[href]` rule (priority 50): our toDOM
+      // emits an href, and marks are matched before nodes at equal priority,
+      // so without this a copy/paste degrades this atom to a plain link.
+      priority: 60,
       tag: "a[data-inline-embed]",
       getAttrs: (el) => ({
         ref: (el as HTMLElement).getAttribute("data-inline-embed") || null,
