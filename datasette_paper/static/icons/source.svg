@@ -1,0 +1,20 @@
+<!--
+  Master art for the paper PWA icons. A white bootstrap `file-text-fill`
+  glyph on the brand colour (#276890, the same tint the datasette-sidebar
+  entry uses). The glyph occupies the central ~46% so it stays inside the
+  maskable "safe zone" (central 80%) — one master serves both the `any` and
+  `maskable` purposes.
+
+  Regenerate the PNGs (run from repo root):
+    cd datasette_paper/static/icons
+    rsvg-convert -w 512 -h 512 source.svg -o icon-512.png
+    rsvg-convert -w 512 -h 512 source.svg -o icon-maskable-512.png
+    rsvg-convert -w 192 -h 192 source.svg -o icon-192.png
+    rsvg-convert -w 180 -h 180 source.svg -o apple-touch-icon.png
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#276890"/>
+  <g transform="translate(138.25 138.25) scale(14.72)" fill="#ffffff">
+    <path d="M12 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2M5 4h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1m-.5 2.5A.5.5 0 0 1 5 6h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5M5 8h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1m0 2h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1"/>
+  </g>
+</svg>

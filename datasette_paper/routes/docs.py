@@ -1271,6 +1271,53 @@ async def paper_index_page(datasette, request):
     )
 
 
+@router.GET(r"^/-/paper/manifest\.webmanifest$")
+async def paper_manifest(datasette, request):
+    """Web app manifest for the installable paper PWA.
+
+    Served dynamically (not as a static file) so ``start_url`` / ``scope`` and
+    the icon URLs resolve through ``datasette.urls`` and stay correct under a
+    ``base_url`` sub-path deployment. Ungated — like the index shell it leaks
+    nothing actor-specific. ``scope`` = ``/-/paper/`` keeps the index, tag, and
+    doc pages all "in app" so navigating between papers stays standalone.
+    @feat pwa: the manifest that makes /-/paper/ installable to the home screen.
+    """
+
+    def icon(f):
+        return datasette.urls.static_plugins("datasette_paper", f"icons/{f}")
+
+    manifest = {
+        "name": "Papers",
+        "short_name": "Papers",
+        "start_url": datasette.urls.path("/-/paper/"),
+        "scope": datasette.urls.path("/-/paper/"),
+        "display": "standalone",
+        # Match the white index-page background; kept in lock-step with the
+        # theme-color <meta> in paper_base.html.
+        "background_color": "#ffffff",
+        "theme_color": "#ffffff",
+        "icons": [
+            {"src": icon("icon-192.png"), "sizes": "192x192", "type": "image/png"},
+            {"src": icon("icon-512.png"), "sizes": "512x512", "type": "image/png"},
+            {
+                "src": icon("icon-maskable-512.png"),
+                "sizes": "512x512",
+                "type": "image/png",
+                "purpose": "maskable",
+            },
+        ],
+    }
+    # Build the body ourselves and set the media type via `content_type=`.
+    # `Response.json(..., headers={"Content-Type": ...})` would *append* a
+    # second Content-Type header rather than override the kwarg default (see
+    # tests/CLAUDE.md), yielding a malformed comma-joined value.
+    return Response(
+        json.dumps(manifest),
+        content_type="application/manifest+json",
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
 @router.GET(r"^/-/paper/tag/(?P<tag>[^/]+)$")
 async def paper_tag_page(datasette, request, tag: str):
     """Inline-tag search results page for ``#tag``.
