@@ -622,6 +622,7 @@ async def create_doc(datasette, request, body: Annotated[CreateDocBody, Body()])
             snapshot_doc_json=json.dumps(materialized),
             snapshot_actor_id=actor_id(request),
         )
+        seeded_from_snapshot = True
     elif content is not None:
         # markdown_to_doc always returns a schema-valid doc (an empty/
         # whitespace body becomes a single blank paragraph), so we store it
@@ -634,12 +635,25 @@ async def create_doc(datasette, request, body: Annotated[CreateDocBody, Body()])
             snapshot_doc_json=json.dumps(doc_json),
             snapshot_actor_id=actor_id(request),
         )
+        seeded_from_snapshot = True
     else:
         doc = await db.insert_doc(
             name=name,
             created_by=actor_id(request),
             kind=kind,
         )
+        seeded_from_snapshot = False
+    # A snapshot-seeded doc (template or markdown) has body content that was
+    # written straight to the version-0 snapshot, never flowing through the
+    # instance write-tail where `reindex_tags` / `reindex_links` run. Its derived
+    # indexes would stay empty until the first edit, so `/tags/{slug}/refs` and
+    # backlinks wouldn't see it. Build them now off the fresh instance. (The
+    # empty `insert_doc` branch has no body, so nothing to index.)
+    if seeded_from_snapshot:
+        registry = get_registry(datasette)
+        instance = await registry.get(db, doc.id)
+        await instance.reindex_links()
+        await instance.reindex_tags()
     # Seed the owner's acl Manager grant so the creator can view/edit/manage
     # their new doc. No-op for anonymous creates (created_by is None).
     await seed_owner_manager_grant(datasette, doc.id, doc.created_by)

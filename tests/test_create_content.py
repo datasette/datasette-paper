@@ -107,3 +107,47 @@ async def test_create_empty_content_yields_blank_doc(ds):
     # trailing newline.
     md = await _document_markdown(ds, resp.json()["id"])
     assert md == "\n"
+
+
+@pytest.mark.asyncio
+async def test_create_from_markdown_indexes_inline_tags(ds):
+    """A markdown-seeded body flows straight into the version-0 snapshot,
+    bypassing the instance write-tail. Create must still rebuild the derived
+    `_datasette_paper_inline_tag` index, or `/tags/{slug}/refs` wouldn't see the
+    doc until its first edit (regression: the tag-search page listed nothing)."""
+    resp = await ds.client.post(
+        "/-/paper/api/docs",
+        json={
+            "name": "Tagged",
+            "content": "Filed under [#roadmap](paper:/tag/roadmap) twice: "
+            "[#roadmap](paper:/tag/roadmap).\n",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    doc_id = resp.json()["id"]
+
+    refs = await ds.client.get("/-/paper/api/tags/roadmap/refs")
+    assert refs.status_code == 200, refs.text
+    docs = refs.json()["docs"]
+    assert [d["id"] for d in docs] == [doc_id]
+    assert docs[0]["occurrences"] == 2
+
+
+@pytest.mark.asyncio
+async def test_create_from_markdown_indexes_links(ds):
+    """Same write-tail bypass for outgoing `[[id]]` edges: a markdown-seeded
+    doc must populate `_datasette_paper_link` so its target's backlinks list it
+    without a first edit."""
+    target = await ds.client.post("/-/paper/api/docs", json={"name": "Target"})
+    target_id = target.json()["id"]
+
+    src = await ds.client.post(
+        "/-/paper/api/docs",
+        json={"name": "Source", "content": f"See [[{target_id}]] for context.\n"},
+    )
+    assert src.status_code == 201, src.text
+    src_id = src.json()["id"]
+
+    back = await ds.client.get(f"/-/paper/api/docs/{target_id}/backlinks")
+    assert back.status_code == 200, back.text
+    assert [b["id"] for b in back.json()["backlinks"]] == [src_id]
