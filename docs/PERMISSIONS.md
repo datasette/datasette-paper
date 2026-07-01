@@ -494,6 +494,14 @@ anonymous-owned (`created_by` NULL) and `private` docs gain nothing — paper ne
 auto-opens a doc on upgrade. It bails gracefully once the legacy column/table
 have been dropped.
 
+> **Not to be confused with the authors backfill.** `m009_backfill_authors` (an
+> ordinary append-only schema step, *not* this acl backfill) is a separate
+> one-shot that credits each pre-feature doc's `created_by` as **author #0** in
+> `_datasette_paper_doc_author`, matching `seed_creator_author` for new docs.
+> Pure local SQL (no acl, so no marker table — `sqlite_migrate` runs it once);
+> non-anonymous only; skips any doc that already has a byline. Authorship is a
+> credit, not access — the backfill is unrelated to grants above.
+
 ---
 
 ## 11. Testing

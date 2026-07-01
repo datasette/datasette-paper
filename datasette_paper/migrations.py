@@ -663,3 +663,27 @@ def m008_doc_authors(db: Database):
             ON _datasette_paper_doc_author(doc_id, position);
         """
     )
+
+
+@migrations()
+def m009_backfill_authors(db: Database):
+    # @feat authors: backfill pre-feature docs — credit each existing doc's
+    # creator as author #0, matching seed_creator_author for new docs.
+    # Non-anonymous only; skip any doc that already has a byline (idempotent).
+    # added_at mirrors the doc's created_at so the credit reads as "since
+    # creation". Bypasses the route's eligibility check on purpose: this is a
+    # historical credit of the original creator, who may since have lost access
+    # (same grandfathering stance as the replace route). Marker lives on this
+    # Python line, never inside the SQL string (CLAUDE.md).
+    db.executescript(
+        """
+        INSERT INTO _datasette_paper_doc_author
+            (doc_id, actor_id, position, added_by, added_at)
+        SELECT d.id, d.created_by, 0, d.created_by, d.created_at
+        FROM _datasette_paper_doc d
+        WHERE d.created_by IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM _datasette_paper_doc_author a WHERE a.doc_id = d.id
+          );
+        """
+    )
