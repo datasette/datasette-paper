@@ -407,3 +407,46 @@ WHERE d.id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
   )
 ORDER BY d.updated_at DESC, d.id DESC;
+
+
+-- ============================================================================
+-- Document authors (the manager-curated byline). Ordered list of credited
+-- actors, document metadata distinct from created_by and from acl grants.
+-- Mutations are manage-gated in the route handler; who may be credited is
+-- constrained to edit/manage-access actors there too. `position` orders the
+-- byline: add appends at max+1 (so a remove may leave a harmless gap and keep
+-- provenance), replace renumbers densely from 0. insertDocAuthor is INSERT OR
+-- IGNORE so a duplicate (doc_id, actor_id) is a no-op.
+-- ============================================================================
+
+-- Append/insert one author row at an explicit position. OR IGNORE makes a
+-- duplicate (doc_id, actor_id) a no-op (the pair is the PK).
+-- name: insertDocAuthor
+INSERT OR IGNORE INTO _datasette_paper_doc_author (doc_id, actor_id, position, added_by)
+VALUES ($doc_id::integer, $actor_id::text, $position::integer, $added_by::text::);
+
+-- Remove one author from a doc. Deleting an absent actor affects 0 rows.
+-- name: deleteDocAuthor
+DELETE FROM _datasette_paper_doc_author
+WHERE doc_id = $doc_id::integer AND actor_id = $actor_id::text;
+
+-- Clear every author on a doc — the first half of set_doc_authors (replace)
+-- and the doc-hard-delete cascade helper.
+-- name: deleteAuthorsForDoc
+DELETE FROM _datasette_paper_doc_author WHERE doc_id = $doc_id::integer;
+
+-- The doc's byline, in order. Ordered actor ids (position implied by order).
+-- name: listAuthorsForDoc
+SELECT actor_id
+FROM _datasette_paper_doc_author
+WHERE doc_id = $doc_id::integer
+ORDER BY position;
+
+-- Next append slot: max(position)+1, or 0 for an empty byline. add appends
+-- here so removals may leave gaps without ever colliding — order is always by
+-- `position`, so gaps are harmless and provenance survives a remove. Only
+-- replace renumbers densely.
+-- name: nextAuthorPosition
+SELECT COALESCE(MAX(position), -1) + 1 AS next_position
+FROM _datasette_paper_doc_author
+WHERE doc_id = $doc_id::integer;

@@ -1975,6 +1975,123 @@
         }
       ],
       "result_class": "TagRef"
+    },
+    {
+      "name": "insertDocAuthor",
+      "result_type": "Void",
+      "sql": "INSERT OR IGNORE INTO _datasette_paper_doc_author (doc_id, actor_id, position, added_by)\nVALUES ($doc_id::integer, $actor_id::text, $position::integer, $added_by::text::);",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$actor_id::text",
+          "name": "actor_id",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$position::integer",
+          "name": "position",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$added_by::text::",
+          "name": "added_by",
+          "annotated_type": "text",
+          "nullable": true
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteDocAuthor",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_doc_author\nWHERE doc_id = $doc_id::integer AND actor_id = $actor_id::text;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$actor_id::text",
+          "name": "actor_id",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteAuthorsForDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_doc_author WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "listAuthorsForDoc",
+      "result_type": "Rows",
+      "sql": "SELECT actor_id\nFROM _datasette_paper_doc_author\nWHERE doc_id = $doc_id::integer\nORDER BY position;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "actor_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc_author",
+          "origin_column": "actor_id",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": null
+    },
+    {
+      "name": "nextAuthorPosition",
+      "result_type": "Rows",
+      "sql": "SELECT COALESCE(MAX(position), -1) + 1 AS next_position\nFROM _datasette_paper_doc_author\nWHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "next_position",
+          "origin_database": null,
+          "origin_table": null,
+          "origin_column": null,
+          "decltype": null,
+          "nullable": null
+        }
+      ],
+      "result_class": null
     }
   ]
 }

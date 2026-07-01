@@ -137,6 +137,25 @@ async def seed_owner_manager_grant(datasette, doc_id, created_by) -> None:
     )
 
 
+# @feat authors: seed the creator as author #0 on create
+async def seed_creator_author(datasette, doc_id, created_by) -> None:
+    """Credit the doc creator as the first author on create.
+
+    No-op for anonymous creates (``created_by`` falsy) — same rule as the owner
+    grant, so an anonymous doc has an empty byline. The creator is always a
+    Manager (via ``seed_owner_manager_grant``) and therefore always
+    authorship-eligible, so this can never violate the edit/manage-access
+    constraint enforced on the add/replace routes.
+    """
+    if not created_by:
+        return
+    from .util import paper_db
+
+    await paper_db(datasette).add_doc_author(
+        doc_id=doc_id, actor_id=str(created_by), added_by=str(created_by)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Per-action helpers used by route handlers
 # ---------------------------------------------------------------------------
@@ -259,3 +278,47 @@ async def can_paper_manage(datasette, actor, doc_id) -> bool:
         resource=PaperDocResource(doc_id),
         actor=actor,
     )
+
+
+# @feat authors: who may be credited — actors holding edit/manage access
+async def author_candidates(datasette, doc_id) -> tuple[set, bool]:
+    """Return (eligible_actor_ids, has_open_audience) for a doc's byline.
+
+    Eligible = actors holding ``paper-edit`` or ``paper-manage`` (the roles are
+    cumulative — Editor and Manager both carry ``paper-edit``). Read straight
+    from acl grants, filtered by action, mirroring :func:`named_viewers`.
+
+    Grant-based on purpose, **not** ``datasette.allowed``-based: the ``locked``
+    deny is a resolver-time rule not reflected in ``list_grants`` (see
+    ``permission_resources_sql``), so an editor stays authorship-eligible while
+    the doc is locked — a locked doc must not become un-authorable. Group
+    grants are expanded via ``acl_actor_groups``; public / dynamic-group
+    audiences are non-enumerable (you can't credit "everyone") and only flip
+    ``open_audience`` so the UI can hint at it.
+    """
+    from datasette_acl.grants import list_grants
+
+    grants = await list_grants(
+        datasette, PAPER_DOC_RESOURCE_TYPE, PAPER_DOCS_PARENT, str(doc_id)
+    )
+    eligible: set = set()
+    open_audience = False
+    db = datasette.get_internal_database()
+    for g in grants:
+        if PAPER_EDIT not in g["actions"]:
+            continue
+        if g["principal"] == "actor":
+            if g["actor_id"] is not None:
+                eligible.add(g["actor_id"])
+        elif g["principal"] == "group":
+            rows = await db.execute(
+                "SELECT actor_id FROM acl_actor_groups WHERE group_id = ?",
+                [g["group_id"]],
+            )
+            for r in rows.rows:
+                eligible.add(r["actor_id"])
+        else:
+            # Public audience (everyone / authenticated / anonymous): not
+            # enumerable as named actors.
+            open_audience = True
+    return eligible, open_audience

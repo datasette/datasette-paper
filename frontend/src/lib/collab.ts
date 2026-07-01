@@ -174,6 +174,13 @@ export interface ConnectionOpts {
    */
   onDocState?: (payload: DocStatePayload) => void;
   /**
+   * Called whenever the server broadcasts an ``authors-changed`` SSE event
+   * (a manager added / removed / reordered the byline). The payload-free
+   * event just signals "re-fetch the byline"; the AuthorsPanel re-reads
+   * ``GET …/authors`` so it resolves under its own ``profile_access``.
+   */
+  onAuthorsChanged?: () => void;
+  /**
    * Called once at bootstrap with the paper's ``kind``. Templates and
    * docs share the editor surface but the UI differs: templates show a
    * badge, surface the placeholder-insert affordance (slice 4), and
@@ -1526,6 +1533,13 @@ export class EditorConnection {
       }
     };
     es.addEventListener("state-changed", handleStateChanged as EventListener);
+
+    const handleAuthorsChanged = () => {
+      // Payload-free: the panel re-fetches so each viewer resolves the byline
+      // under their own profile_access.
+      this.opts.onAuthorsChanged?.();
+    };
+    es.addEventListener("authors-changed", handleAuthorsChanged);
 
     const handlePermissionsChanged = (evt: MessageEvent) => {
       // Server pushes ``{canEdit, locked}`` after a lock/unlock; merge

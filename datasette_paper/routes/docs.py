@@ -20,19 +20,23 @@ from ..permissions import (
     PAPER_EDIT,
     PAPER_MANAGE,
     PaperDocResource,
+    author_candidates,
     can_paper_manage,
     ensure_paper_create,
     ensure_paper_edit,
     ensure_paper_view,
     named_viewers,
+    seed_creator_author,
     seed_owner_manager_grant,
     viewable_doc_ids,
 )
 from ..schemas import (
     AppendDocBody,
+    AuthorBody,
     CreateDocBody,
     IdsBody,
     RenameDocBody,
+    ReplaceAuthorsBody,
     ReplaceDocTagsBody,
     TagBody,
 )
@@ -409,6 +413,171 @@ async def list_tags(datasette, request):
     return Response.json({"tags": [{"tag": t, "count": n} for t, n in rows]})
 
 
+# ---------------------------------------------------------------------------
+# Document authors (the manager-curated byline)
+#
+# @feat authors: an ordered list of credited actors — document metadata,
+# distinct from created_by and from acl grants. Reading rides paper-view;
+# mutations are manage-gated (via _ensure_owner) like tag mutations; who may be
+# credited is constrained to edit/manage-access actors (author_candidates).
+# The GET paths resolve names/avatars under the profile_access degrade.
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_authors(datasette, request, ids):
+    """Resolve ordered actor ids → ``[{id, name, avatar_url}]`` for a byline.
+
+    Name/avatar resolution is gated on ``profile_access`` and degrades to
+    id-as-name (never 403), mirroring ``mention_search`` / ``resolve_actors``.
+    Order is preserved (the caller passes byline order).
+    """
+    may_resolve = await datasette.allowed(action="profile_access", actor=request.actor)
+    profiles = await resolve_actor_profiles(datasette, ids) if may_resolve else {}
+    out = []
+    for aid in ids:
+        prof = profiles.get(aid) or {}
+        out.append(
+            {
+                "id": aid,
+                "name": prof.get("name") or aid,
+                "avatar_url": prof.get("avatar_url"),
+            }
+        )
+    return out
+
+
+async def _authors_response(datasette, request, doc_id: int):
+    """Standard ``{"authors": [...]}`` envelope — shared by GET + every mutation."""
+    ids = await paper_db(datasette).list_authors_for_doc(doc_id=doc_id)
+    return Response.json({"authors": await _resolve_authors(datasette, request, ids)})
+
+
+def _broadcast_authors_changed(datasette, doc_id: int) -> None:
+    """Notify live subscribers that the byline changed (no-op if none are hot).
+
+    Each client re-fetches ``GET …/authors`` so it resolves under its own
+    ``profile_access`` — the event carries no payload.
+    """
+    instance = get_registry(datasette)._instances.get(doc_id)
+    if instance is not None:
+        instance.broadcast_authors_changed()
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/authors$")
+async def list_doc_authors(datasette, request, doc_id: int):
+    """The doc's byline (ordered), resolved to names/avatars.
+
+    Requires ``paper-view`` — if you can see the doc you can see its credits.
+    → 200 ``{"authors": [{id, name, avatar_url}]}``.
+    """
+    await ensure_paper_view(datasette, request, doc_id)
+    return await _authors_response(datasette, request, doc_id)
+
+
+@router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/author-candidates$")
+async def list_author_candidates(datasette, request, doc_id: int):
+    """Actors eligible to be credited (edit/manage access) minus the current
+    byline, resolved for display. **Manager-only** — it discloses the editor
+    set, which a viewer must not learn. Optional ``?q=`` prefix filter.
+
+    → 200 ``{"results": [...], "open_audience": bool}``; 403 non-managers;
+    404 if the doc was deleted.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    q = (request.args.get("q") or "").strip().lower()
+    try:
+        limit = min(int(request.args.get("limit") or 20), 50)
+    except ValueError:
+        limit = 20
+    eligible, open_audience = await author_candidates(datasette, doc_id)
+    current = set(await paper_db(datasette).list_authors_for_doc(doc_id=doc_id))
+    results = await _resolve_authors(datasette, request, sorted(eligible - current))
+    if q:
+        results = [r for r in results if q in r["name"].lower() or q in r["id"].lower()]
+    results.sort(key=lambda r: (not r["name"].lower().startswith(q), r["name"].lower()))
+    return Response.json({"results": results[:limit], "open_audience": open_audience})
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/authors/add$")
+async def add_doc_author(
+    datasette, request, doc_id: int, body: Annotated[AuthorBody, Body()]
+):
+    """Add one author. Manager-only; the actor must currently hold
+    ``paper-edit``/``paper-manage``. Body ``{"actor_id": "..."}``; duplicate is
+    a no-op. → 200 ``{"authors": [...]}``; 400 empty/ineligible; 404 doc gone.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    aid = str(body.actor_id).strip() if body.actor_id is not None else ""
+    if not aid:
+        return Response.json({"error": "invalid actor_id"}, status=400)
+    eligible, _ = await author_candidates(datasette, doc_id)
+    if aid not in eligible:
+        return Response.json({"error": "not an eligible author"}, status=400)
+    await paper_db(datasette).add_doc_author(
+        doc_id=doc_id, actor_id=aid, added_by=actor_id(request)
+    )
+    _broadcast_authors_changed(datasette, doc_id)
+    return await _authors_response(datasette, request, doc_id)
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/authors/remove$")
+async def remove_doc_author(
+    datasette, request, doc_id: int, body: Annotated[AuthorBody, Body()]
+):
+    """Remove one author. Manager-only. Body ``{"actor_id": "..."}``; removing
+    an absent id is a no-op. → 200 ``{"authors": [...]}``; 400 empty; 404 gone.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    aid = str(body.actor_id).strip() if body.actor_id is not None else ""
+    if not aid:
+        return Response.json({"error": "invalid actor_id"}, status=400)
+    await paper_db(datasette).remove_doc_author(doc_id=doc_id, actor_id=aid)
+    _broadcast_authors_changed(datasette, doc_id)
+    return await _authors_response(datasette, request, doc_id)
+
+
+@router.POST(r"^/-/paper/api/docs/(?P<doc_id>\d+)/authors/replace$")
+async def replace_doc_authors(
+    datasette, request, doc_id: int, body: Annotated[ReplaceAuthorsBody, Body()]
+):
+    """Replace the whole ordered byline (reorder + set). Manager-only. Every id
+    must be eligible **or already credited** (grandfathering — a since-revoked
+    co-author can still be reordered). Body ``{"authors": [...]}``, deduped
+    preserving order; ``[]`` clears. → 200 ``{"authors": [...]}``; 400 if any
+    *new* id is ineligible; 404 if the doc was deleted.
+    """
+    doc = await _ensure_owner(datasette, request, doc_id)
+    if doc is None:
+        return Response.json({"error": "Document not found"}, status=404)
+    seen: set = set()
+    authors = []
+    for raw in body.authors:
+        aid = str(raw).strip()
+        if aid and aid not in seen:
+            seen.add(aid)
+            authors.append(aid)
+    eligible, _ = await author_candidates(datasette, doc_id)
+    current = set(await paper_db(datasette).list_authors_for_doc(doc_id=doc_id))
+    allowed = eligible | current  # grandfather already-credited authors
+    ineligible = [a for a in authors if a not in allowed]
+    if ineligible:
+        return Response.json(
+            {"error": "not an eligible author", "ineligible": ineligible},
+            status=400,
+        )
+    await paper_db(datasette).set_doc_authors(
+        doc_id=doc_id, actor_ids=authors, added_by=actor_id(request)
+    )
+    _broadcast_authors_changed(datasette, doc_id)
+    return await _authors_response(datasette, request, doc_id)
+
+
 @router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/links$")
 async def forward_links(datasette, request, doc_id: int):
     await ensure_paper_view(datasette, request, doc_id)
@@ -657,6 +826,8 @@ async def create_doc(datasette, request, body: Annotated[CreateDocBody, Body()])
     # Seed the owner's acl Manager grant so the creator can view/edit/manage
     # their new doc. No-op for anonymous creates (created_by is None).
     await seed_owner_manager_grant(datasette, doc.id, doc.created_by)
+    # @feat authors: seed the creator as author #0 (managers can change it).
+    await seed_creator_author(datasette, doc.id, doc.created_by)
     return Response.json(
         {
             "id": doc.id,

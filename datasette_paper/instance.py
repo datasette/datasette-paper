@@ -747,6 +747,21 @@ class Instance:
         for q in list(self.subscribers):
             q.put_nowait(msg)
 
+    # @feat authors: notify open clients that the byline changed
+    def broadcast_authors_changed(self) -> None:
+        """Push an ``authors-changed`` event to every subscriber.
+
+        The byline lives in the sidebar of every open client, so a manager's
+        add / remove / reorder should reach the others without a reload. The
+        event carries no payload — each client re-fetches ``GET …/authors`` so
+        it resolves names/avatars under *its own* ``profile_access``. The
+        stream is already ``paper-view``-gated at subscribe time (events.py),
+        so no extra check is needed to receive it.
+        """
+        msg = {"kind": "authors-changed"}
+        for q in list(self.subscribers):
+            q.put_nowait(msg)
+
     async def broadcast_permissions_changed(self, datasette, locked: bool) -> None:
         """Push a per-subscriber ``permissions-changed`` event after a lock flip.
 

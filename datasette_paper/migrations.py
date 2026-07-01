@@ -635,3 +635,55 @@ def m007_inline_tag_index(db: Database):
             ON _datasette_paper_inline_tag(tag);
         """
     )
+
+
+@migrations()
+def m008_doc_authors(db: Database):
+    # @feat authors: append-only table backing the manager-curated byline —
+    # an ordered list of credited actors, document metadata (NOT doc content,
+    # so not in the schema lock-step). Mirrors _datasette_paper_doc_tag plus a
+    # `position` column because a byline is ordered, not a set.
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _datasette_paper_doc_author (
+            --! Ordered byline of actors credited on a doc. Manager-curated
+            --! metadata, distinct from created_by (one creator) and from acl
+            --! grants (who can access). An actor is credited at most once.
+            doc_id   INTEGER NOT NULL REFERENCES _datasette_paper_doc(id) ON DELETE CASCADE,
+            --- Credited actor id (opaque; no FK, like created_by / step.actor_id).
+            actor_id TEXT NOT NULL,
+            --- Byline order: dense, 0-based; rewritten wholesale on replace.
+            position INTEGER NOT NULL,
+            --- Provenance: the manager actor id who added the credit (nullable).
+            added_by TEXT,
+            added_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+            PRIMARY KEY (doc_id, actor_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_doc_author_doc
+            ON _datasette_paper_doc_author(doc_id, position);
+        """
+    )
+
+
+@migrations()
+def m009_backfill_authors(db: Database):
+    # @feat authors: backfill pre-feature docs — credit each existing doc's
+    # creator as author #0, matching seed_creator_author for new docs.
+    # Non-anonymous only; skip any doc that already has a byline (idempotent).
+    # added_at mirrors the doc's created_at so the credit reads as "since
+    # creation". Bypasses the route's eligibility check on purpose: this is a
+    # historical credit of the original creator, who may since have lost access
+    # (same grandfathering stance as the replace route). Marker lives on this
+    # Python line, never inside the SQL string (CLAUDE.md).
+    db.executescript(
+        """
+        INSERT INTO _datasette_paper_doc_author
+            (doc_id, actor_id, position, added_by, added_at)
+        SELECT d.id, d.created_by, 0, d.created_by, d.created_at
+        FROM _datasette_paper_doc d
+        WHERE d.created_by IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM _datasette_paper_doc_author a WHERE a.doc_id = d.id
+          );
+        """
+    )

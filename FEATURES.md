@@ -30,3 +30,4 @@ this table and the markers in sync.
 | `permissions` | Per-doc access model — five actions resolved via datasette-acl, the bespoke `locked` read-only edit-deny, owner=Manager seeding, route gating (see docs/PERMISSIONS.md) | `datasette_paper/permissions.py` |
 | `snapshot-log` | Storage model — append-only step log + periodic snapshots; the live doc is materialized by replaying the steps_tail over the latest snapshot, with compaction | `datasette_paper/instance.py` |
 | `line-boundary` | Cmd/Home + Left/Right move the caret to the *visual* line start/end ourselves, so a line that begins with a link mark can't leak the keystroke to Chromium's Back shortcut | `frontend/src/lib/lineBoundary.ts` |
+| `authors` | Manager-curated, ordered byline of credited actors — document metadata (not doc content), distinct from `created_by`; creator seeded as author #0, mutations manage-gated, an author must hold edit/manage access | `frontend/src/lib/AuthorsPanel.svelte` |

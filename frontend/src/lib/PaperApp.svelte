@@ -66,6 +66,10 @@
   let canEdit = $derived(permissions?.canEdit ?? true);
   let isOwner = $derived(permissions?.isOwner ?? false);
   let locked = $derived(permissions?.locked ?? false);
+  // Managers curate the authors byline; everyone else sees it read-only.
+  let canManage = $derived(permissions?.canManage ?? false);
+  // Bumped on every `authors-changed` SSE event so the AuthorsPanel re-fetches.
+  let authorsTick = $state(0);
   let kind = $state<"doc" | "template">("doc");
   // Current actor id from the bootstrap, forwarded to the share dialog.
   let selfActor = $state<string | null>(null);
@@ -97,6 +101,9 @@
         },
         onDocState: (s) => {
           docState = s;
+        },
+        onAuthorsChanged: () => {
+          authorsTick += 1;
         },
         onKind: (k) => {
           kind = k;
@@ -257,6 +264,7 @@
     {locked}
     {kind}
     {selfActor}
+    {authorsTick}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />
@@ -310,7 +318,14 @@
     onresult={onCreateResult}
   />
     </div>
-    <Sidebar {view} {docId} {sourceStore} showSources={canEdit && mode === "edit"} />
+    <Sidebar
+      {view}
+      {docId}
+      {sourceStore}
+      {canManage}
+      {authorsTick}
+      showSources={canEdit && mode === "edit"}
+    />
   </div>
 </div>
 

@@ -6,7 +6,7 @@
 // `seed(ctx)` returns an `ids` object whose keys are referenced by shots via
 // the `doc:` field (or by name inside a `goto`/`prepare`). Keep that object's
 // shape stable — adding keys is fine, renaming/removing breaks shots.
-import { PAPER, ACTOR } from "./config.mjs";
+import { PAPER, BASE, ACTOR } from "./config.mjs";
 import { signActorCookie } from "./cookie.mjs";
 
 const RICH = `# Q3 Planning
@@ -162,6 +162,20 @@ const TOC =
   "### Data model\n\nThe core tables and how they relate.\n\n" +
   "## Deployment\n\nShipping changes safely to production.\n";
 
+// A short doc for the authors-byline shot. Kept separate from RICH so adding a
+// byline doesn't perturb the other shots' framing. Owned by ACTOR, with two
+// teammates granted edit access + credited as co-authors.
+const AUTHORS = `# Team retrospective
+
+What went well this quarter, what to improve, and the experiments we want to
+run next. Everyone credited in the byline contributed to the writeup.
+
+## Highlights
+
+- Shipped the collaborative editor
+- Cut median page-load time in half
+`;
+
 export async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -185,6 +199,32 @@ export async function seed(ctx) {
     });
     if (r.status() !== 200) {
       throw new Error(`tag "${id}" failed: ${r.status()} ${await r.text()}`);
+    }
+  };
+  // Grant an actor an acl Editor role (via datasette-acl's JSON API) so they
+  // become an author *candidate* — global-config edit isn't a grant. Sent as
+  // the owner, who holds Manager on their own doc.
+  const grantEditor = async (id, actorId, owner) => {
+    const r = await ctx.request.post(
+      `${BASE}/-/acl/api/resource/paper-doc/_paper/${id}/grant`,
+      {
+        data: { actor_id: actorId, role: "Editor" },
+        headers: { Cookie: `ds_actor=${signActorCookie(owner)}` },
+      },
+    );
+    if (!r.ok()) {
+      throw new Error(`grant "${actorId}" failed: ${r.status()} ${await r.text()}`);
+    }
+  };
+  // Credit an actor on the byline. Manager-gated; the actor must already hold
+  // edit/manage access (grant them first).
+  const addAuthor = async (id, actorId, owner) => {
+    const r = await ctx.request.post(`${PAPER}/api/docs/${id}/authors/add`, {
+      data: { actor_id: actorId },
+      headers: { Cookie: `ds_actor=${signActorCookie(owner)}` },
+    });
+    if (r.status() !== 200) {
+      throw new Error(`author "${actorId}" failed: ${r.status()} ${await r.text()}`);
     }
   };
   // List-page filler, created oldest-first so the rich doc sorts to the top.
@@ -221,8 +261,16 @@ export async function seed(ctx) {
   const sqlBlockHiddenId = await create("Q2 vendor report (hidden)", ACTOR, SQL_BLOCK_HIDDEN);
   const inlineValueId = await create("Vendor snapshot", ACTOR, INLINE_VALUE);
   const tocId = await create("Engineering handbook", ACTOR, TOC);
+  // Authors byline: ACTOR is auto-seeded as author #0; grant + credit two
+  // teammates so the byline reads "Alice Ada, Bob Babbage and Carol Shaw".
+  const authorsId = await create("Team retrospective", ACTOR, AUTHORS);
+  await grantEditor(authorsId, "bob", ACTOR);
+  await grantEditor(authorsId, "carol", ACTOR);
+  await addAuthor(authorsId, "bob", ACTOR);
+  await addAuthor(authorsId, "carol", ACTOR);
   return {
     richId,
+    authorsId,
     linkId,
     mentionId,
     inlineTagId,
