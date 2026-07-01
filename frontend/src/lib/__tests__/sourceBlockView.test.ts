@@ -111,6 +111,16 @@ describe("SourceBlockView", () => {
     expect(view.dom.classList.contains("is-collapsed")).toBe(false);
   });
 
+  it("grows the name input with its content so long names aren't clipped", async () => {
+    const { view } = await build({ name: "short" }, ok(["n"]));
+    const name = view.dom.querySelector(".pm-source-card-name") as HTMLInputElement;
+    const initial = name.size;
+    name.value = "entries_matching_transcript_search";
+    name.dispatchEvent(new Event("input"));
+    expect(name.size).toBeGreaterThan(initial);
+    expect(name.size).toBeGreaterThanOrEqual("entries_matching_transcript_search".length);
+  });
+
   it("prompts to name an unnamed source", async () => {
     const { view } = await build({ name: null }, { status: "missing" });
     const probe = view.dom.querySelector(".pm-source-card-probe")!;

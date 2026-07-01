@@ -98,8 +98,11 @@ export class SourceBlockView implements NodeView {
     this.nameInput.className = "pm-source-card-name";
     this.nameInput.placeholder = "name";
     this.nameInput.value = (this.node.attrs.name as string | null) ?? "";
-    // Commit on blur/Enter, never per-keystroke (focus-stealing; see
-    // frontend/CLAUDE.md note on the table name input).
+    this.syncNameWidth();
+    // Grow the field with its content as you type, but only *commit* the value
+    // on blur/Enter — never per-keystroke (focus-stealing; see frontend/CLAUDE.md
+    // note on the table name input).
+    this.nameInput.addEventListener("input", () => this.syncNameWidth());
     this.nameInput.addEventListener("blur", () => this.commitName());
     this.nameInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -144,9 +147,18 @@ export class SourceBlockView implements NodeView {
   private commitName(): void {
     const next = normalizeSourceName(this.nameInput.value);
     if (next !== this.nameInput.value) this.nameInput.value = next;
+    this.syncNameWidth();
     if (next !== ((this.node.attrs.name as string | null) ?? "")) {
       this.setAttr("name", next || null);
     }
+  }
+
+  /** Size the input to its content (or the placeholder when empty) so a long
+   *  source name isn't clipped. The `size` attr counts characters; the mono
+   *  font makes that a faithful width. `+1` leaves room for the caret. */
+  private syncNameWidth(): void {
+    const text = this.nameInput.value || this.nameInput.placeholder;
+    this.nameInput.size = Math.max(text.length + 1, 4);
   }
 
   private applyCollapsed(): void {
@@ -247,6 +259,7 @@ export class SourceBlockView implements NodeView {
     if (nameChanged) {
       if (document.activeElement !== this.nameInput) {
         this.nameInput.value = (node.attrs.name as string | null) ?? "";
+        this.syncNameWidth();
       }
       this.subscribeProbe();
     }

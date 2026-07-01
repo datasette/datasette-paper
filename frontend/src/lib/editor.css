@@ -772,7 +772,11 @@
   user-select: none;
 }
 .editor-host .pm-source-card-name {
-  width: 10ch;
+  /* Width is driven by the input's `size` attr (synced to content length in
+   * sourceBlockView.ts) so the name never gets clipped; box-sizing keeps the
+   * padding from adding phantom characters of width. */
+  box-sizing: content-box;
+  min-width: 3ch;
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   padding: 1px 5px;
