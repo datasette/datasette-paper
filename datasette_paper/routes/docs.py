@@ -452,6 +452,17 @@ async def _authors_response(datasette, request, doc_id: int):
     return Response.json({"authors": await _resolve_authors(datasette, request, ids)})
 
 
+def _broadcast_authors_changed(datasette, doc_id: int) -> None:
+    """Notify live subscribers that the byline changed (no-op if none are hot).
+
+    Each client re-fetches ``GET …/authors`` so it resolves under its own
+    ``profile_access`` — the event carries no payload.
+    """
+    instance = get_registry(datasette)._instances.get(doc_id)
+    if instance is not None:
+        instance.broadcast_authors_changed()
+
+
 @router.GET(r"^/-/paper/api/docs/(?P<doc_id>\d+)/authors$")
 async def list_doc_authors(datasette, request, doc_id: int):
     """The doc's byline (ordered), resolved to names/avatars.
@@ -509,6 +520,7 @@ async def add_doc_author(
     await paper_db(datasette).add_doc_author(
         doc_id=doc_id, actor_id=aid, added_by=actor_id(request)
     )
+    _broadcast_authors_changed(datasette, doc_id)
     return await _authors_response(datasette, request, doc_id)
 
 
@@ -526,6 +538,7 @@ async def remove_doc_author(
     if not aid:
         return Response.json({"error": "invalid actor_id"}, status=400)
     await paper_db(datasette).remove_doc_author(doc_id=doc_id, actor_id=aid)
+    _broadcast_authors_changed(datasette, doc_id)
     return await _authors_response(datasette, request, doc_id)
 
 
@@ -561,6 +574,7 @@ async def replace_doc_authors(
     await paper_db(datasette).set_doc_authors(
         doc_id=doc_id, actor_ids=authors, added_by=actor_id(request)
     )
+    _broadcast_authors_changed(datasette, doc_id)
     return await _authors_response(datasette, request, doc_id)
 
 

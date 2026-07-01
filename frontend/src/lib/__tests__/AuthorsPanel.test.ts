@@ -117,6 +117,35 @@ describe("AuthorsPanel", () => {
     expect(posted).toBe(true);
   });
 
+  it("re-fetches the byline when authorsTick changes (SSE live-sync)", async () => {
+    byline = [{ id: "alice", name: "Alice", avatar_url: null }];
+    const { rerender } = render(AuthorsPanel, {
+      docId: "1",
+      canManage: false,
+      authorsTick: 0,
+    });
+    await settled();
+    expect(screen.queryByText("Bob")).toBeNull();
+
+    const fetchMock = vi.mocked(fetch);
+    const before = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).endsWith("/authors"),
+    ).length;
+
+    // A manager elsewhere added Bob; the SSE event bumps authorsTick.
+    byline = [
+      { id: "alice", name: "Alice", avatar_url: null },
+      { id: "bob", name: "Bob", avatar_url: null },
+    ];
+    await rerender({ docId: "1", canManage: false, authorsTick: 1 });
+
+    await vi.waitFor(() => expect(screen.getByText("Bob")).toBeTruthy());
+    const after = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).endsWith("/authors"),
+    ).length;
+    expect(after).toBeGreaterThan(before);
+  });
+
   it("lets a manager remove an author", async () => {
     byline = [
       { id: "alice", name: "Alice", avatar_url: null },

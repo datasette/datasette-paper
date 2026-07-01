@@ -21,6 +21,7 @@
     locked = false,
     kind = "doc",
     selfActor = null,
+    authorsTick = 0,
     copyMarkdown,
   }: {
     docId: string;
@@ -32,6 +33,7 @@
     locked?: boolean;
     kind?: "doc" | "template";
     selfActor?: string | null;
+    authorsTick?: number;
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
@@ -183,6 +185,40 @@
   let titleInput = $state("");
   let saving = $state(false);
   let savedRecently = $state(false);
+
+  // @feat authors: read-only byline under the title. Distinct from the
+  // "by <creator>" line — this is the manager-curated author list. Editing
+  // lives in the sidebar AuthorsPanel; here it is display-only and re-fetches
+  // when an `authors-changed` SSE event bumps `authorsTick`.
+  type Author = { id: string; name: string; avatar_url: string | null };
+  let authors = $state<Author[]>([]);
+
+  async function loadAuthors() {
+    try {
+      const resp = await fetch(`/-/paper/api/docs/${docId}/authors`);
+      if (!resp.ok) return;
+      const data = (await resp.json()) as { authors: Author[] };
+      authors = data.authors ?? [];
+    } catch {
+      // Best-effort display; leave the last-known byline in place.
+    }
+  }
+
+  // Join names as a human byline: "A", "A and B", "A, B and C".
+  let bylineText = $derived(
+    (() => {
+      const names = authors.map((a) => a.name);
+      if (names.length <= 1) return names.join("");
+      if (names.length === 2) return `${names[0]} and ${names[1]}`;
+      return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+    })(),
+  );
+
+  $effect(() => {
+    void docId;
+    void authorsTick;
+    loadAuthors();
+  });
 
   async function load() {
     // The bootstrap envelope returns doc state; the doc row's metadata
@@ -528,6 +564,12 @@
         </div>
       </span>
     </div>
+    {#if authors.length > 0}
+      <div class="byline">
+        <span class="byline-label">Authors:</span>
+        {bylineText}
+      </div>
+    {/if}
   {:else}
     <div class="loading">Loading…</div>
   {/if}
@@ -609,6 +651,15 @@
     display: inline-flex;
     align-items: center;
     gap: 4px;
+  }
+  .byline {
+    margin-top: 2px;
+    padding: 0 6px;
+    font-size: 12px;
+    color: #666;
+  }
+  .byline-label {
+    color: #999;
   }
   .creator-avatar {
     width: 16px;

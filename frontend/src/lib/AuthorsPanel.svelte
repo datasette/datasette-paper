@@ -17,8 +17,11 @@
    */
   type Author = { id: string; name: string; avatar_url: string | null };
 
-  let { docId, canManage = false }: { docId: string; canManage?: boolean } =
-    $props();
+  let {
+    docId,
+    canManage = false,
+    authorsTick = 0,
+  }: { docId: string; canManage?: boolean; authorsTick?: number } = $props();
 
   let open = $state(true);
   let loading = $state(false);
@@ -54,11 +57,13 @@
     }
   }
 
-  // (Re)load whenever the panel is open or the doc changes. Reading `open` and
-  // `docId` registers them as effect dependencies.
+  // (Re)load whenever the panel is open, the doc changes, or an
+  // `authors-changed` SSE event bumps `authorsTick`. Reading each here
+  // registers them as effect dependencies.
   $effect(() => {
     if (!open) return;
     void docId;
+    void authorsTick;
     load();
   });
 

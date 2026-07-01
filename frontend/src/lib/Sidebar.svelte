@@ -24,12 +24,14 @@
     sourceStore = null,
     showSources = false,
     canManage = false,
+    authorsTick = 0,
   }: {
     view: EditorView | null;
     docId: string;
     sourceStore?: SourceStore | null;
     showSources?: boolean;
     canManage?: boolean;
+    authorsTick?: number;
   } = $props();
 </script>
 
@@ -37,7 +39,7 @@
   <!-- The byline shows for every viewer; only its editor affordances are
        gated on canManage (not on showSources / edit mode). -->
   <div class="sidebar-section">
-    <AuthorsPanel {docId} {canManage} />
+    <AuthorsPanel {docId} {canManage} {authorsTick} />
   </div>
   {#if showSources}
     <div class="sidebar-section">

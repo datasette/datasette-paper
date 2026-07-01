@@ -14,6 +14,8 @@ See routes/docs.py + permissions.author_candidates. Storage-layer coverage is
 in test_authors_db.py.
 """
 
+import asyncio
+
 import pytest
 
 from conftest import (
@@ -25,6 +27,7 @@ from conftest import (
     setup_paper_datasette,
 )
 from datasette_paper.db import PaperDB
+from datasette_paper.instance import get_registry
 from datasette_paper.permissions import author_candidates
 
 # @feat authors: proof of the manager-curated byline — creator seeding, the
@@ -301,6 +304,29 @@ async def test_author_candidates_includes_editor_excludes_viewer():
     assert "bob" in eligible  # editor
     assert "vic" not in eligible  # viewer
     assert open_audience is False
+
+
+@pytest.mark.asyncio
+async def test_mutation_broadcasts_authors_changed():
+    """A live subscriber gets an ``authors-changed`` SSE event after a manager
+    mutates the byline."""
+    ds = await build_ds()
+    doc_id = await create_doc(ds, "Doc", actor_id="alice")
+    await grant_role(ds, doc_id, "bob", "Editor")
+
+    db = PaperDB(ds.get_internal_database())
+    instance = await get_registry(ds).get(db, doc_id)
+    queue = await instance.subscribe(client_id=1, actor_id="alice")
+
+    r = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/authors/add",
+        json={"actor_id": "bob"},
+        cookies=actor_cookie(ds, "alice"),
+    )
+    assert r.status_code == 200, r.text
+
+    payload = await asyncio.wait_for(queue.get(), timeout=1)
+    assert payload["kind"] == "authors-changed"
 
 
 @pytest.mark.asyncio
