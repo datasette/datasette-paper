@@ -239,6 +239,89 @@ describe("handleDatasettePaste", () => {
   });
 });
 
+describe("handleDatasettePaste with a filtered table URL", () => {
+  const FILTERED = `${ORIGIN}/fixtures/facetable?state__contains=CA&_sort_desc=pop&_col=name`;
+
+  it("carries filters / sort / columns into the block embed's config", () => {
+    const { view, getDoc } = fakeView(emptyParaState());
+    const claimed = handleDatasettePaste(view, pasteEvent(FILTERED), ctx);
+    expect(claimed).toBe(true);
+    const node = getDoc().doc.firstChild!;
+    expect(node.type.name).toBe("block_embed");
+    expect(node.attrs.ref).toBe("/fixtures/facetable");
+    expect(node.attrs.config).toEqual({
+      filters: [{ column: "state", op: "contains", value: "CA" }],
+      sort: { column: "pop", desc: true },
+      columns: ["name"],
+    });
+  });
+
+  it("keeps the {} config default for a plain URL (no query)", () => {
+    const { view, getDoc } = fakeView(emptyParaState());
+    handleDatasettePaste(view, pasteEvent(`${ORIGIN}/fixtures/facetable`), ctx);
+    const node = getDoc().doc.firstChild!;
+    expect(node.type.name).toBe("block_embed");
+    expect(node.attrs.config).toEqual({});
+  });
+
+  it("drops the params on a mid-text paste (inline surface has no config)", () => {
+    const { view, getDoc } = fakeView(midTextState());
+    const claimed = handleDatasettePaste(view, pasteEvent(FILTERED), ctx);
+    expect(claimed).toBe(true);
+    let found = false;
+    getDoc().doc.firstChild!.forEach((n) => {
+      if (n.type.name === "inline_embed" && n.attrs.ref === "/fixtures/facetable") {
+        found = true;
+      }
+    });
+    expect(found).toBe(true);
+  });
+
+  it("drops the params on a database URL (always inline)", () => {
+    const { view, getDoc } = fakeView(emptyParaState());
+    const claimed = handleDatasettePaste(
+      view,
+      pasteEvent(`${ORIGIN}/fixtures?state__exact=CA&_sort=name`),
+      ctx,
+    );
+    expect(claimed).toBe(true);
+    let found = false;
+    getDoc().doc.firstChild!.forEach((n) => {
+      if (n.type.name === "inline_embed" && n.attrs.ref === "/fixtures") {
+        found = true;
+      }
+    });
+    expect(found).toBe(true);
+  });
+
+  it("drops the params on a row URL (3 segments take no filters)", () => {
+    const { view, getDoc } = fakeView(emptyParaState());
+    handleDatasettePaste(
+      view,
+      pasteEvent(`${ORIGIN}/fixtures/vendors/42?state__exact=CA`),
+      ctx,
+    );
+    const node = getDoc().doc.firstChild!;
+    expect(node.type.name).toBe("block_embed");
+    expect(node.attrs.ref).toBe("/fixtures/vendors/42");
+    expect(node.attrs.config).toEqual({});
+  });
+
+  it("still strips a non-root base_url before parsing ref and params", () => {
+    const { view, getDoc } = fakeView(emptyParaState());
+    handleDatasettePaste(
+      view,
+      pasteEvent(`${ORIGIN}/data/fixtures/facetable?state__exact=CA`),
+      { origin: ORIGIN, baseUrl: "/data/" },
+    );
+    const node = getDoc().doc.firstChild!;
+    expect(node.attrs.ref).toBe("/fixtures/facetable");
+    expect(node.attrs.config).toEqual({
+      filters: [{ column: "state", op: "exact", value: "CA" }],
+    });
+  });
+});
+
 describe("matchManifestRef (lazy provider, bundle not yet loaded)", () => {
   afterEach(() => _resetProvidersForTest());
 

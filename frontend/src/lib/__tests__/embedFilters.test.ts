@@ -7,6 +7,7 @@ import { describe, it, expect } from "vitest";
 
 import {
   FILTER_OPS,
+  configFromUrlParams,
   filterOpByKey,
   filterQueryParams,
   sanitizeFilters,
@@ -167,5 +168,99 @@ describe("filterQueryParams", () => {
     const desc = filterQueryParams([], { column: "name", desc: true });
     expect(desc).toEqual([["_sort_desc", "name"]]);
     expect(filterQueryParams([], null)).toEqual([]);
+  });
+});
+
+describe("configFromUrlParams", () => {
+  const parse = (query: string) => configFromUrlParams(new URLSearchParams(query));
+
+  it("returns {} for an empty query", () => {
+    expect(parse("")).toEqual({});
+  });
+
+  it("treats a bare col=value as an exact filter", () => {
+    expect(parse("state=CA")).toEqual({
+      filters: [{ column: "state", op: "exact", value: "CA" }],
+    });
+  });
+
+  it("maps a known __ suffix to its op", () => {
+    expect(parse("state__contains=CA")).toEqual({
+      filters: [{ column: "state", op: "contains", value: "CA" }],
+    });
+  });
+
+  it("splits on the last __, so a known suffix wins over a __-containing column", () => {
+    expect(parse("state__exact=CA")).toEqual({
+      filters: [{ column: "state", op: "exact", value: "CA" }],
+    });
+    expect(parse("a__weird_col__gt=3")).toEqual({
+      filters: [{ column: "a__weird_col", op: "gt", value: "3" }],
+    });
+  });
+
+  it("drops the wire dummy value on a no-value op", () => {
+    expect(parse("notes__notblank=1")).toEqual({
+      filters: [{ column: "notes", op: "notblank" }],
+    });
+  });
+
+  it("keeps the whole key as an exact-filter column when the suffix is unknown", () => {
+    expect(parse("weird__foo=x")).toEqual({
+      filters: [{ column: "weird__foo", op: "exact", value: "x" }],
+    });
+  });
+
+  it("keeps repeated params, in URL order", () => {
+    expect(parse("age__gte=2&age__lte=9")).toEqual({
+      filters: [
+        { column: "age", op: "gte", value: "2" },
+        { column: "age", op: "lte", value: "9" },
+      ],
+    });
+  });
+
+  it("treats a _-prefixed key with an explicit suffix as a filter (Datasette's rule)", () => {
+    expect(parse("_size__exact=x")).toEqual({
+      filters: [{ column: "_size", op: "exact", value: "x" }],
+    });
+  });
+
+  it("skips empty column names", () => {
+    expect(parse("=x&__gt=5")).toEqual({});
+  });
+
+  it("parses _sort and _sort_desc", () => {
+    expect(parse("_sort=name")).toEqual({ sort: { column: "name" } });
+    expect(parse("_sort_desc=population")).toEqual({
+      sort: { column: "population", desc: true },
+    });
+  });
+
+  it("emits no sort when both _sort and _sort_desc are present (Datasette 400s it)", () => {
+    expect(parse("_sort=a&_sort_desc=b")).toEqual({});
+  });
+
+  it("collects _col in order, deduped, dropping empties", () => {
+    expect(parse("_col=name&_col=state&_col=name&_col=")).toEqual({
+      columns: ["name", "state"],
+    });
+  });
+
+  it("ignores out-of-vocabulary specials", () => {
+    expect(parse("_search=x&_size=10&_facet=state&_where=1=1&_next=tok&_nocol=id")).toEqual(
+      {},
+    );
+  });
+
+  it("round-trips filterQueryParams output", () => {
+    const filters = [
+      { column: "state", op: "contains", value: "CA" },
+      { column: "notes", op: "isnull" },
+      { column: "a__weird_col", op: "gt", value: "3" },
+    ];
+    const sort = { column: "population", desc: true };
+    const params = new URLSearchParams(filterQueryParams(filters, sort));
+    expect(configFromUrlParams(params)).toEqual({ filters, sort });
   });
 });

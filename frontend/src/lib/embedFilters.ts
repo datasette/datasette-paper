@@ -132,3 +132,72 @@ export function filterQueryParams(
   if (sort) pairs.push([sort.desc ? "_sort_desc" : "_sort", sort.column]);
   return pairs;
 }
+
+/**
+ * The inverse of `filterQueryParams`: parse a table-page URL's query string
+ * into the `filters` / `sort` / `columns` config keys, mirroring Datasette's
+ * own parse (`Filters.selections()` splits each key on the *last* `__`) so a
+ * pasted filtered link becomes an equally filtered embed.
+ *
+ * - A key is a filter unless it's a `_`-special (`_`-prefixed with no `__` —
+ *   Datasette's rule, which keeps `_size__exact=…` working as a filter on a
+ *   column literally named `_size`). Known suffix → that op; no `__` → op
+ *   `exact`; unknown suffix → the whole key is the column with op `exact`
+ *   (forgiving — Datasette can't split that case either). No-value ops drop
+ *   the wire dummy value; empty column names are skipped; repeated params
+ *   are all kept, in URL order.
+ * - `_sort=col` → ascending, `_sort_desc=col` → descending. Both present →
+ *   no sort at all (Datasette 400s that URL; we can't guess intent).
+ * - `_col=a&_col=b` → `columns`, order preserved, deduped.
+ * - Every other special (`_search`, `_where`, `_facet*`, `_size`, `_next`,
+ *   `_nocol`, `_shape`, `_extra`, …) is ignored — out of the config
+ *   vocabulary (`_nocol` in particular is unresolvable without the table
+ *   schema at paste time).
+ *
+ * Only keys with content are returned — a plain URL yields `{}` so the
+ * caller can skip the `config` attr entirely. Never throws on junk queries.
+ */
+export function configFromUrlParams(params: URLSearchParams): {
+  filters?: EmbedFilter[];
+  sort?: EmbedSort;
+  columns?: string[];
+} {
+  const filters: EmbedFilter[] = [];
+  for (const [key, value] of params.entries()) {
+    if (key.startsWith("_") && !key.includes("__")) continue; // a `_`-special
+    let column = key;
+    let op = "exact";
+    const split = key.lastIndexOf("__");
+    if (split !== -1) {
+      const suffix = key.slice(split + 2);
+      if (OPS_BY_KEY.has(suffix)) {
+        column = key.slice(0, split);
+        op = suffix;
+      }
+    }
+    if (column.length === 0) continue;
+    if (OPS_BY_KEY.get(op)?.noValue) {
+      filters.push({ column, op });
+    } else {
+      filters.push({ column, op, value });
+    }
+  }
+
+  // First occurrence wins for repeats; an empty value counts as absent
+  // (nothing to sort by). Both directions present is Datasette's 400 case.
+  const asc = params.get("_sort") || null;
+  const desc = params.get("_sort_desc") || null;
+  const sort: EmbedSort | null =
+    asc && desc ? null : asc ? { column: asc } : desc ? { column: desc, desc: true } : null;
+
+  const columns: string[] = [];
+  for (const col of params.getAll("_col")) {
+    if (col.length > 0 && !columns.includes(col)) columns.push(col);
+  }
+
+  const out: { filters?: EmbedFilter[]; sort?: EmbedSort; columns?: string[] } = {};
+  if (filters.length > 0) out.filters = filters;
+  if (sort) out.sort = sort;
+  if (columns.length > 0) out.columns = columns;
+  return out;
+}
