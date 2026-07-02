@@ -703,6 +703,91 @@ export class BlockEmbedView implements NodeView {
     dispatch(state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, config }));
   }
 
+  /**
+   * The per-column ▾ header menu (Datasette's cog, translated to config
+   * writes — editors only, the caller gates on `view.editable`): sort
+   * ascending/descending with the active direction suppressed and "Clear
+   * sort" in its place, hide this column (absent when it's the last visible
+   * one), and show all columns (present only while `config.columns` is set).
+   *
+   * Each item is ONE writeConfig step. Ascending writes `sort: {column}`
+   * with NO `desc: false` — the same normalization the filter panel uses, so
+   * asc → the key's absence and equal configs never ping-pong steps. Open /
+   * close / outside-click reuse the ⋮ menu's toggleMenu mechanics, which also
+   * guarantees only one menu (⋮ or any column's) is open at a time.
+   */
+  private columnMenu(col: string): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "pm-block-embed-menu-wrap pm-block-embed-col-menu-wrap";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pm-block-embed-col-menu-btn";
+    btn.title = `Column actions: ${col}`;
+    btn.setAttribute("aria-label", `Column actions: ${col}`);
+    btn.appendChild(this.svgIcon("chevronDown"));
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.toggleMenu(menu);
+    });
+    wrap.appendChild(btn);
+
+    const menu = document.createElement("div");
+    menu.className = "pm-block-embed-menu pm-block-embed-col-menu";
+
+    // menuButton closes the menu before running the action; prepending the
+    // icon keeps the button's textContent equal to the plain label.
+    const item = (icon: string, label: string, action: () => void): void => {
+      const b = this.menuButton(label, action);
+      b.prepend(this.svgIcon(icon));
+      menu.appendChild(b);
+    };
+    // Spread-and-set/delete one key — empty keys dropped (minimal config,
+    // clean fence), everything else in the bag untouched.
+    const writeSort = (sort?: EmbedSort): void => {
+      const next: Record<string, unknown> = { ...(this.node.attrs.config ?? {}) };
+      if (sort) next.sort = sort;
+      else delete next.sort;
+      this.writeConfig(next);
+    };
+
+    const sort = this.sort();
+    const isAsc = sort != null && sort.column === col && sort.desc !== true;
+    const isDesc = sort != null && sort.column === col && sort.desc === true;
+    if (!isAsc) {
+      item("sortUp", "Sort ascending", () => writeSort({ column: col }));
+    }
+    if (!isDesc) {
+      item("sortDown", "Sort descending", () => writeSort({ column: col, desc: true }));
+    }
+    if (isAsc || isDesc) {
+      item("x", "Clear sort", () => writeSort());
+    }
+
+    // "Visible" = the author's selection, or every column when unset — the
+    // same source the picker seeds from. Hiding the last visible column
+    // would render nothing, so that item disappears instead (Datasette's
+    // ">1 visible" cog condition).
+    const visible = this.selectedColumns() ?? this.allColumns;
+    const remaining = visible.filter((c) => c !== col);
+    if (remaining.length) {
+      item("eyeSlash", "Hide this column", () => {
+        this.writeConfig({ ...(this.node.attrs.config ?? {}), columns: remaining });
+      });
+    }
+    if ((this.config as { columns?: unknown }).columns !== undefined) {
+      item("eye", "Show all columns", () => {
+        const next: Record<string, unknown> = { ...(this.node.attrs.config ?? {}) };
+        delete next.columns;
+        this.writeConfig(next);
+      });
+    }
+
+    wrap.appendChild(menu);
+    return wrap;
+  }
+
   /** A menu button that closes the menu, then runs `action`. */
   private menuButton(label: string, action: () => void): HTMLButtonElement {
     const b = document.createElement("button");
@@ -902,15 +987,43 @@ export class BlockEmbedView implements NodeView {
       ),
     );
 
+    // Summary line: "<count> rows where … sorted by …" — Datasette phrases
+    // the description (`human_description_en`), we render it as text nodes
+    // only. Visible to everyone (it's how read-only viewers learn the embed
+    // is a filtered slice); omitted entirely when the description is empty
+    // (unfiltered/unsorted) or absent (older Datasette without the extra).
+    if (payload.humanDescription) {
+      const summary = document.createElement("div");
+      summary.className = "pm-block-embed-summary";
+      const prefix =
+        payload.count != null
+          ? `${payload.count} row${payload.count === 1 ? "" : "s"} `
+          : "";
+      // One text node — the description is data-derived, never innerHTML.
+      summary.textContent = `${prefix}${payload.humanDescription}`;
+      this.dom.appendChild(summary);
+    }
+
     const scroll = document.createElement("div");
     scroll.className = "pm-block-embed-scroll";
     const table = document.createElement("table");
 
     const thead = document.createElement("thead");
     const htr = document.createElement("tr");
+    const sort = this.sort();
     for (const col of payload.columns) {
       const th = document.createElement("th");
-      th.textContent = col; // text node
+      th.appendChild(document.createTextNode(col)); // text node
+      // Passive sort indicator on the sorted column — rendered for EVERYONE
+      // (viewers included); only the config-writing menu below is gated.
+      if (sort?.column === col) {
+        const ind = this.svgIcon(sort.desc ? "sortDown" : "sortUp");
+        ind.classList.add("pm-block-embed-sort-ind");
+        ind.dataset.dir = sort.desc ? "desc" : "asc";
+        th.appendChild(ind);
+      }
+      // The ▾ column-actions menu writes config — editors only (T02 gate).
+      if (this.view.editable) th.appendChild(this.columnMenu(col));
       htr.appendChild(th);
     }
     thead.appendChild(htr);
@@ -1057,8 +1170,16 @@ export class BlockEmbedView implements NodeView {
       void this.load();
     } else if (this.headerEl && this.renderedEditable !== !!this.view.editable) {
       // Editability flipped mid-session (view/edit toggle, forced read-only
-      // on stepError) — rebuild just the gated header chrome; no re-fetch.
-      this.refreshHeader();
+      // on stepError) — re-gate the chrome without a re-fetch. A table render
+      // also carries per-column ▾ menus in its header row, so rebuild the
+      // whole card from the held payload; anything else only needs the
+      // header chrome swapped.
+      if (this.tablePayload) {
+        this.closeMenu();
+        this.renderTable(this.tablePayload);
+      } else {
+        this.refreshHeader();
+      }
     }
     return true;
   }

@@ -40,9 +40,15 @@ describe("filterOpByKey", () => {
   });
 });
 
-describe("filter panel icons", () => {
+describe("filter panel + column menu icons", () => {
   it("registers the people / funnel / funnelFill / x icon slots", () => {
     for (const name of ["people", "funnel", "funnelFill", "x"]) {
+      expect(TOOLBAR_ICONS[name], name).toContain("<path");
+    }
+  });
+
+  it("registers the column-menu slots: sortUp / sortDown / eyeSlash / chevronDown / eye", () => {
+    for (const name of ["sortUp", "sortDown", "eyeSlash", "chevronDown", "eye"]) {
       expect(TOOLBAR_ICONS[name], name).toContain("<path");
     }
   });

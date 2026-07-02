@@ -35,6 +35,13 @@ async function build(
   return view;
 }
 
+// The rendered column labels: each th's LEADING text node. For an editor the
+// th also hosts the ▾ column menu, whose (CSS-hidden) item labels would leak
+// into a plain textContent read.
+function thLabels(root: { querySelectorAll: ParentNode["querySelectorAll"] }): (string | null)[] {
+  return [...root.querySelectorAll("th")].map((t) => t.childNodes[0].textContent);
+}
+
 describe("BlockEmbedView", () => {
   afterEach(() => vi.unstubAllGlobals());
 
@@ -50,10 +57,7 @@ describe("BlockEmbedView", () => {
     });
     const table = view.dom.querySelector("table");
     expect(table).not.toBeNull();
-    expect([...view.dom.querySelectorAll("th")].map((t) => t.textContent)).toEqual([
-      "id",
-      "name",
-    ]);
+    expect(thLabels(view.dom)).toEqual(["id", "name"]);
     expect(view.dom.querySelectorAll("tbody tr")).toHaveLength(2);
     expect(view.dom.textContent).toContain("Acme");
     // Footer: inline limit dropdown + total count ("showing [10] of 30 rows").
@@ -500,10 +504,7 @@ describe("BlockEmbedView", () => {
     expect(urls[0]).toContain("_col=name");
     expect(urls[0]).toContain("_col=region");
     // Only the picked columns reach the rendered header — the PK is dropped.
-    expect([...view.dom.querySelectorAll("th")].map((t) => t.textContent)).toEqual([
-      "name",
-      "region",
-    ]);
+    expect(thLabels(view.dom)).toEqual(["name", "region"]);
   });
 
   it("the ⋮ menu lists every column as a checkbox, selected ones checked", async () => {
@@ -1074,6 +1075,292 @@ describe("BlockEmbedView", () => {
   it("renders no badge when config has no filters", async () => {
     const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
     expect(view.dom.querySelector(".pm-block-embed-filter-badge")).toBeNull();
+    view.destroy();
+  });
+
+  // ── Table filters T04: the per-column ▾ header menu ───────────────────────
+
+  function colMenuBtn(view: EditorView, col: string): HTMLButtonElement {
+    return view.dom.querySelector(
+      `.pm-block-embed-col-menu-btn[aria-label="Column actions: ${col}"]`,
+    ) as HTMLButtonElement;
+  }
+
+  function openColMenu(view: EditorView, col: string): HTMLElement {
+    const btn = colMenuBtn(view, col);
+    btn.click();
+    return btn.parentElement!.querySelector(".pm-block-embed-col-menu") as HTMLElement;
+  }
+
+  function colItems(menu: HTMLElement): (string | null)[] {
+    return [...menu.querySelectorAll(".pm-block-embed-menu-item")].map(
+      (el) => el.textContent,
+    );
+  }
+
+  function clickColItem(menu: HTMLElement, label: string): void {
+    (
+      [...menu.querySelectorAll(".pm-block-embed-menu-item")].find(
+        (el) => el.textContent === label,
+      ) as HTMLButtonElement
+    ).click();
+  }
+
+  const isOpen = (menu: HTMLElement) =>
+    menu.classList.contains("pm-block-embed-menu--open");
+
+  it("renders a ▾ menu trigger on every th for editors", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    const btns = [
+      ...view.dom.querySelectorAll(".pm-block-embed-col-menu-btn"),
+    ] as HTMLButtonElement[];
+    expect(btns).toHaveLength(3);
+    expect(btns.map((b) => b.getAttribute("aria-label"))).toEqual([
+      "Column actions: id",
+      "Column actions: state",
+      "Column actions: population",
+    ]);
+    view.destroy();
+  });
+
+  it("renders no ▾ triggers for read-only viewers", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      NATIVE_3COL,
+      () => false,
+    );
+    expect(view.dom.querySelectorAll(".pm-block-embed-col-menu-btn")).toHaveLength(0);
+    view.destroy();
+  });
+
+  it("keeps a single menu open: a column menu closes the ⋮ menu and other column menus", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    // Open the header ⋮ menu first.
+    (view.dom.querySelector(".pm-block-embed-menu-btn") as HTMLButtonElement).click();
+    const overflow = view.dom.querySelector(
+      ".pm-block-embed-head .pm-block-embed-menu",
+    ) as HTMLElement;
+    expect(isOpen(overflow)).toBe(true);
+    // Opening a column menu closes it.
+    const first = openColMenu(view, "state");
+    expect(isOpen(overflow)).toBe(false);
+    expect(isOpen(first)).toBe(true);
+    // Opening another column's menu closes the first.
+    const second = openColMenu(view, "population");
+    expect(isOpen(first)).toBe(false);
+    expect(isOpen(second)).toBe(true);
+    view.destroy();
+  });
+
+  it("Sort ascending writes sort {column} in one step — no desc key at all", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    const dispatch = vi.spyOn(view, "dispatch");
+    const menu = openColMenu(view, "state");
+    clickColItem(menu, "Sort ascending");
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    const config = view.state.doc.firstChild!.attrs.config as {
+      sort: Record<string, unknown>;
+    };
+    expect(config).toEqual({ sort: { column: "state" } });
+    // The T03 normalization: ascending is the key's shape, not desc: false.
+    expect(Object.keys(config.sort)).toEqual(["column"]);
+    await new Promise((r) => setTimeout(r, 0));
+    view.destroy();
+  });
+
+  it("Sort descending writes sort {column, desc: true}", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    const menu = openColMenu(view, "population");
+    clickColItem(menu, "Sort descending");
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({
+      sort: { column: "population", desc: true },
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    view.destroy();
+  });
+
+  it("hides the active ascending item and offers Clear sort, which deletes the key", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { sort: { column: "state" } } },
+      NATIVE_3COL,
+    );
+    const menu = openColMenu(view, "state");
+    const labels = colItems(menu);
+    expect(labels).not.toContain("Sort ascending");
+    expect(labels).toContain("Sort descending");
+    expect(labels).toContain("Clear sort");
+    clickColItem(menu, "Clear sort");
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({});
+    await new Promise((r) => setTimeout(r, 0));
+    view.destroy();
+  });
+
+  it("hides the active descending item; other columns get no Clear sort", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { sort: { column: "population", desc: true } } },
+      NATIVE_3COL,
+    );
+    const sorted = colItems(openColMenu(view, "population"));
+    expect(sorted).not.toContain("Sort descending");
+    expect(sorted).toContain("Sort ascending");
+    expect(sorted).toContain("Clear sort");
+    const other = colItems(openColMenu(view, "state"));
+    expect(other).toContain("Sort ascending");
+    expect(other).toContain("Sort descending");
+    expect(other).not.toContain("Clear sort");
+    view.destroy();
+  });
+
+  it("Hide this column seeds from allColumns and writes the remainder", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    const dispatch = vi.spyOn(view, "dispatch");
+    const menu = openColMenu(view, "state");
+    clickColItem(menu, "Hide this column");
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({
+      columns: ["id", "population"],
+    });
+    await new Promise((r) => setTimeout(r, 0));
+    view.destroy();
+  });
+
+  it("offers no Hide item on the last visible column; Show all deletes the key", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { columns: ["state"] } },
+      NATIVE_3COL,
+    );
+    // Projection renders only the selected column.
+    expect(view.dom.querySelectorAll("th")).toHaveLength(1);
+    const menu = openColMenu(view, "state");
+    const labels = colItems(menu);
+    expect(labels).not.toContain("Hide this column");
+    expect(labels).toContain("Show all columns");
+    clickColItem(menu, "Show all columns");
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({});
+    await new Promise((r) => setTimeout(r, 0));
+    view.destroy();
+  });
+
+  it("offers Show all columns only while config.columns is set", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    expect(colItems(openColMenu(view, "state"))).not.toContain("Show all columns");
+    view.destroy();
+  });
+
+  it("re-gates the column menus when editability flips mid-session", async () => {
+    let editable = true;
+    const { view, nodeView } = await mountEmbed(
+      { ref: "/data/vendors" },
+      NATIVE_3COL,
+      () => editable,
+    );
+    expect(view.dom.querySelectorAll(".pm-block-embed-col-menu-btn")).toHaveLength(3);
+
+    editable = false;
+    view.setProps({ editable: () => editable });
+    nodeView.update(view.state.doc.firstChild!);
+    expect(view.dom.querySelectorAll(".pm-block-embed-col-menu-btn")).toHaveLength(0);
+
+    editable = true;
+    view.setProps({ editable: () => editable });
+    nodeView.update(view.state.doc.firstChild!);
+    expect(view.dom.querySelectorAll(".pm-block-embed-col-menu-btn")).toHaveLength(3);
+    view.destroy();
+  });
+
+  it("shows the passive sort indicator to read-only viewers (desc icon)", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { sort: { column: "population", desc: true } } },
+      NATIVE_3COL,
+      () => false,
+    );
+    const ind = view.dom.querySelector(".pm-block-embed-sort-ind") as HTMLElement;
+    expect(ind).not.toBeNull();
+    expect(ind.dataset.dir).toBe("desc");
+    // It sits in the sorted column's header, as the sort-down icon.
+    expect(ind.closest("th")!.textContent).toBe("population");
+    expect(ind.querySelector("path")!.getAttribute("d")!.startsWith("M3.5 2.5")).toBe(
+      true,
+    );
+    view.destroy();
+  });
+
+  it("uses the sort-up icon for an ascending sort", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { sort: { column: "state" } } },
+      NATIVE_3COL,
+    );
+    const ind = view.dom.querySelector(".pm-block-embed-sort-ind") as HTMLElement;
+    expect(ind.dataset.dir).toBe("asc");
+    expect(ind.closest("th")!.childNodes[0].textContent).toBe("state");
+    expect(ind.querySelector("path")!.getAttribute("d")!.startsWith("M3.5 12.5")).toBe(
+      true,
+    );
+    // Only the sorted column carries an indicator.
+    expect(view.dom.querySelectorAll(".pm-block-embed-sort-ind")).toHaveLength(1);
+    view.destroy();
+  });
+
+  // ── Table filters T05: the summary line ───────────────────────────────────
+
+  it("renders '<count> rows <description>' between the header and the table", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id", "state"],
+      rows: [[1, "CA"]],
+      count: 42,
+      human_description_en: "where state = CA",
+    });
+    const summary = view.dom.querySelector(".pm-block-embed-summary") as HTMLElement;
+    expect(summary).not.toBeNull();
+    expect(summary.textContent).toBe("42 rows where state = CA");
+    expect(summary.previousElementSibling!.classList.contains("pm-block-embed-head")).toBe(
+      true,
+    );
+    expect(summary.nextElementSibling!.classList.contains("pm-block-embed-scroll")).toBe(
+      true,
+    );
+    // The footer truncation info is unchanged alongside it.
+    expect(
+      view.dom.querySelector(".pm-block-embed-footer-info")!.textContent,
+    ).toContain("of 42 rows");
+  });
+
+  it("keeps a hostile description inert (single text node, no markup)", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 1,
+      human_description_en: "where note = <script>alert(1)</script>",
+    });
+    const summary = view.dom.querySelector(".pm-block-embed-summary") as HTMLElement;
+    expect(summary.querySelector("script")).toBeNull();
+    expect(summary.childNodes).toHaveLength(1);
+    expect(summary.childNodes[0].nodeType).toBe(Node.TEXT_NODE);
+    expect(summary.textContent).toContain("<script>alert(1)</script>");
+  });
+
+  it("renders no summary line when the description is absent (older Datasette)", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 1,
+    });
+    expect(view.dom.querySelector(".pm-block-embed-summary")).toBeNull();
+  });
+
+  it("shows the summary line to read-only viewers too", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      {
+        ...NATIVE_3COL,
+        count: 7,
+        human_description_en: "where state = CA",
+      },
+      () => false,
+    );
+    expect(
+      view.dom.querySelector(".pm-block-embed-summary")!.textContent,
+    ).toBe("7 rows where state = CA");
     view.destroy();
   });
 });

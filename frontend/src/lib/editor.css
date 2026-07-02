@@ -1306,6 +1306,74 @@
   width: 10px;
   height: 10px;
 }
+/* Summary line under the header: "<count> rows where …" — everyone sees it. */
+.editor-host .pm-block-embed-summary {
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #555;
+  border-bottom: 1px solid #ececf0;
+}
+/* Column header ▾ menu (editors only). The trigger stays subtle until its
+   header cell is hovered or its menu is open, but never fully hidden — it
+   must stay clickable/discoverable without a hover hint. */
+.editor-host .pm-block-embed-col-menu-btn {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #777;
+  padding: 1px;
+  margin-left: 3px;
+  display: inline-flex;
+  vertical-align: middle;
+  border-radius: 3px;
+  opacity: 0.35;
+}
+.editor-host .pm-block-embed th:hover .pm-block-embed-col-menu-btn,
+.editor-host .pm-block-embed-col-menu-wrap:has(.pm-block-embed-menu--open)
+  .pm-block-embed-col-menu-btn {
+  opacity: 1;
+}
+.editor-host .pm-block-embed-col-menu-btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+  opacity: 1;
+}
+.editor-host .pm-block-embed-col-menu-btn .pm-block-embed-icon svg {
+  width: 10px;
+  height: 10px;
+}
+.editor-host .pm-block-embed-col-menu-wrap {
+  /* Keep the trigger on the text baseline inside a plain (non-flex) <th>. */
+  vertical-align: middle;
+}
+/* The dropdown inherits .pm-block-embed-menu's box; anchor it to the left
+   edge of its header cell instead of the ⋮ menu's right-edge alignment. */
+.editor-host .pm-block-embed-col-menu {
+  left: 0;
+  right: auto;
+  min-width: 170px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+.editor-host .pm-block-embed-col-menu .pm-block-embed-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.editor-host .pm-block-embed-col-menu .pm-block-embed-icon svg {
+  width: 12px;
+  height: 12px;
+}
+/* Passive sort indicator on the sorted column — viewers see it too. */
+.editor-host .pm-block-embed-sort-ind {
+  margin-left: 4px;
+  vertical-align: middle;
+  color: #6429a8;
+}
+.editor-host .pm-block-embed-sort-ind svg {
+  width: 11px;
+  height: 11px;
+}
 .editor-host .pm-block-embed-tables {
   list-style: none;
   margin: 0;

@@ -52,6 +52,10 @@ export type EmbedPayload =
       rows: CellValue[][];
       count: number | null;
       truncated: boolean;
+      // Datasette's server-phrased "where … sorted by …" summary (the
+      // `human_description_en` extra). Set only when non-empty — absent for an
+      // unfiltered/unsorted table, or an older Datasette without the extra.
+      humanDescription?: string;
       href: string;
     }
   | {
@@ -194,11 +198,13 @@ async function fetchTableEmbed(
   const filterParams = filterQs ? `&${filterQs}` : "";
   // `_shape=arrays` (plural) returns the {columns, rows-as-arrays, count, next}
   // envelope; `_shape=array` (singular) would be a bare top-level array with
-  // no columns/count. `_extra` adds count + columns to the envelope.
+  // no columns/count. `_extra` adds count + columns + the server-phrased
+  // "where … sorted by …" summary (empty string when unfiltered/unsorted;
+  // key simply absent on older Datasettes that lack the extra).
   const res = await fetch(
     jsonUrl(
       ref,
-      `?_shape=arrays&_extra=count,columns&_size=${encodeURIComponent(String(limit))}${colParams}${filterParams}`,
+      `?_shape=arrays&_extra=count,columns,human_description_en&_size=${encodeURIComponent(String(limit))}${colParams}${filterParams}`,
     ),
   );
   if (!res.ok) {
@@ -222,10 +228,16 @@ async function fetchTableEmbed(
     rows?: CellValue[][];
     count?: number | null;
     next?: string | null;
+    human_description_en?: string;
   };
   const allColumns = j.columns ?? [];
   const rows = j.rows ?? [];
   const count = typeof j.count === "number" ? j.count : null;
+  // Empty/absent/malformed → undefined, so the NodeView renders no summary.
+  const humanDescription =
+    typeof j.human_description_en === "string" && j.human_description_en.length > 0
+      ? j.human_description_en
+      : undefined;
   // Project to exactly the author's selection, in their order, dropping any PK
   // `_col` forced back in. If every selected column has vanished from the
   // schema, fall back to the full response rather than rendering nothing.
@@ -249,6 +261,7 @@ async function fetchTableEmbed(
     rows: outRows,
     count,
     truncated: j.next != null || (count != null && count > rows.length),
+    humanDescription,
     href: ref,
   };
 }
