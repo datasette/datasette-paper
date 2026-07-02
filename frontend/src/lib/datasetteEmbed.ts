@@ -22,6 +22,7 @@ import { schema } from "./schema";
 import type { Command } from "prosemirror-state";
 import { TOOLBAR_ICONS } from "./icons";
 import type { DatasetteStatus } from "./datasetteResolver";
+import { filterQueryParams, type EmbedFilter, type EmbedSort } from "./embedFilters";
 
 // `safeHref` moved to its own dependency-free module (shared with the schema
 // render sink in schema.ts, which can't import from here without a cycle).
@@ -78,7 +79,11 @@ export type EmbedPayload =
       href: string;
     }
   | { status: "denied" }
-  | { status: "not_found" };
+  | { status: "not_found" }
+  // A server-reported fetch failure with a human-readable reason — e.g. a
+  // filtered table fetch 400ing on a stale `_sort`/filter column. `message`
+  // is Datasette's `error` string, rendered as a TEXT NODE by the NodeView.
+  | { status: "error"; message: string };
 
 export type SearchResult = {
   ref: string;
@@ -172,6 +177,8 @@ async function fetchTableEmbed(
   ref: string,
   limit: number,
   columns?: string[],
+  filters?: EmbedFilter[],
+  sort?: EmbedSort | null,
 ): Promise<EmbedPayload> {
   // `config.columns` (if any): send `?_col=` so unselected columns never leave
   // the server. `_col` can't *hide* PKs (Datasette always re-adds them) or
@@ -179,16 +186,37 @@ async function fetchTableEmbed(
   // gives both honesty (less on the wire) and full control (hide PKs, reorder).
   const wanted = (columns ?? []).filter((c) => typeof c === "string" && c.length > 0);
   const colParams = wanted.map((c) => `&_col=${encodeURIComponent(c)}`).join("");
+  // `config.filters` / `config.sort` (sanitized by the caller) → the same
+  // `column__op=value` / `_sort(_desc)` params Datasette's own table form
+  // uses; URLSearchParams owns the encoding so crafted values stay one param.
+  const filterPairs = filterQueryParams(filters ?? [], sort ?? null);
+  const filterQs = new URLSearchParams(filterPairs).toString();
+  const filterParams = filterQs ? `&${filterQs}` : "";
   // `_shape=arrays` (plural) returns the {columns, rows-as-arrays, count, next}
   // envelope; `_shape=array` (singular) would be a bare top-level array with
   // no columns/count. `_extra` adds count + columns to the envelope.
   const res = await fetch(
     jsonUrl(
       ref,
-      `?_shape=arrays&_extra=count,columns&_size=${encodeURIComponent(String(limit))}${colParams}`,
+      `?_shape=arrays&_extra=count,columns&_size=${encodeURIComponent(String(limit))}${colParams}${filterParams}`,
     ),
   );
-  if (!res.ok) return { status: denialStatus(res.status) };
+  if (!res.ok) {
+    // 403 stays the leak-free denied placeholder. Any other failure (a
+    // filtered fetch can 400 on a stale filter/sort column, a type mismatch,
+    // …) carries Datasette's `{ok: false, error}` body — surface that
+    // message so an editor can fix the filter; unparseable body → not_found.
+    if (res.status === 403) return { status: "denied" };
+    try {
+      const body = (await res.json()) as { error?: unknown };
+      if (typeof body.error === "string" && body.error.length > 0) {
+        return { status: "error", message: body.error };
+      }
+    } catch {
+      /* non-JSON error body — fall through to the generic status */
+    }
+    return { status: "not_found" };
+  }
   const j = (await res.json()) as {
     columns?: string[];
     rows?: CellValue[][];
@@ -292,18 +320,30 @@ async function fetchDatabaseEmbed(db: string, ref: string): Promise<EmbedPayload
 /**
  * Fetch the read-only render payload for a ref. Network error → not_found.
  * `columns` (from a table/view embed's `config.columns`) restricts a
- * table/view to that column subset, in that order; ignored for row/database.
+ * table/view to that column subset, in that order; `filters`/`sort` (the
+ * sanitized `config.filters`/`config.sort`) restrict and order its rows.
+ * All three are ignored for row/database refs.
  */
 export async function fetchEmbed(
   ref: string,
   limit?: number,
   columns?: string[],
+  filters?: EmbedFilter[],
+  sort?: EmbedSort | null,
 ): Promise<EmbedPayload> {
   const seg = refSegments(ref);
   try {
     if (seg.length === 1) return await fetchDatabaseEmbed(seg[0], ref);
     if (seg.length === 2)
-      return await fetchTableEmbed(seg[0], seg[1], ref, limit ?? DEFAULT_EMBED_LIMIT, columns);
+      return await fetchTableEmbed(
+        seg[0],
+        seg[1],
+        ref,
+        limit ?? DEFAULT_EMBED_LIMIT,
+        columns,
+        filters,
+        sort,
+      );
     if (seg.length === 3) return await fetchRowEmbed(seg[0], seg[1], seg[2], ref);
     return { status: "not_found" };
   } catch {

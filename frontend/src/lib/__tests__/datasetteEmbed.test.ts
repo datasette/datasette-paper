@@ -242,6 +242,117 @@ describe("fetchEmbed (native .json)", () => {
     expect(out.rows).toEqual([[1, "Acme"]]);
   });
 
+  // ── Filters + sort (config.filters / config.sort → query params) ─────────
+
+  function stubTableFetch(urls: string[], init: { ok?: boolean; status?: number; body?: unknown } = {}) {
+    const { ok = true, status = 200, body } = init;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return {
+          ok,
+          status,
+          json: async () => body ?? { columns: ["id"], rows: [[1]], count: 1 },
+        };
+      }),
+    );
+  }
+
+  it("appends column__op=value pairs and the sort param to the fetch URL", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls);
+    await fetchEmbed(
+      "/d/t",
+      25,
+      undefined,
+      [
+        { column: "state", op: "exact", value: "CA" },
+        { column: "notes", op: "notblank" },
+      ],
+      { column: "population", desc: true },
+    );
+    const query = new URLSearchParams(urls[0].split("?")[1]);
+    expect(query.get("state__exact")).toBe("CA");
+    // No-value ops send "1", exactly what Datasette's cog menu emits.
+    expect(query.get("notes__notblank")).toBe("1");
+    expect(query.get("_sort_desc")).toBe("population");
+    expect(query.get("_sort")).toBeNull();
+    // The existing fetch-only params are still present, before the filters.
+    expect(urls[0]).toContain("_shape=arrays");
+    expect(urls[0]).toContain("_size=25");
+  });
+
+  it("emits _sort (not _sort_desc) for an ascending sort", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls);
+    await fetchEmbed("/d/t", 25, undefined, [], { column: "name" });
+    const query = new URLSearchParams(urls[0].split("?")[1]);
+    expect(query.get("_sort")).toBe("name");
+    expect(query.get("_sort_desc")).toBeNull();
+  });
+
+  it("keeps values with &, %, = and unicode as a single encoded param", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls);
+    await fetchEmbed("/d/t", 25, undefined, [
+      { column: "name", op: "exact", value: "CA&_del=1" },
+      { column: "pct", op: "contains", value: "100%" },
+      { column: "city", op: "exact", value: "Zürich ✓" },
+    ]);
+    const query = new URLSearchParams(urls[0].split("?")[1]);
+    // The crafted value round-trips as ONE param — no smuggled `_del` key.
+    expect(query.get("name__exact")).toBe("CA&_del=1");
+    expect(query.get("_del")).toBeNull();
+    expect(query.get("pct__contains")).toBe("100%");
+    expect(query.get("city__exact")).toBe("Zürich ✓");
+    // And the raw URL carries them percent-encoded.
+    expect(urls[0]).toContain("name__exact=CA%26_del%3D1");
+  });
+
+  it("issues no filter/sort params when none are configured", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls);
+    await fetchEmbed("/d/t", 25);
+    expect(urls[0]).toBe("/d/t.json?_shape=arrays&_extra=count,columns&_size=25");
+  });
+
+  it("surfaces Datasette's error string from a 400 body", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls, {
+      ok: false,
+      status: 400,
+      body: { ok: false, error: "Cannot sort table by nope" },
+    });
+    expect(
+      await fetchEmbed("/d/t", 25, undefined, [], { column: "nope" }),
+    ).toEqual({ status: "error", message: "Cannot sort table by nope" });
+  });
+
+  it("keeps a 403 leak-free (denied) even when the body has an error string", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls, {
+      ok: false,
+      status: 403,
+      body: { ok: false, error: "Permission denied for secret_table" },
+    });
+    expect(await fetchEmbed("/d/t", 25)).toEqual({ status: "denied" });
+  });
+
+  it("falls back to not_found when a non-200 body has no error string", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => {
+          throw new Error("not json");
+        },
+      })),
+    );
+    expect(await fetchEmbed("/d/t", 25)).toEqual({ status: "not_found" });
+  });
+
   it("transforms a native row response into a row payload", async () => {
     vi.stubGlobal(
       "fetch",

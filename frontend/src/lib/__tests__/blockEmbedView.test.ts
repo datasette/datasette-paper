@@ -29,7 +29,7 @@ async function build(
 ): Promise<BlockEmbedView> {
   stubFetch(native, init);
   const node = schema.nodes.block_embed.create({ ref });
-  const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+  const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
   // Let the async load() resolve.
   await new Promise((r) => setTimeout(r, 0));
   return view;
@@ -97,7 +97,7 @@ describe("BlockEmbedView", () => {
       }),
     );
     const node = schema.nodes.block_embed.create({ ref: "/data/vendors" });
-    const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+    const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     expect(urls[0]).toContain("_size=10");
 
@@ -234,7 +234,7 @@ describe("BlockEmbedView", () => {
       const fetchSpy = vi.fn();
       vi.stubGlobal("fetch", fetchSpy);
       const node = schema.nodes.block_embed.create({ ref: "/-/places/list/5" });
-      const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+      const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
       await new Promise((r) => setTimeout(r, 0));
 
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -277,7 +277,7 @@ describe("BlockEmbedView", () => {
         ref: "/-/places/list/5",
         config,
       });
-      new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+      new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
       await new Promise((r) => setTimeout(r, 0));
       expect(ctxSeen.config).toEqual(config);
     } finally {
@@ -315,7 +315,7 @@ describe("BlockEmbedView", () => {
     });
     try {
       const node = schema.nodes.block_embed.create({ ref: "/-/places/list/secret" });
-      const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+      const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
       await new Promise((r) => setTimeout(r, 0));
       expect(view.dom.classList.contains("pm-block-embed--denied")).toBe(true);
       expect(view.dom.textContent).not.toContain("secret");
@@ -438,9 +438,11 @@ describe("BlockEmbedView", () => {
 
   // Mount a block_embed (optionally with attrs) into a real EditorView, so the
   // picker's setNodeMarkup transaction has a live state/dispatch to write to.
+  // `editable` is the live EditorView prop the NodeView gates its config UI on.
   async function mountEmbed(
     attrs: Record<string, unknown>,
     native: unknown,
+    editable?: () => boolean,
   ): Promise<{ view: EditorView; nodeView: BlockEmbedView }> {
     stubFetch(native);
     let captured: BlockEmbedView | null = null;
@@ -450,6 +452,7 @@ describe("BlockEmbedView", () => {
     document.body.appendChild(place);
     const view = new EditorView(place, {
       state: EditorState.create({ doc }),
+      ...(editable ? { editable } : {}),
       nodeViews: {
         block_embed: (node, v, getPos) => {
           captured = new BlockEmbedView(node, v, getPos as () => number | undefined);
@@ -492,7 +495,7 @@ describe("BlockEmbedView", () => {
       ref: "/data/vendors",
       config: { columns: ["name", "region"] },
     });
-    const view = new BlockEmbedView(node, {} as unknown as EditorView, () => 0);
+    const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     expect(urls[0]).toContain("_col=name");
     expect(urls[0]).toContain("_col=region");
@@ -553,6 +556,250 @@ describe("BlockEmbedView", () => {
     boxes.forEach((b) => (b.checked = true));
     (view.dom.querySelector(".pm-block-embed-columns-apply") as HTMLButtonElement).click();
     expect(view.state.doc.firstChild!.attrs.config).toEqual({ columns: [] });
+    view.destroy();
+  });
+
+  // ── Table filters T01: config.filters/sort → fetch params + title link ────
+
+  function stubUrlCapture(native: unknown): string[] {
+    const urls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        urls.push(url);
+        return { ok: true, status: 200, json: async () => native };
+      }),
+    );
+    return urls;
+  }
+
+  const FILTERED_CONFIG = {
+    columns: ["name"],
+    filters: [
+      { column: "state", op: "exact", value: "CA" },
+      { column: "notes", op: "notblank" },
+    ],
+    sort: { column: "population", desc: true },
+  };
+
+  it("fetches with column__op / _sort_desc params when config has filters", async () => {
+    const urls = stubUrlCapture({
+      columns: ["id", "name"],
+      rows: [[1, "Acme"]],
+      count: 1,
+    });
+    const node = schema.nodes.block_embed.create({
+      ref: "/data/vendors",
+      config: FILTERED_CONFIG,
+    });
+    new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    await new Promise((r) => setTimeout(r, 0));
+    const query = new URLSearchParams(urls[0].split("?")[1]);
+    expect(query.get("state__exact")).toBe("CA");
+    expect(query.get("notes__notblank")).toBe("1");
+    expect(query.get("_sort_desc")).toBe("population");
+    expect(query.get("_sort")).toBeNull();
+  });
+
+  it("carries filters/sort/_col on the title link, but no fetch-only params", async () => {
+    stubFetch({ columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 });
+    const node = schema.nodes.block_embed.create({
+      ref: "/data/vendors",
+      config: FILTERED_CONFIG,
+    });
+    const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    await new Promise((r) => setTimeout(r, 0));
+    const href = (
+      view.dom.querySelector(".pm-block-embed-label") as HTMLAnchorElement
+    ).getAttribute("href")!;
+    expect(href.startsWith("/data/vendors?")).toBe(true);
+    const query = new URLSearchParams(href.split("?")[1]);
+    expect(query.get("state__exact")).toBe("CA");
+    expect(query.get("notes__notblank")).toBe("1");
+    expect(query.get("_sort_desc")).toBe("population");
+    expect(query.getAll("_col")).toEqual(["name"]);
+    // Fetch-only params never ride the link — the page picks its own.
+    expect(query.get("_shape")).toBeNull();
+    expect(query.get("_extra")).toBeNull();
+    expect(query.get("_size")).toBeNull();
+  });
+
+  it("keeps the title link clean (bare path) when config has no filters", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 1,
+    });
+    expect(
+      view.dom.querySelector(".pm-block-embed-label")!.getAttribute("href"),
+    ).toBe("/data/vendors");
+  });
+
+  it("a crafted filter value stays one encoded param on the title link", async () => {
+    stubFetch({ columns: ["id"], rows: [[1]], count: 1 });
+    const node = schema.nodes.block_embed.create({
+      ref: "/data/vendors",
+      config: { filters: [{ column: "state", op: "exact", value: "CA&_del=1" }] },
+    });
+    const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    await new Promise((r) => setTimeout(r, 0));
+    const href = (
+      view.dom.querySelector(".pm-block-embed-label") as HTMLAnchorElement
+    ).getAttribute("href")!;
+    expect(href).toContain("state__exact=CA%26_del%3D1");
+    const query = new URLSearchParams(href.split("?")[1]);
+    expect(query.get("state__exact")).toBe("CA&_del=1");
+    expect(query.get("_del")).toBeNull();
+  });
+
+  it("a config-only setNodeMarkup re-fetches with the new filter params", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id"], rows: [[1]], count: 1 },
+    );
+    // Swap in a URL-capturing stub for the re-fetch the config write triggers.
+    const captured = stubUrlCapture({ columns: ["id"], rows: [[1]], count: 1 });
+    const node = view.state.doc.firstChild!;
+    view.dispatch(
+      view.state.tr.setNodeMarkup(0, undefined, {
+        ...node.attrs,
+        config: { filters: [{ column: "state", op: "exact", value: "CA" }] },
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0));
+    expect(captured.length).toBeGreaterThan(0);
+    expect(captured.at(-1)).toContain("state__exact=CA");
+    view.destroy();
+  });
+
+  it("drops malformed filter entries from the fetch instead of 400ing the embed", async () => {
+    const urls = stubUrlCapture({ columns: ["id"], rows: [[1]], count: 1 });
+    const node = schema.nodes.block_embed.create({
+      ref: "/data/vendors",
+      config: {
+        filters: [
+          { column: "state", op: "regex", value: "x" }, // unknown op → dropped
+          { column: "state", op: "exact", value: "CA" },
+        ],
+        sort: { desc: true }, // no column → ignored
+      },
+    });
+    new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(urls[0]).toContain("state__exact=CA");
+    expect(urls[0]).not.toContain("regex");
+    expect(urls[0]).not.toContain("_sort");
+  });
+
+  it("surfaces the server's error text on a non-200 with an error body", async () => {
+    const view = await build(
+      "/data/vendors",
+      { ok: false, error: "Cannot sort table by nope" },
+      { ok: false, status: 400 },
+    );
+    expect(view.dom.classList.contains("pm-block-embed--error")).toBe(true);
+    // The message lands as text (no table, no markup injection).
+    expect(view.dom.querySelector("table")).toBeNull();
+    expect(
+      view.dom.querySelector(".pm-block-embed-placeholder")!.textContent,
+    ).toBe("Cannot sort table by nope");
+  });
+
+  // ── Table filters T02: config-writing UI is gated on view.editable ────────
+
+  function menuLabels(view: EditorView): (string | null)[] {
+    return [...view.dom.querySelectorAll(".pm-block-embed-menu-item")].map(
+      (el) => el.textContent,
+    );
+  }
+
+  it("hides the ⋮ config items (Columns…, Convert) from read-only viewers", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 },
+      () => false,
+    );
+    const labels = menuLabels(view);
+    // Export/copy items stay — they dispatch nothing.
+    expect(labels.some((l) => l!.startsWith("Download CSV"))).toBe(true);
+    expect(labels.some((l) => l!.startsWith("Copy as CSV"))).toBe(true);
+    expect(labels).not.toContain("Columns…");
+    expect(labels).not.toContain("Convert to inline element");
+    // Refresh stays available to everyone (read-only re-fetch, no step).
+    expect(view.dom.querySelector(".pm-block-embed-refresh")).not.toBeNull();
+    view.destroy();
+  });
+
+  it("renders no ⋮ button at all for a read-only non-table embed (empty menu)", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data" },
+      { tables: [{ name: "vendors", count: 3 }] },
+      () => false,
+    );
+    expect(view.dom.querySelector(".pm-block-embed-menu-btn")).toBeNull();
+    expect(view.dom.querySelector(".pm-block-embed-refresh")).not.toBeNull();
+    view.destroy();
+  });
+
+  it("config-writing handlers no-op when not editable (belt and braces)", async () => {
+    const { view, nodeView } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 },
+      () => false,
+    );
+    const before = view.state.doc;
+    const internals = nodeView as unknown as {
+      setColumns: (columns: string[]) => void;
+      convertToInline: () => void;
+    };
+    internals.setColumns(["name"]);
+    internals.convertToInline();
+    expect(view.state.doc.eq(before)).toBe(true);
+    view.destroy();
+  });
+
+  it("update() re-gates the chrome when editability flips mid-session", async () => {
+    let editable = true;
+    const { view, nodeView } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 },
+      () => editable,
+    );
+    expect(menuLabels(view)).toContain("Columns…");
+
+    // Flip to read-only (view/edit toggle, stepError) and re-check on update().
+    editable = false;
+    view.setProps({ editable: () => editable });
+    nodeView.update(view.state.doc.firstChild!);
+    expect(menuLabels(view)).not.toContain("Columns…");
+    expect(menuLabels(view)).not.toContain("Convert to inline element");
+
+    // And back: the controls reappear without a re-fetch.
+    editable = true;
+    view.setProps({ editable: () => editable });
+    nodeView.update(view.state.doc.firstChild!);
+    expect(menuLabels(view)).toContain("Columns…");
+    view.destroy();
+  });
+
+  it("closes an open columns panel when editability flips to false", async () => {
+    let editable = true;
+    const { view, nodeView } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 },
+      () => editable,
+    );
+    openColumnsPanel(view);
+    expect(view.dom.querySelector(".pm-block-embed-columns")).not.toBeNull();
+    expect(
+      view.dom.querySelector(".pm-block-embed-menu--open"),
+    ).not.toBeNull();
+
+    editable = false;
+    view.setProps({ editable: () => editable });
+    nodeView.update(view.state.doc.firstChild!);
+    expect(view.dom.querySelector(".pm-block-embed-columns")).toBeNull();
+    expect(view.dom.querySelector(".pm-block-embed-menu--open")).toBeNull();
     view.destroy();
   });
 });

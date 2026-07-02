@@ -1293,6 +1293,9 @@
 .editor-host .pm-block-embed--denied .pm-block-embed-placeholder {
   color: #8a5a00;
 }
+.editor-host .pm-block-embed--error .pm-block-embed-placeholder {
+  color: #a12622;
+}
 
 /* Inline-atom placeholder visual — pill, monospace key, blue tint.
  * Rendered by the placeholder node in schema.ts (class `pm-placeholder`). */
