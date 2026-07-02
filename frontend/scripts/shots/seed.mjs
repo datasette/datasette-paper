@@ -118,6 +118,15 @@ const BLOCK_ROW =
 const BLOCK_COLUMNS =
   "# Vendors (selected columns)\n\n```paper-embed\n" +
   '{"config": {"columns": ["name", "region"]}, "mode": "table", "ref": "/data/vendors"}\n```\n';
+// A table embed with a shared filter + sort: `config.filters`/`config.sort`
+// (the "Filter & sort…" panel writes exactly this) render the funnel badge,
+// the "7 rows where region = West sorted by name descending" summary line,
+// and the ▼ indicator on the sorted column. Demonstrates the embed-filters
+// feature for the README.
+const BLOCK_FILTERS =
+  "# Vendors (filtered)\n\n```paper-embed\n" +
+  '{"config": {"filters": [{"column": "region", "op": "exact", "value": "West"}], ' +
+  '"sort": {"column": "name", "desc": true}}, "mode": "table", "ref": "/data/vendors"}\n```\n';
 
 // SQL query block: an editable query run against the `data` database, with the
 // results rendered live. The `db=data` token marks it as a runnable SQL block
@@ -217,6 +226,7 @@ export async function seed(ctx) {
   const blockTableId = await create("Vendors table", ACTOR, BLOCK_TABLE);
   const blockRowId = await create("Featured vendor (block)", ACTOR, BLOCK_ROW);
   const blockColumnsId = await create("Vendors (columns)", ACTOR, BLOCK_COLUMNS);
+  const blockFiltersId = await create("Vendors (filtered)", ACTOR, BLOCK_FILTERS);
   const sqlBlockId = await create("Q2 vendor report", ACTOR, SQL_BLOCK);
   const sqlBlockHiddenId = await create("Q2 vendor report (hidden)", ACTOR, SQL_BLOCK_HIDDEN);
   const inlineValueId = await create("Vendor snapshot", ACTOR, INLINE_VALUE);
@@ -235,6 +245,7 @@ export async function seed(ctx) {
     blockTableId,
     blockRowId,
     blockColumnsId,
+    blockFiltersId,
     sqlBlockId,
     sqlBlockHiddenId,
     inlineValueId,

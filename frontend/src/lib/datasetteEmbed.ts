@@ -175,6 +175,7 @@ function denialStatus(status: number | undefined): "denied" | "not_found" {
   return status === 403 ? "denied" : "not_found";
 }
 
+// @feat embed-filters: config.filters/sort → col__op / _sort params on the .json fetch
 async function fetchTableEmbed(
   db: string,
   table: string,

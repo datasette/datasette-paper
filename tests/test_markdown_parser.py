@@ -672,6 +672,46 @@ class TestToc:
         doc = parse_and_validate('```paper-embed\n{"ref":"/r","config":"oops"}\n```\n')
         assert doc["content"][0]["attrs"]["config"] == {}
 
+    # @feat embed-filters: parser keeps a fence's filter config verbatim, junk included
+    def test_paper_embed_fence_with_filter_config(self):
+        # A hand-written fence carrying the filter vocabulary: the parser
+        # restores the whole config dict intact — filter order, the value-less
+        # no-value op entry, and the sort direction included.
+        doc = parse_and_validate(
+            "```paper-embed\n"
+            '{"config": {"filters": ['
+            '{"column": "name", "op": "contains", "value": "Vendor 1"}, '
+            '{"column": "region", "op": "notblank"}], '
+            '"sort": {"column": "id", "desc": true}}, '
+            '"mode": "table", "ref": "/data/vendors"}\n```\n'
+        )
+        block = doc["content"][0]
+        assert block["type"] == "block_embed"
+        assert block["attrs"] == {
+            "ref": "/data/vendors",
+            "mode": "table",
+            "config": {
+                "filters": [
+                    {"column": "name", "op": "contains", "value": "Vendor 1"},
+                    {"column": "region", "op": "notblank"},
+                ],
+                "sort": {"column": "id", "desc": True},
+            },
+        }
+
+    def test_paper_embed_string_filters_kept_verbatim(self):
+        # `config` is a valid object but `filters` is a string, not an array.
+        # Like the malformed-columns case below, the parser keeps the config
+        # verbatim (sanitizing is the frontend's job — `sanitizeFilters`
+        # treats a non-array as "no filters"). Contract: don't raise, don't
+        # rewrite.
+        doc = parse_and_validate(
+            '```paper-embed\n{"ref":"/r","config":{"filters":"oops"}}\n```\n'
+        )
+        block = doc["content"][0]
+        assert block["type"] == "block_embed"
+        assert block["attrs"]["config"] == {"filters": "oops"}
+
     def test_paper_embed_malformed_columns_does_not_crash(self):
         # `config` is a valid object but `columns` is a string, not a list. The
         # parser keeps `config` verbatim (it doesn't validate the bag's shape);

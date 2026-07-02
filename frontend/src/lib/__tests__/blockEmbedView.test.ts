@@ -29,7 +29,7 @@ async function build(
 ): Promise<BlockEmbedView> {
   stubFetch(native, init);
   const node = schema.nodes.block_embed.create({ ref });
-  const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+  const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
   // Let the async load() resolve.
   await new Promise((r) => setTimeout(r, 0));
   return view;
@@ -101,7 +101,7 @@ describe("BlockEmbedView", () => {
       }),
     );
     const node = schema.nodes.block_embed.create({ ref: "/data/vendors" });
-    const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     expect(urls[0]).toContain("_size=10");
 
@@ -238,7 +238,7 @@ describe("BlockEmbedView", () => {
       const fetchSpy = vi.fn();
       vi.stubGlobal("fetch", fetchSpy);
       const node = schema.nodes.block_embed.create({ ref: "/-/places/list/5" });
-      const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+      const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
       await new Promise((r) => setTimeout(r, 0));
 
       expect(fetchSpy).not.toHaveBeenCalled();
@@ -281,7 +281,7 @@ describe("BlockEmbedView", () => {
         ref: "/-/places/list/5",
         config,
       });
-      new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+      new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
       await new Promise((r) => setTimeout(r, 0));
       expect(ctxSeen.config).toEqual(config);
     } finally {
@@ -319,7 +319,7 @@ describe("BlockEmbedView", () => {
     });
     try {
       const node = schema.nodes.block_embed.create({ ref: "/-/places/list/secret" });
-      const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+      const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
       await new Promise((r) => setTimeout(r, 0));
       expect(view.dom.classList.contains("pm-block-embed--denied")).toBe(true);
       expect(view.dom.textContent).not.toContain("secret");
@@ -499,7 +499,7 @@ describe("BlockEmbedView", () => {
       ref: "/data/vendors",
       config: { columns: ["name", "region"] },
     });
-    const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     expect(urls[0]).toContain("_col=name");
     expect(urls[0]).toContain("_col=region");
@@ -593,7 +593,7 @@ describe("BlockEmbedView", () => {
       ref: "/data/vendors",
       config: FILTERED_CONFIG,
     });
-    new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     const query = new URLSearchParams(urls[0].split("?")[1]);
     expect(query.get("state__exact")).toBe("CA");
@@ -608,7 +608,7 @@ describe("BlockEmbedView", () => {
       ref: "/data/vendors",
       config: FILTERED_CONFIG,
     });
-    const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     const href = (
       view.dom.querySelector(".pm-block-embed-label") as HTMLAnchorElement
@@ -642,7 +642,7 @@ describe("BlockEmbedView", () => {
       ref: "/data/vendors",
       config: { filters: [{ column: "state", op: "exact", value: "CA&_del=1" }] },
     });
-    const view = new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     const href = (
       view.dom.querySelector(".pm-block-embed-label") as HTMLAnchorElement
@@ -685,7 +685,7 @@ describe("BlockEmbedView", () => {
         sort: { desc: true }, // no column → ignored
       },
     });
-    new BlockEmbedView(node, { editable: true } as unknown as EditorView, () => 0);
+    new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
     expect(urls[0]).toContain("state__exact=CA");
     expect(urls[0]).not.toContain("regex");

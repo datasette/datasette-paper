@@ -145,6 +145,13 @@ export default {
 - **Same-origin only (v1).** `matchUrl` sees same-origin URLs. Rendering
   arbitrary external-web URLs (GitHub, etc.) needs a server-side fetch layer and
   is a separate, future feature.
+- **Reserved config keys.** A `block_embed` carries an opaque `config` object
+  (JSON, round-tripped through the `paper-embed` fence). Paper's own table
+  embeds use the keys `filters`, `sort`, and `columns` for their
+  Datasette-style filter/sort/column-subset state (see the `embed-filters`
+  feature). If your provider renders table-shaped data, treat those keys as
+  reserved-by-convention with the same meanings; pick other names for
+  provider-specific state.
 
 ## Testing
 

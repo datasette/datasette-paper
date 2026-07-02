@@ -71,9 +71,11 @@ export class BlockEmbedView implements NodeView {
   // mid-session without re-fetching data or re-mounting a provider body.
   private headerEl: HTMLElement | null = null;
   private headerArgs: { icon: string; label: string; href?: string } | null = null;
-  // `view.editable` as of the last header render — update() compares against
-  // the live prop to detect a mid-session flip (view/edit toggle, stepError).
+  // `view.editable` as of the last header render — compared against the live
+  // prop to detect a mid-session flip (view/edit toggle, stepError).
   private renderedEditable = false;
+  // Watches the editor root's `contenteditable` attribute (see constructor).
+  private editableObserver: MutationObserver;
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.view = view;
@@ -84,7 +86,33 @@ export class BlockEmbedView implements NodeView {
     this.ref = node.attrs.ref ?? null;
     this.mode = node.attrs.mode ?? "table";
     this.config = (node.attrs.config as Record<string, unknown>) ?? {};
+    // The view/edit toggle flips PM's `editable` prop via setProps without
+    // dispatching a transaction, so update() below never runs (PM re-runs a
+    // NodeView only when its node or decorations change). The flip DOES
+    // rewrite the editor root's `contenteditable` attribute — observe that
+    // and re-gate the config-writing chrome (⋮ items, per-column ▾ menus).
+    this.editableObserver = new MutationObserver(() => this.regateEditable());
+    this.editableObserver.observe(view.dom, {
+      attributes: true,
+      attributeFilter: ["contenteditable"],
+    });
     void this.load();
+  }
+
+  /**
+   * Re-gate the rendered chrome after an editability flip, without a
+   * re-fetch. A table render carries per-column ▾ menus in its header row,
+   * so rebuild the whole card from the held payload; anything else only
+   * needs the header chrome swapped. No-op while the render matches.
+   */
+  private regateEditable(): void {
+    if (!this.headerEl || this.renderedEditable === !!this.view.editable) return;
+    if (this.tablePayload) {
+      this.closeMenu();
+      this.renderTable(this.tablePayload);
+    } else {
+      this.refreshHeader();
+    }
   }
 
   private async load(): Promise<void> {
@@ -487,6 +515,7 @@ export class BlockEmbedView implements NodeView {
    * per keystroke), or nothing at all when the result equals the current
    * config. Cancel (or outside click) discards.
    */
+  // @feat embed-filters: editor UI — filter panel, per-column ▾ menu, badge + summary line
   private showFiltersPanel(menu: HTMLElement): void {
     if (!this.view.editable) return; // belt-and-braces: viewers never write config
     menu.replaceChildren();
@@ -1168,23 +1197,16 @@ export class BlockEmbedView implements NodeView {
       this.mode = nextMode;
       this.config = nextConfig;
       void this.load();
-    } else if (this.headerEl && this.renderedEditable !== !!this.view.editable) {
-      // Editability flipped mid-session (view/edit toggle, forced read-only
-      // on stepError) — re-gate the chrome without a re-fetch. A table render
-      // also carries per-column ▾ menus in its header row, so rebuild the
-      // whole card from the held payload; anything else only needs the
-      // header chrome swapped.
-      if (this.tablePayload) {
-        this.closeMenu();
-        this.renderTable(this.tablePayload);
-      } else {
-        this.refreshHeader();
-      }
+    } else {
+      // Editability may have flipped mid-session (view/edit toggle, forced
+      // read-only on stepError) — re-gate the chrome without a re-fetch.
+      this.regateEditable();
     }
     return true;
   }
 
   destroy(): void {
+    this.editableObserver.disconnect();
     this.closeMenu();
     this.disposeExternal();
   }

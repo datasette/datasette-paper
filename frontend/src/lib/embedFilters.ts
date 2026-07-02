@@ -12,6 +12,7 @@
  * reader here degrades per-entry and never throws.
  */
 
+// @feat embed-filters: operator registry, config sanitizers, config⇄URL-param translation
 export interface EmbedFilter {
   column: string;
   op: string;

@@ -15,6 +15,7 @@ import {
 } from "../embedFilters";
 import { TOOLBAR_ICONS } from "../icons";
 
+// @feat embed-filters: unit tests — registry, sanitizers, param translation + URL inverse
 describe("FILTER_OPS", () => {
   it("carries all 22 Datasette operators with unique keys", () => {
     expect(FILTER_OPS).toHaveLength(22);

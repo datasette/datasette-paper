@@ -96,6 +96,7 @@ export function parseDatasetteRef(
  * provider-claimed URLs never come through here, so their query strings are
  * never interpreted.
  */
+// @feat embed-filters: pasted filtered-URL query params become embed config
 export function parseDatasetteRefWithParams(
   text: string,
   ctx: RefParseContext,
