@@ -802,4 +802,278 @@ describe("BlockEmbedView", () => {
     expect(view.dom.querySelector(".pm-block-embed-menu--open")).toBeNull();
     view.destroy();
   });
+
+  // ── Table filters T03: the "Filter & sort…" panel + header badge ──────────
+
+  const NATIVE_3COL = {
+    columns: ["id", "state", "population"],
+    rows: [[1, "CA", 100]],
+    count: 1,
+  };
+
+  function openFiltersPanel(view: EditorView) {
+    (view.dom.querySelector(".pm-block-embed-menu-btn") as HTMLButtonElement).click();
+    const item = [...view.dom.querySelectorAll(".pm-block-embed-menu-item")].find(
+      (el) => el.textContent === "Filter & sort…",
+    ) as HTMLButtonElement;
+    item.click();
+    return {
+      panel: view.dom.querySelector(".pm-block-embed-filters") as HTMLElement,
+      rows: () =>
+        [...view.dom.querySelectorAll(".pm-block-embed-filter-row")] as HTMLElement[],
+    };
+  }
+
+  function rowParts(row: HTMLElement) {
+    return {
+      column: row.querySelector(".pm-block-embed-filter-column") as HTMLSelectElement,
+      op: row.querySelector(".pm-block-embed-filter-op") as HTMLSelectElement,
+      value: row.querySelector(".pm-block-embed-filter-value") as HTMLInputElement,
+    };
+  }
+
+  function sortControls(view: EditorView) {
+    return {
+      column: view.dom.querySelector(
+        ".pm-block-embed-filter-sort-column",
+      ) as HTMLSelectElement,
+      dir: view.dom.querySelector(
+        ".pm-block-embed-filter-sort-dir",
+      ) as HTMLSelectElement,
+    };
+  }
+
+  function applyBtn(view: EditorView): HTMLButtonElement {
+    return view.dom.querySelector(".pm-block-embed-filter-apply") as HTMLButtonElement;
+  }
+
+  it("opens the panel with one row per configured filter plus a trailing blank", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: {
+          filters: [
+            { column: "state", op: "exact", value: "CA" },
+            { column: "population", op: "gt", value: "100" },
+          ],
+          sort: { column: "population", desc: true },
+        },
+      },
+      NATIVE_3COL,
+    );
+    const { panel, rows } = openFiltersPanel(view);
+    expect(panel).not.toBeNull();
+    const all = rows();
+    expect(all).toHaveLength(3);
+    const first = rowParts(all[0]);
+    expect(first.column.value).toBe("state");
+    expect(first.op.value).toBe("exact");
+    expect(first.value.value).toBe("CA");
+    const second = rowParts(all[1]);
+    expect(second.column.value).toBe("population");
+    expect(second.op.value).toBe("gt");
+    expect(second.value.value).toBe("100");
+    // The trailing blank row starts on the empty "– column –" option.
+    expect(rowParts(all[2]).column.value).toBe("");
+    // The op select carries every registry op, in order.
+    expect([...first.op.options].map((o) => o.value)).toHaveLength(22);
+    // The sort row seeds from config.sort.
+    const sort = sortControls(view);
+    expect(sort.column.value).toBe("population");
+    expect(sort.dir.value).toBe("desc");
+    // The shared-view notice is always present in the panel.
+    expect(
+      view.dom.querySelector(".pm-block-embed-shared-notice")!.textContent,
+    ).toContain("Shared view");
+    view.destroy();
+  });
+
+  it("hides and disables the value input when a no-value op is chosen", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    const { rows } = openFiltersPanel(view);
+    const r = rowParts(rows()[0]);
+    expect(r.value.disabled).toBe(false);
+    expect(r.value.hidden).toBe(false);
+    r.op.value = "notblank";
+    r.op.dispatchEvent(new Event("change"));
+    expect(r.value.disabled).toBe(true);
+    expect(r.value.hidden).toBe(true);
+    // And back — the visibility re-evaluates on every op change.
+    r.op.value = "contains";
+    r.op.dispatchEvent(new Event("change"));
+    expect(r.value.disabled).toBe(false);
+    expect(r.value.hidden).toBe(false);
+    view.destroy();
+  });
+
+  it("grows a fresh blank row when the last row's column is chosen", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    const { rows } = openFiltersPanel(view);
+    expect(rows()).toHaveLength(1);
+    const r = rowParts(rows()[0]);
+    r.column.value = "state";
+    r.column.dispatchEvent(new Event("change"));
+    expect(rows()).toHaveLength(2);
+    // Re-picking a column on a non-last row does not grow another.
+    r.column.value = "population";
+    r.column.dispatchEvent(new Event("change"));
+    expect(rows()).toHaveLength(2);
+    view.destroy();
+  });
+
+  it("Apply commits the form as exactly one transaction, dropping incomplete rows", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    const dispatch = vi.spyOn(view, "dispatch");
+    const { rows } = openFiltersPanel(view);
+    const r = rowParts(rows()[0]);
+    r.column.value = "state";
+    r.column.dispatchEvent(new Event("change"));
+    r.value.value = "CA"; // op stays on the first registry entry: exact
+    // Second row: column + value-taking op but no value → incomplete, dropped.
+    const r2 = rowParts(rows()[1]);
+    r2.column.value = "population";
+    r2.column.dispatchEvent(new Event("change"));
+    r2.op.value = "gt";
+    r2.op.dispatchEvent(new Event("change"));
+    const sort = sortControls(view);
+    sort.column.value = "population";
+    sort.dir.value = "desc";
+    applyBtn(view).click();
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({
+      filters: [{ column: "state", op: "exact", value: "CA" }],
+      sort: { column: "population", desc: true },
+    });
+    view.destroy();
+  });
+
+  it("keeps a no-value op row without its value on Apply", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    const { rows } = openFiltersPanel(view);
+    const r = rowParts(rows()[0]);
+    r.column.value = "state";
+    r.column.dispatchEvent(new Event("change"));
+    r.op.value = "notblank";
+    r.op.dispatchEvent(new Event("change"));
+    applyBtn(view).click();
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({
+      filters: [{ column: "state", op: "notblank" }],
+    });
+    view.destroy();
+  });
+
+  it("clearing every row on Apply removes the filters key entirely", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: {
+          columns: ["state"],
+          filters: [{ column: "state", op: "exact", value: "CA" }],
+        },
+      },
+      NATIVE_3COL,
+    );
+    const { rows } = openFiltersPanel(view);
+    (rows()[0].querySelector(".pm-block-embed-filter-remove") as HTMLButtonElement).click();
+    // The trailing blank row survives the removal.
+    expect(rows()).toHaveLength(1);
+    applyBtn(view).click();
+    // filters key gone; unrelated config keys untouched.
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({ columns: ["state"] });
+    view.destroy();
+  });
+
+  it("choosing '– no sort –' on Apply removes the sort key", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { sort: { column: "population", desc: true } } },
+      NATIVE_3COL,
+    );
+    openFiltersPanel(view);
+    const sort = sortControls(view);
+    expect(sort.column.value).toBe("population");
+    sort.column.value = "";
+    applyBtn(view).click();
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({});
+    view.destroy();
+  });
+
+  it("Apply with an unchanged form dispatches nothing", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: {
+          filters: [{ column: "state", op: "exact", value: "CA" }],
+          sort: { column: "population", desc: true },
+        },
+      },
+      NATIVE_3COL,
+    );
+    const dispatch = vi.spyOn(view, "dispatch");
+    openFiltersPanel(view);
+    applyBtn(view).click();
+    expect(dispatch).not.toHaveBeenCalled();
+    // …and the menu closed anyway.
+    expect(view.dom.querySelector(".pm-block-embed-menu--open")).toBeNull();
+    view.destroy();
+  });
+
+  it("Cancel discards edits and dispatches nothing", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: { filters: [{ column: "state", op: "exact", value: "CA" }] },
+      },
+      NATIVE_3COL,
+    );
+    const dispatch = vi.spyOn(view, "dispatch");
+    const { rows } = openFiltersPanel(view);
+    rowParts(rows()[0]).value.value = "WA"; // typing never dispatches
+    (
+      view.dom.querySelector(".pm-block-embed-filter-cancel") as HTMLButtonElement
+    ).click();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({
+      filters: [{ column: "state", op: "exact", value: "CA" }],
+    });
+    expect(view.dom.querySelector(".pm-block-embed-menu--open")).toBeNull();
+    view.destroy();
+  });
+
+  it("hides the Filter & sort… item from read-only viewers", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      NATIVE_3COL,
+      () => false,
+    );
+    expect(menuLabels(view)).not.toContain("Filter & sort…");
+    view.destroy();
+  });
+
+  it("shows the filter-count badge to read-only viewers when filters are configured", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: {
+          filters: [
+            { column: "state", op: "exact", value: "CA" },
+            { column: "state", op: "notblank" },
+          ],
+        },
+      },
+      NATIVE_3COL,
+      () => false,
+    );
+    const badge = view.dom.querySelector(".pm-block-embed-filter-badge");
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent).toBe("2");
+    // The funnel is an icon (constant SVG), never an emoji character.
+    expect(badge!.querySelector("svg")).not.toBeNull();
+    view.destroy();
+  });
+
+  it("renders no badge when config has no filters", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    expect(view.dom.querySelector(".pm-block-embed-filter-badge")).toBeNull();
+    view.destroy();
+  });
 });

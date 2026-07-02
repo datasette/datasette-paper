@@ -1186,6 +1186,126 @@
   font-weight: 600;
   color: #6429a8;
 }
+/* The in-place "Filter & sort…" form that replaces the menu body. */
+.editor-host .pm-block-embed-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 2px;
+}
+.editor-host .pm-block-embed-filter-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.editor-host .pm-block-embed-filter-row,
+.editor-host .pm-block-embed-filter-sort {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+  color: #333;
+}
+.editor-host .pm-block-embed-filter-row select,
+.editor-host .pm-block-embed-filter-row input,
+.editor-host .pm-block-embed-filter-sort select {
+  font: inherit;
+  font-size: 12px;
+  padding: 2px 4px;
+  border: 1px solid #d4d4d4;
+  border-radius: 4px;
+  background: #fff;
+  color: #333;
+  min-width: 0;
+}
+.editor-host .pm-block-embed-filter-value {
+  flex: 1;
+  width: 90px;
+}
+.editor-host .pm-block-embed-filter-remove {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #777;
+  padding: 2px;
+  display: inline-flex;
+  border-radius: 4px;
+}
+.editor-host .pm-block-embed-filter-remove:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+}
+.editor-host .pm-block-embed-filter-sort-label {
+  font-weight: 600;
+  color: #555;
+}
+/* Soft informational strip — this is a heads-up, not a warning. */
+.editor-host .pm-block-embed-shared-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #555;
+  background: #f1ecf8;
+  border-radius: 4px;
+  max-width: 260px;
+}
+.editor-host .pm-block-embed-shared-notice .pm-block-embed-icon {
+  margin-top: 1px;
+  flex: none;
+}
+.editor-host .pm-block-embed-filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #eee;
+}
+.editor-host .pm-block-embed-filter-cancel,
+.editor-host .pm-block-embed-filter-apply {
+  border: 1px solid #d4d4d4;
+  background: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: #333;
+  padding: 4px 10px;
+  border-radius: 4px;
+}
+.editor-host .pm-block-embed-filter-cancel:hover {
+  background: #f1ecf8;
+}
+.editor-host .pm-block-embed-filter-apply {
+  background: #6429a8;
+  border-color: #6429a8;
+  color: #fff;
+  font-weight: 600;
+}
+.editor-host .pm-block-embed-filter-apply:hover {
+  background: #55238f;
+}
+/* Header chip: funnel + active-filter count (informational — everyone sees it). */
+.editor-host .pm-block-embed-filter-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #ede5f7;
+  color: #6429a8;
+  font-size: 11px;
+  font-weight: 600;
+}
+.editor-host .pm-block-embed-filter-badge .pm-block-embed-icon svg {
+  width: 10px;
+  height: 10px;
+}
 .editor-host .pm-block-embed-tables {
   list-style: none;
   margin: 0;

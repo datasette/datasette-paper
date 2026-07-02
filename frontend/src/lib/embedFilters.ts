@@ -56,6 +56,16 @@ export const FILTER_OPS: { key: string; label: string; noValue?: boolean }[] = [
 const OPS_BY_KEY = new Map(FILTER_OPS.map((op) => [op.key, op]));
 
 /**
+ * The registry entry for an op key, or undefined for an unknown key — the
+ * filter panel's per-key lookup (e.g. re-checking `noValue` on op change).
+ */
+export function filterOpByKey(
+  key: string,
+): { key: string; label: string; noValue?: boolean } | undefined {
+  return OPS_BY_KEY.get(key);
+}
+
+/**
  * The valid filters from a raw `config.filters` value. Non-array → `[]`.
  * An entry that isn't an object, lacks a non-empty string `column`, names an
  * `op` outside the registry, or (for a value-taking op) has no string

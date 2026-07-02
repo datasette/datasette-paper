@@ -27,6 +27,8 @@ import {
 } from "./datasetteEmbed";
 import { rowsToCsv, rowsToJson } from "./tableExport";
 import {
+  FILTER_OPS,
+  filterOpByKey,
   filterQueryParams,
   sanitizeFilters,
   sanitizeSort,
@@ -246,6 +248,21 @@ export class BlockEmbedView implements NodeView {
     labelEl.textContent = label; // text node — never innerHTML
     head.appendChild(labelEl);
 
+    // Active-filter chip: funnel + count, shown whenever this is a table/view
+    // render with filters configured. Informational, so read-only viewers see
+    // it too — only the panel that *edits* the filters is gated on editable.
+    if (this.tablePayload) {
+      const filterCount = this.filters().length;
+      if (filterCount > 0) {
+        const badge = document.createElement("span");
+        badge.className = "pm-block-embed-filter-badge";
+        badge.title = `${filterCount} filter${filterCount === 1 ? "" : "s"} applied`;
+        badge.appendChild(this.svgIcon("funnelFill"));
+        badge.appendChild(document.createTextNode(String(filterCount)));
+        head.appendChild(badge);
+      }
+    }
+
     const refresh = document.createElement("button");
     refresh.type = "button";
     refresh.className = "pm-block-embed-refresh";
@@ -361,6 +378,20 @@ export class BlockEmbedView implements NodeView {
           this.showColumnsPanel(menu);
         });
         menu.appendChild(cols);
+
+        // Filter & sort form — config-writing, same gate as Columns….
+        const filters = document.createElement("button");
+        filters.type = "button";
+        filters.className = "pm-block-embed-menu-item";
+        filters.textContent = "Filter & sort…";
+        // Like Columns…, this swaps the menu body for the form in place —
+        // Apply/Cancel (or outside click) closes it.
+        filters.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.showFiltersPanel(menu);
+        });
+        menu.appendChild(filters);
       }
     }
 
@@ -447,13 +478,228 @@ export class BlockEmbedView implements NodeView {
     menu.appendChild(panel);
   }
 
+  /**
+   * Swap the open ⋮ menu's body for the filter & sort form: one row per
+   * active filter (column / op / value) plus an always-present trailing blank
+   * row, a sort row, the shared-view notice, and Cancel / "Apply for
+   * everyone". All editing is local to the form — nothing dispatches until
+   * Apply, which commits the whole form as ONE setNodeMarkup step (never
+   * per keystroke), or nothing at all when the result equals the current
+   * config. Cancel (or outside click) discards.
+   */
+  private showFiltersPanel(menu: HTMLElement): void {
+    if (!this.view.editable) return; // belt-and-braces: viewers never write config
+    menu.replaceChildren();
+    const panel = document.createElement("div");
+    panel.className = "pm-block-embed-filters";
+
+    const rowsHost = document.createElement("div");
+    rowsHost.className = "pm-block-embed-filter-rows";
+    panel.appendChild(rowsHost);
+
+    type FilterRow = {
+      el: HTMLElement;
+      column: HTMLSelectElement;
+      op: HTMLSelectElement;
+      value: HTMLInputElement;
+    };
+    const rows: FilterRow[] = [];
+
+    const columnSelect = (
+      className: string,
+      blankLabel: string,
+      selected: string,
+    ): HTMLSelectElement => {
+      const select = document.createElement("select");
+      select.className = className;
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = blankLabel;
+      select.appendChild(blank);
+      for (const col of this.allColumns) {
+        const opt = document.createElement("option");
+        opt.value = col;
+        opt.textContent = col; // text node — column names are data-derived
+        if (col === selected) opt.selected = true;
+        select.appendChild(opt);
+      }
+      return select;
+    };
+
+    const addRow = (seed?: EmbedFilter): void => {
+      const el = document.createElement("div");
+      el.className = "pm-block-embed-filter-row";
+
+      const column = columnSelect(
+        "pm-block-embed-filter-column",
+        "– column –",
+        seed?.column ?? "",
+      );
+      const op = document.createElement("select");
+      op.className = "pm-block-embed-filter-op";
+      for (const o of FILTER_OPS) {
+        const opt = document.createElement("option");
+        opt.value = o.key;
+        opt.textContent = o.label;
+        if (o.key === seed?.op) opt.selected = true;
+        op.appendChild(opt);
+      }
+      const value = document.createElement("input");
+      value.type = "text";
+      value.className = "pm-block-embed-filter-value";
+      value.value = seed?.value ?? "";
+      // A no-value op (is null, is blank, …) takes no argument — hide and
+      // disable the value box; re-evaluated whenever the op changes.
+      const syncValue = (): void => {
+        const noValue = !!filterOpByKey(op.value)?.noValue;
+        value.disabled = noValue;
+        value.hidden = noValue;
+      };
+      syncValue();
+      op.addEventListener("change", syncValue);
+      // Choosing a column on the trailing blank row grows a fresh blank row
+      // (Datasette's always-one-empty-row form pattern).
+      column.addEventListener("change", () => {
+        if (column.value && rows[rows.length - 1]?.column === column) addRow();
+      });
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "pm-block-embed-filter-remove";
+      remove.title = "Remove filter";
+      remove.setAttribute("aria-label", "Remove filter");
+      remove.appendChild(this.svgIcon("x"));
+      remove.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const i = rows.findIndex((r) => r.el === el);
+        if (i >= 0) rows.splice(i, 1);
+        el.remove();
+        // Keep the invariant: always one trailing blank row.
+        if (!rows.length || rows[rows.length - 1].column.value !== "") addRow();
+      });
+
+      el.appendChild(column);
+      el.appendChild(op);
+      el.appendChild(value);
+      el.appendChild(remove);
+      rowsHost.appendChild(el);
+      rows.push({ el, column, op, value });
+    };
+
+    for (const f of this.filters()) addRow(f);
+    addRow(); // the trailing blank row
+
+    // Sort row: "– no sort –" + every column, with an asc/desc control.
+    const sort = this.sort();
+    const sortRow = document.createElement("div");
+    sortRow.className = "pm-block-embed-filter-sort";
+    const sortLabel = document.createElement("span");
+    sortLabel.className = "pm-block-embed-filter-sort-label";
+    sortLabel.textContent = "Sort";
+    const sortColumn = columnSelect(
+      "pm-block-embed-filter-sort-column",
+      "– no sort –",
+      sort?.column ?? "",
+    );
+    const sortDir = document.createElement("select");
+    sortDir.className = "pm-block-embed-filter-sort-dir";
+    for (const [dirValue, dirLabel] of [
+      ["asc", "ascending"],
+      ["desc", "descending"],
+    ]) {
+      const opt = document.createElement("option");
+      opt.value = dirValue;
+      opt.textContent = dirLabel;
+      if ((dirValue === "desc") === !!sort?.desc) opt.selected = true;
+      sortDir.appendChild(opt);
+    }
+    sortRow.appendChild(sortLabel);
+    sortRow.appendChild(sortColumn);
+    sortRow.appendChild(sortDir);
+    panel.appendChild(sortRow);
+
+    // Shared-view notice — informational, pairs with the Apply button label:
+    // this config is document state, not a private per-session filter.
+    const notice = document.createElement("div");
+    notice.className = "pm-block-embed-shared-notice";
+    notice.appendChild(this.svgIcon("people"));
+    notice.appendChild(
+      document.createTextNode(
+        "Shared view — filters are saved in the document and change what everyone sees.",
+      ),
+    );
+    panel.appendChild(notice);
+
+    const actions = document.createElement("div");
+    actions.className = "pm-block-embed-filter-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "pm-block-embed-filter-cancel";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeMenu(); // discard — nothing dispatched while editing
+    });
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "pm-block-embed-filter-apply";
+    apply.textContent = "Apply for everyone";
+    apply.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Collect the form; incomplete rows — no column, an unknown op, or an
+      // empty value on a value-taking op — are dropped (Datasette's own
+      // "- remove filter -" semantics).
+      const filters: EmbedFilter[] = [];
+      for (const r of rows) {
+        const column = r.column.value;
+        if (!column) continue;
+        const known = filterOpByKey(r.op.value);
+        if (!known) continue;
+        if (known.noValue) {
+          filters.push({ column, op: known.key });
+        } else if (r.value.value !== "") {
+          filters.push({ column, op: known.key, value: r.value.value });
+        }
+      }
+      // Minimal config, clean fence: no filters/sort → drop the key entirely
+      // (the tocView setConfig normalization precedent).
+      const next: Record<string, unknown> = { ...(this.node.attrs.config ?? {}) };
+      if (filters.length) next.filters = filters;
+      else delete next.filters;
+      if (sortColumn.value) {
+        next.sort =
+          sortDir.value === "desc"
+            ? { column: sortColumn.value, desc: true }
+            : { column: sortColumn.value };
+      } else {
+        delete next.sort;
+      }
+      this.closeMenu();
+      const current = (this.node.attrs.config as Record<string, unknown>) ?? {};
+      // An unchanged config dispatches no step at all.
+      if (JSON.stringify(next) === JSON.stringify(current)) return;
+      this.writeConfig(next);
+    });
+    actions.appendChild(cancel);
+    actions.appendChild(apply);
+    panel.appendChild(actions);
+    menu.appendChild(panel);
+  }
+
   /** Merge `columns` into the node's `config` attr; update() then re-fetches. */
   private setColumns(columns: string[]): void {
+    this.writeConfig({ ...(this.node.attrs.config ?? {}), columns });
+  }
+
+  /** Write a full config bag to the node's attrs as one setNodeMarkup step. */
+  private writeConfig(config: Record<string, unknown>): void {
     if (!this.view.editable) return; // the server 403s the step anyway
     const pos = this.getPos();
     if (pos == null) return;
     const { state, dispatch } = this.view;
-    const config = { ...(this.node.attrs.config ?? {}), columns };
     dispatch(state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, config }));
   }
 

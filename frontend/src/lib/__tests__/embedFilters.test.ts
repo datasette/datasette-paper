@@ -7,10 +7,12 @@ import { describe, it, expect } from "vitest";
 
 import {
   FILTER_OPS,
+  filterOpByKey,
   filterQueryParams,
   sanitizeFilters,
   sanitizeSort,
 } from "../embedFilters";
+import { TOOLBAR_ICONS } from "../icons";
 
 describe("FILTER_OPS", () => {
   it("carries all 22 Datasette operators with unique keys", () => {
@@ -26,6 +28,22 @@ describe("FILTER_OPS", () => {
   it("labels every op for the picker UI", () => {
     for (const op of FILTER_OPS) {
       expect(op.label.length).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("filterOpByKey", () => {
+  it("looks up registry entries by key, undefined for unknown keys", () => {
+    expect(filterOpByKey("exact")).toEqual({ key: "exact", label: "=" });
+    expect(filterOpByKey("isnull")?.noValue).toBe(true);
+    expect(filterOpByKey("regex")).toBeUndefined();
+  });
+});
+
+describe("filter panel icons", () => {
+  it("registers the people / funnel / funnelFill / x icon slots", () => {
+    for (const name of ["people", "funnel", "funnelFill", "x"]) {
+      expect(TOOLBAR_ICONS[name], name).toContain("<path");
     }
   });
 });
