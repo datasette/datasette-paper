@@ -128,6 +128,18 @@ const BLOCK_FILTERS =
   '{"config": {"filters": [{"column": "region", "op": "exact", "value": "West"}], ' +
   '"sort": {"column": "name", "desc": true}}, "mode": "table", "ref": "/data/vendors"}\n```\n';
 
+// Ugly-data doc for the result-rendering shots: a wide table embed (13
+// columns incl. multi-line/long text, an unbroken URL and a blob) plus a SQL
+// block over the same rows. Long values collapse to one clamped line, blobs
+// render as their byte size, and the table h-scrolls with edge fades.
+const RESULT_RENDERING =
+  "# Support tickets\n\nReal-world messy data: long values collapse to one " +
+  "line and expand on demand, binary cells show their size, and wide tables " +
+  "scroll sideways.\n\n```paper-embed\n" +
+  '{"config": {}, "mode": "table", "ref": "/data/tickets"}\n```\n\n' +
+  "```sql db=data\nselect id, customer, subject, description, attachment " +
+  "from tickets order by id\n```\n";
+
 // SQL query block: an editable query run against the `data` database, with the
 // results rendered live. The `db=data` token marks it as a runnable SQL block
 // (a plain ```sql fence stays a code block). One doc shows the editor + results
@@ -227,6 +239,7 @@ export async function seed(ctx) {
   const blockRowId = await create("Featured vendor (block)", ACTOR, BLOCK_ROW);
   const blockColumnsId = await create("Vendors (columns)", ACTOR, BLOCK_COLUMNS);
   const blockFiltersId = await create("Vendors (filtered)", ACTOR, BLOCK_FILTERS);
+  const resultRenderingId = await create("Support tickets", ACTOR, RESULT_RENDERING);
   const sqlBlockId = await create("Q2 vendor report", ACTOR, SQL_BLOCK);
   const sqlBlockHiddenId = await create("Q2 vendor report (hidden)", ACTOR, SQL_BLOCK_HIDDEN);
   const inlineValueId = await create("Vendor snapshot", ACTOR, INLINE_VALUE);
@@ -246,6 +259,7 @@ export async function seed(ctx) {
     blockRowId,
     blockColumnsId,
     blockFiltersId,
+    resultRenderingId,
     sqlBlockId,
     sqlBlockHiddenId,
     inlineValueId,

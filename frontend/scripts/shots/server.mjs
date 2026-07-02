@@ -37,6 +37,42 @@ rows = [(i, "Vendor %d" % i, regions[i % 4]) for i in range(1, 31)]
 db.executemany("insert into vendors (id, name, region) values (?, ?, ?)", rows)
 db.execute("create table regions (id integer primary key, name text)")
 db.executemany("insert into regions (id, name) values (?, ?)", list(enumerate(regions, 1)))
+# Ugly, real-world-shaped data for the result-rendering shots: many columns,
+# multi-line + very long text, an unbroken-token URL, and a binary blob.
+# Everything is deterministic (the screenshot contract).
+db.execute("""create table tickets (
+  id integer primary key, opened text, customer text, email text,
+  region text, priority text, status text, subject text, description text,
+  stack_trace text, page_url text, attachment blob, resolution text)""")
+description = (
+  "Customer reports the checkout button does nothing on Safari 17.\\n\\n"
+  "Steps to reproduce:\\n"
+  "1. Add any item to the cart\\n"
+  "2. Navigate to /checkout\\n"
+  "3. Click 'Place order'\\n\\n"
+  "Expected: order confirmation page.\\n"
+  "Actual: silent failure; the browser console shows a Content-Security-Policy "
+  "violation for the payments iframe, followed by an unhandled promise "
+  "rejection in checkout.bundle.js. The customer retried on two machines "
+  "and sees the same behaviour on both."
+)
+stack = "Traceback (most recent call last):\\n" + "".join(
+  '  File "/srv/app/handlers/checkout.py", line %d, in place_order\\n'
+  "    total = compute_total(cart, promotions, region_tax_table)\\n" % (40 + i)
+  for i in range(20)
+) + "ValueError: unsupported currency pair (USD, XAG)"
+url = "https://shop.example.com/checkout/session/" + "a1b2c3d4e5f6" * 12
+blob = bytes(range(256)) * 41  # ~10.2 KB
+statuses = ["open", "triaged", "in progress", "resolved"]
+tickets = [
+  (i, "2026-06-%02d 09:%02d:00" % (i, 13 + i), "Customer %d" % i,
+   "customer%d@example.com" % i, regions[i % 4], ["low", "normal", "high"][i % 3],
+   statuses[i % 4], "Checkout button unresponsive on Safari (case %d)" % i,
+   description, stack, url, blob,
+   None if i % 2 else "Rolled back the payments iframe CSP change.")
+  for i in range(1, 9)
+]
+db.executemany("insert into tickets values (%s)" % ",".join("?" * 13), tickets)
 db.commit(); db.close()
 `;
   execFileSync("uv", ["run", "--prerelease=allow", "python3", "-c", py]);

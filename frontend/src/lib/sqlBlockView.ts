@@ -19,7 +19,12 @@
  */
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView, ViewMutationRecord } from "prosemirror-view";
-import { cellText, iconMarkup } from "./datasetteEmbed";
+import { iconMarkup } from "./datasetteEmbed";
+import {
+  attachScrollFades,
+  markOverflowingCells,
+  renderResultValue,
+} from "./resultCell";
 import {
   listQueryableDatabases,
   queryHref,
@@ -383,6 +388,9 @@ export class SqlBlockView implements NodeView {
     const start = this.page * this.pageSize;
     const pageRows = rows.slice(start, start + this.pageSize);
 
+    // Non-scrolling wrap for the edge fades (see blockEmbedView.renderTable).
+    const wrap = document.createElement("div");
+    wrap.className = "pm-result-scrollwrap";
     const scroll = document.createElement("div");
     scroll.className = "pm-sql-block-scroll";
     const table = document.createElement("table");
@@ -402,14 +410,18 @@ export class SqlBlockView implements NodeView {
       const tr = document.createElement("tr");
       for (const cell of row) {
         const td = document.createElement("td");
-        td.textContent = cellText(cell); // text node
+        // @feat result-cells: SQL result cells render clamped + expandable
+        renderResultValue(td, cell); // text nodes only
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
     scroll.appendChild(table);
-    this.resultsEl.appendChild(scroll);
+    wrap.appendChild(scroll);
+    this.resultsEl.appendChild(wrap);
+    attachScrollFades(wrap, scroll);
+    markOverflowingCells(table);
 
     this.resultsEl.appendChild(this.buildFooter(rows.length, start, pageRows.length));
   }
