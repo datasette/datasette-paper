@@ -20,6 +20,7 @@
   import type { EmbedKindFilter } from "./slashMenu";
   import CreatePageDialog from "./CreatePageDialog.svelte";
   import { insertImage } from "./image";
+  import { youtubeWatchUrl } from "./youtube";
   import { insertDatasetteEmbed } from "./datasetteEmbed";
   import { TOOLBAR_ICONS } from "./icons";
 
@@ -208,6 +209,15 @@
             const marker = node.attrs.checked ? "- [x] " : "- [ ] ";
             state.write(marker);
             state.renderContent(node);
+          },
+          // A lone canonical YouTube URL on its own line — the bare-URL form
+          // the backend markdown round-trips (datasette_paper/markdown.py).
+          video_embed(state, node) {
+            if ((node.attrs.provider ?? "youtube") === "youtube" && node.attrs.videoId) {
+              const start = typeof node.attrs.start === "number" ? node.attrs.start : null;
+              state.write(youtubeWatchUrl(node.attrs.videoId, start));
+            }
+            state.closeBlock(node);
           },
         },
         defaultMarkdownSerializer.marks,

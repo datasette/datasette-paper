@@ -13,6 +13,8 @@ import re
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
 
+from .youtube import youtube_watch_url
+
 # A resource-URL resolver: given (ref_type, value) it returns
 # ``(kind, url)`` where:
 #   * ``kind`` is the embed provider kind (only meaningful for ``"embed"``;
@@ -193,6 +195,21 @@ def _render_block(node: dict) -> str:
         # back in markdown_parser.py.
         body = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         return "```paper-embed\n" + body + "\n```\n"
+    if (
+        t == "video_embed"
+    ):  # @feat video-embed: serialize atom to a bare canonical YouTube URL line
+        # A lone URL on its own line — the markdown parser reads it back into a
+        # video_embed (markdown_parser.py). Only YouTube exists today; an
+        # unknown provider degrades to nothing renderable, so skip it rather
+        # than emit a bogus URL.
+        attrs = node.get("attrs") or {}
+        if (attrs.get("provider") or "youtube") != "youtube" or not attrs.get(
+            "videoId"
+        ):
+            return ""
+        start = attrs.get("start")
+        start = start if isinstance(start, int) and start > 0 else None
+        return youtube_watch_url(attrs["videoId"], start) + "\n"
     if t == "toc":
         attrs = node.get("attrs") or {}
         config = attrs.get("config") or {}

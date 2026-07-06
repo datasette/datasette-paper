@@ -1059,6 +1059,72 @@
   outline: 2px solid #6429a8;
   outline-offset: 1px;
 }
+
+/* "Lite" YouTube embed: a thumbnail facade that swaps to the real iframe on
+   click (videoEmbedView.ts, modelled on paulirish/lite-youtube-embed). */
+.editor-host .pm-video-embed {
+  margin: 0 0 0.75em;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+}
+.editor-host .pm-video-embed.ProseMirror-selectednode {
+  outline: 2px solid #6429a8;
+  outline-offset: 1px;
+}
+.editor-host .pm-video-embed-facade {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background: #000;
+}
+.editor-host .pm-video-embed-thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* hqdefault is letterboxed; crop to a clean 16:9 */
+  display: block;
+}
+.editor-host .pm-video-embed-play {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 68px;
+  height: 48px;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.55);
+  transition: background 0.15s ease;
+}
+.editor-host .pm-video-embed-facade:hover .pm-video-embed-play {
+  background: #f00;
+}
+.editor-host .pm-video-embed-play::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-40%, -50%);
+  border-style: solid;
+  border-width: 10px 0 10px 17px;
+  border-color: transparent transparent transparent #fff;
+}
+.editor-host .pm-video-embed-iframe {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+}
+.editor-host .pm-video-embed-fallback {
+  padding: 12px;
+  font-size: 13px;
+  color: #666;
+  background: #fbfbfd;
+}
+
 .editor-host .pm-block-embed-head {
   display: flex;
   align-items: center;

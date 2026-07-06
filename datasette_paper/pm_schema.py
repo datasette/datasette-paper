@@ -409,6 +409,38 @@ _block_embed_spec = {
     ],
 }
 
+# Block atom for a "lite" YouTube embed — mirrors the JS schema in
+# frontend/src/lib/schema.ts. Identity-only: `provider` ("youtube" today), the
+# provider video id, and an optional `start` offset in seconds. The facade
+# render (thumbnail -> click-to-iframe) is client-only; markdown round-trips as
+# a bare canonical watch URL via datasette_paper/markdown.py. toDOM is never
+# rendered server-side but must be structurally valid for node_from_json.
+# @feat video-embed: server node spec (mirrors schema.ts) with provider/videoId/start attrs
+_video_embed_spec = {
+    "group": "block",
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {
+        "provider": {"default": "youtube"},
+        "videoId": {"default": None},
+        "start": {"default": None},
+    },
+    "parseDOM": [{"tag": "div[data-video-embed]"}],
+    "toDOM": lambda node: [
+        "div",
+        {
+            "data-video-embed": str(node.attrs.get("provider") or "youtube"),
+            "data-video-id": str(node.attrs.get("videoId") or ""),
+            "data-video-start": (
+                "" if node.attrs.get("start") is None else str(node.attrs.get("start"))
+            ),
+            "class": "pm-video-embed",
+        },
+        str(node.attrs.get("videoId") or ""),
+    ],
+}
+
 # Block atom for an auto-generated table of contents — mirrors the JS schema in
 # frontend/src/lib/schema.ts. Content-free; the heading list is derived
 # per-viewer and never persisted. `config` is an opaque options bag
@@ -502,6 +534,7 @@ _nodes = {
     "value": _value_spec,
     "inline_embed": _inline_embed_spec,
     "block_embed": _block_embed_spec,
+    "video_embed": _video_embed_spec,
     "toc": _toc_spec,
     "sql_block": _sql_block_spec,
     "source": _source_spec,

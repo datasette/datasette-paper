@@ -28,6 +28,30 @@ from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
 from .util import normalize_tag
+from .youtube import parse_youtube_url
+
+
+def _video_embed_from_paragraph(para: dict) -> dict | None:
+    """A paragraph whose only content is a bare YouTube URL becomes a
+    ``video_embed`` atom — the inverse of ``markdown.py`` emitting a lone URL
+    line. Marks are ignored, so an autolinked ``<url>`` converts too; link
+    *text* that differs from the URL (``[watch](url)``) never matches, so a
+    genuine link stays a link.
+    """
+    content = para.get("content") or []
+    if len(content) != 1:
+        return None
+    child = content[0]
+    if child.get("type") != "text":
+        return None
+    parsed = parse_youtube_url(child.get("text") or "")
+    if parsed is None:
+        return None
+    video_id, start = parsed
+    return {
+        "type": "video_embed",
+        "attrs": {"provider": "youtube", "videoId": video_id, "start": start},
+    }
 
 
 _MARK_OPEN_CLOSE = {
@@ -145,6 +169,15 @@ def _tokens_to_doc(tokens) -> dict:
         elif t == "paragraph_open":
             push({"type": "paragraph", "content": []})
         elif t == "paragraph_close":
+            # @feat video-embed: a lone top-level YouTube-URL paragraph becomes a video_embed
+            # Only at doc depth 1 — matching the paste handler, which converts
+            # only an empty top-level paragraph. Nested (list/quote) URLs stay
+            # links. Mutate in place so the node keeps its slot in root content.
+            if stack[-2] is root:
+                embed = _video_embed_from_paragraph(stack[-1])
+                if embed is not None:
+                    stack[-1].clear()
+                    stack[-1].update(embed)
             pop()
 
         elif t == "blockquote_open":

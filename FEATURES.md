@@ -20,6 +20,7 @@ this table and the markers in sync.
 | `placeholder` | `{{key}}` template-placeholder inline atom — authored only in templates, substituted server-side at create time (write-only: never parsed back) | `datasette_paper/template_params.py` |
 | `inline-embed` | Inline atom referencing a Datasette resource by ref path, resolved to a live pill label per-viewer | `frontend/src/lib/inlineEmbedView.ts` |
 | `block-embed` | Block atom embedding a read-only live render of a Datasette table/row/db; round-trips as a `paper-embed` JSON fence | `frontend/src/lib/blockEmbedView.ts` |
+| `video-embed` | "Lite" YouTube embed: a lone YouTube URL pasted in its own paragraph becomes a facade block (thumbnail → click-to-iframe); round-trips as a bare canonical watch URL on its own line | `frontend/src/lib/videoEmbedView.ts` |
 | `embed-filters` | Datasette-style filter/sort config on table embeds, stored in the paper-embed fence | `frontend/src/lib/embedFilters.ts` |
 | `result-cells` | Clamped, expandable cell rendering + h-scroll edge fades shared by embed/SQL result tables and the row card; blobs render as their byte size | `frontend/src/lib/resultCell.ts` |
 | `source` | A named, parameterless SQL query block (fenced `source name=NAME db=DB`) that inline `value` atoms reference | `frontend/src/lib/sourceBlockView.ts` |

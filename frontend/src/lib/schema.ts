@@ -300,6 +300,53 @@ const blockEmbedNode: NodeSpec = {
   ],
 };
 
+// Block atom for a "lite" YouTube embed — created when a lone YouTube URL is
+// pasted into its own paragraph (youtubePaste.ts). Identity-only: `provider`
+// ("youtube" today), the provider video id, and an optional `start` offset in
+// seconds. Rendered by a facade NodeView (videoEmbedView.ts, modelled on
+// paulirish/lite-youtube-embed) that shows a thumbnail until clicked, then swaps
+// in the real iframe — so N embeds don't spawn N iframes. `provider` is
+// deliberately generic so adding another video host later needs no schema change.
+// Mirrors datasette_paper/pm_schema.py; datasette_paper/markdown.py round-trips
+// it as a bare canonical watch URL on its own line.
+// @feat video-embed: client NodeSpec for the video_embed atom (mirrors pm_schema.py)
+const videoEmbedNode: NodeSpec = {
+  group: "block",
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: {
+    provider: { default: "youtube" },
+    videoId: { default: null },
+    start: { default: null },
+  },
+  parseDOM: [
+    {
+      tag: "div[data-video-embed]",
+      getAttrs: (el) => {
+        const dom = el as HTMLElement;
+        const startRaw = dom.getAttribute("data-video-start");
+        const start = startRaw ? Number(startRaw) : null;
+        return {
+          provider: dom.getAttribute("data-video-embed") || "youtube",
+          videoId: dom.getAttribute("data-video-id") || null,
+          start: start != null && Number.isFinite(start) ? start : null,
+        };
+      },
+    },
+  ],
+  toDOM: (node) => [
+    "div",
+    {
+      "data-video-embed": String(node.attrs.provider ?? "youtube"),
+      "data-video-id": String(node.attrs.videoId ?? ""),
+      "data-video-start": node.attrs.start == null ? "" : String(node.attrs.start),
+      class: "pm-video-embed",
+    },
+    String(node.attrs.videoId ?? "?"),
+  ],
+};
+
 // Block atom for an auto-generated table of contents. Content-free — the
 // heading list is derived per-render by a NodeView (tocView.ts) from the live
 // doc and never persisted. `config` is an opaque options bag
@@ -491,6 +538,7 @@ export const schema = new Schema({
     .append({ value: valueNode })
     .append({ inline_embed: inlineEmbedNode })
     .append({ block_embed: blockEmbedNode })
+    .append({ video_embed: videoEmbedNode })
     .append({ toc: tocNode })
     .append({ sql_block: sqlBlockNode })
     .append({ source: sourceNode })

@@ -76,12 +76,14 @@ import { MentionView } from "./mentionView";
 import { DatasetteResolver } from "./datasetteResolver";
 import { InlineEmbedView } from "./inlineEmbedView";
 import { BlockEmbedView } from "./blockEmbedView";
+import { VideoEmbedView } from "./videoEmbedView";
 import { SqlBlockView } from "./sqlBlockView";
 import { TagView } from "./tagView";
 import { SourceStore } from "./sourceStore";
 import { ValueView } from "./valueView";
 import { SourceBlockView } from "./sourceBlockView";
 import { handleDatasettePaste } from "./datasettePaste";
+import { handleYouTubePaste } from "./youtubePaste";
 import {
   buildSlashCommands,
   createSlashSuggestPlugin,
@@ -1333,6 +1335,7 @@ export class EditorConnection {
           ),
         block_embed: (node, view, getPos) =>
           new BlockEmbedView(node, view, getPos as () => number | undefined),
+        video_embed: (node) => new VideoEmbedView(node),
         toc: (node, view, getPos) =>
           new TocView(node, view, getPos as () => number | undefined),
         sql_block: (node, view, getPos) =>
@@ -1388,7 +1391,9 @@ export class EditorConnection {
       // clipboard), then a Datasette resource URL (auto inline-ref vs block
       // embed by cursor context), else the default text/HTML paste.
       handlePaste: (view, event) =>
-        handleImagePaste(view, event) || handleDatasettePaste(view, event),
+        handleImagePaste(view, event) ||
+        handleYouTubePaste(view, event) ||
+        handleDatasettePaste(view, event),
       handleDrop: (view, event) => handleImageDrop(view, event as DragEvent),
       dispatchTransaction: (tr) => this.dispatchTransaction(tr),
     });

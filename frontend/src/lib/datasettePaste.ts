@@ -138,7 +138,7 @@ export function matchManifestRef(
 }
 
 /** True when the cursor is in an empty top-level paragraph (block surface). */
-function isEmptyTopParagraph(state: EditorState): boolean {
+export function isEmptyTopParagraph(state: EditorState): boolean {
   const sel = state.selection;
   if (!sel.empty) return false;
   const $from = sel.$from;
