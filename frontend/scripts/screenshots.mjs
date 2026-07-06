@@ -92,8 +92,8 @@ async function main() {
   try {
     const ctx = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 2 });
     // Re-inject the stability stylesheet on every navigation (addStyleTag on a
-    // single page wouldn't survive page.goto). This is what hides the installed
-    // debug bar and the blinking caret in every shot.
+    // single page wouldn't survive page.goto). This disables the blinking caret
+    // and animations in every shot.
     await ctx.addInitScript((css) => {
       const inject = () => {
         if (document.getElementById("__shots_stability")) return;
@@ -105,6 +105,19 @@ async function main() {
       inject();
       document.addEventListener("DOMContentLoaded", inject);
     }, STABILITY_CSS);
+    // Collapse the datasette-debug-bar to its minimized handle in the corner
+    // (clicking its max/min button just flips this flag). The bar reads this
+    // localStorage key when its script runs; init scripts run first, so seeding
+    // it here renders the bar minimized instead of an expanded panel over the
+    // bottom-right of every full-page shot. try/catch: localStorage can be
+    // unavailable on the initial about:blank document.
+    await ctx.addInitScript(() => {
+      try {
+        localStorage.setItem("datasette-debug-bar", JSON.stringify({ expanded: false }));
+      } catch {
+        // localStorage not available on this document — skip.
+      }
+    });
     await ctx.addCookies([
       { name: "ds_actor", value: signActorCookie(ACTOR), domain: "localhost", path: "/" },
     ]);

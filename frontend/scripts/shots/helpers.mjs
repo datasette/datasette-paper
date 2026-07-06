@@ -2,8 +2,9 @@
 import { PAPER, VIEWPORT } from "./config.mjs";
 
 // Per-page stabilization, injected on the context (see runner) so it survives
-// navigation. Hides the blinking caret + the installed debug bar and disables
-// transitions/animations.
+// navigation. Hides the blinking caret and disables transitions/animations.
+// (The datasette-debug-bar is collapsed to its minimized handle separately, via
+// a localStorage seed in the runner — not through this stylesheet.)
 export const STABILITY_CSS = `*, *::before, *::after {
   caret-color: transparent !important;
   transition: none !important;
