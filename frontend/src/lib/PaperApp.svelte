@@ -21,6 +21,7 @@
   import CreatePageDialog from "./CreatePageDialog.svelte";
   import { insertImage } from "./image";
   import { insertDatasetteEmbed } from "./datasetteEmbed";
+  import { TOOLBAR_ICONS } from "./icons";
 
   let { docId }: { docId: string } = $props();
 
@@ -44,6 +45,22 @@
   let createResolver: ((id: number | null) => void) | null = null;
 
   let editorEl: HTMLDivElement | undefined = $state(undefined);
+
+  // Floating scroll-to-top affordance for long docs (mobile-primary, but shown
+  // at every width and in view mode too). The page scrolls on the window — the
+  // app has no bounded-height overflow container — so we watch window scroll.
+  let showScrollTop = $state(false);
+  $effect(() => {
+    const onScroll = () => {
+      showScrollTop = window.scrollY > 600;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener("scroll", onScroll);
+  });
+  function scrollToTop() {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   type StatusObj = { state: ReporterState; message: string };
   let status: StatusObj = $state({ state: "ok", message: "" });
@@ -312,6 +329,20 @@
     </div>
     <Sidebar {view} {docId} {sourceStore} showSources={canEdit && mode === "edit"} />
   </div>
+  {#if showScrollTop}
+    <button
+      type="button"
+      class="scroll-to-top"
+      aria-label="Scroll to top"
+      title="Scroll to top"
+      onclick={scrollToTop}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+        {@html TOOLBAR_ICONS["arrowUpCircle"]}
+      </svg>
+    </button>
+  {/if}
 </div>
 
 <style>
@@ -330,6 +361,13 @@
   @media (max-width: 1399.98px) {
     .datasette-paper-app {
       padding-right: 52px;
+    }
+  }
+  /* On phones the rail collapses to a single 3-dot button (Sidebar.svelte), so
+   * the 52px reservation above just wastes width — restore the normal inset. */
+  @media (max-width: 640px) {
+    .datasette-paper-app {
+      padding-right: 16px;
     }
   }
   .status-banner {
@@ -395,5 +433,41 @@
     display: flex;
     flex-direction: column;
     min-height: 0;
+  }
+  /* Floating scroll-to-top button. Bottom-right, clear of the top-right icon
+   * rail (Sidebar, fixed at top:72px). On phones it lifts above the
+   * bottom-pinned toolbar strip so the two never overlap. */
+  .scroll-to-top {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 18;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    border: 1px solid #d8dde3;
+    border-radius: 50%;
+    background: #fff;
+    color: #40474f;
+    cursor: pointer;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+  }
+  .scroll-to-top:hover {
+    background: #f3f5f7;
+    color: #1a1a1a;
+  }
+  @media (max-width: 640px) {
+    /* The toolbar is `position: fixed` at the bottom on phones; reserve room so
+     * the last lines of a long doc aren't hidden behind it. */
+    .editor-host {
+      padding-bottom: calc(52px + env(safe-area-inset-bottom));
+    }
+    /* Lift the scroll-to-top button above the fixed toolbar strip. */
+    .scroll-to-top {
+      bottom: calc(60px + env(safe-area-inset-bottom));
+    }
   }
 </style>

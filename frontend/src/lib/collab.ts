@@ -1297,6 +1297,15 @@ export class EditorConnection {
     this.view = new EditorView(this.opts.place, {
       state,
       editable: () => this.editable,
+      // Turn off iOS autocorrect/-capitalize/-complete on the contenteditable.
+      // Best-effort: iOS's autofill accessory bar (the key/credit-card pill
+      // above the keyboard) is OS chrome that web content can't remove, but
+      // these at least stop the field from being treated as autofillable.
+      attributes: {
+        autocorrect: "off",
+        autocapitalize: "off",
+        autocomplete: "off",
+      },
       nodeViews: {
         task_item: (node, view, getPos) =>
           new TaskItemView(node, view, getPos as () => number | undefined),

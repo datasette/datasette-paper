@@ -824,4 +824,27 @@
     line-height: 1.5;
     font-weight: 600;
   }
+
+  /* On phones the single meta row (by · edited · users · Share/Edit/View · ⋯)
+   * has nowhere near the width it needs, so the text columns collapse and wrap
+   * mid-phrase ("edited / 1h / ago"). Let the row wrap, keep each phrase intact,
+   * and drop the action buttons onto their own full-width line below. */
+  @media (max-width: 640px) {
+    .meta {
+      flex-wrap: wrap;
+      row-gap: 4px;
+    }
+    .created-by,
+    .updated-at,
+    .users {
+      white-space: nowrap;
+    }
+    .meta-actions {
+      margin-left: 0;
+      flex-basis: 100%;
+      margin-top: 6px;
+      flex-wrap: wrap;
+      row-gap: 6px;
+    }
+  }
 </style>

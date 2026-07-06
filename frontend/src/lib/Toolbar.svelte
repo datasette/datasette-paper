@@ -205,6 +205,17 @@
     run(toggleMark(linkType, { href }));
   }
 
+  // Insert `[[` at the cursor to launch the wiki-link autocomplete. The
+  // wikiLinkSuggest plugin recomputes from doc+selection on every transaction
+  // (no dedicated open command), so a plain insert trips its trigger exactly
+  // like typing the brackets by hand.
+  function startWikiLink() {
+    if (!view) return;
+    const tr = view.state.tr.insertText("[[");
+    view.dispatch(tr);
+    view.focus();
+  }
+
   function isLinkActive(): boolean {
     if (!view) return false;
     const sel = view.state.selection;
@@ -283,6 +294,58 @@
     void tick;
     return view ? canInsertTable(view.state) : false;
   });
+
+  // ─── mobile layout ──────────────────────────────────────────────────────────
+  // On phones the toolbar becomes a bottom-pinned, horizontally-scrolling strip
+  // that rides above the software keyboard, plus an always-visible button to
+  // dismiss the keyboard. Everything here is gated on the same 640px breakpoint
+  // as the `@media` rules below so JS and CSS agree on what "mobile" means.
+  const MOBILE_QUERY = "(max-width: 640px)";
+  let isMobile = $state(false);
+  $effect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia(MOBILE_QUERY);
+    const update = () => (isMobile = mq.matches);
+    update();
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  });
+
+  // Keyboard-aware bottom offset. `position: fixed; bottom: 0` pins to the
+  // layout viewport, which on iOS sits *behind* the keyboard; the VisualViewport
+  // gap tells us how tall the keyboard is so the strip can sit flush on top of
+  // it. Falls back to 0 (viewport bottom) where VisualViewport is unavailable.
+  let kbOffset = $state(0);
+  $effect(() => {
+    if (!isMobile) {
+      kbOffset = 0;
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      kbOffset = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    update();
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  });
+
+  // Blur the contenteditable to dismiss the iOS keyboard. Blurring the active
+  // element too covers iOS versions that keep the keyboard up otherwise.
+  function hideKeyboard() {
+    (view?.dom as HTMLElement | undefined)?.blur();
+    (document.activeElement as HTMLElement | null)?.blur?.();
+  }
+
+  // Inline bottom offset applied only on mobile (desktop keeps its sticky-top
+  // rule untouched). Kept as a derived string so both the strip and the
+  // hide-keyboard button track the keyboard together.
+  const mobileBottomStyle = $derived(isMobile ? `bottom: ${kbOffset}px` : "");
 </script>
 
 {#snippet btn(name: ToolbarIconName, title: string, onclick: () => void, pressed: boolean | undefined = undefined, disabled = false)}
@@ -303,7 +366,7 @@
   </button>
 {/snippet}
 
-<div class="paper-toolbar" role="toolbar" aria-label="Editor toolbar">
+<div class="paper-toolbar" role="toolbar" aria-label="Editor toolbar" style={mobileBottomStyle}>
   {@render btn("undo", "Undo", () => run(undo), undefined, !canUndo)}
   {@render btn("redo", "Redo", () => run(redo), undefined, !canRedo)}
   <span class="tb-sep" aria-hidden="true"></span>
@@ -315,6 +378,7 @@
   {@render btn("italic", "Italic (⌘I)", toggle(schema.marks.em), isItalic)}
   {@render btn("code", "Inline code (⌘`)", toggle(schema.marks.code), isCode)}
   {@render btn("link", "Link (⌘K)", toggleLink, isLink)}
+  {@render btn("wikilink", "Link to a page ([[)", startWikiLink)}
   <span class="tb-sep" aria-hidden="true"></span>
   {@render btn("listUl", "Bullet list", wrapList(schema.nodes.bullet_list))}
   {@render btn("listOl", "Numbered list", wrapList(schema.nodes.ordered_list))}
@@ -416,6 +480,24 @@
     </div>
   {/if}
 </div>
+
+<!-- Hide-keyboard button (mobile only). Rendered outside `.paper-toolbar` so it
+     stays fixed on the right edge and never scrolls away with the button strip. -->
+{#if isMobile}
+  <button
+    type="button"
+    class="tb-hide-keyboard"
+    aria-label="Hide keyboard"
+    title="Hide keyboard"
+    style={mobileBottomStyle}
+    onclick={hideKeyboard}
+  >
+    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+      {@html TOOLBAR_ICONS["keyboardHide"]}
+    </svg>
+  </button>
+{/if}
 
 
 <style>
@@ -567,5 +649,69 @@
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 130px;
+  }
+
+  /* ─── mobile: bottom-pinned, horizontally-scrolling strip ──────────────────
+   * On phones the toolbar leaves the top and pins to the bottom of the screen,
+   * riding above the software keyboard (JS sets an inline `bottom` via the
+   * VisualViewport gap). It becomes a single non-wrapping row that scrolls
+   * horizontally, with room reserved on the right for the fixed hide-keyboard
+   * button. Breakpoint mirrors MOBILE_QUERY in the script. */
+  .tb-hide-keyboard {
+    display: none;
+  }
+  @media (max-width: 640px) {
+    .paper-toolbar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      top: auto;
+      margin: 0;
+      width: 100%;
+      max-width: none;
+      border-radius: 0;
+      border-left: none;
+      border-right: none;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+      justify-content: flex-start;
+      -webkit-overflow-scrolling: touch;
+      /* Reserve space so scrolled buttons never slide under the fixed
+       * hide-keyboard button on the right. */
+      padding-right: 46px;
+      /* Clear the iOS home indicator when the keyboard is closed. */
+      padding-bottom: calc(4px + env(safe-area-inset-bottom));
+    }
+    /* Keep separators and buttons from being squeezed by the flex row. */
+    .paper-toolbar .tb-btn,
+    .paper-toolbar .tb-sep {
+      flex: 0 0 auto;
+    }
+    .tb-hide-keyboard {
+      position: fixed;
+      right: 0;
+      bottom: 0;
+      z-index: 11;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 46px;
+      /* Match the strip height + safe-area so the button spans it fully. */
+      height: calc(36px + env(safe-area-inset-bottom));
+      padding-bottom: env(safe-area-inset-bottom);
+      border: 1px solid #e4e4e4;
+      border-right: none;
+      border-bottom: none;
+      border-top-left-radius: 8px;
+      background: #fff;
+      color: #333;
+      cursor: pointer;
+      box-shadow: -2px 0 6px rgba(0, 0, 0, 0.06);
+    }
+    .tb-hide-keyboard:active {
+      background: #eaeaea;
+    }
   }
 </style>

@@ -141,6 +141,15 @@ export const TOOLBAR_ICONS: Record<string, string> = {
 
   // bootstrap-icons/chevron-down
   chevronDown: `<path fill-rule="evenodd" d="M1.646 4.646a.5.5 0 0 1 .708 0L8 10.293l5.646-5.647a.5.5 0 0 1 .708.708l-6 6a.5.5 0 0 1-.708 0l-6-6a.5.5 0 0 1 0-.708"/>`,
+  // Start-a-wiki-link toolbar button (inserts `[[`). Bootstrap `file-earmark-text`
+  // (page glyph) as a functional default. ← Alex: swap for a preferred glyph.
+  wikilink: `<path d="M5.5 7a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1zM5 9.5a.5.5 0 0 1 .5-.5h5a.5.5 0 0 1 0 1h-5a.5.5 0 0 1-.5-.5m0 2a.5.5 0 0 1 .5-.5h2a.5.5 0 0 1 0 1h-2a.5.5 0 0 1-.5-.5"/><path d="M9.5 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.5zm0 1v2A1.5 1.5 0 0 0 11 4.5h2V14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1z"/>`,
+  // Mobile "hide keyboard" button. Bootstrap `chevron-bar-down` (dismiss-down)
+  // as a functional default. ← Alex: swap for a preferred glyph.
+  keyboardHide: `<path fill-rule="evenodd" d="M3.646 11.146a.5.5 0 0 1 .708 0L8 14.793l3.646-3.647a.5.5 0 0 1 .708.708l-4 4a.5.5 0 0 1-.708 0l-4-4a.5.5 0 0 1 0-.708M1 8a.5.5 0 0 1 .5-.5h13a.5.5 0 0 1 0 1h-13A.5.5 0 0 1 1 8"/>`,
+  // Floating scroll-to-top button. Bootstrap `arrow-up-circle` as a functional
+  // default. ← Alex: swap for a preferred glyph.
+  arrowUpCircle: `<path fill-rule="evenodd" d="M1 8a7 7 0 1 0 14 0A7 7 0 0 0 1 8m15 0A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-7.5 3.5a.5.5 0 0 1-1 0V5.707L5.354 7.854a.5.5 0 1 1-.708-.708l3-3a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 5.707z"/>`,
 };
 
 export type ToolbarIconName = keyof typeof TOOLBAR_ICONS;
