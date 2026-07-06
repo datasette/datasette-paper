@@ -16,7 +16,6 @@
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
 import {
-  cellText,
   embedIconMarkup,
   fetchEmbed,
   iconMarkup,
@@ -25,6 +24,11 @@ import {
   safeHref,
   type EmbedPayload,
 } from "./datasetteEmbed";
+import {
+  attachScrollFades,
+  markOverflowingCells,
+  renderResultValue,
+} from "./resultCell";
 import { rowsToCsv, rowsToJson } from "./tableExport";
 import {
   FILTER_OPS,
@@ -1033,6 +1037,10 @@ export class BlockEmbedView implements NodeView {
       this.dom.appendChild(summary);
     }
 
+    // The non-scrolling wrap exists for the edge fades: absolutely
+    // positioned children of the scroll box itself would scroll away.
+    const wrap = document.createElement("div");
+    wrap.className = "pm-result-scrollwrap";
     const scroll = document.createElement("div");
     scroll.className = "pm-block-embed-scroll";
     const table = document.createElement("table");
@@ -1063,14 +1071,18 @@ export class BlockEmbedView implements NodeView {
       const tr = document.createElement("tr");
       for (const cell of row) {
         const td = document.createElement("td");
-        td.textContent = cellText(cell); // text node
+        // @feat result-cells: block-embed cells render clamped + expandable
+        renderResultValue(td, cell); // text nodes only
         tr.appendChild(td);
       }
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);
     scroll.appendChild(table);
-    this.dom.appendChild(scroll);
+    wrap.appendChild(scroll);
+    this.dom.appendChild(wrap);
+    attachScrollFades(wrap, scroll);
+    markOverflowingCells(table);
 
     // Right (margin-left:auto on the info span pushes it over): "showing [25]
     // of 1,234 rows" — the count number is the limit dropdown.
@@ -1135,11 +1147,13 @@ export class BlockEmbedView implements NodeView {
       const dt = document.createElement("dt");
       dt.textContent = field.column; // text node
       const dd = document.createElement("dd");
-      dd.textContent = cellText(field.value); // text node
+      // @feat result-cells: row-card field values render clamped + expandable
+      renderResultValue(dd, field.value); // text nodes only
       dl.appendChild(dt);
       dl.appendChild(dd);
     }
     this.dom.appendChild(dl);
+    markOverflowingCells(dl);
   }
 
   private renderDatabase(

@@ -1408,11 +1408,21 @@
   overflow: auto;
   /* ~10 rows + header before vertical scroll kicks in. */
   max-height: 320px;
+  /* H-scrolling the table must not trigger browser back-swipe. */
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 }
 .editor-host .pm-block-embed table {
   border-collapse: collapse;
   width: 100%;
   font-size: 13px;
+  /* prosemirror-tables' stylesheet sets `.ProseMirror table { table-layout:
+     fixed }` for DOCUMENT tables, and result tables live inside the editor
+     DOM too. Fixed layout squeezes N columns into 100% width (the "cramped"
+     bug: 13 columns ≈ 55px each, cells overlapping). Auto layout + the
+     .pm-result-cell clamp gives each column its content width, bounded, and
+     lets the scroll container actually h-scroll. */
+  table-layout: auto;
 }
 .editor-host .pm-block-embed th,
 .editor-host .pm-block-embed td {
@@ -1471,6 +1481,120 @@
 }
 .editor-host .pm-block-embed-fields dd {
   margin: 0;
+  /* Long unbroken tokens must wrap, not blow the 1fr track / get clipped
+     by the card's overflow:hidden. min-width:0 keeps the track honest. */
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* In the row card the grid track is the width bound, not the 260px clamp. */
+.editor-host .pm-block-embed-fields dd .pm-result-cell {
+  max-width: 100%;
+}
+
+/* Shared result-cell clamp + expand — block-embed tables, SQL results, and
+ * the row card's field values (rendered by resultCell.ts). Collapsed: one
+ * ellipsized line on a bounded column. Expanded (host .is-expanded): the
+ * full value, wrapped, scrolling inside its cell. The clamp lives on an
+ * inner span because max-width on a <td> is unreliable in auto table
+ * layout. */
+.editor-host .pm-result-cell {
+  display: inline-block;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.editor-host .pm-result-cell[data-kind="binary"] {
+  color: #888;
+  font-style: italic;
+}
+.editor-host .is-expanded > .pm-result-cell {
+  max-width: 480px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 200px;
+  overflow-y: auto;
+  vertical-align: top;
+}
+.editor-host .pm-result-cell-note {
+  color: #999;
+  font-style: italic;
+}
+/* Expand toggle: subtle until its cell is hovered / it has focus / it's
+ * open — never display:none, keyboard focus must reach it. */
+.editor-host .pm-result-cell-expand {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: #777;
+  padding: 1px;
+  margin-left: 4px;
+  display: inline-flex;
+  vertical-align: middle;
+  border-radius: 3px;
+  opacity: 0.35;
+}
+.editor-host td:hover > .pm-result-cell-expand,
+.editor-host dd:hover > .pm-result-cell-expand,
+.editor-host .pm-result-cell-expand:focus-visible,
+.editor-host .is-expanded > .pm-result-cell-expand {
+  opacity: 1;
+}
+.editor-host .pm-result-cell-expand:hover {
+  background: rgba(0, 0, 0, 0.06);
+  color: #333;
+}
+.editor-host .pm-result-cell-expand svg {
+  width: 11px;
+  height: 11px;
+  transition: transform 0.12s ease;
+}
+/* chevronDown flips to point up while expanded. */
+.editor-host .is-expanded > .pm-result-cell-expand svg {
+  transform: rotate(180deg);
+}
+
+/* Non-scrolling wrap around each result scroll box: paints edge fades
+ * ("more columns this way") when resultCell.ts's scroll sync sets the
+ * has-overflow-* classes. z-index 2 sits above the sticky <th> (z:1);
+ * pointer-events:none keeps the scrollbar usable underneath. */
+.editor-host .pm-result-scrollwrap {
+  position: relative;
+}
+.editor-host .pm-result-scrollwrap::before,
+.editor-host .pm-result-scrollwrap::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 16px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  z-index: 2;
+}
+.editor-host .pm-result-scrollwrap::before {
+  left: 0;
+  background: linear-gradient(
+    to right,
+    rgba(251, 251, 253, 0.95),
+    rgba(251, 251, 253, 0)
+  );
+}
+.editor-host .pm-result-scrollwrap::after {
+  right: 0;
+  background: linear-gradient(
+    to left,
+    rgba(251, 251, 253, 0.95),
+    rgba(251, 251, 253, 0)
+  );
+}
+.editor-host .pm-result-scrollwrap.has-overflow-left::before {
+  opacity: 1;
+}
+.editor-host .pm-result-scrollwrap.has-overflow-right::after {
+  opacity: 1;
 }
 .editor-host .pm-block-embed-skeleton,
 .editor-host .pm-block-embed-placeholder {
@@ -1665,11 +1789,16 @@
 .editor-host .pm-sql-block-scroll {
   overflow: auto;
   max-height: 320px;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
 }
 .editor-host .pm-sql-block table {
   border-collapse: collapse;
   width: 100%;
   font-size: 13px;
+  /* Escape prosemirror-tables' `.ProseMirror table { table-layout: fixed }`
+     — see the .pm-block-embed table comment. */
+  table-layout: auto;
 }
 .editor-host .pm-sql-block th,
 .editor-host .pm-sql-block td {

@@ -340,6 +340,41 @@ describe("BlockEmbedView", () => {
     expect(view.dom.querySelector("td")!.textContent).toContain("<img");
   });
 
+  // @feat result-cells: block-embed cells collapse long/multi-line/blob values
+  it("collapses long and multi-line cells; blob cells show size only", async () => {
+    const view = await build("/data/ugly", {
+      columns: ["long", "multi", "blob"],
+      rows: [
+        ["x".repeat(500), "line one\nline two", { $base64: true, encoded: "aGVsbG8=" }],
+      ],
+      count: 1,
+    });
+    const tds = [...view.dom.querySelectorAll("td")];
+    const spanText = (td: Element) => td.querySelector(".pm-result-cell")!.textContent!;
+    expect(spanText(tds[0])).toBe("x".repeat(200) + "…");
+    expect(spanText(tds[1])).toBe("line one…");
+    expect(spanText(tds[2])).toBe("<binary — 5 B>");
+    // The two truncated cells carry the expand toggle; the blob does not.
+    expect(tds[0].querySelector(".pm-result-cell-expand")).not.toBeNull();
+    expect(tds[1].querySelector(".pm-result-cell-expand")).not.toBeNull();
+    expect(tds[2].querySelector(".pm-result-cell-expand")).toBeNull();
+    // Expanding reveals the second line in place.
+    tds[1].querySelector<HTMLButtonElement>(".pm-result-cell-expand")!.click();
+    expect(spanText(tds[1])).toBe("line one\nline two");
+    expect(tds[1].classList.contains("is-expanded")).toBe(true);
+  });
+
+  it("row-card field values collapse the same way", async () => {
+    const view = await build("/data/vendors/1", {
+      columns: ["id", "notes"],
+      rows: [{ id: 1, notes: "n1\nn2" }],
+    });
+    const dds = [...view.dom.querySelectorAll("dd")];
+    expect(dds[1].querySelector(".pm-result-cell")!.textContent).toBe("n1…");
+    dds[1].querySelector<HTMLButtonElement>(".pm-result-cell-expand")!.click();
+    expect(dds[1].querySelector(".pm-result-cell")!.textContent).toBe("n1\nn2");
+  });
+
   // ── Ticket 02: footer layout (link left, count right) ─────────────────────
 
   it("orders the table footer: open-in-Datasette link first, info second", async () => {
@@ -1316,9 +1351,14 @@ describe("BlockEmbedView", () => {
     expect(summary.previousElementSibling!.classList.contains("pm-block-embed-head")).toBe(
       true,
     );
-    expect(summary.nextElementSibling!.classList.contains("pm-block-embed-scroll")).toBe(
+    // The table sits right after the summary, inside its fade wrap (which
+    // holds the .pm-block-embed-scroll box).
+    expect(summary.nextElementSibling!.classList.contains("pm-result-scrollwrap")).toBe(
       true,
     );
+    expect(
+      summary.nextElementSibling!.querySelector(".pm-block-embed-scroll"),
+    ).not.toBeNull();
     // The footer truncation info is unchanged alongside it.
     expect(
       view.dom.querySelector(".pm-block-embed-footer-info")!.textContent,

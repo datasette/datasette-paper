@@ -81,6 +81,21 @@ describe("SqlBlockView", () => {
     expect(view.dom.textContent).toContain("of 1 row");
   });
 
+  // @feat result-cells: SQL result cells collapse long/multi-line/blob values
+  it("collapses long cells and shows blob size, expandable in place", async () => {
+    const { view } = await build("select * from ugly", {
+      ok: true,
+      columns: ["multi", "blob"],
+      rows: [["a\nb", { $base64: true, encoded: "aGVsbG8=" }]],
+    });
+    const tds = [...view.dom.querySelectorAll("td")];
+    expect(tds[0].querySelector(".pm-result-cell")!.textContent).toBe("a…");
+    expect(tds[1].textContent).toBe("<binary — 5 B>");
+    expect(view.dom.textContent).not.toContain("aGVsbG8"); // payload stays out
+    tds[0].querySelector<HTMLButtonElement>(".pm-result-cell-expand")!.click();
+    expect(tds[0].querySelector(".pm-result-cell")!.textContent).toBe("a\nb");
+  });
+
   it("right-aligns an 'open in Datasette' link to the query page", async () => {
     const { view } = await build("select 1 as n", { ok: true, columns: ["n"], rows: [[1]] });
     const link = view.dom.querySelector(".pm-sql-block-footer-link") as HTMLAnchorElement;
