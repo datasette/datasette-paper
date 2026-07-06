@@ -316,27 +316,20 @@
 
 <style>
   .datasette-paper-app {
-    /* ≥1400px: the column stays centred at 740px and the rail floats in the
-     * right gutter (Sidebar.svelte, fixed), so the editor never shifts. */
+    /* The document keeps a comfortable centred 740px reading column at every
+     * width; the thin icon rail floats in the right gutter (Sidebar.svelte,
+     * fixed) and its flyout overlays the page rather than reflowing it, so the
+     * editor never shifts as sections open and close. */
     max-width: 740px;
     margin: 0 auto;
     padding: 0 16px;
+    box-sizing: border-box;
   }
-  /* 800–1400px: not enough gutter to float the rail beside a centred column,
-   * so lay the editor and rail out side by side — the editor shares the row and
-   * shrinks. Below 800px the rail stacks under the document (Sidebar.svelte). */
-  @media (min-width: 800px) and (max-width: 1399.98px) {
+  /* <1400px the gutter tightens; reserve a right inset the width of the rail so
+   * content never runs under it. ≥1400px the gutter is roomy enough on its own. */
+  @media (max-width: 1399.98px) {
     .datasette-paper-app {
-      max-width: 1080px;
-    }
-    .paper-layout {
-      display: flex;
-      gap: 24px;
-      align-items: flex-start;
-    }
-    .paper-main {
-      flex: 1 1 auto;
-      min-width: 0;
+      padding-right: 52px;
     }
   }
   .status-banner {

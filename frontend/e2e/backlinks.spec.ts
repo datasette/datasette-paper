@@ -43,7 +43,7 @@ test.describe("backlinks", () => {
 
     // The edge is indexed server-side, then surfaced in B's Links panel.
     await gotoPaper(page, `${BASE}/doc/${bId}`);
-    await page.locator(".links-panel-toggle").click();
+    await page.locator('.paper-rail-btn[aria-label="Links"]').click();
     const linkedFrom = page
       .locator(".links-panel-section")
       .filter({ hasText: "Linked from" });

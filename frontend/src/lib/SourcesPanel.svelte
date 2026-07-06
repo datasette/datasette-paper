@@ -20,22 +20,27 @@
   import type { SourceStore } from "./sourceStore";
 
   // `initiallyOpen` lets a host (the right sidebar) expand the panel on mount;
-  // stacked inline it defaults collapsed. `sourceStore` (when provided) is the
-  // live source runner, read for each source's column count ("N values").
+  // stacked inline it defaults collapsed. `embedded` renders the panel headless
+  // — no self-collapse caret, always open — for a host (the icon rail) that owns
+  // open/closed itself. `sourceStore` (when provided) is the live source runner,
+  // read for each source's column count ("N values").
   let {
     view,
     initiallyOpen = false,
+    embedded = false,
     sourceStore = null,
   }: {
     view: EditorView | null;
     initiallyOpen?: boolean;
+    embedded?: boolean;
     sourceStore?: SourceStore | null;
   } = $props();
 
   type Row = { name: string | null; db: string | null; sql: string; pos: number };
 
   // Capture the host's initial preference once; toggling is local thereafter.
-  let open = $state(untrack(() => initiallyOpen));
+  // Embedded: always open (the rail owns visibility, so there's no toggle here).
+  let open = $state(untrack(() => (embedded ? true : initiallyOpen)));
   let dbs = $state<string[]>([]);
   let tick = $state(0);
 
@@ -231,17 +236,24 @@
   </svg>
 {/snippet}
 
-<section class="sources-panel">
-  <button
-    type="button"
-    class="sources-panel-toggle"
-    aria-expanded={open}
-    onclick={toggle}
-  >
-    <span class="sources-panel-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
-    Sources
-    {#if sources.length}<span class="sources-panel-count">{sources.length}</span>{/if}
-  </button>
+<section class="sources-panel" class:is-embedded={embedded}>
+  {#if embedded}
+    <h3 class="sources-panel-heading">
+      Sources
+      {#if sources.length}<span class="sources-panel-count">{sources.length}</span>{/if}
+    </h3>
+  {:else}
+    <button
+      type="button"
+      class="sources-panel-toggle"
+      aria-expanded={open}
+      onclick={toggle}
+    >
+      <span class="sources-panel-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+      Sources
+      {#if sources.length}<span class="sources-panel-count">{sources.length}</span>{/if}
+    </button>
+  {/if}
 
   {#if open}
     <div class="sources-panel-body">
@@ -352,6 +364,27 @@
     border-top: 1px solid #e2e8f0;
     padding-top: 8px;
     font-size: 14px;
+  }
+  /* Embedded (icon-rail flyout): the host supplies the card chrome, so drop the
+   * standalone top rule and the body's nesting indent. */
+  .sources-panel.is-embedded {
+    margin-top: 0;
+    border-top: none;
+    padding-top: 0;
+  }
+  .sources-panel.is-embedded .sources-panel-body {
+    padding-left: 0;
+  }
+  .sources-panel-heading {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
   }
   .sources-panel-toggle {
     display: flex;

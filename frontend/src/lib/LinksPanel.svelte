@@ -12,6 +12,7 @@
    * hint, denied shows "Permission denied" (never a title, never clickable),
    * not_found shows a struck-through "Paper #<id>" (never clickable).
    */
+  import { untrack } from "svelte";
 
   type LinkItem = {
     id: number;
@@ -23,9 +24,11 @@
     href?: string;
   };
 
-  let { docId }: { docId: string } = $props();
+  // `embedded` renders the panel headless — no self-collapse caret, always open —
+  // for a host (the icon rail) that owns open/closed itself.
+  let { docId, embedded = false }: { docId: string; embedded?: boolean } = $props();
 
-  let open = $state(false);
+  let open = $state(untrack(() => embedded));
   let loading = $state(false);
   let error = $state<string | null>(null);
   let links = $state<LinkItem[]>([]);
@@ -98,16 +101,20 @@
   }
 </script>
 
-<section class="links-panel">
-  <button
-    type="button"
-    class="links-panel-toggle"
-    aria-expanded={open}
-    onclick={toggle}
-  >
-    <span class="links-panel-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
-    Links
-  </button>
+<section class="links-panel" class:is-embedded={embedded}>
+  {#if embedded}
+    <h3 class="links-panel-heading-top">Links</h3>
+  {:else}
+    <button
+      type="button"
+      class="links-panel-toggle"
+      aria-expanded={open}
+      onclick={toggle}
+    >
+      <span class="links-panel-caret" aria-hidden="true">{open ? "▾" : "▸"}</span>
+      Links
+    </button>
+  {/if}
 
   {#if open}
     <div class="links-panel-body">
@@ -177,6 +184,23 @@
     margin: 16px 0;
     border-top: 1px solid #e0e4e8;
     font-size: 14px;
+  }
+  /* Embedded (icon-rail flyout): the host supplies the card chrome, so drop the
+   * standalone top rule/margin and the body's nesting indent. */
+  .links-panel.is-embedded {
+    margin: 0;
+    border-top: none;
+  }
+  .links-panel.is-embedded .links-panel-body {
+    padding-left: 0;
+  }
+  .links-panel-heading-top {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #64748b;
   }
   .links-panel-toggle {
     display: inline-flex;
