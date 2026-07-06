@@ -26,6 +26,15 @@ import {
   type EmbedPayload,
 } from "./datasetteEmbed";
 import { rowsToCsv, rowsToJson } from "./tableExport";
+import {
+  FILTER_OPS,
+  filterOpByKey,
+  filterQueryParams,
+  sanitizeFilters,
+  sanitizeSort,
+  type EmbedFilter,
+  type EmbedSort,
+} from "./embedFilters";
 import { embedRegistry, type PaperEmbedProvider } from "./embedRegistry";
 import { ensureProviderForRef, manifestKindForRef } from "./embedProviders";
 import type { DatasetteStatus } from "./datasetteResolver";
@@ -57,6 +66,16 @@ export class BlockEmbedView implements NodeView {
   // The full (pre-projection) column set of the last table/view render — seeds
   // the "Columns…" picker so it can offer every column, selected ones checked.
   private allColumns: string[] = [];
+  // The last-rendered header element + the args that built it, so update()
+  // can rebuild just the header chrome (menu gating) when editability flips
+  // mid-session without re-fetching data or re-mounting a provider body.
+  private headerEl: HTMLElement | null = null;
+  private headerArgs: { icon: string; label: string; href?: string } | null = null;
+  // `view.editable` as of the last header render — compared against the live
+  // prop to detect a mid-session flip (view/edit toggle, stepError).
+  private renderedEditable = false;
+  // Watches the editor root's `contenteditable` attribute (see constructor).
+  private editableObserver: MutationObserver;
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.view = view;
@@ -67,7 +86,33 @@ export class BlockEmbedView implements NodeView {
     this.ref = node.attrs.ref ?? null;
     this.mode = node.attrs.mode ?? "table";
     this.config = (node.attrs.config as Record<string, unknown>) ?? {};
+    // The view/edit toggle flips PM's `editable` prop via setProps without
+    // dispatching a transaction, so update() below never runs (PM re-runs a
+    // NodeView only when its node or decorations change). The flip DOES
+    // rewrite the editor root's `contenteditable` attribute — observe that
+    // and re-gate the config-writing chrome (⋮ items, per-column ▾ menus).
+    this.editableObserver = new MutationObserver(() => this.regateEditable());
+    this.editableObserver.observe(view.dom, {
+      attributes: true,
+      attributeFilter: ["contenteditable"],
+    });
     void this.load();
+  }
+
+  /**
+   * Re-gate the rendered chrome after an editability flip, without a
+   * re-fetch. A table render carries per-column ▾ menus in its header row,
+   * so rebuild the whole card from the held payload; anything else only
+   * needs the header chrome swapped. No-op while the render matches.
+   */
+  private regateEditable(): void {
+    if (!this.headerEl || this.renderedEditable === !!this.view.editable) return;
+    if (this.tablePayload) {
+      this.closeMenu();
+      this.renderTable(this.tablePayload);
+    } else {
+      this.refreshHeader();
+    }
   }
 
   private async load(): Promise<void> {
@@ -95,7 +140,13 @@ export class BlockEmbedView implements NodeView {
       await this.loadExternal(token, provider);
       return;
     }
-    const payload = await fetchEmbed(this.ref, this.limit, this.selectedColumns());
+    const payload = await fetchEmbed(
+      this.ref,
+      this.limit,
+      this.selectedColumns(),
+      this.filters(),
+      this.sort(),
+    );
     // A newer load() (ref change / refresh) superseded this one.
     if (token !== this.token) return;
     this.render(payload);
@@ -203,6 +254,9 @@ export class BlockEmbedView implements NodeView {
    * `<svg>` markup (paper's bundled kind icon, or a provider's own). The label
    * is a link to the resource's Datasette page when `href` is known (so the
    * title is clickable, per design); the "open in Datasette" link is in the footer.
+   *
+   * Records its inputs + the built element so `refreshHeader()` can rebuild
+   * this chrome in place when editability flips (the ⋮ menu is gated on it).
    */
   private header(iconSvg: string, label: string, href?: string): HTMLElement {
     const head = document.createElement("div");
@@ -222,6 +276,21 @@ export class BlockEmbedView implements NodeView {
     labelEl.textContent = label; // text node — never innerHTML
     head.appendChild(labelEl);
 
+    // Active-filter chip: funnel + count, shown whenever this is a table/view
+    // render with filters configured. Informational, so read-only viewers see
+    // it too — only the panel that *edits* the filters is gated on editable.
+    if (this.tablePayload) {
+      const filterCount = this.filters().length;
+      if (filterCount > 0) {
+        const badge = document.createElement("span");
+        badge.className = "pm-block-embed-filter-badge";
+        badge.title = `${filterCount} filter${filterCount === 1 ? "" : "s"} applied`;
+        badge.appendChild(this.svgIcon("funnelFill"));
+        badge.appendChild(document.createTextNode(String(filterCount)));
+        head.appendChild(badge);
+      }
+    }
+
     const refresh = document.createElement("button");
     refresh.type = "button";
     refresh.className = "pm-block-embed-refresh";
@@ -234,9 +303,28 @@ export class BlockEmbedView implements NodeView {
       void this.load();
     });
     head.appendChild(refresh);
-    head.appendChild(this.overflowMenu());
+    // The ⋮ menu is null when it has no items for this viewer (e.g. a
+    // read-only viewer of a non-table embed) — no empty menu button.
+    const menu = this.overflowMenu();
+    if (menu) head.appendChild(menu);
 
+    this.headerEl = head;
+    this.headerArgs = { icon: iconSvg, label, href };
+    this.renderedEditable = !!this.view.editable;
     return head;
+  }
+
+  /**
+   * Rebuild the header chrome in place after an editability flip — same
+   * icon/label/href, freshly gated ⋮ menu. Closes any open menu/panel first
+   * (a stale open panel must not survive a flip to read-only).
+   */
+  private refreshHeader(): void {
+    const old = this.headerEl;
+    const args = this.headerArgs;
+    if (!old || !args) return;
+    this.closeMenu();
+    old.replaceWith(this.header(args.icon, args.label, args.href));
   }
 
   /**
@@ -255,8 +343,15 @@ export class BlockEmbedView implements NodeView {
    *
    * The menu is positioned within the embed (tall enough not to clip it) and
    * closes on outside click.
+   *
+   * Items that dispatch a transaction (Columns…, Convert to inline element)
+   * render only when `view.editable` — the live EditorView prop, same gate as
+   * tagView/linkOpen. Read-only viewers keep the navigate/copy items (and the
+   * refresh button in the header); returns null when no item is available so
+   * the header can skip the button entirely.
    */
-  private overflowMenu(): HTMLElement {
+  private overflowMenu(): HTMLElement | null {
+    const canEdit = !!this.view.editable;
     const wrap = document.createElement("div");
     wrap.className = "pm-block-embed-menu-wrap";
 
@@ -296,8 +391,9 @@ export class BlockEmbedView implements NodeView {
       menu.appendChild(
         this.menuButton(`Copy as JSON${suffix}`, () => this.copyPage(payload, "json")),
       );
-      // Column picker — only meaningful once we know the table's columns.
-      if (this.allColumns.length) {
+      // Column picker — config-writing, editors only; and only meaningful
+      // once we know the table's columns.
+      if (canEdit && this.allColumns.length) {
         const cols = document.createElement("button");
         cols.type = "button";
         cols.className = "pm-block-embed-menu-item";
@@ -310,12 +406,30 @@ export class BlockEmbedView implements NodeView {
           this.showColumnsPanel(menu);
         });
         menu.appendChild(cols);
+
+        // Filter & sort form — config-writing, same gate as Columns….
+        const filters = document.createElement("button");
+        filters.type = "button";
+        filters.className = "pm-block-embed-menu-item";
+        filters.textContent = "Filter & sort…";
+        // Like Columns…, this swaps the menu body for the form in place —
+        // Apply/Cancel (or outside click) closes it.
+        filters.addEventListener("click", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.showFiltersPanel(menu);
+        });
+        menu.appendChild(filters);
       }
     }
 
-    menu.appendChild(
-      this.menuButton("Convert to inline element", () => this.convertToInline()),
-    );
+    // Converting rewrites the document — an edit, gated like config writes.
+    if (canEdit) {
+      menu.appendChild(
+        this.menuButton("Convert to inline element", () => this.convertToInline()),
+      );
+    }
+    if (!menu.childElementCount) return null;
     wrap.appendChild(menu);
     return wrap;
   }
@@ -334,11 +448,26 @@ export class BlockEmbedView implements NodeView {
   }
 
   /**
+   * The author's row filters from `config.filters`, bad entries dropped
+   * (same defensive spirit as `selectedColumns()` — config can arrive from
+   * hand-written markdown and must degrade, never poison the fetch).
+   */
+  private filters(): EmbedFilter[] {
+    return sanitizeFilters((this.config as { filters?: unknown }).filters);
+  }
+
+  /** The author's sort from `config.sort`, or null when absent/malformed. */
+  private sort(): EmbedSort | null {
+    return sanitizeSort((this.config as { sort?: unknown }).sort);
+  }
+
+  /**
    * Swap the open ⋮ menu's body for an inline checklist of `allColumns`, each
    * checked iff currently selected (all checked when no selection = "show all").
    * "Apply" writes the ordered selection to `config.columns` and closes.
    */
   private showColumnsPanel(menu: HTMLElement): void {
+    if (!this.view.editable) return; // belt-and-braces: viewers never write config
     menu.replaceChildren();
     const panel = document.createElement("div");
     panel.className = "pm-block-embed-columns";
@@ -377,13 +506,315 @@ export class BlockEmbedView implements NodeView {
     menu.appendChild(panel);
   }
 
+  /**
+   * Swap the open ⋮ menu's body for the filter & sort form: one row per
+   * active filter (column / op / value) plus an always-present trailing blank
+   * row, a sort row, the shared-view notice, and Cancel / "Apply for
+   * everyone". All editing is local to the form — nothing dispatches until
+   * Apply, which commits the whole form as ONE setNodeMarkup step (never
+   * per keystroke), or nothing at all when the result equals the current
+   * config. Cancel (or outside click) discards.
+   */
+  // @feat embed-filters: editor UI — filter panel, per-column ▾ menu, badge + summary line
+  private showFiltersPanel(menu: HTMLElement): void {
+    if (!this.view.editable) return; // belt-and-braces: viewers never write config
+    menu.replaceChildren();
+    const panel = document.createElement("div");
+    panel.className = "pm-block-embed-filters";
+
+    const rowsHost = document.createElement("div");
+    rowsHost.className = "pm-block-embed-filter-rows";
+    panel.appendChild(rowsHost);
+
+    type FilterRow = {
+      el: HTMLElement;
+      column: HTMLSelectElement;
+      op: HTMLSelectElement;
+      value: HTMLInputElement;
+    };
+    const rows: FilterRow[] = [];
+
+    const columnSelect = (
+      className: string,
+      blankLabel: string,
+      selected: string,
+    ): HTMLSelectElement => {
+      const select = document.createElement("select");
+      select.className = className;
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = blankLabel;
+      select.appendChild(blank);
+      for (const col of this.allColumns) {
+        const opt = document.createElement("option");
+        opt.value = col;
+        opt.textContent = col; // text node — column names are data-derived
+        if (col === selected) opt.selected = true;
+        select.appendChild(opt);
+      }
+      return select;
+    };
+
+    const addRow = (seed?: EmbedFilter): void => {
+      const el = document.createElement("div");
+      el.className = "pm-block-embed-filter-row";
+
+      const column = columnSelect(
+        "pm-block-embed-filter-column",
+        "– column –",
+        seed?.column ?? "",
+      );
+      const op = document.createElement("select");
+      op.className = "pm-block-embed-filter-op";
+      for (const o of FILTER_OPS) {
+        const opt = document.createElement("option");
+        opt.value = o.key;
+        opt.textContent = o.label;
+        if (o.key === seed?.op) opt.selected = true;
+        op.appendChild(opt);
+      }
+      const value = document.createElement("input");
+      value.type = "text";
+      value.className = "pm-block-embed-filter-value";
+      value.value = seed?.value ?? "";
+      // A no-value op (is null, is blank, …) takes no argument — hide and
+      // disable the value box; re-evaluated whenever the op changes.
+      const syncValue = (): void => {
+        const noValue = !!filterOpByKey(op.value)?.noValue;
+        value.disabled = noValue;
+        value.hidden = noValue;
+      };
+      syncValue();
+      op.addEventListener("change", syncValue);
+      // Choosing a column on the trailing blank row grows a fresh blank row
+      // (Datasette's always-one-empty-row form pattern).
+      column.addEventListener("change", () => {
+        if (column.value && rows[rows.length - 1]?.column === column) addRow();
+      });
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "pm-block-embed-filter-remove";
+      remove.title = "Remove filter";
+      remove.setAttribute("aria-label", "Remove filter");
+      remove.appendChild(this.svgIcon("x"));
+      remove.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const i = rows.findIndex((r) => r.el === el);
+        if (i >= 0) rows.splice(i, 1);
+        el.remove();
+        // Keep the invariant: always one trailing blank row.
+        if (!rows.length || rows[rows.length - 1].column.value !== "") addRow();
+      });
+
+      el.appendChild(column);
+      el.appendChild(op);
+      el.appendChild(value);
+      el.appendChild(remove);
+      rowsHost.appendChild(el);
+      rows.push({ el, column, op, value });
+    };
+
+    for (const f of this.filters()) addRow(f);
+    addRow(); // the trailing blank row
+
+    // Sort row: "– no sort –" + every column, with an asc/desc control.
+    const sort = this.sort();
+    const sortRow = document.createElement("div");
+    sortRow.className = "pm-block-embed-filter-sort";
+    const sortLabel = document.createElement("span");
+    sortLabel.className = "pm-block-embed-filter-sort-label";
+    sortLabel.textContent = "Sort";
+    const sortColumn = columnSelect(
+      "pm-block-embed-filter-sort-column",
+      "– no sort –",
+      sort?.column ?? "",
+    );
+    const sortDir = document.createElement("select");
+    sortDir.className = "pm-block-embed-filter-sort-dir";
+    for (const [dirValue, dirLabel] of [
+      ["asc", "ascending"],
+      ["desc", "descending"],
+    ]) {
+      const opt = document.createElement("option");
+      opt.value = dirValue;
+      opt.textContent = dirLabel;
+      if ((dirValue === "desc") === !!sort?.desc) opt.selected = true;
+      sortDir.appendChild(opt);
+    }
+    sortRow.appendChild(sortLabel);
+    sortRow.appendChild(sortColumn);
+    sortRow.appendChild(sortDir);
+    panel.appendChild(sortRow);
+
+    // Shared-view notice — informational, pairs with the Apply button label:
+    // this config is document state, not a private per-session filter.
+    const notice = document.createElement("div");
+    notice.className = "pm-block-embed-shared-notice";
+    notice.appendChild(this.svgIcon("people"));
+    notice.appendChild(
+      document.createTextNode(
+        "Shared view — filters are saved in the document and change what everyone sees.",
+      ),
+    );
+    panel.appendChild(notice);
+
+    const actions = document.createElement("div");
+    actions.className = "pm-block-embed-filter-actions";
+    const cancel = document.createElement("button");
+    cancel.type = "button";
+    cancel.className = "pm-block-embed-filter-cancel";
+    cancel.textContent = "Cancel";
+    cancel.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeMenu(); // discard — nothing dispatched while editing
+    });
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "pm-block-embed-filter-apply";
+    apply.textContent = "Apply for everyone";
+    apply.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // Collect the form; incomplete rows — no column, an unknown op, or an
+      // empty value on a value-taking op — are dropped (Datasette's own
+      // "- remove filter -" semantics).
+      const filters: EmbedFilter[] = [];
+      for (const r of rows) {
+        const column = r.column.value;
+        if (!column) continue;
+        const known = filterOpByKey(r.op.value);
+        if (!known) continue;
+        if (known.noValue) {
+          filters.push({ column, op: known.key });
+        } else if (r.value.value !== "") {
+          filters.push({ column, op: known.key, value: r.value.value });
+        }
+      }
+      // Minimal config, clean fence: no filters/sort → drop the key entirely
+      // (the tocView setConfig normalization precedent).
+      const next: Record<string, unknown> = { ...(this.node.attrs.config ?? {}) };
+      if (filters.length) next.filters = filters;
+      else delete next.filters;
+      if (sortColumn.value) {
+        next.sort =
+          sortDir.value === "desc"
+            ? { column: sortColumn.value, desc: true }
+            : { column: sortColumn.value };
+      } else {
+        delete next.sort;
+      }
+      this.closeMenu();
+      const current = (this.node.attrs.config as Record<string, unknown>) ?? {};
+      // An unchanged config dispatches no step at all.
+      if (JSON.stringify(next) === JSON.stringify(current)) return;
+      this.writeConfig(next);
+    });
+    actions.appendChild(cancel);
+    actions.appendChild(apply);
+    panel.appendChild(actions);
+    menu.appendChild(panel);
+  }
+
   /** Merge `columns` into the node's `config` attr; update() then re-fetches. */
   private setColumns(columns: string[]): void {
+    this.writeConfig({ ...(this.node.attrs.config ?? {}), columns });
+  }
+
+  /** Write a full config bag to the node's attrs as one setNodeMarkup step. */
+  private writeConfig(config: Record<string, unknown>): void {
+    if (!this.view.editable) return; // the server 403s the step anyway
     const pos = this.getPos();
     if (pos == null) return;
     const { state, dispatch } = this.view;
-    const config = { ...(this.node.attrs.config ?? {}), columns };
     dispatch(state.tr.setNodeMarkup(pos, undefined, { ...this.node.attrs, config }));
+  }
+
+  /**
+   * The per-column ▾ header menu (Datasette's cog, translated to config
+   * writes — editors only, the caller gates on `view.editable`): sort
+   * ascending/descending with the active direction suppressed and "Clear
+   * sort" in its place, hide this column (absent when it's the last visible
+   * one), and show all columns (present only while `config.columns` is set).
+   *
+   * Each item is ONE writeConfig step. Ascending writes `sort: {column}`
+   * with NO `desc: false` — the same normalization the filter panel uses, so
+   * asc → the key's absence and equal configs never ping-pong steps. Open /
+   * close / outside-click reuse the ⋮ menu's toggleMenu mechanics, which also
+   * guarantees only one menu (⋮ or any column's) is open at a time.
+   */
+  private columnMenu(col: string): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "pm-block-embed-menu-wrap pm-block-embed-col-menu-wrap";
+
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "pm-block-embed-col-menu-btn";
+    btn.title = `Column actions: ${col}`;
+    btn.setAttribute("aria-label", `Column actions: ${col}`);
+    btn.appendChild(this.svgIcon("chevronDown"));
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.toggleMenu(menu);
+    });
+    wrap.appendChild(btn);
+
+    const menu = document.createElement("div");
+    menu.className = "pm-block-embed-menu pm-block-embed-col-menu";
+
+    // menuButton closes the menu before running the action; prepending the
+    // icon keeps the button's textContent equal to the plain label.
+    const item = (icon: string, label: string, action: () => void): void => {
+      const b = this.menuButton(label, action);
+      b.prepend(this.svgIcon(icon));
+      menu.appendChild(b);
+    };
+    // Spread-and-set/delete one key — empty keys dropped (minimal config,
+    // clean fence), everything else in the bag untouched.
+    const writeSort = (sort?: EmbedSort): void => {
+      const next: Record<string, unknown> = { ...(this.node.attrs.config ?? {}) };
+      if (sort) next.sort = sort;
+      else delete next.sort;
+      this.writeConfig(next);
+    };
+
+    const sort = this.sort();
+    const isAsc = sort != null && sort.column === col && sort.desc !== true;
+    const isDesc = sort != null && sort.column === col && sort.desc === true;
+    if (!isAsc) {
+      item("sortUp", "Sort ascending", () => writeSort({ column: col }));
+    }
+    if (!isDesc) {
+      item("sortDown", "Sort descending", () => writeSort({ column: col, desc: true }));
+    }
+    if (isAsc || isDesc) {
+      item("x", "Clear sort", () => writeSort());
+    }
+
+    // "Visible" = the author's selection, or every column when unset — the
+    // same source the picker seeds from. Hiding the last visible column
+    // would render nothing, so that item disappears instead (Datasette's
+    // ">1 visible" cog condition).
+    const visible = this.selectedColumns() ?? this.allColumns;
+    const remaining = visible.filter((c) => c !== col);
+    if (remaining.length) {
+      item("eyeSlash", "Hide this column", () => {
+        this.writeConfig({ ...(this.node.attrs.config ?? {}), columns: remaining });
+      });
+    }
+    if ((this.config as { columns?: unknown }).columns !== undefined) {
+      item("eye", "Show all columns", () => {
+        const next: Record<string, unknown> = { ...(this.node.attrs.config ?? {}) };
+        delete next.columns;
+        this.writeConfig(next);
+      });
+    }
+
+    wrap.appendChild(menu);
+    return wrap;
   }
 
   /** A menu button that closes the menu, then runs `action`. */
@@ -476,6 +907,7 @@ export class BlockEmbedView implements NodeView {
    * `inline_embed` pill for the same ref — an easy block → inline downgrade.
    */
   private convertToInline(): void {
+    if (!this.view.editable) return; // rewrites the doc — editors only
     const pos = this.getPos();
     if (pos == null) return;
     const { state, dispatch } = this.view;
@@ -510,9 +942,12 @@ export class BlockEmbedView implements NodeView {
 
   private renderLoading(): void {
     this.dom.replaceChildren();
+    this.headerEl = null;
+    this.headerArgs = null;
     this.dom.classList.remove(
       "pm-block-embed--denied",
       "pm-block-embed--missing",
+      "pm-block-embed--error",
     );
     const skel = document.createElement("div");
     skel.className = "pm-block-embed-skeleton";
@@ -522,10 +957,12 @@ export class BlockEmbedView implements NodeView {
 
   private renderPlaceholder(modifier: string, text: string): void {
     this.dom.replaceChildren();
+    this.headerEl = null;
+    this.headerArgs = null;
     this.dom.classList.add(modifier);
     const el = document.createElement("div");
     el.className = "pm-block-embed-placeholder";
-    el.textContent = text; // generic — never the resource's label or data
+    el.textContent = text; // text node — safe even for a server error string
     this.dom.appendChild(el);
   }
 
@@ -535,6 +972,7 @@ export class BlockEmbedView implements NodeView {
     this.dom.classList.remove(
       "pm-block-embed--denied",
       "pm-block-embed--missing",
+      "pm-block-embed--error",
     );
     if (payload.status === "denied") {
       this.renderPlaceholder(
@@ -545,6 +983,12 @@ export class BlockEmbedView implements NodeView {
     }
     if (payload.status === "not_found") {
       this.renderPlaceholder("pm-block-embed--missing", "Resource not found");
+      return;
+    }
+    if (payload.status === "error") {
+      // Datasette's own error string (e.g. a 400 from a stale filter/sort
+      // column) — data-derived, so it lands as a text node like everything else.
+      this.renderPlaceholder("pm-block-embed--error", payload.message);
       return;
     }
     if (payload.kind === "row") {
@@ -565,8 +1009,29 @@ export class BlockEmbedView implements NodeView {
     this.allColumns = payload.allColumns;
     this.dom.replaceChildren();
     this.dom.appendChild(
-      this.header(iconMarkup(kindIcon(payload.kind)), `${payload.db}/${payload.label}`, payload.href),
+      this.header(
+        iconMarkup(kindIcon(payload.kind)),
+        `${payload.db}/${payload.label}`,
+        this.tablePageHref(payload.href),
+      ),
     );
+
+    // Summary line: "<count> rows where … sorted by …" — Datasette phrases
+    // the description (`human_description_en`), we render it as text nodes
+    // only. Visible to everyone (it's how read-only viewers learn the embed
+    // is a filtered slice); omitted entirely when the description is empty
+    // (unfiltered/unsorted) or absent (older Datasette without the extra).
+    if (payload.humanDescription) {
+      const summary = document.createElement("div");
+      summary.className = "pm-block-embed-summary";
+      const prefix =
+        payload.count != null
+          ? `${payload.count} row${payload.count === 1 ? "" : "s"} `
+          : "";
+      // One text node — the description is data-derived, never innerHTML.
+      summary.textContent = `${prefix}${payload.humanDescription}`;
+      this.dom.appendChild(summary);
+    }
 
     const scroll = document.createElement("div");
     scroll.className = "pm-block-embed-scroll";
@@ -574,9 +1039,20 @@ export class BlockEmbedView implements NodeView {
 
     const thead = document.createElement("thead");
     const htr = document.createElement("tr");
+    const sort = this.sort();
     for (const col of payload.columns) {
       const th = document.createElement("th");
-      th.textContent = col; // text node
+      th.appendChild(document.createTextNode(col)); // text node
+      // Passive sort indicator on the sorted column — rendered for EVERYONE
+      // (viewers included); only the config-writing menu below is gated.
+      if (sort?.column === col) {
+        const ind = this.svgIcon(sort.desc ? "sortDown" : "sortUp");
+        ind.classList.add("pm-block-embed-sort-ind");
+        ind.dataset.dir = sort.desc ? "desc" : "asc";
+        th.appendChild(ind);
+      }
+      // The ▾ column-actions menu writes config — editors only (T02 gate).
+      if (this.view.editable) th.appendChild(this.columnMenu(col));
       htr.appendChild(th);
     }
     thead.appendChild(htr);
@@ -606,6 +1082,24 @@ export class BlockEmbedView implements NodeView {
       info.append(" rows");
     }
     this.appendFooter(payload.href, info);
+  }
+
+  /**
+   * The header title-link URL for a table/view: Datasette's own table page
+   * with the embed's filters, sort, and column subset already applied, so
+   * clicking through shows exactly what the embed shows. Path rebuilt from
+   * the ref segments so it can't be poisoned (the exportUrl trick); the
+   * shareable params — `col__op=value` pairs, `_sort`/`_sort_desc`, one
+   * `_col` per selected column — go through URLSearchParams so crafted
+   * values can't break out of the query string. Fetch-only params
+   * (`_shape`/`_extra`/`_size`) are never carried: the page picks its own.
+   */
+  private tablePageHref(href: string): string {
+    const path = "/" + refSegments(href).map(encodeURIComponent).join("/");
+    const params = new URLSearchParams(filterQueryParams(this.filters(), this.sort()));
+    for (const col of this.selectedColumns() ?? []) params.append("_col", col);
+    const query = params.toString();
+    return query ? `${path}?${query}` : path;
   }
 
   /**
@@ -703,11 +1197,16 @@ export class BlockEmbedView implements NodeView {
       this.mode = nextMode;
       this.config = nextConfig;
       void this.load();
+    } else {
+      // Editability may have flipped mid-session (view/edit toggle, forced
+      // read-only on stepError) — re-gate the chrome without a re-fetch.
+      this.regateEditable();
     }
     return true;
   }
 
   destroy(): void {
+    this.editableObserver.disconnect();
     this.closeMenu();
     this.disposeExternal();
   }

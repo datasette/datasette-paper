@@ -8,6 +8,12 @@
  * Anything that isn't a Datasette resource path falls through (returns false)
  * so the default paste (plain link) runs.
  *
+ * A table/view URL's filter query params (`?state__contains=CA&_sort_desc=…`)
+ * ride along into the block embed's `config` via `configFromUrlParams` — the
+ * inverse of the header title link. Inline refs (no config to carry),
+ * database/row refs (no filters to take), and provider-claimed URLs (their
+ * query scheme isn't ours to interpret) drop the query as before.
+ *
  * The two decisions are split into pure helpers (`parseDatasetteRef`,
  * `chooseDatasetteSurface`) so they're unit-testable without an EditorView.
  * There is deliberately no typed `{{` trigger — search-driven insertion lives
@@ -18,6 +24,7 @@ import type { EditorView } from "prosemirror-view";
 import { schema } from "./schema";
 import { embedRegistry } from "./embedRegistry";
 import { manifestEntryForRef } from "./embedProviders";
+import { configFromUrlParams } from "./embedFilters";
 
 export interface RefParseContext {
   /** The page origin, e.g. `window.location.origin`. */
@@ -44,16 +51,30 @@ function sameOriginUrl(text: string, origin: string): URL | null {
   return url.origin === origin ? url : null;
 }
 
-/** The base_url-relative pathname of a same-origin URL, or null. */
-function sameOriginPath(text: string, ctx: RefParseContext): string | null {
-  const url = sameOriginUrl(text, ctx.origin);
-  if (!url) return null;
+/** A same-origin URL's pathname, made base_url-relative. */
+function baseRelativePath(url: URL, ctx: RefParseContext): string {
   let path = url.pathname;
   const base = ctx.baseUrl && ctx.baseUrl !== "/" ? ctx.baseUrl : null;
   if (base && path.startsWith(base)) {
     path = "/" + path.slice(base.length);
   }
   return path;
+}
+
+/** The base_url-relative pathname of a same-origin URL, or null. */
+function sameOriginPath(text: string, ctx: RefParseContext): string | null {
+  const url = sameOriginUrl(text, ctx.origin);
+  return url ? baseRelativePath(url, ctx) : null;
+}
+
+/** A ref path (`/db`, `/db/table`, `/db/table/pk`) from a pathname, or null. */
+function refFromPath(path: string): string | null {
+  const segments = path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  if (segments.length < 1 || segments.length > 3) return null;
+  // Datasette tooling / plugin / static paths are not resources.
+  if (segments[0].startsWith("-") || segments[0].startsWith("_")) return null;
+
+  return "/" + segments.join("/");
 }
 
 /**
@@ -65,15 +86,25 @@ export function parseDatasetteRef(
   text: string,
   ctx: RefParseContext,
 ): string | null {
-  const path = sameOriginPath(text, ctx);
-  if (path == null) return null;
+  return parseDatasetteRefWithParams(text, ctx)?.ref ?? null;
+}
 
-  const segments = path.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
-  if (segments.length < 1 || segments.length > 3) return null;
-  // Datasette tooling / plugin / static paths are not resources.
-  if (segments[0].startsWith("-") || segments[0].startsWith("_")) return null;
-
-  return "/" + segments.join("/");
+/**
+ * `parseDatasetteRef` plus the pasted URL's query params, for the paste
+ * handler — a filtered table URL's query becomes embed config
+ * (`configFromUrlParams`). Core db/table/row refs only by construction;
+ * provider-claimed URLs never come through here, so their query strings are
+ * never interpreted.
+ */
+// @feat embed-filters: pasted filtered-URL query params become embed config
+export function parseDatasetteRefWithParams(
+  text: string,
+  ctx: RefParseContext,
+): { ref: string; params: URLSearchParams } | null {
+  const url = sameOriginUrl(text, ctx.origin);
+  if (!url) return null;
+  const ref = refFromPath(baseRelativePath(url, ctx));
+  return ref == null ? null : { ref, params: url.searchParams };
 }
 
 /**
@@ -144,15 +175,27 @@ export function handleDatasettePaste(
   const origin = ctx?.origin ?? window.location.origin;
   // Core db/table/row refs first; then a loaded provider's own matchUrl;
   // finally the manifest prefix fallback for a provider not yet loaded.
+  const core = parseDatasetteRefWithParams(text, { origin, baseUrl: ctx?.baseUrl });
   const ref =
-    parseDatasetteRef(text, { origin, baseUrl: ctx?.baseUrl }) ??
+    core?.ref ??
     matchExternalRef(text, origin) ??
     matchManifestRef(text, { origin, baseUrl: ctx?.baseUrl });
   if (ref == null) return false;
 
   const surface = chooseDatasetteSurface(view.state, ref);
   if (surface === "block") {
-    const node = schema.nodes.block_embed.create({ ref, mode: "table" });
+    const attrs: { ref: string; mode: string; config?: Record<string, unknown> } = {
+      ref,
+      mode: "table",
+    };
+    // Filter params travel only on 2-segment core refs (table/view — row
+    // pages take no filters; database refs never reach the block surface).
+    // An empty parse is omitted so the node keeps its `{}` config default.
+    if (core && core.ref.split("/").filter(Boolean).length === 2) {
+      const config = configFromUrlParams(core.params);
+      if (Object.keys(config).length > 0) attrs.config = config;
+    }
+    const node = schema.nodes.block_embed.create(attrs);
     const $from = view.state.selection.$from;
     // Replace the empty paragraph itself with the block.
     const from = $from.before($from.depth);

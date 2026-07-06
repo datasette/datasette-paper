@@ -750,6 +750,48 @@ def test_block_embed_columns_roundtrip_byte_stable():
     assert markdown_to_doc(md) == doc
 
 
+# @feat embed-filters: pytest round-trip — filters/sort/columns config ⇄ fence
+def test_block_embed_filters_sort_columns_roundtrip_byte_stable():
+    # The full filter vocabulary in one config: value-taking ops, a no-value
+    # op (no `value` key at all), a sort, and a column subset. Serializes to
+    # the exact sorted-keys JSON fence body and parses back to identical
+    # attrs — the storage contract the frontend filter UI relies on.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    doc = _doc(
+        {
+            "type": "block_embed",
+            "attrs": {
+                "ref": "/data/vendors",
+                "mode": "table",
+                "config": {
+                    "filters": [
+                        {"column": "name", "op": "contains", "value": "Vendor 1"},
+                        {"column": "id", "op": "gte", "value": "5"},
+                        {"column": "region", "op": "notblank"},
+                    ],
+                    "sort": {"column": "id", "desc": True},
+                    "columns": ["name", "id"],
+                },
+            },
+        }
+    )
+    md = doc_to_markdown(doc)
+    assert md == (
+        "```paper-embed\n"
+        '{"config": {"columns": ["name", "id"], '
+        '"filters": ['
+        '{"column": "name", "op": "contains", "value": "Vendor 1"}, '
+        '{"column": "id", "op": "gte", "value": "5"}, '
+        '{"column": "region", "op": "notblank"}], '
+        '"sort": {"column": "id", "desc": true}}, '
+        '"mode": "table", "ref": "/data/vendors"}\n```\n'
+    )
+    # serialize → parse → identical (filter order, the value-less no-value
+    # entry, and the sort direction all survive).
+    assert markdown_to_doc(md) == doc
+
+
 def test_toc_serializes_as_empty_paper_toc_fence():
     # All-default (empty) config → a clean empty-body fence.
     md = doc_to_markdown(_doc({"type": "toc", "attrs": {"config": {}}}))
