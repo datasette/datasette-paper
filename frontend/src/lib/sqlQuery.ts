@@ -68,8 +68,10 @@ export async function listQueryableDatabases(): Promise<string[]> {
   try {
     const res = await fetch("/.json", { headers: { Accept: "application/json" } });
     if (!res.ok) return [];
-    const j = (await res.json()) as { databases?: Record<string, unknown> };
-    return Object.keys(j.databases ?? {}).filter((n) => !n.startsWith("_"));
+    // Datasette >=1.0a36 returns `databases` as an array of {name, …} objects
+    // (older releases keyed them by name in an object).
+    const j = (await res.json()) as { databases?: { name: string }[] };
+    return (j.databases ?? []).map((d) => d.name).filter((n) => !n.startsWith("_"));
   } catch {
     return [];
   }

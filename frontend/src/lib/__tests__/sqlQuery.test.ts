@@ -117,7 +117,9 @@ describe("listQueryableDatabases", () => {
       "fetch",
       vi.fn(async () => ({
         ok: true,
-        json: async () => ({ databases: { data: {}, fixtures: {}, _internal: {} } }),
+        json: async () => ({
+          databases: [{ name: "data" }, { name: "fixtures" }, { name: "_internal" }],
+        }),
       })),
     );
     expect(await listQueryableDatabases()).toEqual(["data", "fixtures"]);

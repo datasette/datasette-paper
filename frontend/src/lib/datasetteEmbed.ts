@@ -376,9 +376,11 @@ export async function searchResources(q: string, limit = 20): Promise<SearchResu
   try {
     const top = await fetch("/.json");
     if (!top.ok) return [];
-    const tj = (await top.json()) as { databases?: Record<string, unknown> };
+    // Datasette >=1.0a36 returns `databases` as an array of {name, …} objects
+    // (older releases keyed them by name in an object).
+    const tj = (await top.json()) as { databases?: { name: string }[] };
     // Datasette's internal databases are `_`-prefixed; never offer them.
-    const dbNames = Object.keys(tj.databases ?? {}).filter((n) => !n.startsWith("_"));
+    const dbNames = (tj.databases ?? []).map((d) => d.name).filter((n) => !n.startsWith("_"));
 
     const out: SearchResult[] = [];
     for (const db of dbNames) {

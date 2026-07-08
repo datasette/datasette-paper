@@ -483,7 +483,10 @@ describe("searchResources (native enumeration)", () => {
       "fetch",
       vi.fn(async (url: string) => {
         if (url === "/.json") {
-          return { ok: true, json: async () => ({ databases: { data: {}, _internal: {} } }) };
+          return {
+            ok: true,
+            json: async () => ({ databases: [{ name: "data" }, { name: "_internal" }] }),
+          };
         }
         if (url === "/data.json") {
           return {

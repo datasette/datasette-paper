@@ -22,7 +22,7 @@ function stubFetch(query: unknown, init: QueryInit = {}) {
     "fetch",
     vi.fn(async (url: string) => {
       if (url.startsWith("/.json")) {
-        return { ok: true, status: 200, json: async () => ({ databases: { data: {} } }) };
+        return { ok: true, status: 200, json: async () => ({ databases: [{ name: "data" }] }) };
       }
       return { ok, status, json: async () => query };
     }),
