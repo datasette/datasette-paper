@@ -42,6 +42,11 @@
   // Embedded: always open (the rail owns visibility, so there's no toggle here).
   let open = $state(untrack(() => (embedded ? true : initiallyOpen)));
   let dbs = $state<string[]>([]);
+  // One-shot latch for the db-list fetch. Guarding on `dbs.length === 0`
+  // instead would re-arm forever when `/.json` exposes no queryable database:
+  // the effect reads `dbs.length`, assigns a fresh `dbs = []`, and Svelte
+  // re-runs it on the new-array reference → a `/.json` request per frame.
+  let dbsRequested = $state(false);
   let tick = $state(0);
 
   // RAF-poll so the list reflects doc edits (PM txns don't rerender Svelte).
@@ -57,7 +62,10 @@
   });
 
   $effect(() => {
-    if (open && dbs.length === 0) void listQueryableDatabases().then((d) => (dbs = d));
+    if (open && !dbsRequested) {
+      dbsRequested = true;
+      void listQueryableDatabases().then((d) => (dbs = d));
+    }
   });
 
   const sources = $derived.by<Row[]>(() => {

@@ -23,6 +23,7 @@ vi.mock("../sqlQuery", async () => {
 });
 
 import { schema } from "../schema";
+import { listQueryableDatabases } from "../sqlQuery";
 import SourcesPanel from "../SourcesPanel.svelte";
 
 function sourceNode(name: string | null, db: string, sql: string) {
@@ -172,6 +173,19 @@ describe("SourcesPanel", () => {
     await vi.waitFor(() =>
       expect(screen.getByText("2 values, used 1 time")).toBeTruthy(),
     );
+  });
+
+  it("fetches the db list exactly once even when it comes back empty", async () => {
+    // Regression: guarding the fetch on `dbs.length === 0` re-armed forever
+    // when `/.json` exposes no queryable database — each empty result reassigns
+    // `dbs = []`, which Svelte re-runs the effect on, hammering `/.json`.
+    vi.mocked(listQueryableDatabases).mockResolvedValue([]);
+    const { view } = makeView([]);
+    render(SourcesPanel, { view });
+    await open();
+    // Let the resolved-empty assignment settle across several frames.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+    expect(listQueryableDatabases).toHaveBeenCalledTimes(1);
   });
 
   it("Test runs the query and shows the probed columns", async () => {
