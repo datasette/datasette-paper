@@ -7,7 +7,11 @@ async def test_plugin_is_installed():
     datasette = Datasette(memory=True)
     response = await datasette.client.get("/-/plugins.json")
     assert response.status_code == 200
-    installed_plugins = {p["name"] for p in response.json()}
+    # Datasette >=1.0a36 wraps the list in {"ok", "plugins"}; older
+    # releases returned a bare list.
+    payload = response.json()
+    plugins = payload["plugins"] if isinstance(payload, dict) else payload
+    installed_plugins = {p["name"] for p in plugins}
     assert "datasette-paper" in installed_plugins
 
 

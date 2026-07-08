@@ -195,6 +195,7 @@ dev *flags:
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
             -s permissions.profile_access true \
+            -s settings.max_post_body_bytes 13631488 \
             {{flags}}
 
 dev-with-hmr *flags:

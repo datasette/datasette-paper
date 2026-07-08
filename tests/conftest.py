@@ -21,7 +21,7 @@ from datasette.app import Datasette
 
 from datasette_acl.grants import Principal, grant, revoke
 from datasette_paper.db import PaperDB
-from datasette_paper.instance import get_registry
+from datasette_paper.instance import MAX_STEP_BYTES, get_registry
 from datasette_paper.permissions import (
     PAPER_DOC_RESOURCE_TYPE,
     PAPER_DOCS_PARENT,
@@ -50,7 +50,16 @@ def make_datasette(*, granted: bool = True) -> Datasette:
         if granted
         else {}
     )
-    return Datasette(memory=True, config=config)
+    # Datasette >=1.0a36 caps POST bodies at max_post_body_bytes (default
+    # 2MB) before the request reaches a handler. The paper events API
+    # accepts steps up to MAX_STEP_BYTES (12MB, e.g. a pasted image), so
+    # raise the cap above that — otherwise large-but-valid steps 413 at
+    # the framework and the plugin's own size validation never runs.
+    return Datasette(
+        memory=True,
+        config=config,
+        settings={"max_post_body_bytes": MAX_STEP_BYTES + 1024 * 1024},
+    )
 
 
 def _bind_default_actor(ds: Datasette, actor_id: str) -> None:
