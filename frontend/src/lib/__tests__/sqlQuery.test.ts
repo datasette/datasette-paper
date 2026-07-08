@@ -125,6 +125,19 @@ describe("listQueryableDatabases", () => {
     expect(await listQueryableDatabases()).toEqual(["data", "fixtures"]);
   });
 
+  it("accepts the legacy pre-1.0a36 object-keyed shape", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          databases: { data: {}, fixtures: {}, _internal: {} },
+        }),
+      })),
+    );
+    expect(await listQueryableDatabases()).toEqual(["data", "fixtures"]);
+  });
+
   it("returns [] on failure", async () => {
     vi.stubGlobal(
       "fetch",

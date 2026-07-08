@@ -366,6 +366,18 @@ export async function fetchEmbed(
 }
 
 /**
+ * The two `/.json` `databases` shapes we tolerate: an array of `{name, …}`
+ * objects (Datasette >=1.0a36) or an object keyed by name (pre-1.0a36).
+ */
+export type DatabasesShape = { name: string }[] | Record<string, unknown>;
+
+/** Normalize either `/.json` `databases` shape to a flat list of names. */
+export function databaseNames(databases?: DatabasesShape): string[] {
+  if (!databases) return [];
+  return Array.isArray(databases) ? databases.map((d) => d.name) : Object.keys(databases);
+}
+
+/**
  * Search visible databases / tables / views by name for the picker. No native
  * cross-database name search exists, so enumerate `/.json` (database names)
  * then each `/<db>.json` (its tables + views) and filter client-side. Prefix
@@ -376,11 +388,11 @@ export async function searchResources(q: string, limit = 20): Promise<SearchResu
   try {
     const top = await fetch("/.json");
     if (!top.ok) return [];
-    // Datasette >=1.0a36 returns `databases` as an array of {name, …} objects
-    // (older releases keyed them by name in an object).
-    const tj = (await top.json()) as { databases?: { name: string }[] };
+    // Datasette >=1.0a36 returns `databases` as an array of {name, …} objects;
+    // pre-1.0a36 keyed them by name in an object. Accept both shapes.
+    const tj = (await top.json()) as { databases?: DatabasesShape };
     // Datasette's internal databases are `_`-prefixed; never offer them.
-    const dbNames = (tj.databases ?? []).map((d) => d.name).filter((n) => !n.startsWith("_"));
+    const dbNames = databaseNames(tj.databases).filter((n) => !n.startsWith("_"));
 
     const out: SearchResult[] = [];
     for (const db of dbNames) {

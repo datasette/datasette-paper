@@ -10,7 +10,7 @@ classifiers=[
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "datasette>=1.0a36",
+    "datasette>=1.0a30",
     "datasette-acl>=0.6a1",
     "datasette-acl-share>=0.0.1a4",
     "datasette-plugin-router>=0.0.1a4",

@@ -11,7 +11,7 @@
 import { schema } from "./schema";
 import type { Command } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
-import type { CellValue } from "./datasetteEmbed";
+import { databaseNames, type CellValue, type DatabasesShape } from "./datasetteEmbed";
 
 export interface SqlResult {
   status: "ok" | "denied" | "error" | "empty";
@@ -68,10 +68,10 @@ export async function listQueryableDatabases(): Promise<string[]> {
   try {
     const res = await fetch("/.json", { headers: { Accept: "application/json" } });
     if (!res.ok) return [];
-    // Datasette >=1.0a36 returns `databases` as an array of {name, …} objects
-    // (older releases keyed them by name in an object).
-    const j = (await res.json()) as { databases?: { name: string }[] };
-    return (j.databases ?? []).map((d) => d.name).filter((n) => !n.startsWith("_"));
+    // Datasette >=1.0a36 returns `databases` as an array of {name, …} objects;
+    // pre-1.0a36 keyed them by name in an object. Accept both shapes.
+    const j = (await res.json()) as { databases?: DatabasesShape };
+    return databaseNames(j.databases).filter((n) => !n.startsWith("_"));
   } catch {
     return [];
   }
