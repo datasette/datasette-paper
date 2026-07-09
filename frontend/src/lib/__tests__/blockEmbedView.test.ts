@@ -406,7 +406,7 @@ describe("BlockEmbedView", () => {
     return [...view.dom.querySelectorAll(".pm-block-embed-menu .pm-block-embed-menu-item")] as HTMLElement[];
   }
 
-  it("adds CSV/JSON download links + a Copy page item to the ⋮ menu for a table", async () => {
+  it("adds all-rows CSV/JSON download links to the ⋮ menu for a table (no single-page copy)", async () => {
     const view = await build("/data/vendors", {
       columns: ["id", "name"],
       rows: [[1, "Acme"]],
@@ -414,13 +414,35 @@ describe("BlockEmbedView", () => {
     });
     const items = exportItems(view);
     const labels = items.map((i) => i.textContent);
-    expect(labels.some((l) => l!.startsWith("Download CSV"))).toBe(true);
-    expect(labels.some((l) => l!.startsWith("Download JSON"))).toBe(true);
-    // Copy is honestly labelled as the page when count > held rows.
-    expect(labels.some((l) => l!.includes("Copy as CSV (page, 1 of 30)"))).toBe(true);
-    expect(labels.some((l) => l!.includes("Copy as JSON (page, 1 of 30)"))).toBe(true);
+    expect(labels).toContain("Download CSV (all rows)");
+    expect(labels).toContain("Download JSON (all rows)");
+    // The single-page "Copy as …" items were removed — export is always all rows.
+    expect(labels.some((l) => l!.startsWith("Copy as"))).toBe(false);
     // "Convert to inline element" is still present.
     expect(labels).toContain("Convert to inline element");
+  });
+
+  it("orders the table ⋮ menu: Filter & sort, Columns, Convert, then downloads", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id", "name"],
+      rows: [[1, "Acme"]],
+      count: 30,
+    });
+    // Scope to the overflow ⋮ menu — the per-column ▾ menus share the base
+    // .pm-block-embed-menu-item class that exportItems() picks up.
+    const overflow = view.dom.querySelector(
+      ".pm-block-embed-menu:not(.pm-block-embed-col-menu)",
+    )!;
+    const labels = [...overflow.querySelectorAll(".pm-block-embed-menu-item")].map(
+      (i) => i.textContent,
+    );
+    expect(labels).toEqual([
+      "Filter & sort…",
+      "Columns…",
+      "Convert to inline element",
+      "Download CSV (all rows)",
+      "Download JSON (all rows)",
+    ]);
   });
 
   it("download links point at Datasette's native streaming endpoints", async () => {
@@ -436,32 +458,6 @@ describe("BlockEmbedView", () => {
     const json = links.find((a) => a.textContent!.startsWith("Download JSON"))!;
     expect(csv.getAttribute("href")).toBe("/data/vendors.csv?_stream=on");
     expect(json.getAttribute("href")).toBe("/data/vendors.json?_shape=array");
-  });
-
-  it("labels Copy as the full set (row count, no 'page') when all rows are held", async () => {
-    const view = await build("/data/vendors", {
-      columns: ["id"],
-      rows: [[1], [2]],
-      count: 2,
-    });
-    const labels = exportItems(view).map((i) => i.textContent);
-    expect(labels.some((l) => l === "Copy as CSV (2 rows)")).toBe(true);
-    expect(labels.some((l) => l!.includes("page"))).toBe(false);
-  });
-
-  it("Copy page writes the held rows (serialized) to the clipboard", async () => {
-    const writeText = vi.fn();
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-    const view = await build("/data/vendors", {
-      columns: ["id", "name"],
-      rows: [[1, "Acme"]],
-      count: 30,
-    });
-    const copyCsv = exportItems(view).find((i) =>
-      i.textContent!.startsWith("Copy as CSV"),
-    ) as HTMLButtonElement;
-    copyCsv.click();
-    expect(writeText).toHaveBeenCalledWith("id,name\n1,Acme");
   });
 
   it("offers no export items for a non-table embed (row card)", async () => {
@@ -595,6 +591,51 @@ describe("BlockEmbedView", () => {
     view.destroy();
   });
 
+  it("shows a primary-key column as checked + disabled with a key icon", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { columns: ["name"] } },
+      {
+        columns: ["id", "name", "region"],
+        rows: [[1, "Acme", "West"]],
+        count: 1,
+        primary_keys: ["id"],
+      },
+    );
+    const boxes = openColumnsPanel(view);
+    // "id" is the PK: forced on and locked; the others follow the selection.
+    expect(boxes.map((b) => b.checked)).toEqual([true, true, false]);
+    expect(boxes.map((b) => b.disabled)).toEqual([true, false, false]);
+    const items = [
+      ...view.dom.querySelectorAll(".pm-block-embed-columns-item"),
+    ] as HTMLElement[];
+    expect(items[0].classList.contains("pm-block-embed-columns-item--pk")).toBe(true);
+    expect(items[0].title).toContain("Primary key");
+    expect(items[0].querySelector(".pm-block-embed-columns-pk-icon svg")).not.toBeNull();
+    // Non-PK rows carry no key icon.
+    expect(items[1].querySelector(".pm-block-embed-columns-pk-icon")).toBeNull();
+    view.destroy();
+  });
+
+  it("keeps the PK in config.columns even when other columns are deselected", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      {
+        columns: ["id", "name", "region"],
+        rows: [[1, "Acme", "West"]],
+        count: 1,
+        primary_keys: ["id"],
+      },
+    );
+    const boxes = openColumnsPanel(view);
+    // Deselect "region"; the disabled PK "id" stays checked on its own.
+    boxes[2].checked = false;
+    (view.dom.querySelector(".pm-block-embed-columns-apply") as HTMLButtonElement).click();
+    expect(view.state.doc.firstChild!.attrs.config).toEqual({
+      columns: ["id", "name"],
+    });
+    view.destroy();
+  });
+
   // ── Table filters T01: config.filters/sort → fetch params + title link ────
 
   function stubUrlCapture(native: unknown): string[] {
@@ -669,6 +710,53 @@ describe("BlockEmbedView", () => {
     expect(
       view.dom.querySelector(".pm-block-embed-label")!.getAttribute("href"),
     ).toBe("/data/vendors");
+  });
+
+  it("carries filters/sort/_col on the footer 'open in Datasette' link too", async () => {
+    stubFetch({ columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 });
+    const node = schema.nodes.block_embed.create({
+      ref: "/data/vendors",
+      config: FILTERED_CONFIG,
+    });
+    const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
+    await new Promise((r) => setTimeout(r, 0));
+    const href = (
+      view.dom.querySelector(".pm-block-embed-footer-link") as HTMLAnchorElement
+    ).getAttribute("href")!;
+    const query = new URLSearchParams(href.split("?")[1]);
+    expect(href.startsWith("/data/vendors?")).toBe(true);
+    expect(query.get("state__exact")).toBe("CA");
+    expect(query.get("notes__notblank")).toBe("1");
+    expect(query.get("_sort_desc")).toBe("population");
+    expect(query.getAll("_col")).toEqual(["name"]);
+  });
+
+  it("carries filters/sort/_col on the CSV/JSON export links (same filtered slice)", async () => {
+    stubFetch({ columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 });
+    const node = schema.nodes.block_embed.create({
+      ref: "/data/vendors",
+      config: FILTERED_CONFIG,
+    });
+    const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
+    await new Promise((r) => setTimeout(r, 0));
+    const links = [
+      ...view.dom.querySelectorAll(".pm-block-embed-menu .pm-block-embed-menu-item"),
+    ].filter((i) => i.tagName === "A") as HTMLAnchorElement[];
+    const csv = links.find((a) => a.textContent!.startsWith("Download CSV"))!;
+    const json = links.find((a) => a.textContent!.startsWith("Download JSON"))!;
+
+    expect(csv.getAttribute("href")!.startsWith("/data/vendors.csv?")).toBe(true);
+    const csvQuery = new URLSearchParams(csv.getAttribute("href")!.split("?")[1]);
+    expect(csvQuery.get("_stream")).toBe("on");
+    expect(csvQuery.get("state__exact")).toBe("CA");
+    expect(csvQuery.get("_sort_desc")).toBe("population");
+    expect(csvQuery.getAll("_col")).toEqual(["name"]);
+
+    const jsonQuery = new URLSearchParams(json.getAttribute("href")!.split("?")[1]);
+    expect(jsonQuery.get("_shape")).toBe("array");
+    expect(jsonQuery.get("state__exact")).toBe("CA");
+    expect(jsonQuery.get("_sort_desc")).toBe("population");
+    expect(jsonQuery.getAll("_col")).toEqual(["name"]);
   });
 
   it("a crafted filter value stays one encoded param on the title link", async () => {
@@ -756,10 +844,11 @@ describe("BlockEmbedView", () => {
       () => false,
     );
     const labels = menuLabels(view);
-    // Export/copy items stay — they dispatch nothing.
-    expect(labels.some((l) => l!.startsWith("Download CSV"))).toBe(true);
-    expect(labels.some((l) => l!.startsWith("Copy as CSV"))).toBe(true);
+    // Download links stay — they dispatch nothing.
+    expect(labels).toContain("Download CSV (all rows)");
+    expect(labels).toContain("Download JSON (all rows)");
     expect(labels).not.toContain("Columns…");
+    expect(labels).not.toContain("Filter & sort…");
     expect(labels).not.toContain("Convert to inline element");
     // Refresh stays available to everyone (read-only re-fetch, no step).
     expect(view.dom.querySelector(".pm-block-embed-refresh")).not.toBeNull();
@@ -1113,6 +1202,52 @@ describe("BlockEmbedView", () => {
     view.destroy();
   });
 
+  it("badge is a clickable button that opens the filter panel for editors", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: { filters: [{ column: "state", op: "exact", value: "CA" }] },
+      },
+      NATIVE_3COL,
+    );
+    const badge = view.dom.querySelector(
+      ".pm-block-embed-filter-badge",
+    ) as HTMLButtonElement;
+    expect(badge.tagName).toBe("BUTTON");
+    expect(badge.classList.contains("pm-block-embed-filter-badge--btn")).toBe(true);
+    // No panel until the badge is clicked.
+    expect(view.dom.querySelector(".pm-block-embed-filters")).toBeNull();
+    badge.click();
+    const panel = view.dom.querySelector(".pm-block-embed-filters") as HTMLElement;
+    expect(panel).not.toBeNull();
+    // Seeded from the existing filter (state = CA).
+    const first = rowParts(
+      view.dom.querySelector(".pm-block-embed-filter-row") as HTMLElement,
+    );
+    expect(first.column.value).toBe("state");
+    expect(first.value.value).toBe("CA");
+    view.destroy();
+  });
+
+  it("badge stays an inert span for read-only viewers", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: { filters: [{ column: "state", op: "exact", value: "CA" }] },
+      },
+      NATIVE_3COL,
+      () => false,
+    );
+    const badge = view.dom.querySelector(
+      ".pm-block-embed-filter-badge",
+    ) as HTMLElement;
+    expect(badge.tagName).toBe("SPAN");
+    badge.click();
+    // Viewers can't open the config panel.
+    expect(view.dom.querySelector(".pm-block-embed-filters")).toBeNull();
+    view.destroy();
+  });
+
   // ── Table filters T04: the per-column ▾ header menu ───────────────────────
 
   function colMenuBtn(view: EditorView, col: string): HTMLButtonElement {
@@ -1402,5 +1537,59 @@ describe("BlockEmbedView", () => {
       view.dom.querySelector(".pm-block-embed-summary")!.textContent,
     ).toBe("7 rows where state = CA");
     view.destroy();
+  });
+
+  // ── Truncated count (Datasette's count_limit sentinel) ────────────────────
+
+  it("phrases a truncated count as 'N+ rows' + a warning glyph in the footer", async () => {
+    // Datasette caps counting at count_limit (default 10000) and returns
+    // limit+1 as a "there are more" sentinel; the threshold is derived from
+    // count-1, never hardcoded.
+    const view = await build("/data/legislators", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 10001,
+      count_truncated: true,
+    });
+    const info = view.dom.querySelector(".pm-block-embed-footer-info") as HTMLElement;
+    expect(info.textContent).toContain("of 10,000+ rows");
+    const warn = info.querySelector(".pm-block-embed-count-warn") as HTMLElement;
+    expect(warn).not.toBeNull();
+    expect(warn.getAttribute("aria-label")).toContain("stopped counting at 10,000 rows");
+  });
+
+  it("reflects the truncated count in the summary line prefix", async () => {
+    const view = await build("/data/legislators", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 10001,
+      count_truncated: true,
+      human_description_en: "sorted by birthday descending",
+    });
+    expect(
+      view.dom.querySelector(".pm-block-embed-summary")!.textContent,
+    ).toBe("10,000+ rows sorted by birthday descending");
+  });
+
+  it("shows no truncation warning when the count is exact", async () => {
+    const view = await build("/data/legislators", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 42,
+    });
+    const info = view.dom.querySelector(".pm-block-embed-footer-info") as HTMLElement;
+    expect(info.textContent).toContain("of 42 rows");
+    expect(info.querySelector(".pm-block-embed-count-warn")).toBeNull();
+  });
+
+  it("groups a large exact count with thousands separators", async () => {
+    const view = await build("/data/legislators", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 12345,
+    });
+    expect(
+      view.dom.querySelector(".pm-block-embed-footer-info")!.textContent,
+    ).toContain("of 12,345 rows");
   });
 });

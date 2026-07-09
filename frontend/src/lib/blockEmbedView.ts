@@ -29,7 +29,6 @@ import {
   markOverflowingCells,
   renderResultValue,
 } from "./resultCell";
-import { rowsToCsv, rowsToJson } from "./tableExport";
 import {
   FILTER_OPS,
   filterOpByKey,
@@ -46,6 +45,15 @@ import type { DatasetteStatus } from "./datasetteResolver";
 const ROW_LIMIT_OPTIONS = [10, 25, 100];
 const DEFAULT_ROW_LIMIT = 10;
 
+/**
+ * Group an integer with thousands separators ("10000" → "10,000"). Done with a
+ * regex rather than `toLocaleString` so the output is locale-independent (and
+ * so jsdom tests don't depend on the runner's default locale).
+ */
+function formatInt(n: number): string {
+  return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
 // @feat block-embed: NodeView — fetch+render table/row/db, XSS-safe cells
 export class BlockEmbedView implements NodeView {
   dom: HTMLDivElement;
@@ -61,6 +69,9 @@ export class BlockEmbedView implements NodeView {
   private token = 0;
   // The open overflow menu (if any) + its outside-click teardown.
   private menuEl: HTMLElement | null = null;
+  // The current ⋮ overflow-menu body element (whether open or not), so the
+  // header's filter badge can open it and jump straight to the filter panel.
+  private overflowMenuEl: HTMLElement | null = null;
   // Cleanup returned by a third-party provider's mount(), if any.
   private cleanupExternal: (() => void) | null = null;
   // The last table/view payload rendered, if any — drives the export items
@@ -70,6 +81,9 @@ export class BlockEmbedView implements NodeView {
   // The full (pre-projection) column set of the last table/view render — seeds
   // the "Columns…" picker so it can offer every column, selected ones checked.
   private allColumns: string[] = [];
+  // The PK column names of the last table/view render — the picker shows these
+  // as always-on (checked + disabled + key icon), since Datasette re-adds them.
+  private primaryKeys: string[] = [];
   // The last-rendered header element + the args that built it, so update()
   // can rebuild just the header chrome (menu gating) when editability flips
   // mid-session without re-fetching data or re-mounting a provider body.
@@ -282,15 +296,31 @@ export class BlockEmbedView implements NodeView {
 
     // Active-filter chip: funnel + count, shown whenever this is a table/view
     // render with filters configured. Informational, so read-only viewers see
-    // it too — only the panel that *edits* the filters is gated on editable.
+    // it too. For editors it's also a button that opens the Filter & sort panel
+    // (a shortcut to the ⋮ menu item) — viewers get a plain, inert span.
     if (this.tablePayload) {
       const filterCount = this.filters().length;
       if (filterCount > 0) {
-        const badge = document.createElement("span");
+        const plural = filterCount === 1 ? "" : "s";
+        const editable = !!this.view.editable;
+        const badge = document.createElement(editable ? "button" : "span");
         badge.className = "pm-block-embed-filter-badge";
-        badge.title = `${filterCount} filter${filterCount === 1 ? "" : "s"} applied`;
         badge.appendChild(this.svgIcon("funnelFill"));
         badge.appendChild(document.createTextNode(String(filterCount)));
+        if (editable) {
+          const btn = badge as HTMLButtonElement;
+          btn.type = "button";
+          badge.classList.add("pm-block-embed-filter-badge--btn");
+          badge.title = `${filterCount} filter${plural} applied — edit`;
+          badge.setAttribute("aria-label", `Edit filters (${filterCount} applied)`);
+          badge.addEventListener("click", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            this.openFiltersPanel();
+          });
+        } else {
+          badge.title = `${filterCount} filter${plural} applied`;
+        }
         head.appendChild(badge);
       }
     }
@@ -333,26 +363,25 @@ export class BlockEmbedView implements NodeView {
 
   /**
    * The "⋮" overflow menu. Always offers "Convert to inline element" (block →
-   * inline downgrade). For a table/view it also offers result-export items:
+   * inline downgrade). For a table/view it also offers, top to bottom:
    *
-   *  - **Download CSV / JSON** — links to Datasette's *native* streaming
-   *    endpoints (`.csv?_stream=on`, `.json?_shape=array`), which export the
-   *    *entire* table/view server-side, bypassing the embed's `_size` page cap
-   *    (and the SQL block's `max_returned_rows` cap). `.csv?_stream=on` is
-   *    gated by the `allow_csv_stream` setting (default on).
-   *  - **Copy page** — copies only the rows currently held client-side (one
-   *    `_size` page). Labelled with the page row count and "(page)" whenever
-   *    `count` exceeds the held rows, so a partial copy is never mistaken for
-   *    the whole table.
+   *  - **Filter & sort… / Columns…** — config-writing editor panels that swap
+   *    the menu body in place (editors only).
+   *  - **Download CSV / JSON (all rows)** — links to Datasette's *native*
+   *    streaming endpoints (`.csv?_stream=on`, `.json?_shape=array`), which
+   *    export the *entire* table/view server-side, bypassing the embed's
+   *    `_size` page cap. `.csv?_stream=on` is gated by the `allow_csv_stream`
+   *    setting (default on). There is no single-page copy option — export is
+   *    always the whole dataset.
    *
    * The menu is positioned within the embed (tall enough not to clip it) and
    * closes on outside click.
    *
-   * Items that dispatch a transaction (Columns…, Convert to inline element)
-   * render only when `view.editable` — the live EditorView prop, same gate as
-   * tagView/linkOpen. Read-only viewers keep the navigate/copy items (and the
-   * refresh button in the header); returns null when no item is available so
-   * the header can skip the button entirely.
+   * Items that dispatch a transaction or write config (Filter & sort…, Columns…,
+   * Convert to inline element) render only when `view.editable` — the live
+   * EditorView prop, same gate as tagView/linkOpen. Read-only viewers keep the
+   * download links (and the refresh button in the header); returns null when no
+   * item is available so the header can skip the button entirely.
    */
   private overflowMenu(): HTMLElement | null {
     const canEdit = !!this.view.editable;
@@ -374,57 +403,41 @@ export class BlockEmbedView implements NodeView {
 
     const menu = document.createElement("div");
     menu.className = "pm-block-embed-menu";
+    // Cleared here so a render that produces no menu body (returns null below)
+    // doesn't leave the badge pointing at a stale, detached menu element.
+    this.overflowMenuEl = null;
 
     const payload = this.tablePayload;
-    if (payload) {
-      // Native full-dataset download links — server-side, not the held page.
-      menu.appendChild(
-        this.menuLink("Download CSV (all rows)", this.exportUrl(payload, "csv")),
-      );
-      menu.appendChild(
-        this.menuLink("Download JSON (all rows)", this.exportUrl(payload, "json")),
-      );
-      // Client-side copy of the held page — honestly labelled when partial.
-      const partial = payload.count != null && payload.count > payload.rows.length;
-      const suffix = partial
-        ? ` (page, ${payload.rows.length} of ${payload.count})`
-        : ` (${payload.rows.length} row${payload.rows.length === 1 ? "" : "s"})`;
-      menu.appendChild(
-        this.menuButton(`Copy as CSV${suffix}`, () => this.copyPage(payload, "csv")),
-      );
-      menu.appendChild(
-        this.menuButton(`Copy as JSON${suffix}`, () => this.copyPage(payload, "json")),
-      );
-      // Column picker — config-writing, editors only; and only meaningful
-      // once we know the table's columns.
-      if (canEdit && this.allColumns.length) {
-        const cols = document.createElement("button");
-        cols.type = "button";
-        cols.className = "pm-block-embed-menu-item";
-        cols.textContent = "Columns…";
-        // Unlike menuButton, this swaps the menu body for the checklist in
-        // place rather than closing — Apply (or outside click) closes it.
-        cols.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          this.showColumnsPanel(menu);
-        });
-        menu.appendChild(cols);
+    // Order (top → bottom): the config-writing editor actions first (Filter &
+    // sort, then Columns), then the document edit (Convert to inline), then the
+    // all-rows download links. Read-only viewers see only the downloads.
+    if (payload && canEdit && this.allColumns.length) {
+      // Filter & sort form — config-writing, editors only.
+      const filters = document.createElement("button");
+      filters.type = "button";
+      filters.className = "pm-block-embed-menu-item";
+      filters.textContent = "Filter & sort…";
+      // Swaps the menu body for the form in place — Apply/Cancel (or outside
+      // click) closes it, rather than closing on click like menuButton.
+      filters.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showFiltersPanel(menu);
+      });
+      menu.appendChild(filters);
 
-        // Filter & sort form — config-writing, same gate as Columns….
-        const filters = document.createElement("button");
-        filters.type = "button";
-        filters.className = "pm-block-embed-menu-item";
-        filters.textContent = "Filter & sort…";
-        // Like Columns…, this swaps the menu body for the form in place —
-        // Apply/Cancel (or outside click) closes it.
-        filters.addEventListener("click", (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          this.showFiltersPanel(menu);
-        });
-        menu.appendChild(filters);
-      }
+      // Column picker — config-writing, same gate as Filter & sort.
+      const cols = document.createElement("button");
+      cols.type = "button";
+      cols.className = "pm-block-embed-menu-item";
+      cols.textContent = "Columns…";
+      // Like Filter & sort, swaps the menu body for the checklist in place.
+      cols.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.showColumnsPanel(menu);
+      });
+      menu.appendChild(cols);
     }
 
     // Converting rewrites the document — an edit, gated like config writes.
@@ -433,9 +446,33 @@ export class BlockEmbedView implements NodeView {
         this.menuButton("Convert to inline element", () => this.convertToInline()),
       );
     }
+
+    if (payload) {
+      // Native full-dataset download links — server-side, always the whole
+      // table/view (not just the held page), so no single-page copy option.
+      menu.appendChild(
+        this.menuLink("Download CSV (all rows)", this.exportUrl(payload, "csv")),
+      );
+      menu.appendChild(
+        this.menuLink("Download JSON (all rows)", this.exportUrl(payload, "json")),
+      );
+    }
     if (!menu.childElementCount) return null;
     wrap.appendChild(menu);
+    this.overflowMenuEl = menu;
     return wrap;
+  }
+
+  /**
+   * Open the ⋮ overflow menu and swap straight to the Filter & sort panel —
+   * the header filter badge's shortcut. No-op for viewers or when the menu has
+   * no body (e.g. no editable config items), mirroring the menu item's gate.
+   */
+  private openFiltersPanel(): void {
+    const menu = this.overflowMenuEl;
+    if (!this.view.editable || !menu) return;
+    if (this.menuEl !== menu) this.toggleMenu(menu); // open it if not already
+    this.showFiltersPanel(menu);
   }
 
   /**
@@ -468,7 +505,11 @@ export class BlockEmbedView implements NodeView {
   /**
    * Swap the open ⋮ menu's body for an inline checklist of `allColumns`, each
    * checked iff currently selected (all checked when no selection = "show all").
-   * "Apply" writes the ordered selection to `config.columns` and closes.
+   * Primary-key columns render checked + disabled with a key icon: Datasette
+   * always re-adds PKs to any `_col` projection, so they can't be hidden — the
+   * disabled box (with a hover explanation) reflects that rather than offering
+   * a toggle that wouldn't stick. "Apply" writes the ordered selection to
+   * `config.columns` and closes.
    */
   private showColumnsPanel(menu: HTMLElement): void {
     if (!this.view.editable) return; // belt-and-braces: viewers never write config
@@ -476,18 +517,31 @@ export class BlockEmbedView implements NodeView {
     const panel = document.createElement("div");
     panel.className = "pm-block-embed-columns";
 
+    const pks = new Set(this.primaryKeys);
     const selected = new Set(this.selectedColumns() ?? this.allColumns);
     const inputs: { col: string; input: HTMLInputElement }[] = [];
     for (const col of this.allColumns) {
+      const isPk = pks.has(col);
       const label = document.createElement("label");
       label.className = "pm-block-embed-columns-item";
       const input = document.createElement("input");
       input.type = "checkbox";
-      input.checked = selected.has(col);
+      // A PK is always shown, so it's always checked and can't be unchecked.
+      input.checked = isPk || selected.has(col);
+      if (isPk) {
+        input.disabled = true;
+        label.classList.add("pm-block-embed-columns-item--pk");
+        label.title = "Primary key — always included by Datasette";
+      }
       const text = document.createElement("span");
       text.textContent = col; // text node — column names are data-derived
       label.appendChild(input);
       label.appendChild(text);
+      if (isPk) {
+        const key = this.svgIcon("keyFill");
+        key.classList.add("pm-block-embed-columns-pk-icon");
+        label.appendChild(key);
+      }
       panel.appendChild(label);
       inputs.push({ col, input });
     }
@@ -852,26 +906,22 @@ export class BlockEmbedView implements NodeView {
    * The native Datasette streaming-export URL for a table/view payload.
    * `.csv?_stream=on` streams every row (bypasses row caps); `.json?_shape=array`
    * gives a bare JSON array (paginated — the user follows `next` for the rest).
-   * Built from the ref segments so it can't be poisoned by a crafted `href`.
+   * Carries the embed's filters/sort/columns (`shareableParams`) so the export
+   * is the same filtered slice the embed shows, not the whole raw table. Built
+   * from the ref segments so it can't be poisoned by a crafted `href`.
    */
   private exportUrl(
     payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
     format: "csv" | "json",
   ): string {
     const path = "/" + refSegments(payload.href).map(encodeURIComponent).join("/");
-    return format === "csv" ? `${path}.csv?_stream=on` : `${path}.json?_shape=array`;
-  }
-
-  /** Copy the held page (one `_size` fetch) to the clipboard as CSV/JSON. */
-  private copyPage(
-    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
-    format: "csv" | "json",
-  ): void {
-    const text =
-      format === "csv"
-        ? rowsToCsv(payload.columns, payload.rows)
-        : rowsToJson(payload.columns, payload.rows);
-    void navigator.clipboard?.writeText(text);
+    const params = this.shareableParams();
+    if (format === "csv") {
+      params.set("_stream", "on");
+      return `${path}.csv?${params.toString()}`;
+    }
+    params.set("_shape", "array");
+    return `${path}.json?${params.toString()}`;
   }
 
   private toggleMenu(menu: HTMLElement): void {
@@ -1004,6 +1054,40 @@ export class BlockEmbedView implements NodeView {
     }
   }
 
+  /**
+   * The row-count phrase for the summary line and footer. When Datasette's
+   * count hit its configurable limit (`countTruncated`), the reported `count`
+   * is that limit + 1 and the real total is only known to be *at least* that —
+   * so phrase it as "N+ rows" where N is the limit (`count - 1`), derived from
+   * the response rather than a hardcoded threshold. Otherwise the exact count.
+   */
+  private countPhrase(
+    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
+  ): string {
+    if (payload.count == null) return "";
+    if (payload.countTruncated) return `${formatInt(payload.count - 1)}+ rows`;
+    return `${formatInt(payload.count)} row${payload.count === 1 ? "" : "s"}`;
+  }
+
+  /**
+   * A warning glyph (with a hover/aria explanation) shown next to a truncated
+   * count: the embed is a page from a table Datasette declined to fully count,
+   * so its true size exceeds the "N+" figure displayed.
+   */
+  private countTruncationWarning(
+    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
+  ): HTMLElement {
+    const limit = (payload.count ?? 1) - 1;
+    const el = this.svgIcon("exclamationTriangle");
+    el.classList.add("pm-block-embed-count-warn");
+    el.setAttribute("aria-hidden", "false");
+    el.setAttribute("role", "img");
+    const msg = `Datasette stopped counting at ${formatInt(limit)} rows — the table has more.`;
+    el.title = msg;
+    el.setAttribute("aria-label", msg);
+    return el;
+  }
+
   private renderTable(
     payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
   ): void {
@@ -1011,6 +1095,7 @@ export class BlockEmbedView implements NodeView {
     // column picker (allColumns = the full set, before config.columns subsets).
     this.tablePayload = payload;
     this.allColumns = payload.allColumns;
+    this.primaryKeys = payload.primaryKeys;
     this.dom.replaceChildren();
     this.dom.appendChild(
       this.header(
@@ -1029,9 +1114,7 @@ export class BlockEmbedView implements NodeView {
       const summary = document.createElement("div");
       summary.className = "pm-block-embed-summary";
       const prefix =
-        payload.count != null
-          ? `${payload.count} row${payload.count === 1 ? "" : "s"} `
-          : "";
+        payload.count != null ? `${this.countPhrase(payload)} ` : "";
       // One text node — the description is data-derived, never innerHTML.
       summary.textContent = `${prefix}${payload.humanDescription}`;
       this.dom.appendChild(summary);
@@ -1089,28 +1172,42 @@ export class BlockEmbedView implements NodeView {
     const info = document.createElement("span");
     info.append("showing ", this.rowLimitSelect());
     if (payload.count != null) {
-      info.append(` of ${payload.count} row${payload.count === 1 ? "" : "s"}`);
+      info.append(` of ${this.countPhrase(payload)}`);
+      // When the count is capped at Datasette's limit, flag it: the true total
+      // is larger than the "N+" shown, so the table is bigger than it looks.
+      if (payload.countTruncated) info.append(" ", this.countTruncationWarning(payload));
     } else {
       info.append(" rows");
     }
-    this.appendFooter(payload.href, info);
+    // The footer "open in Datasette" link, like the header title and the
+    // export links, carries the embed's filters/sort/columns so the Datasette
+    // page opens showing exactly what the embed shows.
+    this.appendFooter(this.tablePageHref(payload.href), info);
+  }
+
+  /**
+   * The embed's shareable query params: the `col__op=value` filter pairs,
+   * `_sort`/`_sort_desc`, and one `_col` per selected column. Built through
+   * URLSearchParams so crafted filter values can't break out of the query
+   * string. Shared by the header title link, the footer link, and the CSV/JSON
+   * export links so all four open the *same* filtered slice.
+   */
+  private shareableParams(): URLSearchParams {
+    const params = new URLSearchParams(filterQueryParams(this.filters(), this.sort()));
+    for (const col of this.selectedColumns() ?? []) params.append("_col", col);
+    return params;
   }
 
   /**
    * The header title-link URL for a table/view: Datasette's own table page
    * with the embed's filters, sort, and column subset already applied, so
    * clicking through shows exactly what the embed shows. Path rebuilt from
-   * the ref segments so it can't be poisoned (the exportUrl trick); the
-   * shareable params — `col__op=value` pairs, `_sort`/`_sort_desc`, one
-   * `_col` per selected column — go through URLSearchParams so crafted
-   * values can't break out of the query string. Fetch-only params
-   * (`_shape`/`_extra`/`_size`) are never carried: the page picks its own.
+   * the ref segments so it can't be poisoned (the exportUrl trick). Fetch-only
+   * params (`_shape`/`_extra`/`_size`) are never carried: the page picks its own.
    */
   private tablePageHref(href: string): string {
     const path = "/" + refSegments(href).map(encodeURIComponent).join("/");
-    const params = new URLSearchParams(filterQueryParams(this.filters(), this.sort()));
-    for (const col of this.selectedColumns() ?? []) params.append("_col", col);
-    const query = params.toString();
+    const query = this.shareableParams().toString();
     return query ? `${path}?${query}` : path;
   }
 
@@ -1185,7 +1282,7 @@ export class BlockEmbedView implements NodeView {
       if (t.count != null) {
         const count = document.createElement("span");
         count.className = "pm-block-embed-table-count";
-        count.textContent = `${t.count} row${t.count === 1 ? "" : "s"}`;
+        count.textContent = `${formatInt(t.count)} row${t.count === 1 ? "" : "s"}`;
         li.appendChild(count);
       }
       list.appendChild(li);

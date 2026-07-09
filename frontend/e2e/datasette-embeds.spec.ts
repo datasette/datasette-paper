@@ -144,10 +144,10 @@ test.describe("slash menu + datasette embed", () => {
         hasText: "Download JSON",
       }),
     ).toHaveAttribute("href", /\/vendors\.json\?_shape=array/);
-    // Copy is honestly labelled as the visible page (30 rows total, 10 held).
+    // Export is always the whole dataset — no single-page "Copy as …" item.
     await expect(
-      exportMenu.locator(".pm-block-embed-menu-item", { hasText: "Copy as CSV" }),
-    ).toContainText("page");
+      exportMenu.locator(".pm-block-embed-menu-item", { hasText: "Copy as" }),
+    ).toHaveCount(0);
     // Close the menu before continuing.
     await page.keyboard.press("Escape");
 
@@ -192,20 +192,27 @@ test.describe("slash menu + datasette embed", () => {
       .poll(async () => embed.locator("thead th").allInnerTexts(), { timeout: 10000 })
       .toEqual(["id", "name"]);
 
-    // Open the ⋮ menu → "Columns…", uncheck the PK `id`, Apply.
+    // Open the ⋮ menu → "Columns…". The PK `id` is locked on (checked +
+    // disabled) — Datasette always includes it — so hide `name` instead.
     await embed.locator(".pm-block-embed-menu-btn").click();
     await embed
       .locator(".pm-block-embed-menu-item", { hasText: "Columns…" })
       .click();
-    const idRow = embed.locator(".pm-block-embed-columns-item", { hasText: "id" });
-    await idRow.locator("input").uncheck();
+    const idBox = embed
+      .locator(".pm-block-embed-columns-item", { hasText: "id" })
+      .locator("input");
+    await expect(idBox).toBeChecked();
+    await expect(idBox).toBeDisabled();
+    await embed
+      .locator(".pm-block-embed-columns-item", { hasText: "name" })
+      .locator("input")
+      .uncheck();
     await embed.locator(".pm-block-embed-columns-apply").click();
 
-    // The embed re-fetches/re-renders to just `name` (the PK is gone).
+    // The embed re-fetches/re-renders to just the PK `id` (name is gone).
     await expect
       .poll(async () => embed.locator("thead th").allInnerTexts(), { timeout: 10000 })
-      .toEqual(["name"]);
-    await expect(embed.locator("table")).toContainText("Vendor 1");
+      .toEqual(["id"]);
 
     // The selection persists across reload (config.columns round-trips through
     // the step log + snapshot, not just markdown). Insert = v1, Apply = v2.
@@ -219,7 +226,7 @@ test.describe("slash menu + datasette embed", () => {
         timeout: 10000,
         message: "column selection did not persist across reload",
       })
-      .toEqual(["name"]);
+      .toEqual(["id"]);
   });
 });
 
@@ -262,8 +269,19 @@ test.describe("block-embed filters", () => {
 
     // The embed re-fetches: 11 of 30 rows, funnel badge, "where" summary.
     await expect(embed).toContainText("of 11 rows", { timeout: 10000 });
-    await expect(embed.locator(".pm-block-embed-filter-badge")).toBeVisible();
+    const badge = embed.locator(".pm-block-embed-filter-badge");
+    await expect(badge).toBeVisible();
     await expect(embed.locator(".pm-block-embed-summary")).toContainText("where");
+
+    // The badge itself reopens the filter panel (shortcut for the ⋮ item).
+    await badge.click();
+    await expect(embed.locator(".pm-block-embed-filters")).toBeVisible();
+    await expect(
+      embed.locator(".pm-block-embed-filter-row").first().locator(
+        ".pm-block-embed-filter-column",
+      ),
+    ).toHaveValue("name");
+    await page.keyboard.press("Escape");
 
     // The filter persists across reload (config.filters round-trips through
     // the step log). Insert = v1, Apply = v2.

@@ -147,7 +147,7 @@ describe("fetchEmbed (native .json)", () => {
     );
     const out = await fetchEmbed("/d/t", 25);
     expect(urls[0]).toBe(
-      "/d/t.json?_shape=arrays&_extra=count,columns,human_description_en&_size=25",
+      "/d/t.json?_shape=arrays&_extra=count,count_truncated,columns,primary_keys,human_description_en&_size=25",
     );
     expect(out).toEqual({
       status: "ok",
@@ -156,8 +156,10 @@ describe("fetchEmbed (native .json)", () => {
       db: "d",
       columns: ["id", "name"],
       allColumns: ["id", "name"],
+      primaryKeys: [],
       rows: [[1, "Acme"]],
       count: 30,
+      countTruncated: false,
       truncated: true,
       href: "/d/t",
     });
@@ -317,7 +319,7 @@ describe("fetchEmbed (native .json)", () => {
     stubTableFetch(urls);
     await fetchEmbed("/d/t", 25);
     expect(urls[0]).toBe(
-      "/d/t.json?_shape=arrays&_extra=count,columns,human_description_en&_size=25",
+      "/d/t.json?_shape=arrays&_extra=count,count_truncated,columns,primary_keys,human_description_en&_size=25",
     );
   });
 
@@ -334,7 +336,7 @@ describe("fetchEmbed (native .json)", () => {
       },
     });
     const out = await fetchEmbed("/d/t", 25);
-    expect(urls[0]).toContain("_extra=count,columns,human_description_en");
+    expect(urls[0]).toContain("_extra=count,count_truncated,columns,primary_keys,human_description_en");
     if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
     expect(out.humanDescription).toBe(
       "where state = CA sorted by population descending",
@@ -348,6 +350,52 @@ describe("fetchEmbed (native .json)", () => {
     const out = await fetchEmbed("/d/t", 25);
     if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
     expect(out.humanDescription).toBeUndefined();
+  });
+
+  it("maps primary_keys into the payload, intersected with the columns shown", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          columns: ["id", "name"],
+          rows: [[1, "Acme"]],
+          count: 1,
+          // "ghost" is not among the columns → dropped by the intersect.
+          primary_keys: ["id", "ghost"],
+        }),
+      })),
+    );
+    const out = await fetchEmbed("/d/t", 25);
+    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
+    expect(out.primaryKeys).toEqual(["id"]);
+  });
+
+  it("defaults primaryKeys to [] when the extra is absent (rowid table)", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls);
+    const out = await fetchEmbed("/d/t", 25);
+    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
+    expect(out.primaryKeys).toEqual([]);
+  });
+
+  it("maps count_truncated=true from the response into the payload", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls, {
+      body: { columns: ["id"], rows: [[1]], count: 10001, count_truncated: true },
+    });
+    const out = await fetchEmbed("/d/t", 25);
+    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
+    expect(out.countTruncated).toBe(true);
+  });
+
+  it("defaults countTruncated to false when the extra is absent", async () => {
+    const urls: string[] = [];
+    stubTableFetch(urls);
+    const out = await fetchEmbed("/d/t", 25);
+    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
+    expect(out.countTruncated).toBe(false);
   });
 
   it("leaves humanDescription undefined for an empty description (unfiltered)", async () => {

@@ -49,8 +49,18 @@ export type EmbedPayload =
       // The full server-returned column set (pre-projection), so the column
       // picker can offer every column with the selected ones checked.
       allColumns: string[];
+      // The table's primary-key column names (Datasette's `primary_keys`
+      // extra). Datasette always re-adds these to any `_col` projection, so the
+      // column picker shows them as always-on (checked + disabled).
+      primaryKeys: string[];
       rows: CellValue[][];
       count: number | null;
+      // True when `count` hit Datasette's `count_limit` (the reported number is
+      // `count_limit + 1`, so the real row total is *at least* that). Datasette
+      // stops counting past the limit and returns limit+1 as a "there are more"
+      // sentinel — see the `count_truncated` extra. The limit is configurable,
+      // so the UI derives the threshold from `count` rather than hardcoding it.
+      countTruncated: boolean;
       truncated: boolean;
       // Datasette's server-phrased "where … sorted by …" summary (the
       // `human_description_en` extra). Set only when non-empty — absent for an
@@ -201,11 +211,12 @@ async function fetchTableEmbed(
   // envelope; `_shape=array` (singular) would be a bare top-level array with
   // no columns/count. `_extra` adds count + columns + the server-phrased
   // "where … sorted by …" summary (empty string when unfiltered/unsorted;
-  // key simply absent on older Datasettes that lack the extra).
+  // key simply absent on older Datasettes that lack the extra) + the
+  // `count_truncated` flag (whether `count` hit the configurable count limit).
   const res = await fetch(
     jsonUrl(
       ref,
-      `?_shape=arrays&_extra=count,columns,human_description_en&_size=${encodeURIComponent(String(limit))}${colParams}${filterParams}`,
+      `?_shape=arrays&_extra=count,count_truncated,columns,primary_keys,human_description_en&_size=${encodeURIComponent(String(limit))}${colParams}${filterParams}`,
     ),
   );
   if (!res.ok) {
@@ -228,12 +239,20 @@ async function fetchTableEmbed(
     columns?: string[];
     rows?: CellValue[][];
     count?: number | null;
+    count_truncated?: boolean;
+    primary_keys?: string[];
     next?: string | null;
     human_description_en?: string;
   };
   const allColumns = j.columns ?? [];
   const rows = j.rows ?? [];
   const count = typeof j.count === "number" ? j.count : null;
+  const countTruncated = j.count_truncated === true;
+  // Only the PKs that actually appear as columns (a defensive intersect — a
+  // rowid table reports `[]`, and we never want to key a column that isn't shown).
+  const primaryKeys = (Array.isArray(j.primary_keys) ? j.primary_keys : []).filter(
+    (c): c is string => typeof c === "string" && allColumns.includes(c),
+  );
   // Empty/absent/malformed → undefined, so the NodeView renders no summary.
   const humanDescription =
     typeof j.human_description_en === "string" && j.human_description_en.length > 0
@@ -259,8 +278,10 @@ async function fetchTableEmbed(
     db,
     columns: outColumns,
     allColumns,
+    primaryKeys,
     rows: outRows,
     count,
+    countTruncated,
     truncated: j.next != null || (count != null && count > rows.length),
     humanDescription,
     href: ref,

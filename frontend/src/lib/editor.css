@@ -1246,6 +1246,23 @@
 .editor-host .pm-block-embed-columns-item input {
   margin: 0;
 }
+/* Primary-key row: the checkbox is locked on (Datasette always includes PKs).
+   The label stays a "help" cursor to hint the title tooltip explains why. */
+.editor-host .pm-block-embed-columns-item--pk {
+  cursor: help;
+}
+.editor-host .pm-block-embed-columns-item--pk input {
+  cursor: help;
+}
+/* The key glyph is pushed to the row's trailing edge, muted gold. */
+.editor-host .pm-block-embed-columns-pk-icon {
+  margin-left: auto;
+  color: #b8860b;
+}
+.editor-host .pm-block-embed-columns-pk-icon svg {
+  width: 11px;
+  height: 11px;
+}
 .editor-host .pm-block-embed-columns-apply {
   margin-top: 4px;
   border-top: 1px solid #eee;
@@ -1371,6 +1388,18 @@
 .editor-host .pm-block-embed-filter-badge .pm-block-embed-icon svg {
   width: 10px;
   height: 10px;
+}
+/* Editor variant: the badge is a <button> that opens the Filter & sort panel.
+   Reset the native button chrome so it matches the inert span, then add a
+   pointer + hover affordance. */
+.editor-host button.pm-block-embed-filter-badge--btn {
+  border: none;
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+.editor-host .pm-block-embed-filter-badge--btn:hover {
+  background: #e0d3f2;
 }
 /* Summary line under the header: "<count> rows where …" — everyone sees it. */
 .editor-host .pm-block-embed-summary {
@@ -1532,6 +1561,13 @@
 .editor-host .pm-block-embed-footer-info {
   /* Push the row-count + page-size control to the right edge. */
   margin-left: auto;
+}
+/* Truncated-count warning glyph (amber), next to an "N+ rows" figure Datasette
+   capped at its count limit. Nudged to align with the adjacent text baseline. */
+.editor-host .pm-block-embed-count-warn {
+  color: #b76e00;
+  vertical-align: text-bottom;
+  cursor: help;
 }
 .editor-host .pm-block-embed-fields {
   display: grid;
