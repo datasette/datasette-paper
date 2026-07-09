@@ -2,12 +2,15 @@
  * NodeView for `block_embed`: a read-only, live-at-view-time render of a
  * Datasette table/view (capped rows), a single row's fields, or a database's
  * table listing. Unlike the inline pill there is no shared batching resolver —
- * one `GET …/datasette/embed` fetch per mount, re-fetched when `ref`/`mode`
- * changes or the user clicks the refresh control (the data is a snapshot at
- * view time, not collaborative).
+ * one native `.json` fetch per mount (`fetchEmbed`, no custom backend),
+ * re-fetched when `ref`/`mode`/`config` changes or the user clicks refresh
+ * (the data is a snapshot at view time, not collaborative).
  *
  * Render states: loading skeleton → table / row card / database listing /
- * denied / not_found. An overflow ("⋮") menu offers block → inline conversion.
+ * denied / not_found. A table also carries an overflow ("⋮") menu — Filter &
+ * sort…, Columns…, Convert to inline, and Download/Copy submenus (CSV/JSON of
+ * the whole result set, fetched on demand; see `overflowMenu` /
+ * `fetchExportText`) — plus a filter badge and a truncated-count warning.
  *
  * XSS rule (load-bearing): every cell value, column name, and label is
  * user/data-derived and goes into the DOM as a TEXT NODE only — never

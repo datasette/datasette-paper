@@ -78,6 +78,38 @@ template injects the matching JS+CSS via `datasette_vite.vite_entry`.
   chaining doesn't work because `goToNextCell` needs to read the new
   row's cell positions.
 
+## Datasette JSON API (block embeds + SQL block)
+
+The embed/export code talks to Datasette's native browser JSON API
+(`/<db>/<table>.json`, `.csv`) directly — no custom backend, the actor's
+cookie enforces perms. Non-obvious facts it depends on (each cost a probe
+or a bug to learn; `datasette_embed.ts` `fetchTableEmbed` /
+`blockEmbedView.ts` `fetchExportText` are the call sites):
+
+- **Row count is capped and that's a signal, not a bug.** `?_extra=count`
+  returns at most `count_limit + 1` (default 10000, configurable per
+  instance). The paired `?_extra=count_truncated` is `true` exactly when
+  it hit the cap — the real total is unknown-but-larger. Render the capped
+  case as "N+" where `N = count - 1`; never hardcode 10000.
+- **`_shape=arrays` omits the column header** unless you *also* pass
+  `_extra=columns`. Assembling JSON from the arrays shape without it keys
+  every row against an empty header (silent, ugly). `_shape=arrays` (plural)
+  gives `{columns, rows-as-arrays, count, next}`; `_shape=array` (singular)
+  is a bare object array with no envelope.
+- **CSV streams every row; JSON never does.** `.csv?_stream=on` returns the
+  whole table in one unbounded request. `.json` is always paged — one page
+  (default), or `_size=max` = `max_returned_rows` (~1000). For "all rows"
+  JSON you must follow the `next` token (`&_next=<token>`) until it's null
+  (`fetchExportText` does this, with a 100k-row safety valve).
+- **`_extra=primary_keys`** lists PK column names. Datasette always re-adds
+  PKs to any `_col` projection (you can't hide them), so the Columns picker
+  shows them checked + disabled.
+- **The embed load's `_extra` set** is `count,count_truncated,columns,
+  primary_keys,human_description_en`; a mirror assertion in
+  `datasetteEmbed.test.ts` fails if you change the list. `human_description_en`
+  is the server-phrased "where … sorted by …" summary (empty/absent when
+  unfiltered, or on older Datasettes).
+
 ## Tests (`vitest` + `jsdom`)
 
 - `EditorConnection` tests stub `fetch` + `EventSource`. **Always call
@@ -86,6 +118,20 @@ template injects the matching JS+CSS via `datasette_vite.vite_entry`.
 - Drive input rules with the 5-arg `view.someProp("handleTextInput",
   fn => fn(view, from, to, text, () => view.state.tr))` — svelte-check
   rejects the 4-arg form.
+- **jsdom has no download/clipboard/navigation.** For NodeView export
+  tests: stub `URL.createObjectURL`/`revokeObjectURL` and spy
+  `HTMLAnchorElement.prototype.click` (reading `this.download`) for
+  downloads; `Blob` exists but has no `.text()` (assert `.size`/`.type`);
+  stub `navigator.clipboard.writeText` (return a resolved promise — the
+  code awaits it). "Not implemented: navigation" on stderr is harmless
+  anchor-click noise.
+- **A `BlockEmbedView` built bare (not mounted in an `EditorView` attached
+  to `document.body`) has a detached `dom`, so `node.isConnected` is
+  `false`.** Code that guards UI on `isConnected` (the export done-state)
+  is skipped — `document.body.appendChild(view.dom)` in the test harness.
+- **Two-phase export tests** must stub `fetch` to answer *both* the initial
+  embed load and the later export fetch, keyed off the URL (`.csv` →
+  `text()`; `_size=max` → the paged JSON envelope; else the embed body).
 
 ## Screenshots (`scripts/screenshots.mjs` → `docs/screenshots/*.png`)
 
