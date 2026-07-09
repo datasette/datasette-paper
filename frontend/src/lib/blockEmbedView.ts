@@ -17,6 +17,7 @@
  * innerHTML. Only the trusted constant icon SVGs use innerHTML.
  */
 import type { Node as PMNode } from "prosemirror-model";
+import { NodeSelection, TextSelection } from "prosemirror-state";
 import type { EditorView, NodeView } from "prosemirror-view";
 import {
   embedIconMarkup,
@@ -123,8 +124,62 @@ export class BlockEmbedView implements NodeView {
       attributes: true,
       attributeFilter: ["contenteditable"],
     });
+    // When the user has selected text *inside* the embed (a cell value, a
+    // column name — see stopEvent), a copy should yield that text, not the
+    // whole-node URL. PM's editor-level copy handler serializes the current
+    // node selection, so intercept the copy before it bubbles there and let the
+    // browser copy the live selection natively instead. Bubbles from the cell
+    // through this.dom before reaching view.dom, so stopping it here wins.
+    this.dom.addEventListener("copy", this.onCopyWithinSelection);
+    this.dom.addEventListener("cut", this.onCopyWithinSelection);
+    // A node-selected atom swallows drag/double-click text selection. When the
+    // user presses down on the selectable content while this embed is the
+    // node-selection, drop that selection (collapse just after the node) so the
+    // browser can start a native text selection instead.
+    this.dom.addEventListener("mousedown", this.onContentMouseDown);
     void this.load();
   }
+
+  private onContentMouseDown = (e: MouseEvent): void => {
+    const target = e.target as HTMLElement | null;
+    if (!target?.closest(".pm-block-embed-scroll, .pm-block-embed-fields")) return;
+    const pos = this.getPos();
+    if (pos == null) return;
+    const { state } = this.view;
+    if (!(state.selection instanceof NodeSelection) || state.selection.from !== pos) return;
+    // A selected atom is treated as a drag source, not a fresh selection anchor,
+    // so the browser won't start a native text selection while this embed is the
+    // node-selection. Move the selection to the nearest text position (after the
+    // embed, else before) so the following drag/double-click selects cell text.
+    // When the embed is the doc's only block there's no such position — then
+    // just drop the DOM selection that wraps the node so the browser starts
+    // fresh (the copy guard still handles a resulting content selection).
+    const after = state.doc.resolve(Math.min(pos + this.node.nodeSize, state.doc.content.size));
+    const near =
+      TextSelection.findFrom(after, 1, true) ||
+      TextSelection.findFrom(state.doc.resolve(pos), -1, true);
+    if (near) this.view.dispatch(state.tr.setSelection(near));
+    else window.getSelection()?.removeAllRanges();
+  };
+
+  /**
+   * Copy/cut guard: if the user has highlighted text *inside* the result table
+   * or row-card values, stop the event before ProseMirror's handler so the
+   * browser copies that text natively — rather than PM copying the whole node
+   * (its Datasette URL). The check requires both selection ends to sit within
+   * the selectable content region, NOT the embed root: a whole-node selection
+   * (PM's `NodeSelection`) has its ends at the node boundary, so it falls
+   * through and copying the selected node still yields the URL.
+   */
+  private onCopyWithinSelection = (e: Event): void => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || !sel.toString()) return;
+    const inContent = (n: Node | null): boolean => {
+      const el = n?.nodeType === Node.TEXT_NODE ? n.parentElement : (n as Element | null);
+      return !!el?.closest(".pm-block-embed-scroll, .pm-block-embed-fields");
+    };
+    if (inContent(sel.anchorNode) && inContent(sel.focusNode)) e.stopPropagation();
+  };
 
   /**
    * Re-gate the rendered chrome after an editability flip, without a
@@ -1696,6 +1751,9 @@ export class BlockEmbedView implements NodeView {
 
   destroy(): void {
     this.editableObserver.disconnect();
+    this.dom.removeEventListener("copy", this.onCopyWithinSelection);
+    this.dom.removeEventListener("cut", this.onCopyWithinSelection);
+    this.dom.removeEventListener("mousedown", this.onContentMouseDown);
     this.clearExportTimer();
     this.closeMenu();
     this.disposeExternal();
@@ -1703,12 +1761,22 @@ export class BlockEmbedView implements NodeView {
 
   // We own the whole managed subtree — keep PM out of it, but let interactive
   // controls (refresh button, links, row-limit dropdown) handle their own
-  // events. A click on a plain cell still falls through so PM selects the node.
+  // events, and let the browser natively select/copy text in the result table
+  // and row-card values (stopEvent true over those regions — see below).
   ignoreMutation(): boolean {
     return true;
   }
   stopEvent(event: Event): boolean {
     const target = event.target as HTMLElement | null;
-    return !!target && !!target.closest("a, button, select, input, label");
+    if (!target) return false;
+    // Interactive controls handle their own events.
+    if (target.closest("a, button, select, input, label")) return true;
+    // Let the browser natively select (double-click a word, drag a range) and
+    // copy text out of the result table / row-card values — PM must not hijack
+    // those into a whole-node selection. Same region the mousedown/copy guards
+    // use. Chrome outside it (the header bar, footer) still falls through so
+    // clicking there selects the node.
+    if (target.closest(".pm-block-embed-scroll, .pm-block-embed-fields")) return true;
+    return false;
   }
 }

@@ -1680,6 +1680,10 @@
   padding: 4px 8px;
   text-align: left;
   white-space: nowrap;
+  /* Text is selectable/copyable (stopEvent + the copy guard in
+     blockEmbedView.ts) — show the I-beam so that's discoverable. Interactive
+     bits (▾ menu, pk links) set their own cursor and win. */
+  cursor: text;
 }
 .editor-host .pm-block-embed th {
   background: #f4f6f8;

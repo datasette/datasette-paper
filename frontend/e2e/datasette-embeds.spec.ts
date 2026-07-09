@@ -425,11 +425,10 @@ test.describe("block-embed filters", () => {
     await expect(embed).toBeVisible({ timeout: 10000 });
     await expect(embed).toContainText("of 11 rows", { timeout: 10000 });
 
-    // Select the embed node by clicking a plain (non-link) data cell — the
-    // `name` column; `id` is now a pk link that would navigate. Then read what
+    // Inserting the embed leaves it node-selected (clicking a cell now selects
+    // *text* for copying, not the node — see the cell-selection test). Read what
     // ProseMirror writes on a real copy event, straight off the event's
     // clipboardData (headless chromium has no OS clipboard).
-    await embed.locator("tbody tr").first().locator("td").nth(1).click();
     const copied = await page.evaluate(() => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const view = (window as any).__pmView;
@@ -444,7 +443,7 @@ test.describe("block-embed filters", () => {
       };
     });
 
-    // Clicking the embed selected the whole node…
+    // The freshly-inserted embed is node-selected…
     expect(copied.selNode).toBe("block_embed");
     // …and text/plain is its full same-origin Datasette URL, filter + sort intact.
     const u = new URL(copied.text);
@@ -452,5 +451,41 @@ test.describe("block-embed filters", () => {
     expect(u.pathname).toBe("/datasette-paper-e2e-data/vendors");
     expect(u.searchParams.get("name__contains")).toBe("Vendor 1");
     expect(u.searchParams.get("_sort_desc")).toBe("id");
+  });
+
+  test("selecting a cell's text and copying yields the text, not the node URL", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    const { url } = await createPaper(page);
+    await gotoPaper(page, url);
+    // A realistic doc: some prose, then the embed on its own line.
+    await page.locator(".ProseMirror").click();
+    await page.keyboard.type("Our vendors:");
+    await page.keyboard.press("Enter");
+    await pasteText(page, "/datasette-paper-e2e-data/vendors");
+    const embed = page.locator(".pm-block-embed");
+    await expect(embed).toBeVisible({ timeout: 10000 });
+    await expect(embed).toContainText("Vendor 1", { timeout: 10000 });
+
+    // The embed is node-selected from insertion. Dragging across a cell must
+    // drop that node-selection and select the cell text instead.
+    const cell = embed.locator("tbody tr").first().locator("td").nth(1);
+    const box = (await cell.boundingBox())!;
+    await page.mouse.move(box.x + 4, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 4, box.y + box.height / 2, { steps: 12 });
+    await page.mouse.up();
+    await expect
+      .poll(() => page.evaluate(() => window.getSelection()?.toString() ?? ""))
+      .toBe("Vendor 1");
+
+    // A real copy keystroke lands the cell text on the OS clipboard — NOT the
+    // embed's Datasette URL (which is what copying the whole node gives).
+    await page.keyboard.press(process.platform === "darwin" ? "Meta+c" : "Control+c");
+    await expect
+      .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+      .toBe("Vendor 1");
   });
 });
