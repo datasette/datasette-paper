@@ -2368,8 +2368,9 @@
  * rules above without editing them (so light pixels are provably
  * untouched). Each block is written twice — once for the explicit
  * `[data-theme="dark"]` choice and once, inside the media query, for the
- * "system"/unset case that follows the OS (`:is(...)` folds the two
- * system selectors together). Keep the two copies in sync.
+ * explicit `[data-theme="system"]` opt-in that follows the OS. (An unset
+ * page defaults to light, so it is deliberately NOT matched here.) Keep the
+ * two copies in sync.
  * =================================================================== */
 :root[data-theme="dark"] .editor-host .pm-placeholder {
   background: #182a44;
@@ -2458,118 +2459,118 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-placeholder {
     background: #182a44;
     color: #9dc3ff;
     border-color: #2f4d78;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-tag {
     color: #45c9bb;
     background: rgba(69, 201, 187, 0.14);
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-tag-typing {
     background: rgba(69, 201, 187, 0.1);
     border-bottom-color: rgba(69, 201, 187, 0.45);
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-tag-item--active {
     background: rgba(69, 201, 187, 0.2);
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-tag-create {
     color: #45c9bb;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-item,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover-input,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-name,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-code,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-toggle:hover {
+  :root[data-theme="system"] .editor-host .pm-value,
+  :root[data-theme="system"] .editor-host .pm-value-item,
+  :root[data-theme="system"] .editor-host .pm-value-popover,
+  :root[data-theme="system"] .editor-host .pm-value-popover-input,
+  :root[data-theme="system"] .editor-host .pm-source-card-name,
+  :root[data-theme="system"] .editor-host .pm-source-card-code,
+  :root[data-theme="system"] .editor-host .pm-source-card-toggle:hover {
     color: #c9d4e0;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value--loading,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-empty,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover-label,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-icon,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-sigil,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-probe {
+  :root[data-theme="system"] .editor-host .pm-value--loading,
+  :root[data-theme="system"] .editor-host .pm-value-empty,
+  :root[data-theme="system"] .editor-host .pm-value-popover-label,
+  :root[data-theme="system"] .editor-host .pm-source-card-icon,
+  :root[data-theme="system"] .editor-host .pm-source-card-sigil,
+  :root[data-theme="system"] .editor-host .pm-source-card-probe {
     color: #8b98a5;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-source-card-toggle {
     color: #9aa7b4;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-value {
     background: rgba(139, 148, 158, 0.16);
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-value--loading {
     background: rgba(139, 148, 158, 0.1);
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-value-typing {
     background: rgba(139, 148, 158, 0.12);
     border-bottom-color: rgba(139, 148, 158, 0.5);
   }
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-item:hover,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-item--active {
+  :root[data-theme="system"] .editor-host .pm-value-item:hover,
+  :root[data-theme="system"] .editor-host .pm-value-item--active {
     background: rgba(139, 148, 158, 0.18);
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-source-card {
     border-color: #2a323c;
     background: #161b22;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-source-card-head {
     border-bottom-color: #2a323c;
     background: #1d232b;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-source-card.is-collapsed {
     background: #1d232b;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-source-card-probe {
     border-top-color: #2a323c;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-name,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-db,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover-input,
-  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover-select {
+  :root[data-theme="system"] .editor-host .pm-source-card-name,
+  :root[data-theme="system"] .editor-host .pm-source-card-db,
+  :root[data-theme="system"] .editor-host .pm-value-popover-input,
+  :root[data-theme="system"] .editor-host .pm-value-popover-select {
     border-color: #3d4652;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .pm-toc-link {
     color: #b8c2cc;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .ProseMirror
     img {
     background: #21262d;
     color: #8b949e;
   }
-  :is(:root[data-theme="system"], :root:not([data-theme]))
+  :root[data-theme="system"]
     .editor-host
     .remote-selection {
     background: color-mix(in srgb, var(--cursor-color) 32%, transparent);

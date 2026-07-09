@@ -6,8 +6,9 @@
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { cycleTheme, getStoredTheme, type Theme } from "./theme";
 
-  // Per-device theme, cycled System → Light → Dark by the header button.
-  // Initialised from the persisted value so the label reflects reality.
+  // Per-device theme, cycled Light → Dark → System by the header button.
+  // Initialised from the persisted value so the label reflects reality
+  // (defaults to Light; dark/system are explicit opt-ins).
   let currentTheme = $state<Theme>(getStoredTheme());
   const THEME_LABELS: Record<Theme, string> = {
     system: "System",
@@ -513,7 +514,7 @@
     <h1>Papers</h1>
     <div class="header-actions">
       <!-- @feat dark-mode: the index page's theme control — one button that
-           cycles System → Light → Dark via cycleTheme (persist + stamp), with
+           cycles Light → Dark → System via cycleTheme (persist + stamp), with
            an aria-label/title that announces the current state. -->
       <button
         type="button"
@@ -1363,14 +1364,14 @@
     background: rgba(248, 81, 73, 0.15);
   }
   @media (prefers-color-scheme: dark) {
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .error {
+    :global(:root[data-theme="system"]) .error {
       background: #3a1d1d;
       color: #ffb4ab;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .menu button.danger {
+    :global(:root[data-theme="system"]) .menu button.danger {
       color: #ff7b72;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme])))
+    :global(:root[data-theme="system"])
       .menu
       button.danger:hover {
       background: rgba(248, 81, 73, 0.15);

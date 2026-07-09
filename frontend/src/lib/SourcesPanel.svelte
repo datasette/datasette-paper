@@ -614,17 +614,17 @@
     color: #fff;
   }
   @media (prefers-color-scheme: dark) {
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .sources-panel-warn {
+    :global(:root[data-theme="system"]) .sources-panel-warn {
       color: #e3a008;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme])))
+    :global(:root[data-theme="system"])
       .sources-panel-item
       button.danger {
       background: #da3633;
       border-color: #da3633;
       color: #fff;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme])))
+    :global(:root[data-theme="system"])
       .sources-panel-form-actions
       button.primary {
       background: #3a7bd0;

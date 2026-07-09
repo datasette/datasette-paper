@@ -415,10 +415,10 @@
     background: rgba(74, 158, 255, 0.12);
   }
   @media (prefers-color-scheme: dark) {
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .ds-embed-error {
+    :global(:root[data-theme="system"]) .ds-embed-error {
       background: rgba(248, 81, 73, 0.15);
     }
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .ds-embed-result:hover {
+    :global(:root[data-theme="system"]) .ds-embed-result:hover {
       background: rgba(74, 158, 255, 0.12);
     }
   }

@@ -259,11 +259,11 @@
     color: #ff7b72;
   }
   @media (prefers-color-scheme: dark) {
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .te-error {
+    :global(:root[data-theme="system"]) .te-error {
       background: #3a1d1d;
       color: #ffb4ab;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme])))
+    :global(:root[data-theme="system"])
       .te-remove:hover:not(:disabled) {
       color: #ff7b72;
     }

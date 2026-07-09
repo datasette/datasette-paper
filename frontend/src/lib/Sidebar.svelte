@@ -342,12 +342,12 @@
     border-color: rgba(74, 158, 255, 0.35);
   }
   @media (prefers-color-scheme: dark) {
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .paper-rail-btn.is-active,
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .paper-rail-mobile-btn.is-active {
+    :global(:root[data-theme="system"]) .paper-rail-btn.is-active,
+    :global(:root[data-theme="system"]) .paper-rail-mobile-btn.is-active {
       background: rgba(74, 158, 255, 0.18);
       color: #9dc3ff;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme])))
+    :global(:root[data-theme="system"])
       .paper-rail-mobile-btn.is-active {
       border-color: rgba(74, 158, 255, 0.35);
     }

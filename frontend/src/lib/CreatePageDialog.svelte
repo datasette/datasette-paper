@@ -226,7 +226,7 @@
     color: #ffb4ab;
   }
   @media (prefers-color-scheme: dark) {
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .create-page-dialog__error {
+    :global(:root[data-theme="system"]) .create-page-dialog__error {
       background: #3a1d1d;
       color: #ffb4ab;
     }

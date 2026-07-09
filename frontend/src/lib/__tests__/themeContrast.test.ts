@@ -135,14 +135,15 @@ const themeNames = Object.keys(parsed);
 // --- media-branch mirror -------------------------------------------------
 // The dark palette is declared TWICE: once on `:root[data-theme="dark"]`
 // (parsed above) and once inside `@media (prefers-color-scheme: dark)` for
-// the "system"/unset case. The blockRe above deliberately ignores the media
-// branch (its selector list — `:root[data-theme="system"], :root:not([data-theme])`
-// — isn't a single `:root`-ish token). Parse it here on its own so the test
-// can assert the two dark copies never drift.
+// the explicit `:root[data-theme="system"]` opt-in (an unset page defaults to
+// light and is deliberately NOT matched). The blockRe above parses the media
+// branch's `:root[data-theme="system"]` block as a "system" theme, not "dark",
+// so it doesn't collide with the data-theme=dark block. Parse the media branch
+// here on its own so the test can assert the two dark copies never drift.
 function parseMediaDarkTokens(css: string): Record<string, string> | null {
   const noComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
   const m = noComments.match(
-    /@media[^{]*prefers-color-scheme:\s*dark[^{]*\{[\s\S]*?:root:not\(\[data-theme\]\)\s*\{([^}]*)\}/,
+    /@media[^{]*prefers-color-scheme:\s*dark[^{]*\{[\s\S]*?:root\[data-theme="system"\]\s*\{([^}]*)\}/,
   );
   if (!m) return null;
   const tokens: Record<string, string> = {};

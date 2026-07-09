@@ -75,13 +75,15 @@
   let themeSubOpen = $state(false);
   let menuRoot: HTMLDivElement | undefined = $state();
 
-  // Current per-device theme choice (System / Light / Dark), initialised from
+  // Current per-device theme choice (Light / Dark / System), initialised from
   // the persisted value so the radio reflects reality when the menu opens.
   let currentTheme = $state<Theme>(getStoredTheme());
+  // Order mirrors THEMES in theme.ts (light is the default; dark/system are
+  // explicit opt-ins).
   const THEME_OPTIONS: { value: Theme; label: string }[] = [
-    { value: "system", label: "System" },
     { value: "light", label: "Light" },
     { value: "dark", label: "Dark" },
+    { value: "system", label: "System" },
   ];
 
   function chooseTheme(theme: Theme) {
@@ -958,8 +960,9 @@
 
   /* --- Dark theme (append-only; the light rules above are untouched, so light
      pixels can't change). Each override is written twice: for the explicit
-     `[data-theme="dark"]` choice and, in the media query, for the "system"/unset
-     case that follows the OS. `:global(...)` keeps the component scope hash on
+     `[data-theme="dark"]` choice and, in the media query, for the explicit
+     `[data-theme="system"]` opt-in that follows the OS (an unset page defaults
+     to light, so it is not matched). `:global(...)` keeps the component scope hash on
      the descendant class. The .title input had NO explicit color, so it fell to
      the browser default (near-black) and vanished on dark — the biggest fix
      here. --- */
@@ -999,38 +1002,38 @@
     border-color: #6cb0ff;
   }
   @media (prefers-color-scheme: dark) {
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .title {
+    :global(:root[data-theme="system"]) .title {
       color: var(--pp-fg);
     }
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .doc-icon-link {
+    :global(:root[data-theme="system"]) .doc-icon-link {
       color: #6cb0ff;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .saved {
+    :global(:root[data-theme="system"]) .saved {
       color: #7ee787;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme])))
+    :global(:root[data-theme="system"])
       .copy-feedback.copied {
       background: rgba(63, 185, 80, 0.15);
       color: #7ee787;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme])))
+    :global(:root[data-theme="system"])
       .copy-feedback.failed {
       background: #3a1d1d;
       color: #ffb4ab;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .mi-danger,
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .mi-danger .mi-icon {
+    :global(:root[data-theme="system"]) .mi-danger,
+    :global(:root[data-theme="system"]) .mi-danger .mi-icon {
       color: #ff7b72;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .mi-danger:hover {
+    :global(:root[data-theme="system"]) .mi-danger:hover {
       background: rgba(248, 81, 73, 0.15);
     }
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .template-pill {
+    :global(:root[data-theme="system"]) .template-pill {
       background: #182a44;
       color: #9dc3ff;
       border-color: #2f4d78;
     }
-    :global(:is([data-theme="system"], :root:not([data-theme])))
+    :global(:root[data-theme="system"])
       .meta-actions
       :global(.datasette-acl-share__trigger.has-label:hover) {
       background: #6cb0ff;

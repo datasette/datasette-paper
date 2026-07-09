@@ -11,7 +11,9 @@
  *     insertion.
  *  3. System tracks the OS: with data-theme="system", flipping
  *     emulateMedia({ colorScheme }) recolors live (media-branch CSS), no reload.
- *  4. Index-page cycle button cycles System → Light → Dark and persists.
+ *     Paper defaults to LIGHT regardless of OS (dark/system are explicit
+ *     opt-ins), so a fresh visitor on a dark OS still renders light.
+ *  4. Index-page cycle button cycles Light → Dark → System and persists.
  *  5. axe color-contrast sweep of the seeded doc page + the index page in both
  *     themes; zero violations. Scoped to #app-root plus Datasette's header.hd
  *     (ticket 08's chrome surface) so unrelated Datasette/debug-bar chrome is
@@ -105,8 +107,8 @@ test.describe("dark mode", () => {
     const { url } = await createPaper(page, { name: "Theme Toggle Host" });
     await gotoPaper(page, url);
 
-    // Fresh context → clean localStorage → resolver picked "system".
-    expect(await stampedTheme(page)).toBe("system");
+    // Fresh context → clean localStorage → resolver picked "light" (default).
+    expect(await stampedTheme(page)).toBe("light");
 
     await pickThemeFromDocHeader(page, "Dark");
 
@@ -202,11 +204,25 @@ test.describe("dark mode", () => {
     expect(probe.log[firstTheme]).toBe("theme:dark");
   });
 
+  test("a fresh visitor with a dark OS still renders light (light is the default)", async ({
+    page,
+  }) => {
+    const { url } = await createPaper(page, { name: "Theme Default Host" });
+    // Dark OS, no persisted choice. Paper defaults to light regardless of OS
+    // (matching Datasette) — dark/system are explicit per-device opt-ins.
+    await page.emulateMedia({ colorScheme: "dark" });
+    await gotoPaper(page, url);
+
+    expect(await stampedTheme(page)).toBe("light");
+    expect(await bodyBg(page)).toBe(LIGHT_BG);
+  });
+
   test('"System" tracks the OS color scheme live', async ({ page }) => {
     const { url } = await createPaper(page, { name: "Theme System Host" });
     await gotoPaper(page, url);
 
-    // Ensure the explicit "system" choice (default, but assert the mechanism).
+    // Opt in to "system" explicitly (no longer the default) to assert the
+    // OS-tracking mechanism.
     await pickThemeFromDocHeader(page, "System");
     await expect.poll(() => stampedTheme(page)).toBe("system");
 
@@ -220,7 +236,7 @@ test.describe("dark mode", () => {
     expect(await stampedTheme(page)).toBe("system");
   });
 
-  test("index-page cycle button cycles System → Light → Dark and persists", async ({
+  test("index-page cycle button cycles Light → Dark → System and persists", async ({
     page,
   }) => {
     // A doc so the list isn't empty (not required, but realistic).
@@ -231,12 +247,7 @@ test.describe("dark mode", () => {
     const cycle = page.locator("#app-root .theme-cycle");
     await expect(cycle).toBeVisible({ timeout: 10000 });
 
-    // Clean context → starts at System.
-    await expect(cycle).toHaveAttribute("aria-label", "Theme: System");
-    expect(await stampedTheme(page)).toBe("system");
-
-    // System → Light
-    await cycle.click();
+    // Clean context → starts at Light (the default).
     await expect(cycle).toHaveAttribute("aria-label", "Theme: Light");
     expect(await stampedTheme(page)).toBe("light");
     expect(await bodyBg(page)).toBe(LIGHT_BG);
@@ -250,14 +261,23 @@ test.describe("dark mode", () => {
       await page.evaluate(() => localStorage.getItem("paperTheme")),
     ).toBe("dark");
 
+    // Dark → System (OS is emulated light, so "system" resolves light).
+    await cycle.click();
+    await expect(cycle).toHaveAttribute("aria-label", "Theme: System");
+    expect(await stampedTheme(page)).toBe("system");
+    expect(await bodyBg(page)).toBe(LIGHT_BG);
+    expect(
+      await page.evaluate(() => localStorage.getItem("paperTheme")),
+    ).toBe("system");
+
     // Persists across reload.
     await page.reload();
     const cycleAfter = page.locator("#app-root .theme-cycle");
-    await expect(cycleAfter).toHaveAttribute("aria-label", "Theme: Dark", {
+    await expect(cycleAfter).toHaveAttribute("aria-label", "Theme: System", {
       timeout: 10000,
     });
-    expect(await stampedTheme(page)).toBe("dark");
-    expect(await bodyBg(page)).toBe(DARK_BG);
+    expect(await stampedTheme(page)).toBe("system");
+    expect(await bodyBg(page)).toBe(LIGHT_BG);
   });
 
   // ---- axe color-contrast sweeps: {doc, index} × {light, dark} ----

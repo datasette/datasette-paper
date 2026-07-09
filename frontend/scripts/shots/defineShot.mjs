@@ -27,10 +27,12 @@
 // (same origin), so a dark leg's `paperTheme` write would persist onto the next
 // light page and silently theme it dark. To stay hermetic, EACH leg seeds the
 // key for its own theme via a page-scoped addInitScript — "dark" for dark,
-// removed for light. A light leg therefore resolves with the key absent, exactly
-// like the theme-unaware baseline, so its PNG is byte-identical. emulateMedia is
-// already per-page (a fresh page inherits the context default, light), so it's
-// only set on the dark leg to make the resolver's "system" branch render dark.
+// removed for light. Paper defaults to light regardless of OS, so a light leg
+// resolves with the key absent to "light" — identical to the theme-unaware
+// baseline, so its PNG is byte-identical. The dark leg sets an explicit "dark",
+// which the resolver honors independent of the OS. emulateMedia is already
+// per-page (a fresh page inherits the context default, light), so it's only set
+// dark on the dark leg to match the explicit dark choice's OS chrome.
 //
 // ids keys available (from seed()): richId, linkId, mentionId, inlineTagId, slashId,
 //   embedPickerId, inlineDbId, inlineTableId, inlineRowId, blockDbId,
@@ -67,7 +69,8 @@ export function defineShot(desc) {
         }
       }, theme);
       if (theme === "dark") {
-        // Make the resolver's "system" branch render dark too.
+        // Match the explicit dark choice's OS-level chrome (belt-and-braces —
+        // the explicit "dark" already renders dark regardless of OS).
         await page.emulateMedia({ colorScheme: "dark" });
       }
       const suffix = theme === "dark" ? ".dark" : "";

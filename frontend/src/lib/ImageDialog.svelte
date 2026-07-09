@@ -321,10 +321,10 @@
     color: #ffb4ab;
   }
   @media (prefers-color-scheme: dark) {
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .image-paste-zone:focus {
+    :global(:root[data-theme="system"]) .image-paste-zone:focus {
       background: rgba(74, 158, 255, 0.12);
     }
-    :global(:is([data-theme="system"], :root:not([data-theme]))) .image-dialog__error {
+    :global(:root[data-theme="system"]) .image-dialog__error {
       background: #3a1d1d;
       color: #ffb4ab;
     }
