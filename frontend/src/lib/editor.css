@@ -17,7 +17,7 @@
   outline: none;
   font-size: 16px;
   line-height: 1.65;
-  color: #1a1a1a;
+  color: var(--pp-fg);
 }
 .editor-host .ProseMirror p {
   margin: 0 0 0.75em;
@@ -33,6 +33,8 @@
    * alt text legibly instead. These only show when the image fails to render;
    * a loaded image paints over them. */
   min-height: 1.2em;
+  /* deliberate literal: one-off Tailwind gray-100/500 pair for the broken-image
+   * placeholder only, not part of the semantic palette. */
   background: #f3f4f6;
   color: #6b7280;
   font-size: 0.85em;
@@ -40,6 +42,8 @@
 }
 /* Make a click-selected image visible (there's no image NodeView). */
 .editor-host .ProseMirror img.ProseMirror-selectednode {
+  /* deliberate literal: mimics the browser's native selection-highlight blue,
+   * deliberately distinct from --pp-accent. */
   outline: 2px solid #4d90fe;
   outline-offset: 1px;
 }
@@ -57,8 +61,8 @@
  * not inline code. The inner <code> inherits font-family from <pre>; null
  * out any background it might have so styling doesn't double up. */
 .editor-host .ProseMirror pre {
-  background: #f4f6f8;
-  border: 1px solid #e0e4e8;
+  background: var(--pp-surface);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
   padding: 10px 12px;
   margin: 0 0 0.75em;
@@ -97,7 +101,7 @@
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
-  color: #999;
+  color: var(--pp-fg-subtle);
   cursor: pointer;
   padding: 0;
   opacity: 0;
@@ -116,11 +120,11 @@
  * points right (▸), making the folded state legible at a glance. */
 .editor-host .pm-fold-toggle[aria-label="Unfold section"] {
   opacity: 1;
-  color: #666;
+  color: var(--pp-fg-muted);
 }
 .editor-host .pm-fold-toggle:hover {
-  background: #f0f3f6;
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 /* Blocks hidden under a folded heading. */
 .editor-host .pm-folded {
@@ -171,7 +175,7 @@
 }
 .editor-host li[data-task-item][data-checked="true"] > .task-item-content {
   text-decoration: line-through;
-  color: #888;
+  color: var(--pp-fg-subtle);
 }
 
 /* paper_link inline atom — rendered by PaperLinkView, resolved live via
@@ -181,11 +185,11 @@
   display: inline;
   white-space: nowrap;
   cursor: pointer;
-  color: #0b5cad;
+  color: var(--pp-accent);
   text-decoration: none;
   padding: 0 2px;
   border-radius: 3px;
-  background: rgba(11, 92, 173, 0.08);
+  background: var(--pp-accent-bg);
 }
 .editor-host .pm-paper-link:hover {
   text-decoration: underline;
@@ -203,18 +207,18 @@
 .editor-host .pm-paper-link--loading,
 .editor-host .pm-paper-link--archived,
 .editor-host .pm-paper-link--trashed {
-  color: #888;
-  background: rgba(0, 0, 0, 0.05);
+  color: var(--pp-fg-subtle);
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-paper-link--denied {
-  color: #888;
-  background: rgba(0, 0, 0, 0.05);
+  color: var(--pp-fg-subtle);
+  background: var(--pp-surface-2);
   cursor: default;
   text-decoration: none;
 }
 .editor-host .pm-paper-link--missing {
-  color: #888;
-  background: rgba(0, 0, 0, 0.05);
+  color: var(--pp-fg-subtle);
+  background: var(--pp-surface-2);
   cursor: default;
   text-decoration: line-through;
 }
@@ -224,6 +228,8 @@
 .editor-host .pm-paper-link .pm-paper-link-warn {
   display: inline;
   margin-left: 0.25em;
+  /* deliberate literal: its own amber shade, kept distinct from --pp-warn
+   * (a perceptibly different hue-shift, not a near-duplicate collapse). */
   color: #b45309;
   font-size: 0.85em;
   cursor: help;
@@ -232,7 +238,7 @@
 .editor-host .pm-paper-link .pm-paper-link-hint {
   display: inline;
   margin-left: 0.25em;
-  color: #999;
+  color: var(--pp-fg-subtle);
   font-size: 0.85em;
   cursor: help;
   text-decoration: none;
@@ -244,16 +250,16 @@
 .editor-host .pm-mention {
   display: inline;
   white-space: nowrap;
-  color: #0b5cad;
+  color: var(--pp-accent);
   padding: 0 4px;
   border-radius: 3px;
-  background: rgba(11, 92, 173, 0.1);
+  background: var(--pp-accent-bg);
   font-weight: 500;
   user-select: none;
 }
 .editor-host .pm-mention--loading {
-  color: #888;
-  background: rgba(0, 0, 0, 0.05);
+  color: var(--pp-fg-subtle);
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-mention .pm-mention-avatar {
   display: inline-block;
@@ -273,15 +279,15 @@
 }
 .editor-host .ProseMirror table {
   margin: 0 0 0.75em;
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
 }
 .editor-host .ProseMirror td,
 .editor-host .ProseMirror th {
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
   padding: 6px 9px;
 }
 .editor-host .ProseMirror th {
-  background: #f4f6f8;
+  background: var(--pp-table-header-bg);
   text-align: left;
   font-weight: 600;
 }
@@ -295,7 +301,7 @@
  * tags them with `.selectedCell` and draws an ::after overlay. Tint the
  * background too so the selection is unmistakable. */
 .editor-host .ProseMirror .selectedCell {
-  background: rgba(11, 92, 173, 0.08);
+  background: var(--pp-selected-cell);
 }
 
 /* In-table action bar — owned by tableInsertTooltipPlugin. Anchored
@@ -326,10 +332,10 @@
   align-items: center;
   gap: 2px;
   padding: 4px 6px;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px var(--pp-shadow);
   flex-wrap: wrap;
   max-width: 480px;
 }
@@ -343,42 +349,45 @@
   background: transparent;
   border-radius: 4px;
   cursor: pointer;
-  color: #333;
+  color: var(--pp-fg);
   padding: 0;
 }
 .editor-host .pm-tt-btn:hover {
-  background: #eaeaea;
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-tt-btn.pm-tt-text {
   width: auto;
   padding: 0 6px;
   font-size: 12px;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 .editor-host .pm-tt-sep {
   width: 1px;
   height: 18px;
-  background: #ccc;
+  background: var(--pp-border);
   margin: 0 4px;
 }
 .editor-host .pm-tt-name {
   height: 22px;
   padding: 0 6px;
   font-size: 12px;
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
   border-radius: 4px;
   width: 140px;
-  color: #1a1a1a;
-  background: #fff;
+  color: var(--pp-fg);
+  background: var(--pp-bg);
 }
 .editor-host .pm-tt-name:focus {
   outline: none;
-  border-color: #0b5cad;
+  border-color: var(--pp-focus-ring);
+  /* deliberate literal: one-off focus-ring glow alpha, no matching wash token. */
   box-shadow: 0 0 0 2px rgba(11, 92, 173, 0.2);
 }
 .editor-host .pm-tt-name.pm-tt-name-warn {
+  /* deliberate literal: table-name duplicate-warning input gets its own
+   * amber accent, distinct from --pp-warn. */
   border-color: #c08000;
-  background: #fff8ec;
+  background: var(--pp-warn-bg);
 }
 .editor-host .pm-tt-name.pm-tt-name-warn:focus {
   border-color: #c08000;
@@ -387,20 +396,20 @@
 .editor-host .pm-tt-warn {
   margin-left: 4px;
   font-size: 12px;
-  color: #8a5a00;
+  color: var(--pp-warn);
   white-space: nowrap;
 }
 .editor-host .pm-tt-api {
   font-weight: 600;
-  color: #0b5cad;
+  color: var(--pp-accent);
 }
 .editor-host .pm-tt-api:hover:not(:disabled) {
-  background: #d9e7f8;
+  background: var(--pp-surface-3);
 }
 .editor-host .pm-tt-api:disabled {
   opacity: 0.4;
   cursor: not-allowed;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 
 /* Row-drag handle owned by tableRowDragPlugin. The button is hosted
@@ -420,26 +429,26 @@
   background: transparent;
   border: 1px solid transparent;
   border-radius: 3px;
-  color: #999;
+  color: var(--pp-fg-subtle);
   cursor: grab;
   padding: 0;
   z-index: 11;
 }
 .editor-host .pm-row-drag-handle:hover {
-  background: #eaeaea;
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 .editor-host .pm-row-drag-handle.pm-row-drag-handle-grabbing {
   cursor: grabbing;
-  background: #d9e7f8;
-  color: #0b5cad;
+  background: var(--pp-surface-3);
+  color: var(--pp-accent);
 }
 /* Drop indicator — 2px line spanning the table's row width at the
  * boundary above/below the row currently under the pointer. */
 .editor-host .pm-row-drop-indicator {
   position: absolute;
   height: 2px;
-  background: #0b5cad;
+  background: var(--pp-accent);
   pointer-events: none;
   z-index: 11;
   transform: translateY(-1px);
@@ -464,15 +473,15 @@
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 1px 3px var(--pp-shadow);
   font-size: 12px;
   max-width: 460px;
 }
 .editor-host .pm-link-tooltip-url {
-  color: #0b5cad;
+  color: var(--pp-accent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -485,16 +494,16 @@
   justify-content: center;
   height: 22px;
   padding: 0 8px;
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
   border-radius: 4px;
-  background: #f4f6f8;
-  color: #1a1a1a;
+  background: var(--pp-surface);
+  color: var(--pp-fg);
   cursor: pointer;
   font: inherit;
   text-decoration: none;
 }
 .editor-host .pm-link-tooltip-btn:hover {
-  background: #e6ebf0;
+  background: var(--pp-surface-2);
 }
 
 /* Link edit dialog — opened from the tooltip's Edit button. Same anchoring /
@@ -508,10 +517,10 @@
   padding: 10px;
   width: 320px;
   max-width: 90%;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px var(--pp-shadow);
   font-size: 12px;
 }
 .editor-host .pm-link-edit-field {
@@ -520,21 +529,22 @@
   gap: 2px;
 }
 .editor-host .pm-link-edit-label {
-  color: #555;
+  color: var(--pp-fg-muted);
   font-weight: 600;
 }
 .editor-host .pm-link-edit-input {
   padding: 5px 7px;
-  border: 1px solid #cfcfcf;
+  border: 1px solid var(--pp-border-strong);
   border-radius: 4px;
   font: inherit;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .editor-host .pm-link-edit-input:focus {
   outline: none;
-  border-color: #0b5cad;
+  border-color: var(--pp-focus-ring);
 }
 .editor-host .pm-link-edit-err {
+  /* deliberate literal: one-off error red, distinct from --pp-danger. */
   color: #b00020;
   min-height: 0;
 }
@@ -547,17 +557,21 @@
   gap: 6px;
 }
 .editor-host .pm-link-edit-save {
-  background: #0b5cad;
-  border-color: #0b5cad;
-  color: #fff;
+  background: var(--pp-accent);
+  border-color: var(--pp-accent);
+  color: var(--pp-accent-fg);
 }
 .editor-host .pm-link-edit-save:hover {
+  /* deliberate literal: hover-darken of --pp-accent, no dedicated hover token. */
   background: #0a4f95;
 }
 
 /* `[[`-triggered wiki-link autocomplete. */
 .editor-host .pm-wikilink-typing {
-  background: rgba(11, 92, 173, 0.08);
+  background: var(--pp-accent-bg);
+  /* deliberate literal: translucent accent underline for the typing-trigger
+   * decoration, no matching wash token (--pp-accent-bg is a background tint,
+   * not a border-color alpha). */
   border-bottom: 1px solid rgba(11, 92, 173, 0.4);
   border-radius: 2px;
 }
@@ -567,10 +581,10 @@
   min-width: 220px;
   max-height: 260px;
   overflow-y: auto;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px var(--pp-shadow);
   font-size: 13px;
   padding: 4px 0;
 }
@@ -582,33 +596,34 @@
   text-overflow: ellipsis;
 }
 .editor-host .pm-wikilink-item:hover {
-  background: #f1f4f7;
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-wikilink-item--active {
-  background: #e1ebf7;
+  background: var(--pp-surface-3);
 }
 .editor-host .pm-wikilink-empty {
   padding: 4px 10px;
-  color: #888;
+  color: var(--pp-fg-subtle);
   font-style: italic;
 }
 /* Trailing "Create <query> page" row — set off from the result rows above
    it with a divider and a muted "Create"/"page" framing so the typed title
    reads as the actionable part. */
 .editor-host .pm-wikilink-create {
-  border-top: 1px solid #ececec;
+  border-top: 1px solid var(--pp-border);
   margin-top: 4px;
   padding-top: 6px;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 .editor-host .pm-wikilink-create strong {
-  color: #0b5cad;
+  color: var(--pp-accent);
   font-weight: 600;
 }
 
 /* `@`-triggered mention autocomplete. Mirrors the `[[` popup. */
 .editor-host .pm-mention-typing {
-  background: rgba(11, 92, 173, 0.08);
+  background: var(--pp-accent-bg);
+  /* deliberate literal: see .pm-wikilink-typing above — same one-off wash. */
   border-bottom: 1px solid rgba(11, 92, 173, 0.4);
   border-radius: 2px;
 }
@@ -618,10 +633,10 @@
   min-width: 220px;
   max-height: 260px;
   overflow-y: auto;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px var(--pp-shadow);
   font-size: 13px;
   padding: 4px 0;
 }
@@ -635,10 +650,10 @@
   text-overflow: ellipsis;
 }
 .editor-host .pm-mention-item:hover {
-  background: #f1f4f7;
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-mention-item--active {
-  background: #e1ebf7;
+  background: var(--pp-surface-3);
 }
 .editor-host .pm-mention-item .pm-mention-avatar {
   width: 1.1em;
@@ -650,19 +665,23 @@
 }
 .editor-host .pm-mention-empty {
   padding: 4px 10px;
-  color: #888;
+  color: var(--pp-fg-subtle);
   font-style: italic;
 }
 .editor-host .pm-mention-typing-hint {
   padding: 4px 10px;
-  color: #999;
+  color: var(--pp-fg-subtle);
   font-size: 0.85em;
   font-style: italic;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--pp-border);
 }
 /* Inline SQL values — a live computed value spliced into prose. Neutral
    slate so it reads as data, not a mention/tag/link. Rendered by valueView.ts;
-   states: loading (muted), error/denied (red), ok (the value). */
+   states: loading (muted), error/denied (red), ok (the value).
+   deliberate literal: this block and .pm-source-card below use their own
+   Tailwind-slate identity palette throughout — a distinct "this is data,
+   not chrome" identity, not part of the --pp-* semantic palette. Left
+   untokenized. */
 .editor-host .pm-value {
   /* relative so the click-to-edit popover (position:absolute) anchors to the
      chip, not a far-up positioned ancestor. */
@@ -684,8 +703,8 @@
 }
 .editor-host .pm-value--error,
 .editor-host .pm-value--denied {
-  color: #b91c1c;
-  background: rgba(185, 28, 28, 0.1);
+  color: var(--pp-danger);
+  background: var(--pp-danger-bg);
 }
 /* Click-to-edit popover on a value chip — column + format. Anchored below the
    chip; outside-click teardown lives in valueView.ts (same pattern as the
@@ -697,10 +716,10 @@
   z-index: 12;
   min-width: 180px;
   padding: 8px;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 12px var(--pp-shadow);
   font: 13px/1.4 system-ui, sans-serif;
   font-weight: 400;
   color: #1e293b;
@@ -731,7 +750,7 @@
   padding: 2px 5px;
   font: inherit;
   font-size: 12px;
-  background: #fff;
+  background: var(--pp-bg);
   color: #1e293b;
 }
 .editor-host .pm-value-popover-opts:empty {
@@ -782,14 +801,14 @@
   padding: 1px 5px;
   font: 500 13px ui-monospace, SFMono-Regular, Menlo, monospace;
   color: #1e293b;
-  background: #fff;
+  background: var(--pp-bg);
 }
 .editor-host .pm-source-card-db {
   border: 1px solid #cbd5e1;
   border-radius: 4px;
   padding: 1px 4px;
   font-size: 12px;
-  background: #fff;
+  background: var(--pp-bg);
 }
 .editor-host .pm-source-card-spacer {
   flex: 1;
@@ -849,10 +868,13 @@
   white-space: nowrap;
 }
 .editor-host .pm-source-card-probe.is-error {
-  color: #b91c1c;
+  color: var(--pp-danger);
 }
 
-/* `${{` autocomplete — typing decoration + popup (mirrors .pm-tag-*). */
+/* `${{` autocomplete — typing decoration + popup (mirrors .pm-tag-*).
+   deliberate literal: the translucent slate-100-116-139 wash below is the
+   .pm-value family's identity wash (see the .pm-value docstring above) —
+   kept untokenized along with the rest of that identity palette. */
 .editor-host .pm-value-typing {
   background: rgba(100, 116, 139, 0.1);
   border-bottom: 1px solid rgba(100, 116, 139, 0.5);
@@ -863,10 +885,10 @@
   z-index: 11;
   min-width: 180px;
   max-width: 320px;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 12px var(--pp-shadow);
   padding: 4px;
   font-size: 13px;
 }
@@ -891,7 +913,10 @@
 }
 
 /* Inline #tags — a distinct teal accent so they don't read as
-   @mentions (blue) or [[links]]. Rendered by the schema toDOM. */
+   @mentions (blue) or [[links]]. Rendered by the schema toDOM.
+   deliberate literal: this teal text color, its translucent washes below,
+   and the light-teal --active background are the tag's own teal identity
+   color, not part of the --pp-* semantic palette — kept untokenized. */
 .editor-host .pm-tag {
   display: inline;
   white-space: nowrap;
@@ -913,10 +938,10 @@
   min-width: 180px;
   max-height: 260px;
   overflow-y: auto;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 2px 8px var(--pp-shadow);
   font-size: 13px;
   padding: 4px 0;
 }
@@ -930,7 +955,7 @@
   text-overflow: ellipsis;
 }
 .editor-host .pm-tag-item:hover {
-  background: #f1f4f7;
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-tag-item--active {
   background: #d8efec;
@@ -941,13 +966,13 @@
 }
 .editor-host .pm-tag-empty {
   padding: 4px 10px;
-  color: #888;
+  color: var(--pp-fg-subtle);
   font-style: italic;
 }
 
 /* Slash command menu — mirrors .pm-tag-popup; z above toolbar + table tooltip. */
 .editor-host .pm-slash-typing {
-  background: rgba(11, 92, 173, 0.08);
+  background: var(--pp-accent-bg);
   border-radius: 2px;
 }
 .editor-host .pm-slash-menu {
@@ -956,10 +981,10 @@
   min-width: 220px;
   max-height: 300px;
   overflow-y: auto;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.14);
+  box-shadow: 0 2px 10px var(--pp-shadow);
   font-size: 13px;
   padding: 4px 0;
 }
@@ -972,18 +997,18 @@
   white-space: nowrap;
 }
 .editor-host .pm-slash-item:hover {
-  background: #f1f4f7;
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-slash-item--active {
-  background: #e4eefb;
+  background: var(--pp-surface-3);
 }
 .editor-host .pm-slash-icon {
   display: inline-flex;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 .editor-host .pm-slash-empty {
   padding: 5px 12px;
-  color: #888;
+  color: var(--pp-fg-subtle);
   font-style: italic;
 }
 /* Non-interactive section header. No hover, no pointer events; a muted,
@@ -995,7 +1020,7 @@
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #8a8a8a;
+  color: var(--pp-fg-subtle);
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
@@ -1010,10 +1035,12 @@
   display: inline;
   white-space: nowrap;
   cursor: pointer;
-  color: #6429a8;
+  color: var(--pp-link);
   text-decoration: none;
   padding: 0 4px;
   border-radius: 3px;
+  /* deliberate literal: purple wash at --pp-link's own RGB triplet — no
+   * dedicated "--pp-link-bg" wash token exists in the current palette. */
   background: rgba(100, 41, 168, 0.1);
   font-weight: 500;
   user-select: none;
@@ -1026,8 +1053,8 @@
 }
 .editor-host .pm-inline-embed--denied,
 .editor-host .pm-inline-embed--missing {
-  color: #8a8a8a;
-  background: rgba(0, 0, 0, 0.05);
+  color: var(--pp-fg-subtle);
+  background: var(--pp-surface-2);
   cursor: default;
 }
 .editor-host .pm-inline-embed--missing {
@@ -1050,18 +1077,22 @@
 .editor-host .pm-block-embed {
   position: relative;
   margin: 0 0 0.75em;
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  background: #fbfbfd;
+  background: var(--pp-surface);
   overflow: hidden;
 }
 .editor-host .pm-block-embed.ProseMirror-selectednode {
-  outline: 2px solid #6429a8;
+  outline: 2px solid var(--pp-link);
   outline-offset: 1px;
 }
 
 /* "Lite" YouTube embed: a thumbnail facade that swaps to the real iframe on
-   click (videoEmbedView.ts, modelled on paulirish/lite-youtube-embed). */
+   click (videoEmbedView.ts, modelled on paulirish/lite-youtube-embed).
+   deliberate literal: this block's black letterbox and play-button chrome
+   (the solid-black background, the play button's translucent black scrim,
+   its red hover, and the white triangle) is fixed regardless of theme — a
+   video facade — so it's left untokenized throughout .pm-video-embed*. */
 .editor-host .pm-video-embed {
   margin: 0 0 0.75em;
   border-radius: 8px;
@@ -1069,7 +1100,7 @@
   background: #000;
 }
 .editor-host .pm-video-embed.ProseMirror-selectednode {
-  outline: 2px solid #6429a8;
+  outline: 2px solid var(--pp-link);
   outline-offset: 1px;
 }
 .editor-host .pm-video-embed-facade {
@@ -1121,8 +1152,8 @@
 .editor-host .pm-video-embed-fallback {
   padding: 12px;
   font-size: 13px;
-  color: #666;
-  background: #fbfbfd;
+  color: var(--pp-fg-muted);
+  background: var(--pp-surface);
 }
 
 .editor-host .pm-block-embed-head {
@@ -1130,14 +1161,14 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border-bottom: 1px solid #ececf0;
-  background: #f4f4f7;
+  border-bottom: 1px solid var(--pp-border);
+  background: var(--pp-surface-2);
   font-size: 12px;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 .editor-host .pm-block-embed-icon {
   display: inline-flex;
-  color: #6429a8;
+  color: var(--pp-link);
 }
 /* Clamp icon size: a provider-supplied raw <svg> must fit paper's chrome. */
 .editor-host .pm-block-embed-icon svg {
@@ -1147,14 +1178,14 @@
 }
 .editor-host .pm-block-embed-label {
   font-weight: 600;
-  color: #333;
+  color: var(--pp-fg);
 }
 .editor-host .pm-block-embed-label--link {
   text-decoration: none;
   cursor: pointer;
 }
 .editor-host .pm-block-embed-label--link:hover {
-  color: #6429a8;
+  color: var(--pp-link);
   text-decoration: underline;
 }
 .editor-host .pm-block-embed-refresh {
@@ -1162,14 +1193,14 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #777;
+  color: var(--pp-fg-subtle);
   padding: 2px;
   display: inline-flex;
   border-radius: 4px;
 }
 .editor-host .pm-block-embed-refresh:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 .editor-host .pm-block-embed-menu-wrap {
   position: relative;
@@ -1179,14 +1210,14 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #777;
+  color: var(--pp-fg-subtle);
   padding: 2px;
   display: inline-flex;
   border-radius: 4px;
 }
 .editor-host .pm-block-embed-menu-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 .editor-host .pm-block-embed-menu {
   display: none;
@@ -1196,10 +1227,10 @@
   z-index: 12;
   min-width: 180px;
   padding: 4px;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 12px var(--pp-shadow);
 }
 .editor-host .pm-block-embed-menu--open {
   display: block;
@@ -1214,20 +1245,20 @@
   cursor: pointer;
   font: inherit;
   font-size: 13px;
-  color: #333;
+  color: var(--pp-fg);
   text-decoration: none;
   padding: 6px 8px;
   border-radius: 4px;
 }
 .editor-host .pm-block-embed-menu-item:hover {
-  background: #f1ecf8;
-  color: #6429a8;
+  background: var(--pp-code-bg);
+  color: var(--pp-link);
 }
 /* A disabled menu item (e.g. "Hide this column" on a primary key): dimmed,
    non-interactive, and no hover recolour. The `title` carries the reason. */
 .editor-host .pm-block-embed-menu-item--disabled,
 .editor-host .pm-block-embed-menu-item--disabled:hover {
-  color: #aaa;
+  color: var(--pp-fg-subtle);
   background: transparent;
   cursor: not-allowed;
 }
@@ -1248,7 +1279,7 @@
   gap: 5px;
 }
 .editor-host .pm-block-embed-menu-chevron {
-  color: #999;
+  color: var(--pp-fg-subtle);
 }
 .editor-host .pm-block-embed-menu-chevron svg {
   width: 11px;
@@ -1257,14 +1288,16 @@
 }
 /* The back row's leading "‹" chevron is a hint to return, muted like a caption. */
 .editor-host .pm-block-embed-menu-item--back {
-  color: #666;
+  color: var(--pp-fg-muted);
   font-size: 12px;
 }
 /* Export leaf states: "Copying…/Downloading…" (busy) and "Copied ✓" (done). */
 .editor-host .pm-block-embed-export-leaf--busy {
-  color: #6429a8;
+  color: var(--pp-link);
   cursor: progress;
 }
+/* deliberate literal: one-off success green — no "success" role exists in
+ * the current --pp-* palette. */
 .editor-host .pm-block-embed-export-leaf--done {
   color: #157347;
 }
@@ -1289,12 +1322,12 @@
   gap: 6px;
   padding: 5px 8px;
   font-size: 13px;
-  color: #333;
+  color: var(--pp-fg);
   cursor: pointer;
   border-radius: 4px;
 }
 .editor-host .pm-block-embed-columns-item:hover {
-  background: #f1ecf8;
+  background: var(--pp-code-bg);
 }
 .editor-host .pm-block-embed-columns-item input {
   margin: 0;
@@ -1307,7 +1340,8 @@
 .editor-host .pm-block-embed-columns-item--pk input {
   cursor: help;
 }
-/* The key glyph is pushed to the row's trailing edge, muted gold. */
+/* The key glyph is pushed to the row's trailing edge, muted gold.
+ * deliberate literal: one-off gold identity color for the PK marker. */
 .editor-host .pm-block-embed-columns-pk-icon {
   margin-left: auto;
   color: #b8860b;
@@ -1318,9 +1352,9 @@
 }
 .editor-host .pm-block-embed-columns-apply {
   margin-top: 4px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--pp-border);
   font-weight: 600;
-  color: #6429a8;
+  color: var(--pp-link);
 }
 /* The in-place "Filter & sort…" form that replaces the menu body. */
 .editor-host .pm-block-embed-filters {
@@ -1342,7 +1376,7 @@
   align-items: center;
   gap: 4px;
   font-size: 13px;
-  color: #333;
+  color: var(--pp-fg);
 }
 .editor-host .pm-block-embed-filter-row select,
 .editor-host .pm-block-embed-filter-row input,
@@ -1350,10 +1384,10 @@
   font: inherit;
   font-size: 12px;
   padding: 2px 4px;
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
   border-radius: 4px;
-  background: #fff;
-  color: #333;
+  background: var(--pp-bg);
+  color: var(--pp-fg);
   min-width: 0;
 }
 .editor-host .pm-block-embed-filter-value {
@@ -1364,18 +1398,18 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #777;
+  color: var(--pp-fg-subtle);
   padding: 2px;
   display: inline-flex;
   border-radius: 4px;
 }
 .editor-host .pm-block-embed-filter-remove:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 .editor-host .pm-block-embed-filter-sort-label {
   font-weight: 600;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 /* Soft informational strip — this is a heads-up, not a warning. */
 .editor-host .pm-block-embed-shared-notice {
@@ -1386,8 +1420,8 @@
   padding: 6px 8px;
   font-size: 12px;
   line-height: 1.35;
-  color: #555;
-  background: #f1ecf8;
+  color: var(--pp-fg-muted);
+  background: var(--pp-code-bg);
   border-radius: 4px;
   max-width: 260px;
 }
@@ -1401,29 +1435,30 @@
   gap: 6px;
   margin-top: 4px;
   padding-top: 6px;
-  border-top: 1px solid #eee;
+  border-top: 1px solid var(--pp-border);
 }
 .editor-host .pm-block-embed-filter-cancel,
 .editor-host .pm-block-embed-filter-apply {
-  border: 1px solid #d4d4d4;
-  background: #fff;
+  border: 1px solid var(--pp-border);
+  background: var(--pp-bg);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
-  color: #333;
+  color: var(--pp-fg);
   padding: 4px 10px;
   border-radius: 4px;
 }
 .editor-host .pm-block-embed-filter-cancel:hover {
-  background: #f1ecf8;
+  background: var(--pp-code-bg);
 }
 .editor-host .pm-block-embed-filter-apply {
-  background: #6429a8;
-  border-color: #6429a8;
-  color: #fff;
+  background: var(--pp-link);
+  border-color: var(--pp-link);
+  color: var(--pp-accent-fg);
   font-weight: 600;
 }
 .editor-host .pm-block-embed-filter-apply:hover {
+  /* deliberate literal: hover-darken of --pp-link, no dedicated hover token. */
   background: #55238f;
 }
 /* Header chip: funnel + active-filter count (informational — everyone sees it). */
@@ -1435,13 +1470,13 @@
   gap: 3px;
   padding: 1px 7px 1px 5px;
   border-radius: 999px;
-  background: #ececf0;
-  color: #444;
+  background: var(--pp-border);
+  color: var(--pp-fg-muted);
   font-size: 11px;
   font-weight: 600;
 }
 .editor-host .pm-block-embed-sort-pill .pm-block-embed-icon {
-  color: #6429a8;
+  color: var(--pp-link);
 }
 .editor-host .pm-block-embed-sort-pill .pm-block-embed-icon svg {
   width: 10px;
@@ -1454,7 +1489,7 @@
   cursor: pointer;
 }
 .editor-host .pm-block-embed-sort-pill--btn:hover {
-  background: #e0e0e6;
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-block-embed-filter-badge {
   display: inline-flex;
@@ -1462,8 +1497,8 @@
   gap: 3px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: #ede5f7;
-  color: #6429a8;
+  background: var(--pp-code-bg);
+  color: var(--pp-link);
   font-size: 11px;
   font-weight: 600;
 }
@@ -1481,6 +1516,8 @@
   cursor: pointer;
 }
 .editor-host .pm-block-embed-filter-badge--btn:hover {
+  /* deliberate literal: hover-darken of the badge's purple-tinted resting
+   * background (var(--pp-code-bg)-adjacent), no dedicated hover token. */
   background: #e0d3f2;
 }
 /* Summary line under the header: the active filter conditions — everyone sees
@@ -1493,8 +1530,8 @@
   gap: 4px;
   padding: 5px 10px;
   font-size: 12px;
-  color: #555;
-  border-bottom: 1px solid #ececf0;
+  color: var(--pp-fg-muted);
+  border-bottom: 1px solid var(--pp-border);
 }
 .editor-host .pm-block-embed-summary-cond {
   display: inline-flex;
@@ -1503,20 +1540,20 @@
 }
 .editor-host .pm-block-embed-summary-col {
   font-weight: 600;
-  color: #333;
+  color: var(--pp-fg);
 }
 .editor-host .pm-block-embed-summary-op {
-  color: #999;
+  color: var(--pp-fg-subtle);
 }
 .editor-host .pm-block-embed-summary-val {
   padding: 0 5px;
   border-radius: 4px;
-  background: #ede5f7;
-  color: #6429a8;
+  background: var(--pp-code-bg);
+  color: var(--pp-link);
   font-variant-numeric: tabular-nums;
 }
 .editor-host .pm-block-embed-summary-and {
-  color: #aaa;
+  color: var(--pp-fg-subtle);
   font-style: italic;
 }
 /* Column header ▾ menu (editors only). The trigger stays subtle until its
@@ -1526,7 +1563,7 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #777;
+  color: var(--pp-fg-subtle);
   padding: 1px;
   margin-left: 3px;
   display: inline-flex;
@@ -1540,8 +1577,8 @@
   opacity: 1;
 }
 .editor-host .pm-block-embed-col-menu-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
   opacity: 1;
 }
 .editor-host .pm-block-embed-col-menu-btn .pm-block-embed-icon svg {
@@ -1575,23 +1612,26 @@
    the tint over its own grey (a translucent wash would read as *lighter* than
    its neighbours); body cells wash over plain white. */
 .editor-host .pm-block-embed td.pm-block-embed-col-sorted {
+  /* deliberate literal: see .pm-inline-embed above — same purple wash, no
+   * dedicated token. */
   background: rgba(100, 41, 168, 0.05);
 }
 .editor-host .pm-block-embed th.pm-block-embed-col-sorted {
-  background: #eee9f3;
+  background: var(--pp-code-bg);
 }
 /* Passive sort indicator on the sorted column — viewers see it too. */
 .editor-host .pm-block-embed-sort-ind {
   margin-left: 4px;
   vertical-align: middle;
-  color: #6429a8;
+  color: var(--pp-link);
 }
 .editor-host .pm-block-embed-sort-ind svg {
   width: 11px;
   height: 11px;
 }
 /* Primary-key glyph in a column header — muted so it reads as a marker, not an
-   action. Sits just after the column name. */
+   action. Sits just after the column name.
+   deliberate literal: a deliberately desaturated one-off, not --pp-link. */
 .editor-host .pm-block-embed-pk-icon {
   margin-left: 4px;
   vertical-align: middle;
@@ -1603,7 +1643,7 @@
 }
 /* Row-page links: the single-pk cell value and the compound-key "#" cell. */
 .editor-host .pm-block-embed-rowlink {
-  color: #6429a8;
+  color: var(--pp-link);
   text-decoration: none;
 }
 .editor-host .pm-block-embed-rowlink:hover {
@@ -1642,16 +1682,16 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: #333;
+  color: var(--pp-fg);
   text-decoration: none;
 }
 .editor-host .pm-block-embed-table-link:hover {
-  color: #6429a8;
+  color: var(--pp-link);
   text-decoration: underline;
 }
 .editor-host .pm-block-embed-table-count {
   margin-left: auto;
-  color: #999;
+  color: var(--pp-fg-subtle);
   font-variant-numeric: tabular-nums;
 }
 .editor-host .pm-block-embed-scroll {
@@ -1676,7 +1716,7 @@
 }
 .editor-host .pm-block-embed th,
 .editor-host .pm-block-embed td {
-  border: 1px solid #ececf0;
+  border: 1px solid var(--pp-border);
   padding: 4px 8px;
   text-align: left;
   white-space: nowrap;
@@ -1686,7 +1726,7 @@
   cursor: text;
 }
 .editor-host .pm-block-embed th {
-  background: #f4f6f8;
+  background: var(--pp-table-header-bg);
   font-weight: 600;
   /* Keep column headers visible while the body scrolls vertically. */
   position: sticky;
@@ -1699,7 +1739,7 @@
   gap: 10px;
   padding: 6px 10px;
   font-size: 12px;
-  color: #777;
+  color: var(--pp-fg-subtle);
 }
 .editor-host .pm-block-embed-rows {
   font: inherit;
@@ -1711,7 +1751,7 @@
 .editor-host .pm-block-embed-footer-link,
 .editor-host .pm-block-embed-footer-link:visited {
   /* "open in Datasette" sits at the left edge (mirrors the SQL block). */
-  color: #6429a8;
+  color: var(--pp-link);
   text-decoration: none;
 }
 .editor-host .pm-block-embed-footer-link:hover {
@@ -1722,7 +1762,8 @@
   margin-left: auto;
 }
 /* Truncated-count warning glyph (amber), next to an "N+ rows" figure Datasette
-   capped at its count limit. Nudged to align with the adjacent text baseline. */
+   capped at its count limit. Nudged to align with the adjacent text baseline.
+   deliberate literal: its own amber shade, distinct from --pp-warn. */
 .editor-host .pm-block-embed-count-warn {
   color: #b76e00;
   vertical-align: text-bottom;
@@ -1738,7 +1779,7 @@
 }
 .editor-host .pm-block-embed-fields dt {
   font-weight: 600;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 .editor-host .pm-block-embed-fields dd {
   margin: 0;
@@ -1767,7 +1808,7 @@
   vertical-align: bottom;
 }
 .editor-host .pm-result-cell[data-kind="binary"] {
-  color: #888;
+  color: var(--pp-fg-subtle);
   font-style: italic;
 }
 .editor-host .is-expanded > .pm-result-cell {
@@ -1779,7 +1820,7 @@
   vertical-align: top;
 }
 .editor-host .pm-result-cell-note {
-  color: #999;
+  color: var(--pp-fg-subtle);
   font-style: italic;
 }
 /* Expand toggle: subtle until its cell is hovered / it has focus / it's
@@ -1788,7 +1829,7 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #777;
+  color: var(--pp-fg-subtle);
   padding: 1px;
   margin-left: 4px;
   display: inline-flex;
@@ -1803,8 +1844,8 @@
   opacity: 1;
 }
 .editor-host .pm-result-cell-expand:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 .editor-host .pm-result-cell-expand svg {
   width: 11px;
@@ -1819,7 +1860,11 @@
 /* Non-scrolling wrap around each result scroll box: paints edge fades
  * ("more columns this way") when resultCell.ts's scroll sync sets the
  * has-overflow-* classes. z-index 2 sits above the sticky <th> (z:1);
- * pointer-events:none keeps the scrollbar usable underneath. */
+ * pointer-events:none keeps the scrollbar usable underneath.
+ * deliberate literal: the fade gradients below are opaque-to-transparent
+ * versions of --pp-surface's value (251, 251, 253) — kept as a literal RGB
+ * triplet since a var() can't be given a different alpha per gradient stop
+ * without color-mix(); revisit if that's worth the complexity later. */
 .editor-host .pm-result-scrollwrap {
   position: relative;
 }
@@ -1861,7 +1906,7 @@
 .editor-host .pm-block-embed-placeholder {
   padding: 12px;
   font-size: 13px;
-  color: #888;
+  color: var(--pp-fg-subtle);
 }
 /* While (re)loading, the block reserves its previous height (blockEmbedView.ts)
    so the doc doesn't jump; center the skeleton within it. */
@@ -1871,14 +1916,18 @@
   justify-content: center;
 }
 .editor-host .pm-block-embed--denied .pm-block-embed-placeholder {
-  color: #8a5a00;
+  color: var(--pp-warn);
 }
+/* deliberate literal: its own error red, distinct from --pp-danger. */
 .editor-host .pm-block-embed--error .pm-block-embed-placeholder {
   color: #a12622;
 }
 
 /* Inline-atom placeholder visual — pill, monospace key, blue tint.
- * Rendered by the placeholder node in schema.ts (class `pm-placeholder`). */
+ * Rendered by the placeholder node in schema.ts (class `pm-placeholder`).
+ * deliberate literal: its own pastel-blue identity palette (background /
+ * text / border), distinct from --pp-accent — not part of the semantic
+ * palette. */
 .editor-host .pm-placeholder {
   display: inline;
   padding: 1px 6px;
@@ -1900,13 +1949,13 @@
 .editor-host .pm-sql-block {
   position: relative;
   margin: 0 0 0.75em;
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  background: #fbfbfd;
+  background: var(--pp-surface);
   overflow: hidden;
 }
 .editor-host .pm-sql-block.ProseMirror-selectednode {
-  outline: 2px solid #6429a8;
+  outline: 2px solid var(--pp-link);
   outline-offset: 1px;
 }
 .editor-host .pm-sql-block-head {
@@ -1914,14 +1963,14 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border-bottom: 1px solid #ececf0;
-  background: #f4f4f7;
+  border-bottom: 1px solid var(--pp-border);
+  background: var(--pp-surface-2);
   font-size: 12px;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 .editor-host .pm-sql-block-icon {
   display: inline-flex;
-  color: #6429a8;
+  color: var(--pp-link);
 }
 .editor-host .pm-sql-block-icon svg {
   width: 14px;
@@ -1932,10 +1981,10 @@
   font: inherit;
   font-size: 12px;
   padding: 1px 4px;
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
   border-radius: 4px;
-  background: #fff;
-  color: #333;
+  background: var(--pp-bg);
+  color: var(--pp-fg);
 }
 .editor-host .pm-sql-block-spacer {
   margin-left: auto;
@@ -1944,24 +1993,24 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #777;
+  color: var(--pp-fg-subtle);
   font: inherit;
   font-size: 12px;
   padding: 2px 6px;
   border-radius: 4px;
 }
 .editor-host .pm-sql-block-toggle:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 .editor-host .pm-sql-block-run {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   /* Quiet/"in sync" state: results match the current SQL, nothing to run. */
-  border: 1px solid #d4d4d4;
-  background: #fff;
-  color: #999;
+  border: 1px solid var(--pp-border);
+  background: var(--pp-bg);
+  color: var(--pp-fg-subtle);
   cursor: pointer;
   font: inherit;
   font-size: 12px;
@@ -1971,11 +2020,12 @@
 }
 /* Stale: the SQL was edited since the last run — light up to prompt a refresh. */
 .editor-host .pm-sql-block-run--stale {
-  border-color: #6429a8;
-  background: #6429a8;
-  color: #fff;
+  border-color: var(--pp-link);
+  background: var(--pp-link);
+  color: var(--pp-accent-fg);
 }
 .editor-host .pm-sql-block-run--stale:hover {
+  /* deliberate literal: hover-darken of --pp-link, no dedicated hover token. */
   background: #532289;
 }
 .editor-host .pm-sql-block-btn-icon {
@@ -1995,14 +2045,14 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #777;
+  color: var(--pp-fg-subtle);
   padding: 2px;
   display: inline-flex;
   border-radius: 4px;
 }
 .editor-host .pm-sql-block-menu-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 .editor-host .pm-sql-block-menu {
   display: none;
@@ -2012,10 +2062,10 @@
   z-index: 12;
   min-width: 160px;
   padding: 4px;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 12px var(--pp-shadow);
 }
 .editor-host .pm-sql-block-menu--open {
   display: block;
@@ -2029,13 +2079,13 @@
   cursor: pointer;
   font: inherit;
   font-size: 13px;
-  color: #333;
+  color: var(--pp-fg);
   padding: 6px 8px;
   border-radius: 4px;
 }
 .editor-host .pm-sql-block-menu-item:hover {
-  background: #f1ecf8;
-  color: #6429a8;
+  background: var(--pp-code-bg);
+  color: var(--pp-link);
 }
 .editor-host .pm-sql-block-code {
   margin: 0;
@@ -2044,15 +2094,15 @@
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
-  background: #fff;
-  color: #1f2328;
+  background: var(--pp-bg);
+  color: var(--pp-fg);
 }
 /* Hidden = collapse the editor to the Show-SQL toggle; results stay visible. */
 .editor-host .pm-sql-block.is-hidden .pm-sql-block-code {
   display: none;
 }
 .editor-host .pm-sql-block-results {
-  border-top: 1px solid #ececf0;
+  border-top: 1px solid var(--pp-border);
 }
 .editor-host .pm-sql-block-scroll {
   overflow: auto;
@@ -2070,13 +2120,13 @@
 }
 .editor-host .pm-sql-block th,
 .editor-host .pm-sql-block td {
-  border: 1px solid #ececf0;
+  border: 1px solid var(--pp-border);
   padding: 4px 8px;
   text-align: left;
   white-space: nowrap;
 }
 .editor-host .pm-sql-block th {
-  background: #f4f6f8;
+  background: var(--pp-table-header-bg);
   font-weight: 600;
   position: sticky;
   top: 0;
@@ -2088,7 +2138,7 @@
   gap: 10px;
   padding: 6px 10px;
   font-size: 12px;
-  color: #777;
+  color: var(--pp-fg-subtle);
   font-variant-numeric: tabular-nums;
 }
 .editor-host .pm-sql-block-rows {
@@ -2104,9 +2154,9 @@
   gap: 4px;
 }
 .editor-host .pm-sql-block-page-btn {
-  border: 1px solid #d4d4d4;
-  background: #fff;
-  color: #555;
+  border: 1px solid var(--pp-border);
+  background: var(--pp-bg);
+  color: var(--pp-fg-muted);
   cursor: pointer;
   border-radius: 4px;
   width: 20px;
@@ -2118,8 +2168,8 @@
   justify-content: center;
 }
 .editor-host .pm-sql-block-page-btn:hover:not(:disabled) {
-  background: #f1ecf8;
-  color: #6429a8;
+  background: var(--pp-code-bg);
+  color: var(--pp-link);
 }
 .editor-host .pm-sql-block-page-btn:disabled {
   opacity: 0.4;
@@ -2128,7 +2178,7 @@
 .editor-host .pm-sql-block-footer-link,
 .editor-host .pm-sql-block-footer-link:visited {
   /* "open in Datasette" sits at the left edge of the footer. */
-  color: #6429a8;
+  color: var(--pp-link);
   text-decoration: none;
 }
 .editor-host .pm-sql-block-footer-link:hover {
@@ -2139,17 +2189,18 @@
   margin-left: auto;
 }
 .editor-host .pm-sql-block-warn {
-  color: #8a5a00;
+  color: var(--pp-warn);
   cursor: help;
 }
 .editor-host .pm-sql-block-status {
   padding: 12px;
   font-size: 13px;
-  color: #888;
+  color: var(--pp-fg-subtle);
 }
 .editor-host .pm-sql-block-status.pm-sql-block-denied {
-  color: #8a5a00;
+  color: var(--pp-warn);
 }
+/* deliberate literal: its own error red, distinct from --pp-danger. */
 .editor-host .pm-sql-block-status.pm-sql-block-error {
   color: #b3261e;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -2162,13 +2213,13 @@
 .editor-host .pm-toc {
   position: relative;
   margin: 0 0 0.75em;
-  border: 1px solid #d4d4d4;
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  background: #fbfbfd;
+  background: var(--pp-surface);
   overflow: hidden;
 }
 .editor-host .pm-toc.ProseMirror-selectednode {
-  outline: 2px solid #6429a8;
+  outline: 2px solid var(--pp-link);
   outline-offset: 1px;
 }
 .editor-host .pm-toc-head {
@@ -2176,14 +2227,14 @@
   align-items: center;
   gap: 6px;
   padding: 6px 10px;
-  border-bottom: 1px solid #ececf0;
-  background: #f4f4f7;
+  border-bottom: 1px solid var(--pp-border);
+  background: var(--pp-surface-2);
   font-size: 12px;
-  color: #555;
+  color: var(--pp-fg-muted);
 }
 .editor-host .pm-toc-icon {
   display: inline-flex;
-  color: #6429a8;
+  color: var(--pp-link);
 }
 .editor-host .pm-toc-icon svg {
   width: 14px;
@@ -2192,7 +2243,7 @@
 }
 .editor-host .pm-toc-title {
   font-weight: 600;
-  color: #333;
+  color: var(--pp-fg);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-size: 11px;
@@ -2202,7 +2253,7 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  color: #777;
+  color: var(--pp-fg-subtle);
   padding: 2px;
   display: inline-flex;
   border-radius: 4px;
@@ -2212,8 +2263,8 @@
 }
 .editor-host .pm-toc-refresh:hover,
 .editor-host .pm-toc-menu-btn:hover {
-  background: rgba(0, 0, 0, 0.06);
-  color: #333;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
 }
 .editor-host .pm-toc-menu-wrap {
   position: relative;
@@ -2227,10 +2278,10 @@
   z-index: 12;
   min-width: 170px;
   padding: 6px;
-  background: #fff;
-  border: 1px solid #d4d4d4;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 4px 12px var(--pp-shadow);
 }
 .editor-host .pm-toc-menu--open {
   display: block;
@@ -2242,13 +2293,13 @@
   gap: 10px;
   padding: 4px 6px;
   font-size: 13px;
-  color: #333;
+  color: var(--pp-fg);
 }
 .editor-host .pm-toc-menu-num {
   width: 48px;
   font: inherit;
   padding: 2px 4px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--pp-border);
   border-radius: 4px;
 }
 /* Outer list keeps the card's left padding; nested lists indent one step
@@ -2272,18 +2323,19 @@
   margin: 1px 0;
 }
 .editor-host .pm-toc-link {
+  /* deliberate literal: a touch softer than --pp-fg, single-use, kept as-is. */
   color: #3a3a3a;
   text-decoration: none;
   cursor: pointer;
 }
 .editor-host .pm-toc-link:hover {
-  color: #6429a8;
+  color: var(--pp-link);
   text-decoration: underline;
 }
 .editor-host .pm-toc-empty {
   padding: 10px 12px;
   font-size: 13px;
   font-style: italic;
-  color: #999;
+  color: var(--pp-fg-subtle);
 }
 

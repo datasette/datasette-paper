@@ -4,6 +4,71 @@
 @import "prosemirror-example-setup/style/style.css";
 @import "prosemirror-gapcursor/style/gapcursor.css";
 
+/* --pp-* semantic palette ("paper"). Light values only for now — this is a
+ * pure-refactor pass (see plans/dark/tickets/01-tokens-editor-css.md):
+ * every color literal in editor.css (and the two below) now reads through
+ * one of these custom properties, with *zero* pixel change. Dark values
+ * land on a `:root[data-theme="dark"]` block in a later ticket. Each
+ * token is named by ROLE, not hue, so a dark override is a one-line value
+ * change instead of a re-audit of every selector. */
+:root {
+  /* Page background / floating surfaces (menus, dialogs, popovers, inputs)
+   * that sit flush with the page. */
+  --pp-bg: #fff;
+  /* Primary body/prose text color (editor content, default UI text). */
+  --pp-fg: #1a1a1a;
+  /* Secondary text — labels, captions, less-emphasized copy. */
+  --pp-fg-muted: #555;
+  /* Hints, placeholders, disabled-ish/muted icons — the lightest text tier. */
+  --pp-fg-subtle: #888;
+  /* Cards / toolbar-adjacent surfaces, one step off the page background. */
+  --pp-surface: #fbfbfd;
+  /* Nested surface — hover states, popup headers, ghost-button hover washes. */
+  --pp-surface-2: #f1f4f7;
+  /* Active/selected surface — e.g. the highlighted row in an autocomplete list. */
+  --pp-surface-3: #e1ebf7;
+  /* Default hairline border / divider. */
+  --pp-border: #d4d4d4;
+  /* Emphasized border — form inputs that need more definition than a hairline. */
+  --pp-border-strong: #cfcfcf;
+  /* Brand blue — interactive accent (links, buttons, active icons). */
+  --pp-accent: #0b5cad;
+  /* Text/icon color placed on top of an --pp-accent (or other saturated
+   * brand-color) fill — e.g. white label on a blue or purple button. */
+  --pp-accent-fg: #fff;
+  /* Translucent accent wash — subtle tinted backgrounds (autocomplete-typing
+   * decorations, mention chip, table selectedCell). */
+  --pp-accent-bg: rgba(11, 92, 173, 0.08);
+  /* Link/mention/embed purple — the "paper-link" family's identity color. */
+  --pp-link: #6429a8;
+  /* Purple-tinted wash — hover backgrounds and chip fills paired with
+   * --pp-link (block/sql-block menu-item hover, filter badge, sorted-column
+   * header tint). */
+  --pp-code-bg: #f1ecf8;
+  /* Destructive / error text or icon. */
+  --pp-danger: #b91c1c;
+  /* Destructive / error wash background. */
+  --pp-danger-bg: rgba(185, 28, 28, 0.1);
+  /* Warning text or icon (amber). */
+  --pp-warn: #8a5a00;
+  /* Warning wash background. */
+  --pp-warn-bg: #fff8ec;
+  /* Text selection highlight. Not yet consumed in editor.css — declared for
+   * a later ticket (::selection / cursor highlighting). */
+  --pp-selection: rgba(11, 92, 173, 0.18);
+  /* Elevation box-shadow for floating menus/dialogs/tooltips. */
+  --pp-shadow: rgba(0, 0, 0, 0.12);
+  /* Modal backdrop. Not yet consumed in editor.css — declared for a later
+   * ticket (no modal overlay lives in this file today). */
+  --pp-overlay: rgba(0, 0, 0, 0.35);
+  /* Keyboard-focus outline/border color. */
+  --pp-focus-ring: #0b5cad;
+  /* Table header cell background. */
+  --pp-table-header-bg: #f4f6f8;
+  /* Selected table cell background (prosemirror-tables CellSelection). */
+  --pp-selected-cell: rgba(11, 92, 173, 0.08);
+}
+
 *,
 *::before,
 *::after {
@@ -21,8 +86,8 @@ body {
   /* Inter ships its own opt-in OpenType features; cv11 = single-storey a, ss03 = curly l. */
   font-feature-settings: "cv11", "ss03";
   line-height: 1.5;
-  color: #1a1a1a;
-  background: #fff;
+  color: var(--pp-fg);
+  background: var(--pp-bg);
 }
 
 /* Replace the vertical breathing room the old body margin provided,
