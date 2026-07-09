@@ -15,7 +15,7 @@ import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { sendableSteps } from "prosemirror-collab";
 
-const PALETTE = [
+export const PALETTE = [
   "#e6194b", "#3cb44b", "#4363d8", "#f58231",
   "#911eb4", "#46f0f0", "#f032e6", "#bcf60c",
   "#fabebe", "#008080", "#9a6324", "#800000",
@@ -26,6 +26,29 @@ export function colorFor(key: string | number): string {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return PALETTE[Math.abs(h) % PALETTE.length];
+}
+
+/**
+ * Pick a readable label text color for a given identity hue.
+ *
+ * The 12-color PALETTE mixes dark hues (purple, maroon, teal) with light
+ * ones (lime, pink, cyan); forcing white text was unreadable on the light
+ * hues in either theme. Compute the WCAG relative luminance of the hue and
+ * return near-black above a threshold, white below. Threshold 0.4 puts the
+ * three light hues (#46f0f0, #bcf60c, #fabebe) on dark text with margin to
+ * spare while every other palette entry keeps white.
+ *
+ * Pure + exported so the contrast contract is unit-testable.
+ */
+export function labelColorFor(hex: string): string {
+  const h = hex.replace("#", "");
+  const channel = (i: number): number => {
+    const c = parseInt(h.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  const luminance =
+    0.2126 * channel(0) + 0.7152 * channel(2) + 0.0722 * channel(4);
+  return luminance > 0.4 ? "#111827" : "#fff";
 }
 
 // ── reporter plugin (outbound) ───────────────────────────────────────────────
@@ -179,7 +202,11 @@ export function remoteCursorsPlugin(): Plugin<DecorationSet> {
                 Math.min(anchor, head),
                 Math.max(anchor, head),
                 {
-                  style: `background: ${color}33;`,
+                  // Identity hue rides on a custom property so the wash
+                  // alpha (and the caret border) live in editor.css, where
+                  // dark can raise the alpha — the plugin doesn't know the
+                  // theme.
+                  style: `--cursor-color: ${color};`,
                   class: "remote-selection",
                 },
               ),
@@ -210,10 +237,16 @@ function clampPos(pos: number, max: number): number {
   return pos;
 }
 
-function buildCaret(color: string, label: string): HTMLElement {
+// Exported for the label-contrast test; also the widget factory used above.
+// The identity hue rides on the `--cursor-color` custom property (inherited
+// by the label) so the caret border + label background live in editor.css
+// and dark can override them. Only the label text color stays inline —
+// it's computed per-hue for readability (`labelColorFor`), which no static
+// CSS rule can express.
+export function buildCaret(color: string, label: string): HTMLElement {
   const wrap = document.createElement("span");
   wrap.className = "remote-caret";
-  wrap.style.borderLeft = `2px solid ${color}`;
+  wrap.style.setProperty("--cursor-color", color);
   wrap.style.height = "1.2em";
   wrap.style.marginLeft = "-1px";
   wrap.style.position = "relative";
@@ -226,8 +259,7 @@ function buildCaret(color: string, label: string): HTMLElement {
   tag.style.position = "absolute";
   tag.style.top = "-1.2em";
   tag.style.left = "0";
-  tag.style.background = color;
-  tag.style.color = "#fff";
+  tag.style.color = labelColorFor(color);
   tag.style.fontSize = "10px";
   tag.style.padding = "0 4px";
   tag.style.borderRadius = "3px";

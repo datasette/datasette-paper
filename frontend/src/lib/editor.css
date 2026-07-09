@@ -2339,8 +2339,26 @@
   color: var(--pp-fg-subtle);
 }
 
+/* Remote presence cursors (cursors.ts). The identity hue arrives on the
+ * `--cursor-color` custom property set inline by the plugin/`buildCaret`;
+ * the wash alpha and caret border live here so dark can override the alpha
+ * (20% is near-invisible on a dark background). The label background also
+ * reads the property; its text color is set inline (computed per-hue in
+ * `labelColorFor` for readability). Light look is unchanged: 20% mix ==
+ * the old `${color}33`, and `2px solid var(--cursor-color)` == the old
+ * inline border. */
+.editor-host .remote-selection {
+  background: color-mix(in srgb, var(--cursor-color) 20%, transparent);
+}
+.editor-host .remote-caret {
+  border-left: 2px solid var(--cursor-color);
+}
+.editor-host .remote-caret-label {
+  background: var(--cursor-color);
+}
+
 /* ===================================================================
- * DARK THEME — non-semantic identity families (@feat none; theme pass)
+ * DARK THEME — non-semantic identity families (theme pass; no feature marker)
  * -------------------------------------------------------------------
  * The families above use their OWN identity palettes (Tailwind-slate for
  * the ${{value}} / source-card "this is data" chips, teal for #tags,
@@ -2432,6 +2450,11 @@
 :root[data-theme="dark"] .editor-host .ProseMirror img {
   background: #21262d;
   color: #8b949e;
+}
+/* Raise the selection wash on dark — 20% of the identity hue reads as
+ * near-invisible against the dark canvas. */
+:root[data-theme="dark"] .editor-host .remote-selection {
+  background: color-mix(in srgb, var(--cursor-color) 32%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -2545,6 +2568,11 @@
     img {
     background: #21262d;
     color: #8b949e;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .remote-selection {
+    background: color-mix(in srgb, var(--cursor-color) 32%, transparent);
   }
 }
 
