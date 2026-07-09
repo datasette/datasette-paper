@@ -5,15 +5,33 @@
 {% block body_class %}{{ body_class or "" }}{% endblock %}
 
 {% block extra_head %}
-{# @feat pwa: the <head> tags (manifest link, apple + theme-color meta) that
-   make every paper page installable/standalone. theme-color must stay in
-   lock-step with the manifest's theme_color (routes/docs.py:paper_manifest). #}
+{# @feat pwa: the <head> tags (manifest link, apple + theme-color metas) that
+   make every paper page installable/standalone. theme-color is now two
+   media-scoped metas (light #ffffff / dark #0d1117 = --pp-bg dark); they win
+   in the browser at runtime. The manifest's single theme_color
+   (routes/docs.py:paper_manifest) can't be media-scoped, so it stays the
+   light fallback — keep the light value here in lock-step with it. #}
 <link rel="manifest" href="{{ urls.path('/-/paper/manifest.webmanifest') }}">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Papers">
 <link rel="apple-touch-icon" href="{{ urls.static_plugins('datasette_paper', 'icons/apple-touch-icon.png') }}">
+<script>
+  // Runs before first paint. Stamp the resolved theme on <html> so the CSS
+  // (loaded just below) resolves correctly on the very first frame — no
+  // white flash for a dark-preference user. Keep this inline + tiny.
+  (function () {
+    try {
+      var t = localStorage.getItem("paperTheme");
+      if (t !== "light" && t !== "dark" && t !== "system") t = "system";
+      document.documentElement.setAttribute("data-theme", t);
+    } catch (e) {
+      document.documentElement.setAttribute("data-theme", "system");
+    }
+  })();
+</script>
 {{ datasette_paper_vite_entry(entrypoint) | safe }}
 <script type="application/json" id="pageData">{{ page_data | tojson }}</script>
 {% endblock %}

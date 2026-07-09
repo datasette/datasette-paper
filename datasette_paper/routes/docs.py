@@ -1292,8 +1292,11 @@ async def paper_manifest(datasette, request):
         "start_url": datasette.urls.path("/-/paper/"),
         "scope": datasette.urls.path("/-/paper/"),
         "display": "standalone",
-        # Match the white index-page background; kept in lock-step with the
-        # theme-color <meta> in paper_base.html.
+        # A web manifest can't media-scope theme_color, so it stays the light
+        # value: the media-scoped theme-color <meta> tags in paper_base.html
+        # win in the browser at runtime, and this is the light fallback for
+        # contexts that read the manifest instead. Keep in lock-step with the
+        # light meta in paper_base.html.
         "background_color": "#ffffff",
         "theme_color": "#ffffff",
         "icons": [

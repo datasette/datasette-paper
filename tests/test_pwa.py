@@ -42,11 +42,25 @@ async def test_index_head_has_pwa_tags(ds):
     html = (await ds.client.get("/-/paper/")).text
     assert 'rel="manifest"' in html
     assert "/-/paper/manifest.webmanifest" in html
-    assert 'name="theme-color" content="#ffffff"' in html
+    # Two media-scoped theme-color metas: the light fallback matches the
+    # manifest's theme_color, the dark one is the --pp-bg dark value. The
+    # browser picks whichever matches prefers-color-scheme.
+    assert (
+        '<meta name="theme-color" content="#ffffff" '
+        'media="(prefers-color-scheme: light)">' in html
+    )
+    assert (
+        '<meta name="theme-color" content="#0d1117" '
+        'media="(prefers-color-scheme: dark)">' in html
+    )
     assert 'name="apple-mobile-web-app-capable"' in html
     assert 'name="apple-mobile-web-app-title" content="Papers"' in html
     assert 'rel="apple-touch-icon"' in html
     assert "icons/apple-touch-icon.png" in html
+    # FOUC-free resolver: the blocking inline script that stamps data-theme on
+    # <html> from localStorage.paperTheme before first paint.
+    assert "paperTheme" in html
+    assert 'setAttribute("data-theme"' in html
 
 
 @pytest.mark.asyncio
