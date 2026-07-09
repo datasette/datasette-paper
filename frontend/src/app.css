@@ -211,6 +211,18 @@
   border-color: var(--pp-border);
   background: var(--pp-surface-3);
 }
+/* Class-less content links — plain markdown `link` marks in the editor and the
+ * doc-title links in the index / tag lists — carry no paper class, so they fall
+ * through to Datasette's global `a { color: #276890 }`. That blue clears AA on
+ * white but only reaches 3.12:1 on the dark `--pp-bg`, so re-color it to the
+ * accent token. `:not([class])` keeps every themed inline atom
+ * (`.pm-tag` / `.pm-paper-link` / `.pm-mention` / `.pm-inline-embed` — all
+ * classed) on its own identity color. */
+:root[data-theme="dark"] .editor-host .ProseMirror a:not([class]),
+:root[data-theme="dark"] .paper-index a:not([class]),
+:root[data-theme="dark"] .tag-page a:not([class]) {
+  color: var(--pp-accent);
+}
 
 /* LOCK-STEP with the `[data-theme="dark"]` chrome block directly above: same
  * overrides for the system-preference dark branch. Edit both together. */
@@ -246,6 +258,12 @@
   :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) .nav-menu-inner .keyboard-shortcut {
     border-color: var(--pp-border);
     background: var(--pp-surface-3);
+  }
+  /* Class-less content links — mirror of the `[data-theme="dark"]` rule above. */
+  :root:is([data-theme="system"], :not([data-theme])) .editor-host .ProseMirror a:not([class]),
+  :root:is([data-theme="system"], :not([data-theme])) .paper-index a:not([class]),
+  :root:is([data-theme="system"], :not([data-theme])) .tag-page a:not([class]) {
+    color: var(--pp-accent);
   }
 }
 
