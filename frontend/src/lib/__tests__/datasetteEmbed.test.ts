@@ -147,7 +147,7 @@ describe("fetchEmbed (native .json)", () => {
     );
     const out = await fetchEmbed("/d/t", 25);
     expect(urls[0]).toBe(
-      "/d/t.json?_shape=arrays&_extra=count,count_truncated,columns,primary_keys,human_description_en&_size=25",
+      "/d/t.json?_shape=arrays&_extra=count,count_truncated,columns,primary_keys&_size=25",
     );
     expect(out).toEqual({
       status: "ok",
@@ -319,37 +319,8 @@ describe("fetchEmbed (native .json)", () => {
     stubTableFetch(urls);
     await fetchEmbed("/d/t", 25);
     expect(urls[0]).toBe(
-      "/d/t.json?_shape=arrays&_extra=count,count_truncated,columns,primary_keys,human_description_en&_size=25",
+      "/d/t.json?_shape=arrays&_extra=count,count_truncated,columns,primary_keys&_size=25",
     );
-  });
-
-  // ── Table filters T05: the human_description_en extra ────────────────────
-
-  it("threads a non-empty human_description_en onto the payload", async () => {
-    const urls: string[] = [];
-    stubTableFetch(urls, {
-      body: {
-        columns: ["id"],
-        rows: [[1]],
-        count: 42,
-        human_description_en: "where state = CA sorted by population descending",
-      },
-    });
-    const out = await fetchEmbed("/d/t", 25);
-    expect(urls[0]).toContain("_extra=count,count_truncated,columns,primary_keys,human_description_en");
-    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
-    expect(out.humanDescription).toBe(
-      "where state = CA sorted by population descending",
-    );
-    expect(out.count).toBe(42);
-  });
-
-  it("leaves humanDescription undefined when the extra is absent (older Datasette)", async () => {
-    const urls: string[] = [];
-    stubTableFetch(urls); // body has no human_description_en key
-    const out = await fetchEmbed("/d/t", 25);
-    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
-    expect(out.humanDescription).toBeUndefined();
   });
 
   it("maps primary_keys into the payload, intersected with the columns shown", async () => {
@@ -396,16 +367,6 @@ describe("fetchEmbed (native .json)", () => {
     const out = await fetchEmbed("/d/t", 25);
     if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
     expect(out.countTruncated).toBe(false);
-  });
-
-  it("leaves humanDescription undefined for an empty description (unfiltered)", async () => {
-    const urls: string[] = [];
-    stubTableFetch(urls, {
-      body: { columns: ["id"], rows: [[1]], count: 1, human_description_en: "" },
-    });
-    const out = await fetchEmbed("/d/t", 25);
-    if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
-    expect(out.humanDescription).toBeUndefined();
   });
 
   it("surfaces Datasette's error string from a 400 body", async () => {

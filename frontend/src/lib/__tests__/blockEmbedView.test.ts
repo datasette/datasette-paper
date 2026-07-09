@@ -1583,50 +1583,94 @@ describe("BlockEmbedView", () => {
     view.destroy();
   });
 
-  // ── Table filters T05: the summary line ───────────────────────────────────
+  // ── Table filters T05: the summary line (structured conditions) ───────────
 
-  it("renders '<count> rows <description>' between the header and the table", async () => {
-    const view = await build("/data/vendors", {
-      columns: ["id", "state"],
-      rows: [[1, "CA"]],
-      count: 42,
-      human_description_en: "where state = CA",
-    });
+  it("renders the filter conditions — styled col/op/value, no count prefix or sort clause", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: {
+          filters: [{ column: "state", op: "exact", value: "CA" }],
+          sort: { column: "population", desc: true },
+        },
+      },
+      NATIVE_3COL,
+    );
     const summary = view.dom.querySelector(".pm-block-embed-summary") as HTMLElement;
     expect(summary).not.toBeNull();
-    expect(summary.textContent).toBe("42 rows where state = CA");
+    // No "N rows" prefix (footer carries the count) and no "sorted by …" clause
+    // (that moved to the header sort pill).
+    expect(summary.textContent).toBe("state=CA");
+    expect(summary.querySelector(".pm-block-embed-summary-col")!.textContent).toBe(
+      "state",
+    );
+    expect(summary.querySelector(".pm-block-embed-summary-op")!.textContent).toBe("=");
+    expect(summary.querySelector(".pm-block-embed-summary-val")!.textContent).toBe("CA");
+    // Sits between the header and the table's fade wrap.
     expect(summary.previousElementSibling!.classList.contains("pm-block-embed-head")).toBe(
       true,
     );
-    // The table sits right after the summary, inside its fade wrap (which
-    // holds the .pm-block-embed-scroll box).
     expect(summary.nextElementSibling!.classList.contains("pm-result-scrollwrap")).toBe(
       true,
     );
-    expect(
-      summary.nextElementSibling!.querySelector(".pm-block-embed-scroll"),
-    ).not.toBeNull();
-    // The footer truncation info is unchanged alongside it.
-    expect(
-      view.dom.querySelector(".pm-block-embed-footer-info")!.textContent,
-    ).toContain("of 42 rows");
+    view.destroy();
   });
 
-  it("keeps a hostile description inert (single text node, no markup)", async () => {
-    const view = await build("/data/vendors", {
-      columns: ["id"],
-      rows: [[1]],
-      count: 1,
-      human_description_en: "where note = <script>alert(1)</script>",
-    });
+  it("joins multiple filter conditions with 'and'", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: {
+          filters: [
+            { column: "state", op: "exact", value: "CA" },
+            { column: "population", op: "gt", value: "50" },
+          ],
+        },
+      },
+      NATIVE_3COL,
+    );
     const summary = view.dom.querySelector(".pm-block-embed-summary") as HTMLElement;
-    expect(summary.querySelector("script")).toBeNull();
-    expect(summary.childNodes).toHaveLength(1);
-    expect(summary.childNodes[0].nodeType).toBe(Node.TEXT_NODE);
-    expect(summary.textContent).toContain("<script>alert(1)</script>");
+    expect(summary.querySelectorAll(".pm-block-embed-summary-cond")).toHaveLength(2);
+    expect(summary.querySelector(".pm-block-embed-summary-and")!.textContent).toBe("and");
+    expect(summary.textContent).toBe("state=CAandpopulation>50");
+    view.destroy();
   });
 
-  it("renders no summary line when the description is absent (older Datasette)", async () => {
+  it("renders a no-argument op (is null) with no value span", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: { filters: [{ column: "state", op: "isnull" }] },
+      },
+      NATIVE_3COL,
+    );
+    const summary = view.dom.querySelector(".pm-block-embed-summary") as HTMLElement;
+    expect(summary.querySelector(".pm-block-embed-summary-op")!.textContent).toBe(
+      "is null",
+    );
+    expect(summary.querySelector(".pm-block-embed-summary-val")).toBeNull();
+    view.destroy();
+  });
+
+  it("keeps a hostile filter value inert (text node, no markup)", async () => {
+    const { view } = await mountEmbed(
+      {
+        ref: "/data/vendors",
+        config: {
+          filters: [{ column: "note", op: "exact", value: "<script>alert(1)</script>" }],
+        },
+      },
+      NATIVE_3COL,
+    );
+    const val = view.dom.querySelector(".pm-block-embed-summary-val") as HTMLElement;
+    expect(val.querySelector("script")).toBeNull();
+    expect(val.childNodes).toHaveLength(1);
+    expect(val.childNodes[0].nodeType).toBe(Node.TEXT_NODE);
+    expect(val.textContent).toBe("<script>alert(1)</script>");
+    view.destroy();
+  });
+
+  it("renders no summary line when there are no filters", async () => {
     const view = await build("/data/vendors", {
       columns: ["id"],
       rows: [[1]],
@@ -1637,17 +1681,79 @@ describe("BlockEmbedView", () => {
 
   it("shows the summary line to read-only viewers too", async () => {
     const { view } = await mountEmbed(
-      { ref: "/data/vendors" },
       {
-        ...NATIVE_3COL,
-        count: 7,
-        human_description_en: "where state = CA",
+        ref: "/data/vendors",
+        config: { filters: [{ column: "state", op: "exact", value: "CA" }] },
       },
+      NATIVE_3COL,
       () => false,
     );
     expect(
       view.dom.querySelector(".pm-block-embed-summary")!.textContent,
-    ).toBe("7 rows where state = CA");
+    ).toBe("state=CA");
+    view.destroy();
+  });
+
+  // ── Table filters T05: the header sort pill ───────────────────────────────
+
+  it("renders a header sort pill (desc) for viewers — icon + column name", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { sort: { column: "population", desc: true } } },
+      NATIVE_3COL,
+      () => false,
+    );
+    const pill = view.dom.querySelector(".pm-block-embed-sort-pill") as HTMLElement;
+    expect(pill).not.toBeNull();
+    expect(pill.tagName).toBe("SPAN"); // inert for viewers
+    expect(pill.textContent).toBe("population");
+    expect(pill.querySelector(".pm-block-embed-icon")!.getAttribute("data-dir")).toBe(
+      "desc",
+    );
+    // Sits inside the header, before the refresh button.
+    expect(pill.closest(".pm-block-embed-head")).not.toBeNull();
+    view.destroy();
+  });
+
+  it("makes the sort pill a Filter & sort shortcut button for editors", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { sort: { column: "state" } } },
+      NATIVE_3COL,
+    );
+    const pill = view.dom.querySelector(".pm-block-embed-sort-pill") as HTMLButtonElement;
+    expect(pill.tagName).toBe("BUTTON");
+    expect(pill.querySelector(".pm-block-embed-icon")!.getAttribute("data-dir")).toBe(
+      "asc",
+    );
+    pill.click();
+    expect(view.dom.querySelector(".pm-block-embed-filters")).not.toBeNull();
+    view.destroy();
+  });
+
+  it("renders no sort pill when no sort is configured", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
+    expect(view.dom.querySelector(".pm-block-embed-sort-pill")).toBeNull();
+    view.destroy();
+  });
+
+  it("tints the sorted column's header and body cells", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors", config: { sort: { column: "state" } } },
+      NATIVE_3COL,
+    );
+    // `state` is the middle of id/state/population — its th and every td in
+    // that column carry the tint class; the other columns don't.
+    const ths = [...view.dom.querySelectorAll("th")];
+    expect(ths.map((t) => t.classList.contains("pm-block-embed-col-sorted"))).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    const tds = [...view.dom.querySelectorAll("tbody tr:first-child td")];
+    expect(tds.map((t) => t.classList.contains("pm-block-embed-col-sorted"))).toEqual([
+      false,
+      true,
+      false,
+    ]);
     view.destroy();
   });
 
@@ -1670,18 +1776,6 @@ describe("BlockEmbedView", () => {
     expect(warn.getAttribute("aria-label")).toContain("stopped counting at 10,000 rows");
   });
 
-  it("reflects the truncated count in the summary line prefix", async () => {
-    const view = await build("/data/legislators", {
-      columns: ["id"],
-      rows: [[1]],
-      count: 10001,
-      count_truncated: true,
-      human_description_en: "sorted by birthday descending",
-    });
-    expect(
-      view.dom.querySelector(".pm-block-embed-summary")!.textContent,
-    ).toBe("10,000+ rows sorted by birthday descending");
-  });
 
   it("shows no truncation warning when the count is exact", async () => {
     const view = await build("/data/legislators", {

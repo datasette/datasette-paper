@@ -303,9 +303,10 @@ export class BlockEmbedView implements NodeView {
     head.appendChild(labelEl);
 
     // Active-filter chip: funnel + count, shown whenever this is a table/view
-    // render with filters configured. Informational, so read-only viewers see
-    // it too. For editors it's also a button that opens the Filter & sort panel
-    // (a shortcut to the ⋮ menu item) — viewers get a plain, inert span.
+    // render with filters configured. Comes before the sort pill (filter first).
+    // Informational, so read-only viewers see it too. For editors it's also a
+    // button that opens the Filter & sort panel (a shortcut to the ⋮ menu
+    // item) — viewers get a plain, inert span.
     if (this.tablePayload) {
       const filterCount = this.filters().length;
       if (filterCount > 0) {
@@ -331,6 +332,16 @@ export class BlockEmbedView implements NodeView {
         }
         head.appendChild(badge);
       }
+    }
+
+    // Sort pill: asc/desc glyph + the sorted column name, shown whenever this
+    // is a table/view render with a sort configured. Sits after the filter
+    // badge (the sort clause is no longer spelled out in the summary line
+    // below). Informational for everyone; a shortcut button into the Filter &
+    // sort panel for editors, an inert span for viewers.
+    if (this.tablePayload) {
+      const sort = this.sort();
+      if (sort) head.appendChild(this.sortPill(sort));
     }
 
     const refresh = document.createElement("button");
@@ -367,6 +378,80 @@ export class BlockEmbedView implements NodeView {
     if (!old || !args) return;
     this.closeMenu();
     old.replaceWith(this.header(args.icon, args.label, args.href));
+  }
+
+  /**
+   * The header sort pill: a direction glyph (down = descending, up = ascending)
+   * plus the sorted column's name. Mirrors the filter badge's edit/view split —
+   * a `<button>` into the Filter & sort panel for editors, an inert `<span>` for
+   * read-only viewers. The glyph carries a `dir` dataset like the in-table
+   * indicator so both share the same asc/desc meaning.
+   */
+  private sortPill(sort: EmbedSort): HTMLElement {
+    const editable = !!this.view.editable;
+    const pill = document.createElement(editable ? "button" : "span");
+    pill.className = "pm-block-embed-sort-pill";
+    const icon = this.svgIcon(sort.desc ? "sortDown" : "sortUp");
+    icon.dataset.dir = sort.desc ? "desc" : "asc";
+    pill.appendChild(icon);
+    pill.appendChild(document.createTextNode(sort.column)); // text node
+    const dir = sort.desc ? "descending" : "ascending";
+    if (editable) {
+      const btn = pill as HTMLButtonElement;
+      btn.type = "button";
+      pill.classList.add("pm-block-embed-sort-pill--btn");
+      pill.title = `Sorted by ${sort.column} ${dir} — edit`;
+      pill.setAttribute("aria-label", `Edit sort (${sort.column} ${dir})`);
+      pill.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.openFiltersPanel();
+      });
+    } else {
+      pill.title = `Sorted by ${sort.column} ${dir}`;
+      pill.setAttribute("aria-label", `Sorted by ${sort.column} ${dir}`);
+    }
+    return pill;
+  }
+
+  /**
+   * The summary line's filter conditions, built from paper's structured
+   * `config.filters` (not Datasette's flat `human_description_en`) so the column
+   * name, operator, and value each get their own styled span — a read-only
+   * viewer can tell at a glance which token is the column and which is the value.
+   * No-argument ops (`is null`, `is not null`, …) render the op label alone.
+   * Conditions are joined by " and "; all values are text nodes, never markup.
+   */
+  private filterConditionEls(filters: EmbedFilter[]): Node[] {
+    const out: Node[] = [];
+    filters.forEach((f, i) => {
+      if (i > 0) {
+        const sep = document.createElement("span");
+        sep.className = "pm-block-embed-summary-and";
+        sep.textContent = "and";
+        out.push(sep);
+      }
+      const cond = document.createElement("span");
+      cond.className = "pm-block-embed-summary-cond";
+      const col = document.createElement("span");
+      col.className = "pm-block-embed-summary-col";
+      col.textContent = f.column; // text node
+      cond.appendChild(col);
+      const spec = filterOpByKey(f.op);
+      const op = document.createElement("span");
+      op.className = "pm-block-embed-summary-op";
+      op.textContent = spec?.label ?? f.op;
+      cond.appendChild(op);
+      // No-argument ops carry no value; everything else shows the filter value.
+      if (!spec?.noValue) {
+        const val = document.createElement("span");
+        val.className = "pm-block-embed-summary-val";
+        val.textContent = f.value ?? ""; // text node
+        cond.appendChild(val);
+      }
+      out.push(cond);
+    });
+    return out;
   }
 
   /**
@@ -1296,18 +1381,17 @@ export class BlockEmbedView implements NodeView {
       ),
     );
 
-    // Summary line: "<count> rows where … sorted by …" — Datasette phrases
-    // the description (`human_description_en`), we render it as text nodes
-    // only. Visible to everyone (it's how read-only viewers learn the embed
-    // is a filtered slice); omitted entirely when the description is empty
-    // (unfiltered/unsorted) or absent (older Datasette without the extra).
-    if (payload.humanDescription) {
+    // Summary line: the active filter conditions ("<col> <op> <value> and …"),
+    // built from structured config so column/op/value are separately styled.
+    // Visible to everyone (it's how read-only viewers learn the embed is a
+    // filtered slice); no count prefix (the footer already shows the total) and
+    // no sort clause (that moved to the header sort pill). Omitted entirely when
+    // there are no filters.
+    const filters = this.filters();
+    if (filters.length > 0) {
       const summary = document.createElement("div");
       summary.className = "pm-block-embed-summary";
-      const prefix =
-        payload.count != null ? `${this.countPhrase(payload)} ` : "";
-      // One text node — the description is data-derived, never innerHTML.
-      summary.textContent = `${prefix}${payload.humanDescription}`;
+      summary.append(...this.filterConditionEls(filters));
       this.dom.appendChild(summary);
     }
 
@@ -1322,12 +1406,16 @@ export class BlockEmbedView implements NodeView {
     const thead = document.createElement("thead");
     const htr = document.createElement("tr");
     const sort = this.sort();
+    // The rendered index of the sorted column, so its body cells get the same
+    // tint as its header (-1 when the sort column isn't among the shown ones).
+    const sortedColIndex = sort ? payload.columns.indexOf(sort.column) : -1;
     for (const col of payload.columns) {
       const th = document.createElement("th");
       th.appendChild(document.createTextNode(col)); // text node
       // Passive sort indicator on the sorted column — rendered for EVERYONE
       // (viewers included); only the config-writing menu below is gated.
       if (sort?.column === col) {
+        th.classList.add("pm-block-embed-col-sorted");
         const ind = this.svgIcon(sort.desc ? "sortDown" : "sortUp");
         ind.classList.add("pm-block-embed-sort-ind");
         ind.dataset.dir = sort.desc ? "desc" : "asc";
@@ -1343,12 +1431,13 @@ export class BlockEmbedView implements NodeView {
     const tbody = document.createElement("tbody");
     for (const row of payload.rows) {
       const tr = document.createElement("tr");
-      for (const cell of row) {
+      row.forEach((cell, i) => {
         const td = document.createElement("td");
+        if (i === sortedColIndex) td.classList.add("pm-block-embed-col-sorted");
         // @feat result-cells: block-embed cells render clamped + expandable
         renderResultValue(td, cell); // text nodes only
         tr.appendChild(td);
-      }
+      });
       tbody.appendChild(tr);
     }
     table.appendChild(tbody);

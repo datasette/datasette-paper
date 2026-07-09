@@ -105,10 +105,11 @@ or a bug to learn; `datasette_embed.ts` `fetchTableEmbed` /
   PKs to any `_col` projection (you can't hide them), so the Columns picker
   shows them checked + disabled.
 - **The embed load's `_extra` set** is `count,count_truncated,columns,
-  primary_keys,human_description_en`; a mirror assertion in
-  `datasetteEmbed.test.ts` fails if you change the list. `human_description_en`
-  is the server-phrased "where … sorted by …" summary (empty/absent when
-  unfiltered, or on older Datasettes).
+  primary_keys`; a mirror assertion in `datasetteEmbed.test.ts` fails if you
+  change the list. The filter/sort summary line + header sort pill are rebuilt
+  client-side from paper's own `config.filters`/`config.sort` (so column names
+  and values get their own styled spans), so Datasette's server-phrased
+  `human_description_en` extra is deliberately *not* requested.
 
 ## Tests (`vitest` + `jsdom`)
 

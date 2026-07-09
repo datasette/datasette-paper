@@ -62,10 +62,6 @@ export type EmbedPayload =
       // so the UI derives the threshold from `count` rather than hardcoding it.
       countTruncated: boolean;
       truncated: boolean;
-      // Datasette's server-phrased "where … sorted by …" summary (the
-      // `human_description_en` extra). Set only when non-empty — absent for an
-      // unfiltered/unsorted table, or an older Datasette without the extra.
-      humanDescription?: string;
       href: string;
     }
   | {
@@ -209,14 +205,14 @@ async function fetchTableEmbed(
   const filterParams = filterQs ? `&${filterQs}` : "";
   // `_shape=arrays` (plural) returns the {columns, rows-as-arrays, count, next}
   // envelope; `_shape=array` (singular) would be a bare top-level array with
-  // no columns/count. `_extra` adds count + columns + the server-phrased
-  // "where … sorted by …" summary (empty string when unfiltered/unsorted;
-  // key simply absent on older Datasettes that lack the extra) + the
+  // no columns/count. `_extra` adds count + columns + primary_keys + the
   // `count_truncated` flag (whether `count` hit the configurable count limit).
+  // The filter/sort summary is rebuilt client-side from paper's own config, so
+  // the server-phrased `human_description_en` extra isn't requested.
   const res = await fetch(
     jsonUrl(
       ref,
-      `?_shape=arrays&_extra=count,count_truncated,columns,primary_keys,human_description_en&_size=${encodeURIComponent(String(limit))}${colParams}${filterParams}`,
+      `?_shape=arrays&_extra=count,count_truncated,columns,primary_keys&_size=${encodeURIComponent(String(limit))}${colParams}${filterParams}`,
     ),
   );
   if (!res.ok) {
@@ -242,7 +238,6 @@ async function fetchTableEmbed(
     count_truncated?: boolean;
     primary_keys?: string[];
     next?: string | null;
-    human_description_en?: string;
   };
   const allColumns = j.columns ?? [];
   const rows = j.rows ?? [];
@@ -253,11 +248,6 @@ async function fetchTableEmbed(
   const primaryKeys = (Array.isArray(j.primary_keys) ? j.primary_keys : []).filter(
     (c): c is string => typeof c === "string" && allColumns.includes(c),
   );
-  // Empty/absent/malformed → undefined, so the NodeView renders no summary.
-  const humanDescription =
-    typeof j.human_description_en === "string" && j.human_description_en.length > 0
-      ? j.human_description_en
-      : undefined;
   // Project to exactly the author's selection, in their order, dropping any PK
   // `_col` forced back in. If every selected column has vanished from the
   // schema, fall back to the full response rather than rendering nothing.
@@ -283,7 +273,6 @@ async function fetchTableEmbed(
     count,
     countTruncated,
     truncated: j.next != null || (count != null && count > rows.length),
-    humanDescription,
     href: ref,
   };
 }

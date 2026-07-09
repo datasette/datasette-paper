@@ -1419,6 +1419,35 @@
   background: #55238f;
 }
 /* Header chip: funnel + active-filter count (informational — everyone sees it). */
+/* Sort pill in the header: direction glyph + sorted column name. Neutral
+   (grey) tone so it reads as distinct from the purple filter badge next to it. */
+.editor-host .pm-block-embed-sort-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 7px 1px 5px;
+  border-radius: 999px;
+  background: #ececf0;
+  color: #444;
+  font-size: 11px;
+  font-weight: 600;
+}
+.editor-host .pm-block-embed-sort-pill .pm-block-embed-icon {
+  color: #6429a8;
+}
+.editor-host .pm-block-embed-sort-pill .pm-block-embed-icon svg {
+  width: 10px;
+  height: 10px;
+}
+.editor-host button.pm-block-embed-sort-pill--btn {
+  border: none;
+  font-family: inherit;
+  line-height: inherit;
+  cursor: pointer;
+}
+.editor-host .pm-block-embed-sort-pill--btn:hover {
+  background: #e0e0e6;
+}
 .editor-host .pm-block-embed-filter-badge {
   display: inline-flex;
   align-items: center;
@@ -1446,12 +1475,41 @@
 .editor-host .pm-block-embed-filter-badge--btn:hover {
   background: #e0d3f2;
 }
-/* Summary line under the header: "<count> rows where …" — everyone sees it. */
+/* Summary line under the header: the active filter conditions — everyone sees
+   it. Each condition is a col/op/value triple; the three are styled distinctly
+   so column names and values don't blur together. */
 .editor-host .pm-block-embed-summary {
-  padding: 4px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  padding: 5px 10px;
   font-size: 12px;
   color: #555;
   border-bottom: 1px solid #ececf0;
+}
+.editor-host .pm-block-embed-summary-cond {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.editor-host .pm-block-embed-summary-col {
+  font-weight: 600;
+  color: #333;
+}
+.editor-host .pm-block-embed-summary-op {
+  color: #999;
+}
+.editor-host .pm-block-embed-summary-val {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #ede5f7;
+  color: #6429a8;
+  font-variant-numeric: tabular-nums;
+}
+.editor-host .pm-block-embed-summary-and {
+  color: #aaa;
+  font-style: italic;
 }
 /* Column header ▾ menu (editors only). The trigger stays subtle until its
    header cell is hovered or its menu is open, but never fully hidden — it
@@ -1503,6 +1561,16 @@
 .editor-host .pm-block-embed-col-menu .pm-block-embed-icon svg {
   width: 12px;
   height: 12px;
+}
+/* Sorted column gets a faint tint across header + body cells, so the eye can
+   follow the ordering key down the table. Kept subtle. The header cell layers
+   the tint over its own grey (a translucent wash would read as *lighter* than
+   its neighbours); body cells wash over plain white. */
+.editor-host .pm-block-embed td.pm-block-embed-col-sorted {
+  background: rgba(100, 41, 168, 0.05);
+}
+.editor-host .pm-block-embed th.pm-block-embed-col-sorted {
+  background: #eee9f3;
 }
 /* Passive sort indicator on the sorted column — viewers see it too. */
 .editor-host .pm-block-embed-sort-ind {
