@@ -5,6 +5,7 @@
   // on the doc page by paper's extra_js_urls hook, which registers the
   // <datasette-acl-share-dialog> custom element before this component mounts.
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+  import { getStoredTheme, setTheme, type Theme } from "./theme";
 
   // acl resource identity for a paper doc: type "paper-doc", a fixed parent
   // sentinel ("_paper", == PAPER_DOCS_PARENT in permissions.py), child = doc id.
@@ -71,11 +72,28 @@
   let copyState: CopyFeedback = $state("idle");
   let menuOpen = $state(false);
   let apiSubOpen = $state(false);
+  let themeSubOpen = $state(false);
   let menuRoot: HTMLDivElement | undefined = $state();
+
+  // Current per-device theme choice (System / Light / Dark), initialised from
+  // the persisted value so the radio reflects reality when the menu opens.
+  let currentTheme = $state<Theme>(getStoredTheme());
+  const THEME_OPTIONS: { value: Theme; label: string }[] = [
+    { value: "system", label: "System" },
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+  ];
+
+  function chooseTheme(theme: Theme) {
+    currentTheme = theme;
+    setTheme(theme);
+    closeMenu();
+  }
 
   function closeMenu() {
     menuOpen = false;
     apiSubOpen = false;
+    themeSubOpen = false;
   }
 
   async function handleCopy() {
@@ -154,8 +172,10 @@
 
   function onKey(evt: KeyboardEvent) {
     if (!menuOpen || evt.key !== "Escape") return;
-    if (apiSubOpen) apiSubOpen = false;
-    else menuOpen = false;
+    if (apiSubOpen || themeSubOpen) {
+      apiSubOpen = false;
+      themeSubOpen = false;
+    } else menuOpen = false;
   }
 
   $effect(() => {
@@ -394,7 +414,10 @@
                   role="menuitem"
                   class="mi"
                   onclick={handleCopy}
-                  onmouseenter={() => (apiSubOpen = false)}
+                  onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                 >
                   {@render icon("copy")}
                   <span>Copy as markdown</span>
@@ -403,7 +426,10 @@
               <div
                 class="sub-wrap"
                 role="none"
-                onmouseenter={() => (apiSubOpen = true)}
+                onmouseenter={() => {
+                  apiSubOpen = true;
+                  themeSubOpen = false;
+                }}
               >
                 <button
                   type="button"
@@ -449,6 +475,50 @@
                   </div>
                 {/if}
               </div>
+              <!-- @feat dark-mode: the doc page's Light/Dark/System control —
+                   a submenu of radio items that persist the choice via
+                   setTheme (localStorage + <html data-theme> stamp). -->
+              <div
+                class="sub-wrap"
+                role="none"
+                onmouseenter={() => {
+                  themeSubOpen = true;
+                  apiSubOpen = false;
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="mi"
+                  aria-haspopup="menu"
+                  aria-expanded={themeSubOpen}
+                  onclick={() => (themeSubOpen = !themeSubOpen)}
+                >
+                  {@render icon("circleHalf")}
+                  <span>Theme</span>
+                  <span class="mi-caret">{@render icon("chevronRight")}</span>
+                </button>
+                {#if themeSubOpen}
+                  <div class="overflow-menu submenu" role="menu">
+                    {#each THEME_OPTIONS as opt (opt.value)}
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={currentTheme === opt.value}
+                        class="mi"
+                        onclick={() => chooseTheme(opt.value)}
+                      >
+                        {#if currentTheme === opt.value}
+                          {@render icon("check")}
+                        {:else}
+                          <span class="mi-icon-spacer" aria-hidden="true"></span>
+                        {/if}
+                        <span>{opt.label}</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
               {#if isOwner && docState !== "trashed"}
                 <hr class="mi-sep" />
                 {#if kind === "template"}
@@ -457,7 +527,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postTemplateAction("/unmake_template")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("fileText")}
                     <span>Demote to doc</span>
@@ -468,7 +541,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postTemplateAction("/make_template")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("copy")}
                     <span>Make template</span>
@@ -481,7 +557,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postLockAction("/unlock")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("unlock")}
                     <span>Unlock (make editable)</span>
@@ -492,7 +571,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postLockAction("/lock")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("lock")}
                     <span>Lock (read-only)</span>
@@ -506,7 +588,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postStateAction("/archive")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("archive")}
                     <span>Archive</span>
@@ -517,7 +602,10 @@
                   role="menuitem"
                   class="mi mi-danger"
                   onclick={() => postStateAction("/trash")}
-                  onmouseenter={() => (apiSubOpen = false)}
+                  onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                 >
                   {@render icon("trash3")}
                   <span>Move to trash</span>
@@ -760,6 +848,13 @@
   .mi-icon {
     flex: 0 0 auto;
     color: var(--pp-fg-muted);
+  }
+  /* Keeps the label column aligned for an unchecked theme radio (no check
+     icon present) — matches the 14px icon box rendered by the snippet. */
+  .mi-icon-spacer {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
   }
   .mi-caret {
     margin-left: auto;

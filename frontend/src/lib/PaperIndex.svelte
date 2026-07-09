@@ -3,6 +3,22 @@
   import { client } from "./client";
   import LinkGraph from "./LinkGraph.svelte";
   import TagEditor from "./TagEditor.svelte";
+  import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+  import { cycleTheme, getStoredTheme, type Theme } from "./theme";
+
+  // Per-device theme, cycled System → Light → Dark by the header button.
+  // Initialised from the persisted value so the label reflects reality.
+  let currentTheme = $state<Theme>(getStoredTheme());
+  const THEME_LABELS: Record<Theme, string> = {
+    system: "System",
+    light: "Light",
+    dark: "Dark",
+  };
+  let themeLabel = $derived(THEME_LABELS[currentTheme]);
+
+  function advanceTheme(): void {
+    currentTheme = cycleTheme(currentTheme);
+  }
 
   type DocState = "active" | "archived" | "trashed";
 
@@ -495,15 +511,29 @@
 <div class="paper-index">
   <div class="index-header">
     <h1>Papers</h1>
-    <button
-      type="button"
-      class="graph-toggle"
-      aria-haspopup="dialog"
-      aria-expanded={showGraph}
-      onclick={toggleGraph}
-    >
-      Graph
-    </button>
+    <div class="header-actions">
+      <!-- @feat dark-mode: the index page's theme control — one button that
+           cycles System → Light → Dark via cycleTheme (persist + stamp), with
+           an aria-label/title that announces the current state. -->
+      <button
+        type="button"
+        class="theme-cycle"
+        aria-label="Theme: {themeLabel}"
+        title="Theme: {themeLabel}"
+        onclick={advanceTheme}
+      >
+        {@render icon("circleHalf")}
+      </button>
+      <button
+        type="button"
+        class="graph-toggle"
+        aria-haspopup="dialog"
+        aria-expanded={showGraph}
+        onclick={toggleGraph}
+      >
+        Graph
+      </button>
+    </div>
   </div>
 
   {#if showGraph}
@@ -917,6 +947,21 @@
   {/if}
 </div>
 
+{#snippet icon(name: ToolbarIconName)}
+  <svg
+    class="btn-icon"
+    xmlns="http://www.w3.org/2000/svg"
+    width="16"
+    height="16"
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+    {@html TOOLBAR_ICONS[name]}
+  </svg>
+{/snippet}
+
 <style>
   /* Inherit the body font (Inter Variable + system fallbacks). */
   .paper-index {
@@ -931,6 +976,11 @@
     justify-content: space-between;
     gap: 1em;
   }
+  .header-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
   .graph-toggle {
     border: 1px solid var(--pp-border-strong);
     background: var(--pp-bg);
@@ -942,6 +992,28 @@
   }
   .graph-toggle:hover {
     background: var(--pp-surface-2);
+  }
+  .theme-cycle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--pp-border-strong);
+    background: var(--pp-bg);
+    border-radius: 4px;
+    padding: 6px 8px;
+    cursor: pointer;
+    color: var(--pp-fg-muted);
+  }
+  .theme-cycle:hover {
+    background: var(--pp-surface-2);
+    color: var(--pp-fg);
+  }
+  .theme-cycle:focus-visible {
+    outline: 2px solid var(--pp-focus-ring);
+    outline-offset: 2px;
+  }
+  .btn-icon {
+    display: block;
   }
   .graph-backdrop {
     position: fixed;

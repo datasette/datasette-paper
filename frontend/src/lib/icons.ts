@@ -162,6 +162,10 @@ export const TOOLBAR_ICONS: Record<string, string> = {
   // Floating scroll-to-top button. Bootstrap `arrow-up-circle` as a functional
   // default. ← Alex: swap for a preferred glyph.
   arrowUpCircle: `<path fill-rule="evenodd" d="M1 8a7 7 0 1 0 14 0A7 7 0 0 0 1 8m15 0A8 8 0 1 1 0 8a8 8 0 0 1 16 0m-7.5 3.5a.5.5 0 0 1-1 0V5.707L5.354 7.854a.5.5 0 1 1-.708-.708l3-3a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 5.707z"/>`,
+  // Theme toggle (Light/Dark/System). Bootstrap `circle-half` — a circle whose
+  // left half is filled — is the canonical theme glyph and a functional
+  // default here. ← Alex: swap for a preferred glyph.
+  circleHalf: `<path d="M8 15A7 7 0 1 0 8 1zm0 1A8 8 0 1 1 8 0a8 8 0 0 1 0 16"/>`,
 };
 
 export type ToolbarIconName = keyof typeof TOOLBAR_ICONS;

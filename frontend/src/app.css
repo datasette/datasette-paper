@@ -4,13 +4,12 @@
 @import "prosemirror-example-setup/style/style.css";
 @import "prosemirror-gapcursor/style/gapcursor.css";
 
-/* --pp-* semantic palette ("paper"). Light values only for now — this is a
- * pure-refactor pass (see plans/dark/tickets/01-tokens-editor-css.md):
- * every color literal in editor.css (and the two below) now reads through
- * one of these custom properties, with *zero* pixel change. Dark values
- * land on a `:root[data-theme="dark"]` block in a later ticket. Each
- * token is named by ROLE, not hue, so a dark override is a one-line value
- * change instead of a re-audit of every selector. */
+/* @feat dark-mode: the --pp-* semantic palette ("paper") every themed
+ * surface resolves through — light values here, dark overrides on the
+ * `:root[data-theme="dark"]` block (and its system media branch) below.
+ * Each token is named by ROLE, not hue, so a dark override is a one-line
+ * value change instead of a re-audit of every selector. The pairings are
+ * contrast-gated by __tests__/themeContrast.test.ts. */
 :root {
   /* Page background / floating surfaces (menus, dialogs, popovers, inputs)
    * that sit flush with the page. */
