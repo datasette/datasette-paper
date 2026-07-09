@@ -1863,6 +1863,13 @@
   font-size: 13px;
   color: #888;
 }
+/* While (re)loading, the block reserves its previous height (blockEmbedView.ts)
+   so the doc doesn't jump; center the skeleton within it. */
+.editor-host .pm-block-embed--loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 .editor-host .pm-block-embed--denied .pm-block-embed-placeholder {
   color: #8a5a00;
 }

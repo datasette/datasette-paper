@@ -488,4 +488,33 @@ test.describe("block-embed filters", () => {
       .poll(() => page.evaluate(() => navigator.clipboard.readText()))
       .toBe("Vendor 1");
   });
+
+  test("refreshing reserves the block's height so the doc doesn't jump", async ({
+    page,
+  }) => {
+    const { url } = await createPaper(page);
+    await gotoPaper(page, url);
+    await pasteText(page, "/datasette-paper-e2e-data/vendors");
+    const embed = page.locator(".pm-block-embed");
+    await expect(embed).toBeVisible({ timeout: 10000 });
+    await expect(embed).toContainText("Vendor 1", { timeout: 10000 });
+    const before = await embed.evaluate((el) => (el as HTMLElement).offsetHeight);
+
+    // Hold the refetch so the loading state is observable.
+    await page.route("**/vendors.json**", async (route) => {
+      await new Promise((r) => setTimeout(r, 600));
+      await route.continue();
+    });
+    await embed.locator(".pm-block-embed-refresh").click();
+
+    // Loading: the skeleton is up, but the block keeps its height — no collapse
+    // to a short block (which would shift everything below it).
+    await expect(embed.locator(".pm-block-embed-skeleton")).toBeVisible();
+    expect(await embed.evaluate((el) => (el as HTMLElement).offsetHeight)).toBe(before);
+
+    // Loaded: back to the table, the reservation cleared.
+    await page.unroute("**/vendors.json**");
+    await expect(embed).toContainText("Vendor 1", { timeout: 10000 });
+    expect(await embed.evaluate((el) => (el as HTMLElement).style.minHeight)).toBe("");
+  });
 });

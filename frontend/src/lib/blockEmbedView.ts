@@ -284,6 +284,7 @@ export class BlockEmbedView implements NodeView {
     provider: PaperEmbedProvider,
     status: Extract<DatasetteStatus, { status: "ok" }>,
   ): void {
+    this.clearReservedHeight();
     this.dom.replaceChildren();
     this.dom.appendChild(
       this.header(embedIconMarkup(status), status.label, status.href),
@@ -1332,6 +1333,12 @@ export class BlockEmbedView implements NodeView {
   }
 
   private renderLoading(): void {
+    // On a re-fetch (refresh button, row-limit change) the block already has a
+    // height; reserve it through the load so the doc doesn't jump to the short
+    // "Loading…" skeleton and back when the new data lands. Cleared by the next
+    // final render (`clearReservedHeight`). On the FIRST load the dom isn't in
+    // the document yet, so offsetHeight is 0 — no reservation, skeleton as-is.
+    const prevHeight = this.dom.offsetHeight;
     this.dom.replaceChildren();
     this.headerEl = null;
     this.headerArgs = null;
@@ -1340,13 +1347,29 @@ export class BlockEmbedView implements NodeView {
       "pm-block-embed--missing",
       "pm-block-embed--error",
     );
+    this.dom.style.minHeight = prevHeight > 0 ? `${prevHeight}px` : "";
+    // Center the skeleton within any reserved height so the loading state reads
+    // as intentional rather than a short label stranded at the top.
+    this.dom.classList.add("pm-block-embed--loading");
     const skel = document.createElement("div");
     skel.className = "pm-block-embed-skeleton";
     skel.textContent = "Loading…";
     this.dom.appendChild(skel);
   }
 
+  /**
+   * Drop any height reserved by `renderLoading` — called by every final
+   * renderer so the block snaps back to its content's natural height (a smaller
+   * result set really is shorter; only the transient loading state held the old
+   * height). Synchronous with the rebuild, so no intermediate paint/flash.
+   */
+  private clearReservedHeight(): void {
+    this.dom.style.minHeight = "";
+    this.dom.classList.remove("pm-block-embed--loading");
+  }
+
   private renderPlaceholder(modifier: string, text: string): void {
+    this.clearReservedHeight();
     this.dom.replaceChildren();
     this.headerEl = null;
     this.headerArgs = null;
@@ -1358,6 +1381,7 @@ export class BlockEmbedView implements NodeView {
   }
 
   private render(payload: EmbedPayload): void {
+    this.clearReservedHeight();
     // Default to "no exportable table" — renderTable re-sets it below.
     this.tablePayload = null;
     this.dom.classList.remove(
