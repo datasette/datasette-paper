@@ -45,6 +45,13 @@ template injects the matching JS+CSS via `datasette_vite.vite_entry`.
   `Content-Type: application/json` — bare POSTs hit `skip_csrf`.
 - **PM transactions don't trigger Svelte rerenders.** Components that
   need selection state (Toolbar) RAF-poll a `tick` `$state`.
+- **Debug editor bugs via the document model, not the DOM.** The live
+  `EditorView` is exposed at `window.__pmView` (`PaperApp.svelte`,
+  un-gated so it survives the prod build). The rendered DOM hides where
+  the caret actually landed and pollutes `innerText` with widget
+  decorations; read `window.__pmView.state` (or `readEditorState()` in
+  e2e). See `e2e/CLAUDE.md` — headless Chromium masks invalid model
+  selections, so cursor bugs need model assertions or a unit test.
 - **No `$from`-style identifiers in `<script lang="ts">`.** Svelte 5
   reserves `$x`. Destructure to a non-`$` local — `const sel =
   state.selection; sel.$from` works.

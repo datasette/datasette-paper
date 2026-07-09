@@ -26,6 +26,30 @@ per run. `playwright.config.ts` sits next to this directory in
   `kind: "template"` creates a template; `templateId` clones from one.
 - `gotoPaper(page, url)` — navigates and awaits `.ProseMirror`.
 - `typeInEditor(page, text)`, `expectEditorContains(page, sub)`.
+- `readEditorState(page)` → `{doc, selHead, selHeadParent, selEmpty}` —
+  reads the live PM **document model** (see below).
+
+## Debugging selection / schema / cursor bugs (read the model, not the DOM)
+
+`PaperApp` exposes the live `EditorView` at `window.__pmView` (un-gated,
+so it survives the prod build these tests load). For any bug about *where
+the caret landed* or *how nodes are nested*, assert on the document model
+via `readEditorState(page)` — **not** `.innerText()`. Two traps burned a
+lot of time once and will again:
+
+- **The DOM lies about content.** Widget decorations render real DOM that
+  is not document content — a remote caret's username label sits inside
+  the paragraph and shows up in `.innerText()`/`li.textContent`. Strip
+  `.remote-caret` or read `readEditorState().doc` instead.
+- **Headless Chromium hides invalid selections.** If a command leaves the
+  *model* selection at a bogus spot (e.g. a `list_item` boundary instead
+  of inside its `paragraph`), Chromium still renders the DOM caret at the
+  nearest valid position, so typing produces the *correct* text and a
+  typed-text assertion passes — even though real browsers split the block.
+  Assert on `selHead` / `selHeadParent` (e.g. expect `"paragraph"`, catch
+  `"list_item"`), or unit-test the command with a faked `posAtCoords`
+  (see `src/lib/__tests__/lineBoundary.test.ts`). This is why the
+  list-item-split bug had no reproducible e2e and needed a unit test.
 - `waitForServerVersion(page, docId, minVersion)` — **use this
   before `page.reload()`.** Reload aborts in-flight POST batches;
   without the wait, only the first keystroke's batch is persisted.

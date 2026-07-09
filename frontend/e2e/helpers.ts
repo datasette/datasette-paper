@@ -144,6 +144,38 @@ export async function expectEditorContains(page: Page, substring: string) {
 }
 
 /**
+ * Read the live ProseMirror **document model** — the source of truth the
+ * rendered DOM hides. Use this instead of `.innerText()` when a bug is about
+ * where the caret landed or how nodes are nested: widget decorations (remote
+ * caret labels) leak into `innerText`, and headless Chromium silently
+ * normalizes an invalid model selection to a valid DOM caret, so a typed-text
+ * assertion can miss a wrong-selection bug entirely. See e2e/CLAUDE.md.
+ *
+ * Returns the doc as JSON plus the selection head and the node type it sits
+ * in (`selHeadParent` — e.g. "paragraph" vs "list_item" catches a caret that
+ * landed on a block boundary rather than inside its textblock).
+ */
+export async function readEditorState(page: Page): Promise<{
+  doc: unknown;
+  selHead: number;
+  selHeadParent: string;
+  selEmpty: boolean;
+}> {
+  return page.evaluate(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const view = (window as any).__pmView;
+    if (!view) throw new Error("window.__pmView not set — editor not mounted");
+    const s = view.state.selection;
+    return {
+      doc: view.state.doc.toJSON(),
+      selHead: s.head,
+      selHeadParent: view.state.doc.resolve(s.head).parent.type.name,
+      selEmpty: s.empty,
+    };
+  });
+}
+
+/**
  * Poll the bootstrap API until the doc's server-side version is at least
  * ``minVersion``. Use this before reloading the page so any in-flight
  * POST /events batches have time to land — `page.reload()` aborts

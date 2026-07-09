@@ -105,6 +105,13 @@
         place: editorEl,
         onView: (v) => {
           view = v;
+          // Expose the live EditorView for e2e tests and manual debugging.
+          // ProseMirror bugs are usually about the *document model* (selection
+          // position, node structure) which the rendered DOM hides — read
+          // `window.__pmView.state` to see the truth. Intentionally NOT
+          // dev-gated: the e2e suite loads the production bundle, so this must
+          // survive the prod build. See frontend/e2e/CLAUDE.md.
+          (window as unknown as { __pmView: EditorView | null }).__pmView = v;
         },
         onUsers: (n) => {
           users = n;
