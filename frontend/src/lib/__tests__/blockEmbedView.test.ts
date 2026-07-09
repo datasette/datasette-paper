@@ -1757,6 +1757,154 @@ describe("BlockEmbedView", () => {
     view.destroy();
   });
 
+  // ── Primary-key row links (embed-pk-links) ────────────────────────────────
+
+  const NATIVE_PK = {
+    columns: ["id", "name"],
+    rows: [
+      [1, "Acme"],
+      [2, "Globex"],
+    ],
+    count: 2,
+    primary_keys: ["id"],
+  };
+
+  it("turns the single-pk cell into a link to the row page", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_PK, () => false);
+    const rows = [...view.dom.querySelectorAll("tbody tr")];
+    // First cell (the `id` pk) is an anchor; the second (`name`) is not.
+    const pkA = rows[0].children[0].querySelector("a.pm-block-embed-pk-link") as HTMLAnchorElement;
+    expect(pkA).not.toBeNull();
+    expect(pkA.getAttribute("href")).toBe("/data/vendors/1");
+    expect(pkA.textContent).toBe("1");
+    expect(rows[1].children[0].querySelector("a")!.getAttribute("href")).toBe(
+      "/data/vendors/2",
+    );
+    expect(rows[0].children[1].querySelector("a")).toBeNull(); // name cell plain
+    // No leading "#" column for a single pk.
+    expect(view.dom.querySelector(".pm-block-embed-rowlink-col")).toBeNull();
+    view.destroy();
+  });
+
+  it("tilde-encodes a single-pk value with reserved characters", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id", "name"], rows: [["a/b.c", "X"]], count: 1, primary_keys: ["id"] },
+      () => false,
+    );
+    const a = view.dom.querySelector("a.pm-block-embed-pk-link") as HTMLAnchorElement;
+    expect(a.getAttribute("href")).toBe("/data/vendors/a~2Fb~2Ec");
+    view.destroy();
+  });
+
+  it("adds a leading '#' row-link column for a compound primary key", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/sales" },
+      {
+        columns: ["year", "region", "total"],
+        rows: [
+          [2024, "us west", 10],
+          [2024, "eu", 20],
+        ],
+        count: 2,
+        primary_keys: ["year", "region"],
+      },
+      () => false,
+    );
+    // Leading unnamed header cell for the "#" column.
+    const ths = [...view.dom.querySelectorAll("thead th")];
+    expect(ths[0].classList.contains("pm-block-embed-rowlink-col")).toBe(true);
+    expect(ths[0].textContent).toBe("");
+    // Each row's first cell is a "#" link joining the tilde-encoded pk parts.
+    const firstRow = view.dom.querySelector("tbody tr")!;
+    const link = firstRow.querySelector(
+      "td.pm-block-embed-rowlink-col a.pm-block-embed-rowlink",
+    ) as HTMLAnchorElement;
+    expect(link.textContent).toBe("#");
+    expect(link.getAttribute("href")).toBe("/data/sales/2024,us+west");
+    // The pk cells themselves are NOT turned into links in the compound case.
+    expect(firstRow.querySelector("a.pm-block-embed-pk-link")).toBeNull();
+    view.destroy();
+  });
+
+  it("marks primary-key column headers with a key glyph", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/sales" },
+      {
+        columns: ["year", "region", "total"],
+        rows: [[2024, "eu", 20]],
+        count: 1,
+        primary_keys: ["year", "region"],
+      },
+      () => false,
+    );
+    const ths = [...view.dom.querySelectorAll("thead th")].filter(
+      (t) => !t.classList.contains("pm-block-embed-rowlink-col"),
+    );
+    // year + region carry the key icon; total does not.
+    expect(ths.map((t) => !!t.querySelector(".pm-block-embed-pk-icon"))).toEqual([
+      true,
+      true,
+      false,
+    ]);
+    view.destroy();
+  });
+
+  it("renders no links, key icons, or '#' column for a rowid table (no pks)", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/vendors" },
+      { columns: ["id", "name"], rows: [[1, "Acme"]], count: 1, primary_keys: [] },
+      () => false,
+    );
+    expect(view.dom.querySelector("a.pm-block-embed-pk-link")).toBeNull();
+    expect(view.dom.querySelector(".pm-block-embed-rowlink-col")).toBeNull();
+    expect(view.dom.querySelector(".pm-block-embed-pk-icon")).toBeNull();
+    view.destroy();
+  });
+
+  it("keeps the sorted-column tint aligned when a '#' column is prepended", async () => {
+    const { view } = await mountEmbed(
+      { ref: "/data/sales", config: { sort: { column: "region" } } },
+      {
+        columns: ["year", "region", "total"],
+        rows: [[2024, "eu", 20]],
+        count: 1,
+        primary_keys: ["year", "region"],
+      },
+      () => false,
+    );
+    // `region` (2nd data column) is sorted; its td is tinted, the "#" cell is not.
+    const cells = [...view.dom.querySelectorAll("tbody tr:first-child td")];
+    expect(cells[0].classList.contains("pm-block-embed-rowlink-col")).toBe(true);
+    expect(cells.map((c) => c.classList.contains("pm-block-embed-col-sorted"))).toEqual([
+      false, // # column
+      false, // year
+      true, // region
+      false, // total
+    ]);
+    view.destroy();
+  });
+
+  it("disables 'Hide this column' on a primary-key column, with a reason", async () => {
+    const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_PK);
+    // The pk column `id`: Hide item present but disabled + explained.
+    const pkMenu = openColMenu(view, "id");
+    const hide = [...pkMenu.querySelectorAll(".pm-block-embed-menu-item")].find(
+      (el) => el.textContent === "Hide this column",
+    ) as HTMLButtonElement;
+    expect(hide).not.toBeUndefined();
+    expect(hide.disabled).toBe(true);
+    expect(hide.classList.contains("pm-block-embed-menu-item--disabled")).toBe(true);
+    expect(hide.title).toContain("Primary key");
+    // A non-pk column keeps an enabled Hide item.
+    const nameMenu = openColMenu(view, "name");
+    const nameHide = [...nameMenu.querySelectorAll(".pm-block-embed-menu-item")].find(
+      (el) => el.textContent === "Hide this column",
+    ) as HTMLButtonElement;
+    expect(nameHide.disabled).toBe(false);
+    view.destroy();
+  });
+
   // ── Truncated count (Datasette's count_limit sentinel) ────────────────────
 
   it("phrases a truncated count as 'N+ rows' + a warning glyph in the footer", async () => {

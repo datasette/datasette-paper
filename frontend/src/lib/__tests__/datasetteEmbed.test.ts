@@ -14,6 +14,7 @@ import {
   iconMarkup,
   embedIconMarkup,
   safeHref,
+  tildeEncode,
 } from "../datasetteEmbed";
 import { TOOLBAR_ICONS } from "../icons";
 
@@ -515,5 +516,27 @@ describe("searchResources (native enumeration)", () => {
   it("returns [] when /.json is not ok", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => ({}) })));
     expect(await searchResources("x")).toEqual([]);
+  });
+});
+
+// @feat embed-pk-links: tilde-encoding matches datasette.utils.tilde_encode
+describe("tildeEncode (row-pk path segments)", () => {
+  // Golden vectors produced by datasette.utils.tilde_encode itself, so this
+  // stays a faithful port: unreserved [A-Za-z0-9_-] pass through, space → "+",
+  // every other byte → "~XX" (uppercase hex), multi-byte chars per UTF-8 byte.
+  it.each([
+    ["2", "2"],
+    ["2020-01-01", "2020-01-01"],
+    ["a_b-C9", "a_b-C9"],
+    ["a/b", "a~2Fb"],
+    ["hello world", "hello+world"],
+    ["1.5", "1~2E5"],
+    ["a,b", "a~2Cb"],
+    ["~x", "~7Ex"],
+    ["100%", "100~25"],
+    ["café", "caf~C3~A9"],
+    ["", ""],
+  ])("encodes %o as %o", (input, expected) => {
+    expect(tildeEncode(input)).toBe(expected);
   });
 });

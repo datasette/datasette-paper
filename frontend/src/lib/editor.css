@@ -1223,6 +1223,14 @@
   background: #f1ecf8;
   color: #6429a8;
 }
+/* A disabled menu item (e.g. "Hide this column" on a primary key): dimmed,
+   non-interactive, and no hover recolour. The `title` carries the reason. */
+.editor-host .pm-block-embed-menu-item--disabled,
+.editor-host .pm-block-embed-menu-item--disabled:hover {
+  color: #aaa;
+  background: transparent;
+  cursor: not-allowed;
+}
 /* Submenu parent ("Download ▸" / "Copy ▸"), back rows, and any leaf carrying a
    trailing group lay their label and trailing chevron/warning on one flex line. */
 .editor-host .pm-block-embed-menu-item--parent,
@@ -1581,6 +1589,40 @@
 .editor-host .pm-block-embed-sort-ind svg {
   width: 11px;
   height: 11px;
+}
+/* Primary-key glyph in a column header — muted so it reads as a marker, not an
+   action. Sits just after the column name. */
+.editor-host .pm-block-embed-pk-icon {
+  margin-left: 4px;
+  vertical-align: middle;
+  color: #9a86b8;
+}
+.editor-host .pm-block-embed-pk-icon svg {
+  width: 10px;
+  height: 10px;
+}
+/* Row-page links: the single-pk cell value and the compound-key "#" cell. */
+.editor-host .pm-block-embed-rowlink {
+  color: #6429a8;
+  text-decoration: none;
+}
+.editor-host .pm-block-embed-rowlink:hover {
+  text-decoration: underline;
+}
+/* The compound-key "#" column: narrow, centred, its "#" a touch muted until
+   hover so it stays a quiet affordance beside the data. */
+.editor-host .pm-block-embed th.pm-block-embed-rowlink-col,
+.editor-host .pm-block-embed td.pm-block-embed-rowlink-col {
+  width: 1%;
+  text-align: center;
+  white-space: nowrap;
+}
+.editor-host .pm-block-embed td.pm-block-embed-rowlink-col .pm-block-embed-rowlink {
+  font-weight: 600;
+  opacity: 0.75;
+}
+.editor-host .pm-block-embed td.pm-block-embed-rowlink-col .pm-block-embed-rowlink:hover {
+  opacity: 1;
 }
 .editor-host .pm-block-embed-tables {
   list-style: none;

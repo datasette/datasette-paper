@@ -170,6 +170,37 @@ export function refSegments(ref: string): string[] {
     .filter(Boolean);
 }
 
+// @feat embed-pk-links: Datasette tilde-encoding for row-page pk path segments
+/**
+ * Datasette's tilde-encoding for a row-PK path segment — a faithful port of
+ * `datasette.utils.tilde_encode`. Encode the string as UTF-8; each byte in the
+ * unreserved set `[A-Za-z0-9_-]` passes through, a space becomes `+`, and every
+ * other byte becomes `~XX` (uppercase hex). So `/` → `~2F`, `.` → `~2E`, `~` →
+ * `~7E`, `,` → `~2C`: this keeps a pk value disjoint from the `/`-delimited row
+ * path and the `,` that joins the parts of a compound key. Datasette's route
+ * resolver tilde-decodes the segment back, so a value containing any delimiter
+ * round-trips unambiguously.
+ */
+export function tildeEncode(s: string): string {
+  let out = "";
+  for (const b of new TextEncoder().encode(s)) {
+    if (
+      b === 0x2d || // -
+      (b >= 0x30 && b <= 0x39) || // 0-9
+      (b >= 0x41 && b <= 0x5a) || // A-Z
+      b === 0x5f || // _
+      (b >= 0x61 && b <= 0x7a) // a-z
+    ) {
+      out += String.fromCharCode(b);
+    } else if (b === 0x20) {
+      out += "+"; // space
+    } else {
+      out += "~" + b.toString(16).toUpperCase().padStart(2, "0");
+    }
+  }
+  return out;
+}
+
 /** The native `.json` URL for a ref path (`/db/table` → `/db/table.json`). */
 function jsonUrl(ref: string, query = ""): string {
   const path = "/" + refSegments(ref).join("/");

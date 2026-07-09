@@ -25,6 +25,7 @@ import {
   kindIcon,
   refSegments,
   safeHref,
+  tildeEncode,
   type CellValue,
   type EmbedPayload,
 } from "./datasetteEmbed";
@@ -1159,10 +1160,21 @@ export class BlockEmbedView implements NodeView {
     // "Visible" = the author's selection, or every column when unset — the
     // same source the picker seeds from. Hiding the last visible column
     // would render nothing, so that item disappears instead (Datasette's
-    // ">1 visible" cog condition).
+    // ">1 visible" cog condition). A primary key can't be hidden at all —
+    // Datasette re-adds it to every projection — so it shows disabled with the
+    // reason rather than silently vanishing (which would read as "not here").
     const visible = this.selectedColumns() ?? this.allColumns;
     const remaining = visible.filter((c) => c !== col);
-    if (remaining.length) {
+    if (this.primaryKeys.includes(col)) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "pm-block-embed-menu-item pm-block-embed-menu-item--disabled";
+      b.disabled = true;
+      b.textContent = "Hide this column";
+      b.prepend(this.svgIcon("eyeSlash"));
+      b.title = "Primary key — always included by Datasette, can't be hidden";
+      menu.appendChild(b);
+    } else if (remaining.length) {
       item("eyeSlash", "Hide this column", () => {
         this.writeConfig({ ...(this.node.attrs.config ?? {}), columns: remaining });
       });
@@ -1403,15 +1415,41 @@ export class BlockEmbedView implements NodeView {
     scroll.className = "pm-block-embed-scroll";
     const table = document.createElement("table");
 
+    // @feat embed-pk-links: pk-aware header icons, per-row row-page links
+    // Primary keys the render actually shows (Datasette re-adds pks to any
+    // `_col` projection, so normally all of them). Row links need every pk
+    // column present to address a row; a single pk turns its own cell into the
+    // link, a compound pk gets a leading "#" column instead.
+    const pkSet = new Set(payload.primaryKeys);
+    const pkIndices = payload.primaryKeys.map((c) => payload.columns.indexOf(c));
+    const allPksShown = payload.primaryKeys.length > 0 && pkIndices.every((i) => i >= 0);
+    const singlePkIndex = allPksShown && payload.primaryKeys.length === 1 ? pkIndices[0] : -1;
+    const showRowlinkCol = allPksShown && payload.primaryKeys.length > 1;
+
     const thead = document.createElement("thead");
     const htr = document.createElement("tr");
     const sort = this.sort();
     // The rendered index of the sorted column, so its body cells get the same
     // tint as its header (-1 when the sort column isn't among the shown ones).
     const sortedColIndex = sort ? payload.columns.indexOf(sort.column) : -1;
+    // Leading unnamed header for the compound-key "#" row-link column.
+    if (showRowlinkCol) {
+      const th = document.createElement("th");
+      th.className = "pm-block-embed-rowlink-col";
+      th.setAttribute("aria-label", "Row link");
+      htr.appendChild(th);
+    }
     for (const col of payload.columns) {
       const th = document.createElement("th");
       th.appendChild(document.createTextNode(col)); // text node
+      // Primary-key columns carry a key glyph, shown to EVERYONE — the same
+      // signal the Columns picker uses for its always-on pk rows.
+      if (pkSet.has(col)) {
+        const key = this.svgIcon("keyFill");
+        key.classList.add("pm-block-embed-pk-icon");
+        th.appendChild(key);
+        th.title = "Primary key column";
+      }
       // Passive sort indicator on the sorted column — rendered for EVERYONE
       // (viewers included); only the config-writing menu below is gated.
       if (sort?.column === col) {
@@ -1431,11 +1469,30 @@ export class BlockEmbedView implements NodeView {
     const tbody = document.createElement("tbody");
     for (const row of payload.rows) {
       const tr = document.createElement("tr");
+      const rowHref =
+        allPksShown ? this.rowPageHref(payload.href, row, pkIndices) : null;
+      // Compound-key row-link cell: a "#" anchor to the row page.
+      if (showRowlinkCol) {
+        const td = document.createElement("td");
+        td.className = "pm-block-embed-rowlink-col";
+        if (rowHref) td.appendChild(this.rowLink(rowHref, "#"));
+        tr.appendChild(td);
+      }
       row.forEach((cell, i) => {
         const td = document.createElement("td");
         if (i === sortedColIndex) td.classList.add("pm-block-embed-col-sorted");
-        // @feat result-cells: block-embed cells render clamped + expandable
-        renderResultValue(td, cell); // text nodes only
+        // Single-pk cell becomes the row link (value as its text); every other
+        // cell renders plain.
+        if (i === singlePkIndex && rowHref) {
+          const a = this.rowLink(rowHref);
+          a.classList.add("pm-block-embed-pk-link");
+          // @feat result-cells: block-embed cells render clamped + expandable
+          renderResultValue(a, cell); // text nodes only, inside the link
+          td.appendChild(a);
+        } else {
+          // @feat result-cells: block-embed cells render clamped + expandable
+          renderResultValue(td, cell); // text nodes only
+        }
         tr.appendChild(td);
       });
       tbody.appendChild(tr);
@@ -1479,16 +1536,57 @@ export class BlockEmbedView implements NodeView {
   }
 
   /**
+   * The `/db/table` path for a ref, rebuilt from its segments so a crafted
+   * `href` can't inject extra path/query (the exportUrl trick). The base for
+   * both the table-page link and the per-row links.
+   */
+  private tablePath(href: string): string {
+    return "/" + refSegments(href).map(encodeURIComponent).join("/");
+  }
+
+  /**
    * The header title-link URL for a table/view: Datasette's own table page
    * with the embed's filters, sort, and column subset already applied, so
-   * clicking through shows exactly what the embed shows. Path rebuilt from
-   * the ref segments so it can't be poisoned (the exportUrl trick). Fetch-only
-   * params (`_shape`/`_extra`/`_size`) are never carried: the page picks its own.
+   * clicking through shows exactly what the embed shows. Fetch-only params
+   * (`_shape`/`_extra`/`_size`) are never carried: the page picks its own.
    */
   private tablePageHref(href: string): string {
-    const path = "/" + refSegments(href).map(encodeURIComponent).join("/");
+    const path = this.tablePath(href);
     const query = this.shareableParams().toString();
     return query ? `${path}?${query}` : path;
+  }
+
+  // @feat embed-pk-links: build a Datasette row-page URL from a row's pk cells
+  /**
+   * The Datasette row-page URL for one rendered row: `/db/table/<pk-path>`,
+   * where the pk path is each primary-key cell tilde-encoded and joined by `,`
+   * (Datasette's compound-key delimiter). `pkIndices` are the pk columns'
+   * positions in the rendered row. Returns null when any pk cell isn't a plain
+   * scalar (null / blob) — such a row can't be addressed, so it gets no link.
+   */
+  private rowPageHref(href: string, row: CellValue[], pkIndices: number[]): string | null {
+    const parts: string[] = [];
+    for (const i of pkIndices) {
+      const v = row[i];
+      if (typeof v !== "string" && typeof v !== "number") return null;
+      parts.push(tildeEncode(String(v)));
+    }
+    return `${this.tablePath(href)}/${parts.join(",")}`;
+  }
+
+  /**
+   * An anchor to a row page. Base class + hover title shared by the single-pk
+   * cell link (value as its content) and the compound-key "#" link (pass the
+   * `#` glyph as `text`). Same-tab navigation, matching the header/footer
+   * links; `stopEvent` lets the browser handle the click (PM doesn't select).
+   */
+  private rowLink(href: string, text?: string): HTMLAnchorElement {
+    const a = document.createElement("a");
+    a.className = "pm-block-embed-rowlink";
+    a.href = safeHref(href);
+    a.title = "Open this row in Datasette";
+    if (text != null) a.textContent = text; // text node
+    return a;
   }
 
   /**
