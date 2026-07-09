@@ -48,7 +48,18 @@ export function moveToLineBoundary(dir: -1 | 1, extend: boolean): Command {
     const top = (caret.top + caret.bottom) / 2;
     const found = view.posAtCoords({ left, top });
     if (!found) return true;
-    const head = found.pos;
+    let head = found.pos;
+    // `posAtCoords` probes the editor's far-left/right *content* edge. For an
+    // indented block — a list item, whose bullet sits in the list's left
+    // padding — that x lands in the gutter, and Chromium resolves it to a
+    // position OUTSIDE the caret's textblock: the `list_item` boundary just
+    // before its paragraph. Moving the caret there and typing splits the item
+    // into two paragraphs (the reported bug). A visual line never spans more
+    // than one textblock, so clamp the boundary into the caret's own textblock.
+    const $head = selection.$head;
+    if ($head.parent.inlineContent) {
+      head = Math.min($head.end(), Math.max($head.start(), head));
+    }
     const anchor = extend ? selection.anchor : head;
     const next = TextSelection.create(state.doc, anchor, head);
     // No-op at an existing boundary — still return true to swallow the key.

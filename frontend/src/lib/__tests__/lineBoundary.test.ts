@@ -75,6 +75,48 @@ describe("moveToLineBoundary", () => {
     view.destroy();
   });
 
+  it("clamps a list-gutter probe to the paragraph start, not the list_item boundary", () => {
+    // Regression: for a list item, the bullet sits in the list's left padding,
+    // so the far-left probe (view.dom.left) lands in the gutter. Chromium's
+    // posAtCoords there resolves to a position INSIDE the list_item but BEFORE
+    // its paragraph (the list_item boundary). Moving the caret there and typing
+    // split the item into two paragraphs. The command must clamp the boundary
+    // into the caret's own textblock (the paragraph).
+    const LIST_ITEM_BOUNDARY = 2; // inside list_item, before the paragraph
+    const PARA_START = 3; // just inside the paragraph
+    const PARA_END = 3 + "line item".length;
+
+    const doc = schema.node("doc", null, [
+      schema.node("bullet_list", null, [
+        schema.node("list_item", null, [
+          schema.node("paragraph", null, [schema.text("line item")]),
+        ]),
+      ]),
+    ]);
+    let state = EditorState.create({ doc });
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, PARA_END)),
+    );
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const view = new EditorView(mount, { state });
+    view.dom.getBoundingClientRect = () =>
+      ({ left: 0, right: 100, top: 0, bottom: 10 }) as DOMRect;
+    view.coordsAtPos = () => ({ left: 50, right: 50, top: 0, bottom: 10 });
+    // The far-left probe misresolves to the list_item boundary (the bug).
+    view.posAtCoords = ({ left }) =>
+      left < 50
+        ? { pos: LIST_ITEM_BOUNDARY, inside: -1 }
+        : { pos: PARA_END, inside: -1 };
+
+    moveToLineBoundary(-1, false)(view.state, view.dispatch.bind(view), view);
+
+    const sel = view.state.selection;
+    expect(sel.head).toBe(PARA_START);
+    expect(view.state.doc.resolve(sel.head).parent.type.name).toBe("paragraph");
+    view.destroy();
+  });
+
   it("consumes the key even when geometry is unavailable (jsdom bail)", () => {
     const view = viewAt(LINE_START);
     view.coordsAtPos = () => {
