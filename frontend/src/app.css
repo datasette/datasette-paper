@@ -52,13 +52,12 @@
   --pp-warn: #8a5a00;
   /* Warning wash background. */
   --pp-warn-bg: #fff8ec;
-  /* Text selection highlight. Not yet consumed in editor.css — declared for
-   * a later ticket (::selection / cursor highlighting). */
+  /* Text selection highlight (the ::selection rule further down; dark raises
+   * the alpha so the selection stays perceptible on a dark bg). */
   --pp-selection: rgba(11, 92, 173, 0.18);
   /* Elevation box-shadow for floating menus/dialogs/tooltips. */
   --pp-shadow: rgba(0, 0, 0, 0.12);
-  /* Modal backdrop. Not yet consumed in editor.css — declared for a later
-   * ticket (no modal overlay lives in this file today). */
+  /* Modal backdrop (dialog components). */
   --pp-overlay: rgba(0, 0, 0, 0.35);
   /* Keyboard-focus outline/border color. */
   --pp-focus-ring: #0b5cad;
@@ -147,6 +146,14 @@
     --pp-table-header-bg: #1a2029;
     --pp-selected-cell: rgba(74, 158, 255, 0.22);
   }
+}
+
+/* Text selection reads the palette on paper pages (scoped like the chrome
+ * overrides below, so other Datasette pages keep the browser default). The
+ * dark value raises the alpha — the light-theme wash is imperceptible on a
+ * dark background (see plans/dark/04-accessibility.md). */
+body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) ::selection {
+  background: var(--pp-selection);
 }
 
 /* ── Datasette chrome overrides (DARK ONLY) ─────────────────────────────────

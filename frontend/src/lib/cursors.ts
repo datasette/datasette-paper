@@ -29,6 +29,9 @@ export function colorFor(key: string | number): string {
 }
 
 /**
+ * @feat dark-mode: per-hue cursor-label text color — identity hues stay
+ * stable across themes, so the label ink is computed rather than themed.
+ *
  * Pick a readable label text color for a given identity hue.
  *
  * The 12-color PALETTE mixes dark hues (purple, maroon, teal) with light

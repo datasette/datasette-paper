@@ -1,4 +1,7 @@
 /**
+ * @feat dark-mode: the contrast gate — every text-on-surface token pairing
+ * must clear WCAG AA in every theme the palette declares, per the table below.
+ *
  * Theme contrast gate — ticket plans/dark/tickets/03-contrast-gate.md.
  *
  * Parses the `--pp-*` semantic-palette token blocks out of
