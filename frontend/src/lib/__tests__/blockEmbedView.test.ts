@@ -402,62 +402,202 @@ describe("BlockEmbedView", () => {
 
   // ── Ticket 01: export menu ────────────────────────────────────────────────
 
+  // The overflow ⋮ menu (scoped away from the per-column ▾ menus, which share
+  // the base .pm-block-embed-menu-item class).
+  function overflow(view: BlockEmbedView): HTMLElement {
+    return view.dom.querySelector(
+      ".pm-block-embed-menu:not(.pm-block-embed-col-menu)",
+    ) as HTMLElement;
+  }
   function exportItems(view: BlockEmbedView): HTMLElement[] {
-    return [...view.dom.querySelectorAll(".pm-block-embed-menu .pm-block-embed-menu-item")] as HTMLElement[];
+    return [...overflow(view).querySelectorAll(".pm-block-embed-menu-item")] as HTMLElement[];
+  }
+  function menuItem(view: BlockEmbedView, label: string): HTMLButtonElement {
+    return exportItems(view).find((i) => i.textContent === label) as HTMLButtonElement;
   }
 
-  it("adds all-rows CSV/JSON download links to the ⋮ menu for a table (no single-page copy)", async () => {
+  it("orders the table ⋮ menu: Filter & sort, Columns, Convert, Download, Copy", async () => {
     const view = await build("/data/vendors", {
       columns: ["id", "name"],
       rows: [[1, "Acme"]],
       count: 30,
     });
-    const items = exportItems(view);
-    const labels = items.map((i) => i.textContent);
-    expect(labels).toContain("Download CSV (all rows)");
-    expect(labels).toContain("Download JSON (all rows)");
-    // The single-page "Copy as …" items were removed — export is always all rows.
-    expect(labels.some((l) => l!.startsWith("Copy as"))).toBe(false);
-    // "Convert to inline element" is still present.
-    expect(labels).toContain("Convert to inline element");
-  });
-
-  it("orders the table ⋮ menu: Filter & sort, Columns, Convert, then downloads", async () => {
-    const view = await build("/data/vendors", {
-      columns: ["id", "name"],
-      rows: [[1, "Acme"]],
-      count: 30,
-    });
-    // Scope to the overflow ⋮ menu — the per-column ▾ menus share the base
-    // .pm-block-embed-menu-item class that exportItems() picks up.
-    const overflow = view.dom.querySelector(
-      ".pm-block-embed-menu:not(.pm-block-embed-col-menu)",
-    )!;
-    const labels = [...overflow.querySelectorAll(".pm-block-embed-menu-item")].map(
-      (i) => i.textContent,
-    );
-    expect(labels).toEqual([
+    expect(exportItems(view).map((i) => i.textContent)).toEqual([
       "Filter & sort…",
       "Columns…",
       "Convert to inline element",
-      "Download CSV (all rows)",
-      "Download JSON (all rows)",
+      "Download",
+      "Copy",
     ]);
   });
 
-  it("download links point at Datasette's native streaming endpoints", async () => {
+  it("Download ▸ opens a CSV/JSON submenu with a Back row", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id", "name"],
+      rows: [[1, "Acme"]],
+      count: 30,
+    });
+    menuItem(view, "Download").click();
+    const items = exportItems(view);
+    // Back row (labelled with the section) + the two format leaves.
+    expect(items[0].classList.contains("pm-block-embed-menu-item--back")).toBe(true);
+    expect(items.slice(1).map((i) => i.textContent)).toEqual(["CSV", "JSON"]);
+    // Back returns to the main menu.
+    items[0].click();
+    expect(exportItems(view).map((i) => i.textContent)).toContain("Filter & sort…");
+  });
+
+  // Build an editable table embed whose fetch stub answers the initial embed
+  // load AND the later full-result-set export fetches (CSV `_stream`, or the
+  // paginated JSON `_size=max`) with distinct bodies keyed off the URL.
+  async function buildExport(opts: {
+    embed: Record<string, unknown>;
+    csv?: string;
+    json?: { columns: string[]; rows: unknown[][] };
+  }): Promise<{ view: BlockEmbedView; fetchMock: ReturnType<typeof vi.fn> }> {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes(".csv"))
+        return { ok: true, status: 200, text: async () => opts.csv ?? "" };
+      if (url.includes("_size=max"))
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ...(opts.json ?? { columns: [], rows: [] }), next: null }),
+        };
+      return { ok: true, status: 200, json: async () => opts.embed };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const node = schema.nodes.block_embed.create({ ref: "/data/vendors" });
+    const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
+    // Attach so the export leaves are `isConnected` (the done-UI is skipped for
+    // a torn-down submenu, which a detached NodeView dom would otherwise look like).
+    document.body.appendChild(view.dom);
+    await new Promise((r) => setTimeout(r, 0));
+    return { view, fetchMock };
+  }
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  // The CSV/JSON leaves of an open Download/Copy submenu ([back, CSV, JSON]).
+  function exportLeaves(view: BlockEmbedView): HTMLButtonElement[] {
+    return exportItems(view).filter((i) =>
+      i.classList.contains("pm-block-embed-export-leaf"),
+    ) as HTMLButtonElement[];
+  }
+
+  it("Copy ▸ CSV fetches the whole result set (stream) and copies it", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const { view, fetchMock } = await buildExport({
+      embed: { columns: ["id", "name"], rows: [[1, "Acme"]], count: 30 },
+      csv: "id,name\n1,Acme\n2,Globex",
+    });
+    menuItem(view, "Copy").click();
+    const csvLeaf = exportLeaves(view)[0];
+    csvLeaf.click();
+    // While the fetch is in flight the leaf reads "Copying…".
+    expect(csvLeaf.textContent).toContain("Copying…");
+    await flush();
+    // The streamed CSV endpoint was hit and its full text copied.
+    expect(fetchMock.mock.calls.some(([u]) => u.includes(".csv?") && u.includes("_stream=on"))).toBe(true);
+    expect(writeText).toHaveBeenCalledWith("id,name\n1,Acme\n2,Globex");
+    expect(csvLeaf.textContent).toContain("Copied");
+    view.destroy();
+  });
+
+  it("Copy ▸ JSON pages the full result set and copies it as JSON", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const { view, fetchMock } = await buildExport({
+      embed: { columns: ["id", "name"], rows: [[1, "Acme"]], count: 30 },
+      json: { columns: ["id", "name"], rows: [[1, "Acme"], [2, "Globex"]] },
+    });
+    menuItem(view, "Copy").click();
+    exportLeaves(view)[1].click(); // JSON
+    await flush();
+    // Paged export URL: _shape=arrays + _size=max + _extra=columns (arrays shape
+    // omits the header otherwise, which would break rowsToJson).
+    const jsonCall = fetchMock.mock.calls.find(
+      ([u]) => u.includes(".json?") && u.includes("_size=max"),
+    );
+    expect(jsonCall).toBeTruthy();
+    expect(jsonCall![0]).toContain("_extra=columns");
+    expect(writeText).toHaveBeenCalledWith(
+      JSON.stringify(
+        [
+          { id: 1, name: "Acme" },
+          { id: 2, name: "Globex" },
+        ],
+        null,
+        2,
+      ),
+    );
+    view.destroy();
+  });
+
+  it("Download ▸ CSV saves the fetched result set as a client-side blob", async () => {
+    const urlObj = URL as unknown as Record<string, unknown>;
+    const createObjectURL = vi.fn((_blob: Blob) => "blob:fake");
+    const revokeObjectURL = vi.fn();
+    urlObj.createObjectURL = createObjectURL;
+    urlObj.revokeObjectURL = revokeObjectURL;
+    let clicked: { download: string } | null = null;
+    const clickSpy = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        clicked = { download: this.download };
+      });
+    try {
+      const { view } = await buildExport({
+        embed: { columns: ["id", "name"], rows: [[1, "Acme"]], count: 30 },
+        csv: "id,name\n1,Acme\n2,Globex",
+      });
+      menuItem(view, "Download").click();
+      exportLeaves(view)[0].click(); // CSV
+      await flush();
+      expect(createObjectURL).toHaveBeenCalledTimes(1);
+      const blob = createObjectURL.mock.calls[0][0];
+      expect(blob.type).toContain("text/csv");
+      expect(blob.size).toBe("id,name\n1,Acme\n2,Globex".length);
+      expect(clicked!.download).toBe("data-vendors.csv");
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake");
+      view.destroy();
+    } finally {
+      clickSpy.mockRestore();
+      delete urlObj.createObjectURL;
+      delete urlObj.revokeObjectURL;
+    }
+  });
+
+  it("warns on the CSV/JSON leaves for a count-truncated (huge) table", async () => {
     const view = await build("/data/vendors", {
       columns: ["id"],
       rows: [[1]],
-      count: 30,
+      count: 10001,
+      count_truncated: true,
     });
-    const links = exportItems(view).filter(
-      (i) => i.tagName === "A",
-    ) as HTMLAnchorElement[];
-    const csv = links.find((a) => a.textContent!.startsWith("Download CSV"))!;
-    const json = links.find((a) => a.textContent!.startsWith("Download JSON"))!;
-    expect(csv.getAttribute("href")).toBe("/data/vendors.csv?_stream=on");
-    expect(json.getAttribute("href")).toBe("/data/vendors.json?_shape=array");
+    menuItem(view, "Download").click();
+    const leaves = exportItems(view).filter((i) =>
+      i.classList.contains("pm-block-embed-export-leaf"),
+    );
+    expect(leaves).toHaveLength(2);
+    for (const leaf of leaves) {
+      const warn = leaf.querySelector(".pm-block-embed-count-warn") as HTMLElement;
+      expect(warn).not.toBeNull();
+      expect(warn.getAttribute("aria-label")).toContain("10,000+ rows");
+    }
+    view.destroy();
+  });
+
+  it("shows no export warning when the count is exact (not truncated)", async () => {
+    const view = await build("/data/vendors", {
+      columns: ["id"],
+      rows: [[1]],
+      count: 537,
+    });
+    menuItem(view, "Copy").click();
+    for (const leaf of exportLeaves(view)) {
+      expect(leaf.querySelector(".pm-block-embed-count-warn")).toBeNull();
+    }
+    view.destroy();
   });
 
   it("offers no export items for a non-table embed (row card)", async () => {
@@ -731,34 +871,6 @@ describe("BlockEmbedView", () => {
     expect(query.getAll("_col")).toEqual(["name"]);
   });
 
-  it("carries filters/sort/_col on the CSV/JSON export links (same filtered slice)", async () => {
-    stubFetch({ columns: ["id", "name"], rows: [[1, "Acme"]], count: 1 });
-    const node = schema.nodes.block_embed.create({
-      ref: "/data/vendors",
-      config: FILTERED_CONFIG,
-    });
-    const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
-    await new Promise((r) => setTimeout(r, 0));
-    const links = [
-      ...view.dom.querySelectorAll(".pm-block-embed-menu .pm-block-embed-menu-item"),
-    ].filter((i) => i.tagName === "A") as HTMLAnchorElement[];
-    const csv = links.find((a) => a.textContent!.startsWith("Download CSV"))!;
-    const json = links.find((a) => a.textContent!.startsWith("Download JSON"))!;
-
-    expect(csv.getAttribute("href")!.startsWith("/data/vendors.csv?")).toBe(true);
-    const csvQuery = new URLSearchParams(csv.getAttribute("href")!.split("?")[1]);
-    expect(csvQuery.get("_stream")).toBe("on");
-    expect(csvQuery.get("state__exact")).toBe("CA");
-    expect(csvQuery.get("_sort_desc")).toBe("population");
-    expect(csvQuery.getAll("_col")).toEqual(["name"]);
-
-    const jsonQuery = new URLSearchParams(json.getAttribute("href")!.split("?")[1]);
-    expect(jsonQuery.get("_shape")).toBe("array");
-    expect(jsonQuery.get("state__exact")).toBe("CA");
-    expect(jsonQuery.get("_sort_desc")).toBe("population");
-    expect(jsonQuery.getAll("_col")).toEqual(["name"]);
-  });
-
   it("a crafted filter value stays one encoded param on the title link", async () => {
     stubFetch({ columns: ["id"], rows: [[1]], count: 1 });
     const node = schema.nodes.block_embed.create({
@@ -844,9 +956,9 @@ describe("BlockEmbedView", () => {
       () => false,
     );
     const labels = menuLabels(view);
-    // Download links stay — they dispatch nothing.
-    expect(labels).toContain("Download CSV (all rows)");
-    expect(labels).toContain("Download JSON (all rows)");
+    // Download/Copy stay — they only serialize already-fetched rows.
+    expect(labels).toContain("Download");
+    expect(labels).toContain("Copy");
     expect(labels).not.toContain("Columns…");
     expect(labels).not.toContain("Filter & sort…");
     expect(labels).not.toContain("Convert to inline element");

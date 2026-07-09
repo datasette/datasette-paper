@@ -22,6 +22,7 @@ import {
   kindIcon,
   refSegments,
   safeHref,
+  type CellValue,
   type EmbedPayload,
 } from "./datasetteEmbed";
 import {
@@ -29,6 +30,7 @@ import {
   markOverflowingCells,
   renderResultValue,
 } from "./resultCell";
+import { rowsToJson } from "./tableExport";
 import {
   FILTER_OPS,
   filterOpByKey,
@@ -72,6 +74,9 @@ export class BlockEmbedView implements NodeView {
   // The current ⋮ overflow-menu body element (whether open or not), so the
   // header's filter badge can open it and jump straight to the filter panel.
   private overflowMenuEl: HTMLElement | null = null;
+  // Timer for the export "Copied ✓/Downloaded ✓" confirmation → close, so it can
+  // be cancelled (Back, a new export, destroy) rather than firing on stale DOM.
+  private exportTimer: ReturnType<typeof setTimeout> | null = null;
   // Cleanup returned by a third-party provider's mount(), if any.
   private cleanupExternal: (() => void) | null = null;
   // The last table/view payload rendered, if any — drives the export items
@@ -362,31 +367,31 @@ export class BlockEmbedView implements NodeView {
   }
 
   /**
-   * The "⋮" overflow menu. Always offers "Convert to inline element" (block →
-   * inline downgrade). For a table/view it also offers, top to bottom:
+   * The "⋮" overflow menu. For a table/view, top to bottom:
    *
    *  - **Filter & sort… / Columns…** — config-writing editor panels that swap
    *    the menu body in place (editors only).
-   *  - **Download CSV / JSON (all rows)** — links to Datasette's *native*
-   *    streaming endpoints (`.csv?_stream=on`, `.json?_shape=array`), which
-   *    export the *entire* table/view server-side, bypassing the embed's
-   *    `_size` page cap. `.csv?_stream=on` is gated by the `allow_csv_stream`
-   *    setting (default on). There is no single-page copy option — export is
-   *    always the whole dataset.
+   *  - **Convert to inline element** — block → inline downgrade (editors only).
+   *  - **Download ▸ / Copy ▸** — submenus (CSV / JSON) that operate on the rows
+   *    currently held on the client (`payload.rows` — one `_size` page), NOT the
+   *    whole server-side table. Both carry a warning when that's only a slice of
+   *    the table, so a 10-row copy of a million-row table is never mistaken for
+   *    the whole thing. Available to everyone — they neither edit nor write
+   *    config, they just serialize already-fetched data.
    *
    * The menu is positioned within the embed (tall enough not to clip it) and
-   * closes on outside click.
-   *
-   * Items that dispatch a transaction or write config (Filter & sort…, Columns…,
-   * Convert to inline element) render only when `view.editable` — the live
-   * EditorView prop, same gate as tagView/linkOpen. Read-only viewers keep the
-   * download links (and the refresh button in the header); returns null when no
-   * item is available so the header can skip the button entirely.
+   * closes on outside click. Config/edit items render only when `view.editable`.
+   * Returns null when no item is available so the header can skip the button.
    */
   private overflowMenu(): HTMLElement | null {
-    const canEdit = !!this.view.editable;
     const wrap = document.createElement("div");
     wrap.className = "pm-block-embed-menu-wrap";
+
+    const menu = document.createElement("div");
+    menu.className = "pm-block-embed-menu";
+    // Cleared here so a render that produces no menu body (returns null below)
+    // doesn't leave the badge pointing at a stale, detached menu element.
+    this.overflowMenuEl = null;
 
     const btn = document.createElement("button");
     btn.type = "button";
@@ -401,18 +406,25 @@ export class BlockEmbedView implements NodeView {
     });
     wrap.appendChild(btn);
 
-    const menu = document.createElement("div");
-    menu.className = "pm-block-embed-menu";
-    // Cleared here so a render that produces no menu body (returns null below)
-    // doesn't leave the badge pointing at a stale, detached menu element.
-    this.overflowMenuEl = null;
+    this.populateMainMenu(menu);
+    if (!menu.childElementCount) return null;
+    wrap.appendChild(menu);
+    this.overflowMenuEl = menu;
+    return wrap;
+  }
 
+  /**
+   * Fill (or refill, from a submenu's "Back") the ⋮ menu body with its
+   * top-level items. Split from overflowMenu() so the Download/Copy submenus can
+   * restore the main menu in place without rebuilding the whole header.
+   */
+  private populateMainMenu(menu: HTMLElement): void {
+    menu.replaceChildren();
+    const canEdit = !!this.view.editable;
     const payload = this.tablePayload;
-    // Order (top → bottom): the config-writing editor actions first (Filter &
-    // sort, then Columns), then the document edit (Convert to inline), then the
-    // all-rows download links. Read-only viewers see only the downloads.
+
+    // Config-writing editor actions first (Filter & sort, then Columns).
     if (payload && canEdit && this.allColumns.length) {
-      // Filter & sort form — config-writing, editors only.
       const filters = document.createElement("button");
       filters.type = "button";
       filters.className = "pm-block-embed-menu-item";
@@ -426,12 +438,10 @@ export class BlockEmbedView implements NodeView {
       });
       menu.appendChild(filters);
 
-      // Column picker — config-writing, same gate as Filter & sort.
       const cols = document.createElement("button");
       cols.type = "button";
       cols.className = "pm-block-embed-menu-item";
       cols.textContent = "Columns…";
-      // Like Filter & sort, swaps the menu body for the checklist in place.
       cols.addEventListener("click", (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -447,20 +457,226 @@ export class BlockEmbedView implements NodeView {
       );
     }
 
+    // Download / Copy operate on the client-held rows only (one _size page),
+    // never a server-side full-table export — a huge table can't be pulled down
+    // by accident. Each opens a CSV/JSON submenu in place.
     if (payload) {
-      // Native full-dataset download links — server-side, always the whole
-      // table/view (not just the held page), so no single-page copy option.
       menu.appendChild(
-        this.menuLink("Download CSV (all rows)", this.exportUrl(payload, "csv")),
+        this.submenuParent("Download", () => this.showExportSubmenu(menu, "download")),
       );
       menu.appendChild(
-        this.menuLink("Download JSON (all rows)", this.exportUrl(payload, "json")),
+        this.submenuParent("Copy", () => this.showExportSubmenu(menu, "copy")),
       );
     }
-    if (!menu.childElementCount) return null;
-    wrap.appendChild(menu);
-    this.overflowMenuEl = menu;
-    return wrap;
+  }
+
+  /** A top-level ⋮ item that opens a submenu: the label + a trailing chevron. */
+  private submenuParent(label: string, open: () => void): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pm-block-embed-menu-item pm-block-embed-menu-item--parent";
+    b.appendChild(document.createTextNode(label));
+    const trail = document.createElement("span");
+    trail.className = "pm-block-embed-menu-trail";
+    const chevron = this.svgIcon("chevronRight");
+    chevron.classList.add("pm-block-embed-menu-chevron");
+    trail.appendChild(chevron);
+    b.appendChild(trail);
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      open();
+    });
+    return b;
+  }
+
+  /**
+   * Swap the ⋮ menu body for a Download/Copy submenu: a "Back" row that restores
+   * the main menu, then CSV and JSON leaves. A leaf fetches the *entire* current
+   * result set (all filtered/sorted rows, not the held page — see
+   * `fetchExportText`), reporting progress in place: "Copying…"/"Downloading…"
+   * while the fetch runs, then "Copied ✓"/"Downloaded ✓" for ~1s. On a very large
+   * (count-truncated) table it carries a warning that the export may be slow.
+   */
+  private showExportSubmenu(menu: HTMLElement, mode: "download" | "copy"): void {
+    const payload = this.tablePayload;
+    if (!payload) return;
+    menu.replaceChildren();
+
+    const back = document.createElement("button");
+    back.type = "button";
+    back.className = "pm-block-embed-menu-item pm-block-embed-menu-item--back";
+    const backIcon = this.svgIcon("chevronLeft");
+    backIcon.classList.add("pm-block-embed-menu-chevron");
+    back.appendChild(backIcon);
+    back.appendChild(document.createTextNode(mode === "download" ? "Download" : "Copy"));
+    back.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.clearExportTimer();
+      this.populateMainMenu(menu);
+    });
+    menu.appendChild(back);
+
+    for (const format of ["csv", "json"] as const) {
+      menu.appendChild(this.exportLeaf(menu, payload, mode, format));
+    }
+  }
+
+  /**
+   * One CSV/JSON leaf of a Download/Copy submenu. The label lives in its own
+   * span so `runExport` can flip it through the busy/done states; a warning
+   * glyph rides alongside when the table is count-truncated (a full export will
+   * be large/slow).
+   */
+  private exportLeaf(
+    menu: HTMLElement,
+    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
+    mode: "download" | "copy",
+    format: "csv" | "json",
+  ): HTMLButtonElement {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "pm-block-embed-menu-item pm-block-embed-export-leaf";
+    const label = document.createElement("span");
+    label.className = "pm-block-embed-export-label";
+    label.textContent = format.toUpperCase();
+    b.appendChild(label);
+    if (payload.countTruncated) {
+      const trail = document.createElement("span");
+      trail.className = "pm-block-embed-menu-trail";
+      const verb = mode === "copy" ? "copy" : "download";
+      trail.appendChild(
+        this.warningIcon(
+          `This table has ${this.countPhrase(payload)} — exporting every row may be slow to ${verb}.`,
+        ),
+      );
+      b.appendChild(trail);
+    }
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void this.runExport(menu, b, label, payload, mode, format);
+    });
+    return b;
+  }
+
+  /**
+   * Fetch the whole result set and copy/download it, animating the leaf's label.
+   * Keeps the menu open so the "Copying…" → "Copied ✓" states are visible; the
+   * done state lingers ~1s, then the menu closes and resets to its main body.
+   * Re-entrancy-guarded via `data-busy` so a double-click can't double-fetch.
+   */
+  private async runExport(
+    menu: HTMLElement,
+    btn: HTMLButtonElement,
+    label: HTMLElement,
+    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
+    mode: "download" | "copy",
+    format: "csv" | "json",
+  ): Promise<void> {
+    if (btn.dataset.busy) return;
+    this.clearExportTimer();
+    btn.dataset.busy = "1";
+    btn.classList.add("pm-block-embed-export-leaf--busy");
+    label.textContent = mode === "copy" ? "Copying…" : "Downloading…";
+    try {
+      const text = await this.fetchExportText(payload, format);
+      if (mode === "copy") await navigator.clipboard?.writeText(text);
+      else this.saveBlob(payload, format, text);
+      // The action is done; if the submenu was torn down mid-fetch (Back, an
+      // outside click + reopen, a re-render), don't animate a detached node or
+      // schedule a surprise close.
+      if (!btn.isConnected) return;
+      btn.classList.remove("pm-block-embed-export-leaf--busy");
+      btn.classList.add("pm-block-embed-export-leaf--done");
+      const check = this.svgIcon("check");
+      check.classList.add("pm-block-embed-menu-chevron");
+      label.replaceChildren(check, document.createTextNode(mode === "copy" ? "Copied" : "Downloaded"));
+      // Linger on the confirmation, then close + reset so the next open is clean.
+      this.exportTimer = setTimeout(() => {
+        this.exportTimer = null;
+        this.closeMenu();
+        this.populateMainMenu(menu);
+      }, 1100);
+    } catch {
+      btn.classList.remove("pm-block-embed-export-leaf--busy");
+      btn.dataset.busy = "";
+      label.textContent = `${format.toUpperCase()} — failed, retry`;
+    }
+  }
+
+  private clearExportTimer(): void {
+    if (this.exportTimer != null) {
+      clearTimeout(this.exportTimer);
+      this.exportTimer = null;
+    }
+  }
+
+  /**
+   * Fetch the ENTIRE current result set as CSV/JSON text — every filtered/sorted
+   * row, not just the held page. CSV uses Datasette's `_stream=on` (unbounded,
+   * single request). JSON has no unbounded stream, so page through `_shape=arrays`
+   * (`_size=max`) following `next` until it runs out or a safety cap, then
+   * serialize with `rowsToJson`. Both carry the embed's filters/sort/columns via
+   * `shareableParams`. Same-origin fetch → the actor's cookie enforces perms.
+   */
+  private async fetchExportText(
+    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
+    format: "csv" | "json",
+  ): Promise<string> {
+    const path = "/" + refSegments(payload.href).map(encodeURIComponent).join("/");
+    if (format === "csv") {
+      const params = this.shareableParams();
+      params.set("_stream", "on");
+      const res = await fetch(`${path}.csv?${params.toString()}`);
+      if (!res.ok) throw new Error(`export failed (${res.status})`);
+      return res.text();
+    }
+    const MAX_ROWS = 100_000; // safety valve for pathologically large tables
+    const base = this.shareableParams();
+    base.set("_shape", "arrays");
+    base.set("_size", "max");
+    // `_shape=arrays` omits the column list unless asked — without it rowsToJson
+    // would key every row against an empty header. (`count` is deliberately not
+    // requested; we don't need it and it's the expensive extra.)
+    base.set("_extra", "columns");
+    let columns: string[] = [];
+    const rows: CellValue[][] = [];
+    let next: string | null = null;
+    do {
+      const params = new URLSearchParams(base);
+      if (next) params.set("_next", next);
+      const res = await fetch(`${path}.json?${params.toString()}`);
+      if (!res.ok) throw new Error(`export failed (${res.status})`);
+      const j = (await res.json()) as {
+        columns?: string[];
+        rows?: CellValue[][];
+        next?: string | null;
+      };
+      columns = j.columns ?? columns;
+      for (const r of j.rows ?? []) rows.push(r);
+      next = rows.length < MAX_ROWS ? (j.next ?? null) : null;
+    } while (next);
+    return rowsToJson(columns, rows);
+  }
+
+  /** Save already-serialized export text as a client-side download. */
+  private saveBlob(
+    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
+    format: "csv" | "json",
+    text: string,
+  ): void {
+    const mime = format === "csv" ? "text/csv;charset=utf-8" : "application/json";
+    const url = URL.createObjectURL(new Blob([text], { type: mime }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${payload.db}-${payload.label}.${format}`;
+    a.rel = "noopener";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
   }
 
   /**
@@ -890,40 +1106,6 @@ export class BlockEmbedView implements NodeView {
     return b;
   }
 
-  /** A menu item that's a download link (native streaming export endpoint). */
-  private menuLink(label: string, href: string): HTMLAnchorElement {
-    const a = document.createElement("a");
-    a.className = "pm-block-embed-menu-item";
-    a.href = href;
-    a.textContent = label;
-    // A bare GET to a same-origin .csv/.json — no new tab needed; the browser
-    // downloads (.csv) or shows (.json) it. Close the menu on activation.
-    a.addEventListener("click", () => this.closeMenu());
-    return a;
-  }
-
-  /**
-   * The native Datasette streaming-export URL for a table/view payload.
-   * `.csv?_stream=on` streams every row (bypasses row caps); `.json?_shape=array`
-   * gives a bare JSON array (paginated — the user follows `next` for the rest).
-   * Carries the embed's filters/sort/columns (`shareableParams`) so the export
-   * is the same filtered slice the embed shows, not the whole raw table. Built
-   * from the ref segments so it can't be poisoned by a crafted `href`.
-   */
-  private exportUrl(
-    payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
-    format: "csv" | "json",
-  ): string {
-    const path = "/" + refSegments(payload.href).map(encodeURIComponent).join("/");
-    const params = this.shareableParams();
-    if (format === "csv") {
-      params.set("_stream", "on");
-      return `${path}.csv?${params.toString()}`;
-    }
-    params.set("_shape", "array");
-    return `${path}.json?${params.toString()}`;
-  }
-
   private toggleMenu(menu: HTMLElement): void {
     if (this.menuEl === menu) {
       this.closeMenu();
@@ -1069,6 +1251,17 @@ export class BlockEmbedView implements NodeView {
     return `${formatInt(payload.count)} row${payload.count === 1 ? "" : "s"}`;
   }
 
+  /** An amber warning glyph carrying `msg` as its hover title + aria-label. */
+  private warningIcon(msg: string): HTMLElement {
+    const el = this.svgIcon("exclamationTriangle");
+    el.classList.add("pm-block-embed-count-warn");
+    el.setAttribute("aria-hidden", "false");
+    el.setAttribute("role", "img");
+    el.title = msg;
+    el.setAttribute("aria-label", msg);
+    return el;
+  }
+
   /**
    * A warning glyph (with a hover/aria explanation) shown next to a truncated
    * count: the embed is a page from a table Datasette declined to fully count,
@@ -1078,14 +1271,9 @@ export class BlockEmbedView implements NodeView {
     payload: Extract<EmbedPayload, { kind: "table" | "view" }>,
   ): HTMLElement {
     const limit = (payload.count ?? 1) - 1;
-    const el = this.svgIcon("exclamationTriangle");
-    el.classList.add("pm-block-embed-count-warn");
-    el.setAttribute("aria-hidden", "false");
-    el.setAttribute("role", "img");
-    const msg = `Datasette stopped counting at ${formatInt(limit)} rows — the table has more.`;
-    el.title = msg;
-    el.setAttribute("aria-label", msg);
-    return el;
+    return this.warningIcon(
+      `Datasette stopped counting at ${formatInt(limit)} rows — the table has more.`,
+    );
   }
 
   private renderTable(
@@ -1318,6 +1506,7 @@ export class BlockEmbedView implements NodeView {
 
   destroy(): void {
     this.editableObserver.disconnect();
+    this.clearExportTimer();
     this.closeMenu();
     this.disposeExternal();
   }

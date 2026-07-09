@@ -127,29 +127,28 @@ test.describe("slash menu + datasette embed", () => {
       embed.locator(".pm-block-embed-footer > :first-child"),
     ).toHaveClass(/pm-block-embed-footer-link/);
 
-    // Export menu (ticket 01): the ⋮ menu offers native streaming downloads.
+    // Export menu: ⋮ → Download ▸ opens a CSV/JSON submenu; CSV downloads the
+    // client-held rows (30 total, 10 held → the partial-slice warning shows).
     await embed.locator(".pm-block-embed-menu-btn").click();
     // :not(...) — the per-column ▾ menus share the base menu class.
     const exportMenu = embed.locator(
       ".pm-block-embed-menu:not(.pm-block-embed-col-menu)",
     );
     await expect(exportMenu).toHaveClass(/pm-block-embed-menu--open/);
-    await expect(
-      exportMenu.locator(".pm-block-embed-menu-item", {
-        hasText: "Download CSV",
-      }),
-    ).toHaveAttribute("href", /\/vendors\.csv\?_stream=on/);
-    await expect(
-      exportMenu.locator(".pm-block-embed-menu-item", {
-        hasText: "Download JSON",
-      }),
-    ).toHaveAttribute("href", /\/vendors\.json\?_shape=array/);
-    // Export is always the whole dataset — no single-page "Copy as …" item.
-    await expect(
-      exportMenu.locator(".pm-block-embed-menu-item", { hasText: "Copy as" }),
-    ).toHaveCount(0);
-    // Close the menu before continuing.
-    await page.keyboard.press("Escape");
+    // Top level: Download + Copy submenu parents.
+    await expect(exportMenu.getByText("Download", { exact: true })).toBeVisible();
+    await expect(exportMenu.getByText("Copy", { exact: true })).toBeVisible();
+    // Open Download ▸ → the CSV/JSON leaves appear.
+    await exportMenu.getByText("Download", { exact: true }).click();
+    const csvLeaf = exportMenu.getByText("CSV", { exact: true });
+    await expect(csvLeaf).toBeVisible();
+    await expect(exportMenu.getByText("JSON", { exact: true })).toBeVisible();
+    // Clicking CSV triggers a client-side download of the held rows.
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      csvLeaf.click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/vendors\.csv$/);
 
     // Persisted as ref-only: after a reload the NodeView re-fetches + renders.
     await waitForServerVersion(page, host.id, 1);
@@ -399,8 +398,7 @@ test.describe("block-embed filters", () => {
     await expect(
       menu.locator(".pm-block-embed-menu-item", { hasText: "Columns…" }),
     ).toHaveCount(0);
-    await expect(
-      menu.locator(".pm-block-embed-menu-item", { hasText: "Download CSV" }),
-    ).toBeVisible();
+    await expect(menu.getByText("Download", { exact: true })).toBeVisible();
+    await expect(menu.getByText("Copy", { exact: true })).toBeVisible();
   });
 });

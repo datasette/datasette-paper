@@ -1223,6 +1223,51 @@
   background: #f1ecf8;
   color: #6429a8;
 }
+/* Submenu parent ("Download ▸" / "Copy ▸"), back rows, and any leaf carrying a
+   trailing group lay their label and trailing chevron/warning on one flex line. */
+.editor-host .pm-block-embed-menu-item--parent,
+.editor-host .pm-block-embed-menu-item--back,
+.editor-host .pm-block-embed-menu-item:has(.pm-block-embed-menu-trail) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* The trailing group (partial-export warning + chevron), pushed to the right. */
+.editor-host .pm-block-embed-menu-trail {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.editor-host .pm-block-embed-menu-chevron {
+  color: #999;
+}
+.editor-host .pm-block-embed-menu-chevron svg {
+  width: 11px;
+  height: 11px;
+  display: block;
+}
+/* The back row's leading "‹" chevron is a hint to return, muted like a caption. */
+.editor-host .pm-block-embed-menu-item--back {
+  color: #666;
+  font-size: 12px;
+}
+/* Export leaf states: "Copying…/Downloading…" (busy) and "Copied ✓" (done). */
+.editor-host .pm-block-embed-export-leaf--busy {
+  color: #6429a8;
+  cursor: progress;
+}
+.editor-host .pm-block-embed-export-leaf--done {
+  color: #157347;
+}
+.editor-host .pm-block-embed-export-leaf--done .pm-block-embed-menu-chevron {
+  color: #157347;
+}
+.editor-host .pm-block-embed-export-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
 /* The in-place "Columns…" checklist that replaces the menu body. */
 .editor-host .pm-block-embed-columns {
   display: flex;
