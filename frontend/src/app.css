@@ -150,6 +150,106 @@
   }
 }
 
+/* ── Datasette chrome overrides (DARK ONLY) ─────────────────────────────────
+ * Datasette's own header (`header.hd`) and footer (`footer.ft`) are a fixed
+ * blue gradient with near-white text — correct on Datasette's light pages, but
+ * they'd float as a bright bar above/below a dark paper editor. Re-theme them
+ * to the paper surface on PAPER PAGES ONLY, so every other Datasette page (a
+ * table page, /-/databases, the SQL console) stays its default light chrome
+ * even if some future code stamps data-theme on it.
+ *
+ * Scoping: the doc page carries `body.paper-fullscreen`; the index and tag
+ * pages set no body class, so we anchor on their Svelte mount roots
+ * (`.paper-index` / `.tag-page`) via `body:has(...)` — :has() is Baseline and
+ * supported in every browser this app targets. `body:is(...)` folds the three
+ * page scopes into one prefix.
+ *
+ * Light theme gets NO overrides — Datasette's default chrome is already right
+ * there. The header hamburger SVG and the actor name inherit `currentColor`
+ * from `.hd`, so re-coloring `.hd`'s text is enough for them; breadcrumb links
+ * and the menu's button-as-link controls are re-colored explicitly below.
+ *
+ * These are plain chrome overrides, NOT --pp-* token declarations, so the
+ * contrast-gate token-equality assertion (themeContrast.test.ts) does not
+ * cover them — but they still ship in the same two dark forms as the tokens
+ * (explicit `data-theme="dark"` + the system media branch). Keep the two
+ * copies identical and adjacent, exactly like the token blocks above. */
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd,
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft {
+  /* `background` (not `-color`) so the gradient background-image is cleared. */
+  background: var(--pp-surface);
+  color: var(--pp-fg-muted);
+}
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd {
+  border-bottom: 1px solid var(--pp-border);
+}
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft {
+  border-top: 1px solid var(--pp-border);
+}
+/* Breadcrumb links + the nav-menu button-as-link controls (Jump to…, menu
+ * links, Log out). Plain `a`/`button.button-as-link` here already out-specify
+ * Datasette's `.hd a:link`/`.hd a:hover` chain thanks to the scope prefix, so
+ * every link state resolves to accent without enumerating them. */
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a,
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd button.button-as-link,
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft a,
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft button.button-as-link {
+  color: var(--pp-accent);
+}
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a:hover,
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft a:hover {
+  color: var(--pp-focus-ring);
+}
+/* Actor menu dropdown (renders inside .hd when opened). */
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) .nav-menu-inner {
+  background-color: var(--pp-surface-2);
+}
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) .nav-menu-inner li,
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) form.nav-menu-logout {
+  border-top-color: var(--pp-border);
+}
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) .nav-menu-inner .keyboard-shortcut {
+  border-color: var(--pp-border);
+  background: var(--pp-surface-3);
+}
+
+/* LOCK-STEP with the `[data-theme="dark"]` chrome block directly above: same
+ * overrides for the system-preference dark branch. Edit both together. */
+@media (prefers-color-scheme: dark) {
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd,
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft {
+    background: var(--pp-surface);
+    color: var(--pp-fg-muted);
+  }
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd {
+    border-bottom: 1px solid var(--pp-border);
+  }
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft {
+    border-top: 1px solid var(--pp-border);
+  }
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a,
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd button.button-as-link,
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft a,
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft button.button-as-link {
+    color: var(--pp-accent);
+  }
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a:hover,
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft a:hover {
+    color: var(--pp-focus-ring);
+  }
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) .nav-menu-inner {
+    background-color: var(--pp-surface-2);
+  }
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) .nav-menu-inner li,
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) form.nav-menu-logout {
+    border-top-color: var(--pp-border);
+  }
+  :root:is([data-theme="system"], :not([data-theme])) body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) .nav-menu-inner .keyboard-shortcut {
+    border-color: var(--pp-border);
+    background: var(--pp-surface-3);
+  }
+}
+
 *,
 *::before,
 *::after {
