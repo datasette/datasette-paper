@@ -7,6 +7,7 @@ export default defineShot({
   order: 30,
   doc: "richId",
   freeze: false,
+  themes: ["light", "dark"],
   prepare: async (page) => {
     await page.locator('.paper-toolbar [aria-label="Insert image"]').click();
     const dialog = page.locator("dialog.image-dialog");

@@ -7,6 +7,7 @@ export default defineShot({
   order: 28,
   doc: "richId",
   freeze: false,
+  themes: ["light", "dark"],
   prepare: async (page) => {
     await page.locator(".datasette-acl-share__trigger").click();
     const dialog = page.locator("dialog.datasette-acl-share-dialog[open]");

@@ -126,8 +126,14 @@ async function main() {
     const ids = await seed(ctx);
 
     for (const { name, run } of todo) {
-      await run(ctx, ids);
-      console.log(`✓ ${name} → ${out(name)}`);
+      // A shot declares its themes (default ["light"]); dark twins opt in with
+      // themes: ["light", "dark"]. The theme leg is applied per-page inside
+      // defineShot's run — see its docstring for why light stays bit-identical.
+      for (const theme of run.themes ?? ["light"]) {
+        await run(ctx, ids, theme);
+        const suffix = theme === "dark" ? ".dark" : "";
+        console.log(`✓ ${name}${suffix} → ${out(name, suffix)}`);
+      }
     }
     await ctx.close();
   } finally {

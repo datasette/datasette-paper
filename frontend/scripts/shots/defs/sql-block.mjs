@@ -7,4 +7,5 @@ export default defineShot({
   order: 18,
   doc: "sqlBlockId",
   prepare: waitSqlBlock,
+  themes: ["light", "dark"],
 });
