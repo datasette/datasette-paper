@@ -78,10 +78,10 @@
     margin-bottom: 1rem;
   }
   .tag-page-status {
-    color: #6b7280;
+    color: var(--pp-fg-muted);
   }
   .tag-page-error {
-    color: #b91c1c;
+    color: var(--pp-danger);
   }
   .tag-page-list {
     list-style: none;
@@ -93,15 +93,17 @@
     align-items: baseline;
     gap: 0.75rem;
     padding: 0.5rem 0;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid var(--pp-border);
   }
   .tag-page-row a {
     font-weight: 500;
   }
   .tag-page-count {
-    color: #6b7280;
+    color: var(--pp-fg-muted);
     font-size: 0.85rem;
   }
+  /* deliberate literal: amber "state" pill (amber-800 on amber-100) — its own
+     identity palette, no matching warn-role token pair. */
   .tag-page-state {
     color: #92400e;
     background: #fef3c7;

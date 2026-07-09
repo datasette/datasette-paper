@@ -136,15 +136,16 @@
 <style>
   .create-page-dialog {
     width: min(420px, 92vw);
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--pp-border);
     border-radius: 10px;
     padding: 16px;
+    /* deliberate literal: heavier dialog drop-shadow alpha than --pp-shadow. */
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
     font: inherit;
-    color: #1a1a1a;
+    color: var(--pp-fg);
   }
   .create-page-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--pp-overlay);
   }
   .create-page-dialog__head {
     display: flex;
@@ -159,7 +160,7 @@
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
-    color: #666;
+    color: var(--pp-fg-muted);
     padding: 0 4px;
   }
   .create-page-title {
@@ -167,11 +168,11 @@
     flex-direction: column;
     gap: 4px;
     font-size: 12px;
-    color: #555;
+    color: var(--pp-fg-muted);
   }
   .create-page-title input {
     padding: 7px 9px;
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--pp-border);
     border-radius: 6px;
     font: inherit;
     font-size: 14px;
@@ -179,8 +180,10 @@
   .create-page-dialog__note {
     margin: 10px 0 0;
     font-size: 12px;
-    color: #777;
+    color: var(--pp-fg-subtle);
   }
+  /* deliberate literal: solid error-box pink/maroon, distinct from the faint
+     --pp-danger-bg wash. */
   .create-page-dialog__error {
     margin: 10px 0 0;
     padding: 6px 10px;
@@ -202,14 +205,14 @@
     font: inherit;
     font-size: 13px;
     cursor: pointer;
-    border: 1px solid #d0d7de;
-    background: #fff;
-    color: #333;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
+    color: var(--pp-fg);
   }
   .create-page-create-btn {
-    border-color: #0b5cad;
-    background: #0b5cad;
-    color: #fff;
+    border-color: var(--pp-accent);
+    background: var(--pp-accent);
+    color: var(--pp-accent-fg);
   }
   .create-page-create-btn:disabled {
     opacity: 0.5;

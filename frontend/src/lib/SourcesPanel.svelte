@@ -369,7 +369,7 @@
 <style>
   .sources-panel {
     margin-top: 12px;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--pp-border);
     padding-top: 8px;
     font-size: 14px;
   }
@@ -392,7 +392,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #64748b;
+    color: var(--pp-fg-muted);
   }
   .sources-panel-toggle {
     display: flex;
@@ -402,19 +402,19 @@
     border: none;
     padding: 4px 0;
     cursor: pointer;
-    color: #334155;
+    color: var(--pp-fg);
     font-weight: 600;
   }
   .sources-panel-count {
     font-weight: 400;
-    color: #94a3b8;
+    color: var(--pp-fg-subtle);
   }
   .sources-panel-body {
     /* Slight indent so the body reads as nested under the toggle header. */
     padding: 6px 0 4px 10px;
   }
   .sources-panel-none {
-    color: #94a3b8;
+    color: var(--pp-fg-subtle);
     padding: 4px 0;
   }
   .sources-panel-list {
@@ -428,7 +428,7 @@
     align-items: stretch;
     gap: 3px;
     padding: 8px 0;
-    border-bottom: 1px solid #f1f5f9;
+    border-bottom: 1px solid var(--pp-surface-2);
   }
   /* Name row: title left, edit/delete icons floated right. */
   .sources-panel-item-head {
@@ -442,12 +442,13 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-weight: 600;
     font-size: 13px;
-    color: #1e293b;
+    color: var(--pp-fg);
     /* Title: never let a long source name blow out the panel width. */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  /* deliberate literal: one-off amber warn, distinct from --pp-warn. */
   .sources-panel-warn {
     color: #b45309;
     cursor: help;
@@ -465,7 +466,7 @@
     width: fit-content;
     max-width: 100%;
     font-size: 12px;
-    color: #0b5cad;
+    color: var(--pp-accent);
     text-decoration: none;
   }
   .sources-panel-db > span {
@@ -477,7 +478,7 @@
     text-decoration: underline;
   }
   .sources-panel-db.is-none {
-    color: #94a3b8;
+    color: var(--pp-fg-subtle);
   }
   .sources-panel-db :global(svg) {
     flex-shrink: 0;
@@ -486,21 +487,21 @@
   /* "Used N times" on its own line after the database. */
   .sources-panel-usage {
     font-size: 12px;
-    color: #64748b;
+    color: var(--pp-fg-muted);
   }
   .sources-panel-usage.is-unused {
-    color: #94a3b8;
+    color: var(--pp-fg-subtle);
     font-style: italic;
   }
   .sources-panel-item button,
   .sources-panel-add,
   .sources-panel-form-actions button {
-    border: 1px solid #cbd5e1;
-    background: #fff;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
     border-radius: 5px;
     padding: 2px 8px;
     font-size: 12px;
-    color: #334155;
+    color: var(--pp-fg);
     cursor: pointer;
   }
   .sources-panel-item button:disabled {
@@ -513,11 +514,11 @@
     align-items: center;
     justify-content: center;
     padding: 3px;
-    color: #475569;
+    color: var(--pp-fg-muted);
   }
   .sources-panel-item .icon-btn:hover {
-    color: #1e293b;
-    background: #f1f5f9;
+    color: var(--pp-fg);
+    background: var(--pp-surface-2);
   }
   .sources-panel-confirm {
     display: flex;
@@ -528,15 +529,17 @@
   }
   .sources-panel-confirm-text {
     font-size: 12px;
-    color: #b91c1c;
+    color: var(--pp-danger);
   }
+  /* deliberate literal: brighter filled-danger button (red-600), distinct from
+     the --pp-danger text color; its hover settles to --pp-danger. */
   .sources-panel-item button.danger {
     border-color: #dc2626;
     background: #dc2626;
-    color: #fff;
+    color: var(--pp-accent-fg);
   }
   .sources-panel-item button.danger:hover {
-    background: #b91c1c;
+    background: var(--pp-danger);
   }
   .sources-panel-add {
     margin-top: 8px;
@@ -544,9 +547,9 @@
   .sources-panel-form {
     margin-top: 8px;
     padding: 10px;
-    border: 1px solid #e2e8f0;
+    border: 1px solid var(--pp-border);
     border-radius: 8px;
-    background: #f8fafc;
+    background: var(--pp-surface);
   }
   .sources-panel-field {
     display: flex;
@@ -558,12 +561,12 @@
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.03em;
-    color: #64748b;
+    color: var(--pp-fg-muted);
   }
   .sources-panel-field input,
   .sources-panel-field select,
   .sources-panel-field textarea {
-    border: 1px solid #cbd5e1;
+    border: 1px solid var(--pp-border);
     border-radius: 5px;
     padding: 4px 6px;
     font-size: 13px;
@@ -577,18 +580,19 @@
   .sources-panel-spacer {
     flex: 1;
   }
+  /* deliberate literal: deep-navy primary button, distinct from --pp-accent. */
   .sources-panel-form-actions button.primary {
     background: #1b4f86;
-    color: #fff;
+    color: var(--pp-accent-fg);
     border-color: #1b4f86;
   }
   .sources-panel-probe {
     margin-top: 8px;
     font-size: 12px;
-    color: #64748b;
+    color: var(--pp-fg-muted);
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   }
   .sources-panel-probe.is-error {
-    color: #b91c1c;
+    color: var(--pp-danger);
   }
 </style>

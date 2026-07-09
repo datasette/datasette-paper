@@ -932,20 +932,21 @@
     gap: 1em;
   }
   .graph-toggle {
-    border: 1px solid #ccc;
-    background: #fff;
+    border: 1px solid var(--pp-border-strong);
+    background: var(--pp-bg);
     border-radius: 4px;
     padding: 6px 12px;
     cursor: pointer;
     font: inherit;
-    color: #1a1a1a;
+    color: var(--pp-fg);
   }
   .graph-toggle:hover {
-    background: #f0f3f6;
+    background: var(--pp-surface-2);
   }
   .graph-backdrop {
     position: fixed;
     inset: 0;
+    /* deliberate literal: lighter modal backdrop than --pp-overlay (.35). */
     background: rgba(0, 0, 0, 0.3);
     display: flex;
     align-items: center;
@@ -954,8 +955,9 @@
     padding: 16px;
   }
   .graph-dialog {
-    background: #fff;
+    background: var(--pp-bg);
     border-radius: 8px;
+    /* deliberate literal: heavier dialog drop-shadow alpha than --pp-shadow. */
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
     padding: 12px 16px 16px;
     max-width: min(720px, 95vw);
@@ -972,7 +974,7 @@
   .graph-dialog-header h2 {
     margin: 0;
     font-size: 1.05em;
-    color: #1a1a1a;
+    color: var(--pp-fg);
   }
   .graph-close {
     border: none;
@@ -980,13 +982,13 @@
     cursor: pointer;
     font-size: 20px;
     line-height: 1;
-    color: #6a737d;
+    color: var(--pp-fg-muted);
     padding: 2px 6px;
     border-radius: 4px;
   }
   .graph-close:hover {
-    background: #f0f3f6;
-    color: #1a1a1a;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg);
   }
   /* Visually hidden but available to assistive tech (kept for the
    * headerless "Created by" column). */
@@ -1002,10 +1004,12 @@
     border: 0;
   }
   .tab-desc {
-    color: #6a737d;
+    color: var(--pp-fg-muted);
     font-size: 0.9em;
     margin: 10px 0 0;
   }
+  /* deliberate literal: solid error-box pink/maroon, distinct from the faint
+     --pp-danger-bg wash. */
   .error {
     background: #ffd6d6;
     color: #5a0000;
@@ -1018,7 +1022,7 @@
   }
   th,
   td {
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--pp-border);
     padding: 6px 8px;
     text-align: left;
   }
@@ -1036,7 +1040,7 @@
   .tabs {
     display: flex;
     gap: 4px;
-    border-bottom: 1px solid #ddd;
+    border-bottom: 1px solid var(--pp-border);
     margin-top: 1em;
   }
   .tabs button {
@@ -1045,16 +1049,16 @@
     padding: 8px 14px;
     cursor: pointer;
     font: inherit;
-    color: #555;
+    color: var(--pp-fg-muted);
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
   }
   .tabs button.active {
-    color: #1a1a1a;
-    border-bottom-color: #0b5cad;
+    color: var(--pp-fg);
+    border-bottom-color: var(--pp-accent);
   }
   .tabs button:hover:not(.active) {
-    color: #1a1a1a;
+    color: var(--pp-fg);
   }
   .actions-col {
     width: 1%;
@@ -1074,15 +1078,15 @@
     padding: 4px 6px;
     cursor: pointer;
     border-radius: 3px;
-    color: #555;
+    color: var(--pp-fg-muted);
     display: inline-flex;
     align-items: center;
     justify-content: center;
   }
   .menu-trigger:hover:not(:disabled),
   .menu-trigger[aria-expanded="true"] {
-    background: #f0f3f6;
-    color: #1a1a1a;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg);
   }
   .menu-trigger:disabled {
     opacity: 0.5;
@@ -1093,10 +1097,10 @@
     top: 100%;
     right: 0;
     z-index: 10;
-    background: #fff;
-    border: 1px solid #ccc;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border-strong);
     border-radius: 4px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+    box-shadow: 0 2px 8px var(--pp-shadow);
     min-width: 140px;
     padding: 4px 0;
     display: flex;
@@ -1113,8 +1117,10 @@
     color: inherit;
   }
   .menu button:hover {
-    background: #f0f3f6;
+    background: var(--pp-surface-2);
   }
+  /* deliberate literals: one-off dark danger text + its faint hover wash,
+     distinct from --pp-danger / --pp-danger-bg. */
   .menu button.danger {
     color: #8a1a1a;
   }
@@ -1122,7 +1128,7 @@
     background: #fbecec;
   }
   td.delete-at {
-    color: #8a5a00;
+    color: var(--pp-warn);
     font-size: 0.9em;
   }
   tr.busy {
@@ -1138,9 +1144,9 @@
     vertical-align: 1px;
   }
   .badge-locked {
-    background: #eef2f7;
-    color: #4a5568;
-    border: 1px solid #d0d7e0;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg-muted);
+    border: 1px solid var(--pp-border);
   }
   .tag-filter {
     display: flex;
@@ -1150,13 +1156,13 @@
     margin-top: 12px;
   }
   .tag-filter-label {
-    color: #6a737d;
+    color: var(--pp-fg-muted);
     font-size: 0.85em;
   }
   .tag-filter-clear {
     border: none;
     background: transparent;
-    color: #0b5cad;
+    color: var(--pp-accent);
     cursor: pointer;
     font: inherit;
     font-size: 0.85em;
@@ -1174,9 +1180,9 @@
   .tag-chip {
     display: inline-flex;
     align-items: center;
-    background: #eef2f7;
-    color: #2c3e50;
-    border: 1px solid #d0d7e0;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg);
+    border: 1px solid var(--pp-border);
     border-radius: 9px;
     padding: 1px 8px;
     font-size: 11px;
@@ -1187,12 +1193,12 @@
     font-family: inherit;
   }
   .tag-chip-button:hover {
-    background: #e2e8f0;
+    background: var(--pp-surface-3);
   }
   .tag-chip-button.selected {
-    background: #0b5cad;
-    color: #fff;
-    border-color: #0b5cad;
+    background: var(--pp-accent);
+    color: var(--pp-accent-fg);
+    border-color: var(--pp-accent);
   }
   .creator {
     display: inline-flex;
@@ -1245,7 +1251,7 @@
     }
     tbody tr {
       position: relative;
-      border: 1px solid #e0e4e8;
+      border: 1px solid var(--pp-border);
       border-radius: 6px;
       padding: 10px 12px;
       margin-top: 12px;
@@ -1258,7 +1264,7 @@
      * Name cell has no label, so it reads as the card title. */
     td[data-label]::before {
       content: attr(data-label) ": ";
-      color: #6a737d;
+      color: var(--pp-fg-muted);
       font-size: 0.85em;
     }
     td.actions {

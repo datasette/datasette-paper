@@ -552,7 +552,7 @@
   .doc-header {
     padding: 12px 4px;
     margin-bottom: 8px;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--pp-border);
   }
   .title-row {
     display: flex;
@@ -563,14 +563,17 @@
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
+    /* deliberate literal: a deliberately desaturated blue, not --pp-accent. */
     color: #276890;
     text-decoration: none;
     border-radius: 4px;
   }
   .doc-icon-link:hover {
-    color: #0b5cad;
+    color: var(--pp-accent);
   }
   .doc-icon-link:focus-visible {
+    /* deliberate literal: sky-blue focus ring, distinct from the darker
+       --pp-focus-ring brand blue. */
     outline: 2px solid #4a9eff;
     outline-offset: 2px;
   }
@@ -589,12 +592,13 @@
     border-radius: 4px;
   }
   .title:hover {
-    border-color: #e0e0e0;
+    border-color: var(--pp-border);
   }
   .title:focus {
     outline: none;
+    /* deliberate literal: sky-blue focus border, distinct from --pp-focus-ring. */
     border-color: #4a9eff;
-    background: #fff;
+    background: var(--pp-bg);
   }
   .meta {
     display: flex;
@@ -603,7 +607,7 @@
     margin-top: 4px;
     padding: 0 6px;
     font-size: 12px;
-    color: #666;
+    color: var(--pp-fg-muted);
   }
   .created-by {
     display: inline-flex;
@@ -617,6 +621,7 @@
     object-fit: cover;
     flex-shrink: 0;
   }
+  /* deliberate literal: one-off success green — no "success" role token. */
   .saved {
     color: #2a8a2a;
   }
@@ -631,6 +636,8 @@
     padding: 2px 8px;
     border-radius: 999px;
   }
+  /* deliberate literals: one-off success-green and error-box pink/maroon pills,
+     each its own palette with no matching role token. */
   .copy-feedback.copied {
     background: #e1f5e2;
     color: #1f7a2a;
@@ -648,12 +655,13 @@
     padding: 3px 12px;
     font-size: 12px;
     line-height: 1.4;
-    border: 1px solid #0b5cad;
-    background: #0b5cad;
-    color: #fff;
+    border: 1px solid var(--pp-accent);
+    background: var(--pp-accent);
+    color: var(--pp-accent-fg);
     border-radius: 999px;
     cursor: pointer;
   }
+  /* deliberate literal: hover-darken of --pp-accent, no dedicated hover token. */
   .meta-actions :global(.datasette-acl-share__trigger.has-label:hover) {
     background: #094a8b;
     border-color: #094a8b;
@@ -665,8 +673,8 @@
   /* Segmented Edit/View slider */
   .mode-slider {
     display: inline-flex;
-    border: 1px solid #d0d7de;
-    background: #f6f8fa;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-surface-2);
     border-radius: 999px;
     padding: 2px;
     gap: 0;
@@ -677,24 +685,24 @@
     line-height: 1.4;
     border: none;
     background: transparent;
-    color: #555;
+    color: var(--pp-fg-muted);
     border-radius: 999px;
     cursor: pointer;
   }
   .seg:hover:not(.active) {
-    color: #222;
+    color: var(--pp-fg);
   }
   .seg.active {
-    background: #fff;
-    color: #0b5cad;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    background: var(--pp-bg);
+    color: var(--pp-accent);
+    box-shadow: 0 1px 2px var(--pp-shadow);
   }
   .seg:disabled {
     cursor: not-allowed;
     opacity: 0.55;
   }
   .seg:disabled:hover {
-    color: #555;
+    color: var(--pp-fg-muted);
   }
 
   /* Overflow menu */
@@ -707,25 +715,25 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid #d0d7de;
-    background: #f6f8fa;
-    color: #444;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-surface);
+    color: var(--pp-fg-muted);
     border-radius: 999px;
     cursor: pointer;
     padding: 0;
   }
   .overflow-btn:hover {
-    background: #ebeef1;
+    background: var(--pp-surface-2);
   }
   .overflow-menu {
     position: absolute;
     right: 0;
     top: calc(100% + 4px);
     min-width: 200px;
-    background: #fff;
-    border: 1px solid #d0d7de;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
     border-radius: 8px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 14px var(--pp-shadow);
     padding: 4px;
     z-index: 20;
     display: flex;
@@ -741,26 +749,26 @@
     border: none;
     border-radius: 4px;
     font-size: 13px;
-    color: #222;
+    color: var(--pp-fg);
     cursor: pointer;
     white-space: nowrap;
     width: 100%;
   }
   .mi:hover {
-    background: #f0f3f6;
+    background: var(--pp-surface-2);
   }
   .mi-icon {
     flex: 0 0 auto;
-    color: #555;
+    color: var(--pp-fg-muted);
   }
   .mi-caret {
     margin-left: auto;
     display: inline-flex;
-    color: #999;
+    color: var(--pp-fg-subtle);
   }
   .mi-sep {
     border: none;
-    border-top: 1px solid #eaeef2;
+    border-top: 1px solid var(--pp-border);
     margin: 4px 0;
   }
   .mi-section {
@@ -769,8 +777,10 @@
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: #888;
+    color: var(--pp-fg-subtle);
   }
+  /* deliberate literals: one-off crimson danger text + its faint hover wash,
+     distinct from --pp-danger / --pp-danger-bg. */
   .mi-danger {
     color: #a40e26;
   }
@@ -792,7 +802,7 @@
 
   .loading {
     padding: 6px;
-    color: #888;
+    color: var(--pp-fg-subtle);
     font-size: 13px;
   }
   .locked-pill {
@@ -801,9 +811,9 @@
     gap: 4px;
     margin-left: 6px;
     padding: 2px 9px 2px 7px;
-    background: #eef2f7;
-    color: #4a5568;
-    border: 1px solid #d0d7e0;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg-muted);
+    border: 1px solid var(--pp-border);
     border-radius: 999px;
     font-size: 11px;
     line-height: 1.5;
@@ -816,6 +826,9 @@
     display: inline-flex;
     margin-left: 6px;
     padding: 2px 10px;
+    /* deliberate literals: the template pill's own pastel-blue identity palette
+       (light-blue fill / deep-navy text / blue border), distinct from the
+       neutral + accent tokens. */
     background: #e6f0ff;
     color: #0b3b8a;
     border: 1px solid #b9d0f5;

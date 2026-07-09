@@ -393,6 +393,11 @@
     border-radius: 4px;
     margin-bottom: 8px;
   }
+  /* deliberate literals: the status-banner family is a set of solid-pastel
+     callout identity palettes (amber / red / slate) — each is its own bg+fg(+
+     border) triplet with no matching role token (the --pp-danger-bg / --pp-warn-bg
+     washes are faint, not these solid fills). #fff8ec below is the one exact
+     --pp-warn-bg match. */
   .status-banner.status-delay {
     background: #fff5d4;
     color: #5a4a00;
@@ -426,7 +431,7 @@
     font-size: 0.95em;
     padding: 3px 10px;
     border: 1px solid #c08000;
-    background: #fff8ec;
+    background: var(--pp-warn-bg);
     color: #5a3a00;
     border-radius: 3px;
     cursor: pointer;
@@ -438,11 +443,11 @@
     display: inline-block;
     margin-bottom: 8px;
     padding: 2px 8px;
-    background: #eef2f7;
-    color: #4a5568;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg-muted);
     font-size: 12px;
     border-radius: 10px;
-    border: 1px solid #d0d7e0;
+    border: 1px solid var(--pp-border);
   }
   /* In fullscreen layout the host gets flex:1; make the ProseMirror
    * surface stretch to fill it instead of capping at min-height: 60vh. */
@@ -465,16 +470,16 @@
     width: 40px;
     height: 40px;
     padding: 0;
-    border: 1px solid #d8dde3;
+    border: 1px solid var(--pp-border);
     border-radius: 50%;
-    background: #fff;
-    color: #40474f;
+    background: var(--pp-bg);
+    color: var(--pp-fg-muted);
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+    box-shadow: 0 2px 8px var(--pp-shadow);
   }
   .scroll-to-top:hover {
-    background: #f3f5f7;
-    color: #1a1a1a;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg);
   }
   @media (max-width: 640px) {
     /* The toolbar is `position: fixed` at the bottom on phones; reserve room so
