@@ -266,11 +266,13 @@ test.describe("block-embed filters", () => {
     await row.locator(".pm-block-embed-filter-value").fill("Vendor 1");
     await apply.click();
 
-    // The embed re-fetches: 11 of 30 rows, funnel badge, "where" summary.
+    // The embed re-fetches: 11 of 30 rows, funnel badge, structured summary.
     await expect(embed).toContainText("of 11 rows", { timeout: 10000 });
     const badge = embed.locator(".pm-block-embed-filter-badge");
     await expect(badge).toBeVisible();
-    await expect(embed.locator(".pm-block-embed-summary")).toContainText("where");
+    const summary = embed.locator(".pm-block-embed-summary");
+    await expect(summary.locator(".pm-block-embed-summary-col")).toHaveText("name");
+    await expect(summary.locator(".pm-block-embed-summary-val")).toHaveText("Vendor 1");
 
     // The badge itself reopens the filter panel (shortcut for the ⋮ item).
     await badge.click();
@@ -291,9 +293,9 @@ test.describe("block-embed filters", () => {
     await expect(reloaded).toBeVisible({ timeout: 10000 });
     await expect(reloaded).toContainText("of 11 rows", { timeout: 10000 });
     await expect(reloaded.locator(".pm-block-embed-filter-badge")).toBeVisible();
-    await expect(reloaded.locator(".pm-block-embed-summary")).toContainText(
-      "where",
-    );
+    await expect(
+      reloaded.locator(".pm-block-embed-summary .pm-block-embed-summary-val"),
+    ).toHaveText("Vendor 1");
   });
 
   test("column header ▾ menu sorts descending with an indicator", async ({
@@ -343,7 +345,13 @@ test.describe("block-embed filters", () => {
     await expect(
       embed.locator('.pm-block-embed-sort-ind[data-dir="desc"]'),
     ).toBeVisible();
-    await expect(embed.locator(".pm-block-embed-summary")).toContainText("where");
+    // Sort moved to the header pill; the summary carries only the filter.
+    await expect(
+      embed.locator(".pm-block-embed-sort-pill"),
+    ).toContainText("id");
+    await expect(
+      embed.locator(".pm-block-embed-summary .pm-block-embed-summary-val"),
+    ).toHaveText("Vendor 1");
     await expect(embed.locator(".pm-block-embed-filter-badge")).toBeVisible();
 
     // The pasted config round-trips through the fence/step log.
@@ -379,11 +387,15 @@ test.describe("block-embed filters", () => {
       .click();
     await expect(page.locator(".paper-toolbar")).toHaveCount(0);
 
-    // Passive read-signals stay visible to viewers…
-    await expect(embed.locator(".pm-block-embed-summary")).toContainText("where");
+    // Passive read-signals stay visible to viewers: the structured filter
+    // summary, the in-table sort indicator, the header sort pill + funnel badge.
+    await expect(
+      embed.locator(".pm-block-embed-summary .pm-block-embed-summary-val"),
+    ).toHaveText("Vendor 1");
     await expect(
       embed.locator('.pm-block-embed-sort-ind[data-dir="desc"]'),
     ).toBeVisible();
+    await expect(embed.locator(".pm-block-embed-sort-pill")).toContainText("id");
     await expect(embed.locator(".pm-block-embed-filter-badge")).toBeVisible();
 
     // …while every config-writing control is gone: no per-column ▾ menus,
