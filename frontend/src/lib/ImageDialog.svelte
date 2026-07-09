@@ -309,4 +309,24 @@
     opacity: 0.5;
     cursor: default;
   }
+
+  /* --- Dark theme (append-only; light rules untouched). The sky-blue focus
+     tint (#f2f8ff) would flash near-white on dark, and the solid pink error box
+     would glare — swap both for dark equivalents. Both theme conditions. --- */
+  :global([data-theme="dark"]) .image-paste-zone:focus {
+    background: rgba(74, 158, 255, 0.12);
+  }
+  :global([data-theme="dark"]) .image-dialog__error {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .image-paste-zone:focus {
+      background: rgba(74, 158, 255, 0.12);
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .image-dialog__error {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+  }
 </style>

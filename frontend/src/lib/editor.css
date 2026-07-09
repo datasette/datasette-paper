@@ -2339,3 +2339,212 @@
   color: var(--pp-fg-subtle);
 }
 
+/* ===================================================================
+ * DARK THEME — non-semantic identity families (@feat none; theme pass)
+ * -------------------------------------------------------------------
+ * The families above use their OWN identity palettes (Tailwind-slate for
+ * the ${{value}} / source-card "this is data" chips, teal for #tags,
+ * pastel-blue for the placeholder pill) that live OUTSIDE the --pp-*
+ * semantic tokens, so a token override can't reach them. These rules
+ * re-tune those literals for dark. APPEND-ONLY: they override the light
+ * rules above without editing them (so light pixels are provably
+ * untouched). Each block is written twice — once for the explicit
+ * `[data-theme="dark"]` choice and once, inside the media query, for the
+ * "system"/unset case that follows the OS (`:is(...)` folds the two
+ * system selectors together). Keep the two copies in sync.
+ * =================================================================== */
+:root[data-theme="dark"] .editor-host .pm-placeholder {
+  background: #182a44;
+  color: #9dc3ff;
+  border-color: #2f4d78;
+}
+:root[data-theme="dark"] .editor-host .pm-tag {
+  color: #45c9bb;
+  background: rgba(69, 201, 187, 0.14);
+}
+:root[data-theme="dark"] .editor-host .pm-tag-typing {
+  background: rgba(69, 201, 187, 0.1);
+  border-bottom-color: rgba(69, 201, 187, 0.45);
+}
+:root[data-theme="dark"] .editor-host .pm-tag-item--active {
+  background: rgba(69, 201, 187, 0.2);
+}
+:root[data-theme="dark"] .editor-host .pm-tag-create {
+  color: #45c9bb;
+}
+:root[data-theme="dark"] .editor-host .pm-value,
+:root[data-theme="dark"] .editor-host .pm-value-item,
+:root[data-theme="dark"] .editor-host .pm-value-popover,
+:root[data-theme="dark"] .editor-host .pm-value-popover-input,
+:root[data-theme="dark"] .editor-host .pm-source-card-name,
+:root[data-theme="dark"] .editor-host .pm-source-card-code,
+:root[data-theme="dark"] .editor-host .pm-source-card-toggle:hover {
+  color: #c9d4e0;
+}
+:root[data-theme="dark"] .editor-host .pm-value--loading,
+:root[data-theme="dark"] .editor-host .pm-value-empty,
+:root[data-theme="dark"] .editor-host .pm-value-popover-label,
+:root[data-theme="dark"] .editor-host .pm-source-card-icon,
+:root[data-theme="dark"] .editor-host .pm-source-card-sigil,
+:root[data-theme="dark"] .editor-host .pm-source-card-probe {
+  color: #8b98a5;
+}
+:root[data-theme="dark"] .editor-host .pm-source-card-toggle {
+  color: #9aa7b4;
+}
+:root[data-theme="dark"] .editor-host .pm-value {
+  background: rgba(139, 148, 158, 0.16);
+}
+:root[data-theme="dark"] .editor-host .pm-value--loading {
+  background: rgba(139, 148, 158, 0.1);
+}
+:root[data-theme="dark"] .editor-host .pm-value-typing {
+  background: rgba(139, 148, 158, 0.12);
+  border-bottom-color: rgba(139, 148, 158, 0.5);
+}
+:root[data-theme="dark"] .editor-host .pm-value-item:hover,
+:root[data-theme="dark"] .editor-host .pm-value-item--active {
+  background: rgba(139, 148, 158, 0.18);
+}
+:root[data-theme="dark"] .editor-host .pm-source-card {
+  border-color: #2a323c;
+  background: #161b22;
+}
+:root[data-theme="dark"] .editor-host .pm-source-card-head {
+  border-bottom-color: #2a323c;
+  background: #1d232b;
+}
+:root[data-theme="dark"] .editor-host .pm-source-card.is-collapsed {
+  background: #1d232b;
+}
+:root[data-theme="dark"] .editor-host .pm-source-card-probe {
+  border-top-color: #2a323c;
+}
+:root[data-theme="dark"] .editor-host .pm-source-card-name,
+:root[data-theme="dark"] .editor-host .pm-source-card-db,
+:root[data-theme="dark"] .editor-host .pm-value-popover-input,
+:root[data-theme="dark"] .editor-host .pm-value-popover-select {
+  border-color: #3d4652;
+}
+:root[data-theme="dark"] .editor-host .pm-toc-link {
+  color: #b8c2cc;
+}
+:root[data-theme="dark"] .editor-host .ProseMirror img {
+  background: #21262d;
+  color: #8b949e;
+}
+
+@media (prefers-color-scheme: dark) {
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-placeholder {
+    background: #182a44;
+    color: #9dc3ff;
+    border-color: #2f4d78;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-tag {
+    color: #45c9bb;
+    background: rgba(69, 201, 187, 0.14);
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-tag-typing {
+    background: rgba(69, 201, 187, 0.1);
+    border-bottom-color: rgba(69, 201, 187, 0.45);
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-tag-item--active {
+    background: rgba(69, 201, 187, 0.2);
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-tag-create {
+    color: #45c9bb;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-item,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover-input,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-name,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-code,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-toggle:hover {
+    color: #c9d4e0;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value--loading,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-empty,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover-label,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-icon,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-sigil,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-probe {
+    color: #8b98a5;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-source-card-toggle {
+    color: #9aa7b4;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-value {
+    background: rgba(139, 148, 158, 0.16);
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-value--loading {
+    background: rgba(139, 148, 158, 0.1);
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-value-typing {
+    background: rgba(139, 148, 158, 0.12);
+    border-bottom-color: rgba(139, 148, 158, 0.5);
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-item:hover,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-item--active {
+    background: rgba(139, 148, 158, 0.18);
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-source-card {
+    border-color: #2a323c;
+    background: #161b22;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-source-card-head {
+    border-bottom-color: #2a323c;
+    background: #1d232b;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-source-card.is-collapsed {
+    background: #1d232b;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-source-card-probe {
+    border-top-color: #2a323c;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-name,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-source-card-db,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover-input,
+  :is(:root[data-theme="system"], :root:not([data-theme])) .editor-host .pm-value-popover-select {
+    border-color: #3d4652;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .pm-toc-link {
+    color: #b8c2cc;
+  }
+  :is(:root[data-theme="system"], :root:not([data-theme]))
+    .editor-host
+    .ProseMirror
+    img {
+    background: #21262d;
+    color: #8b949e;
+  }
+}
+

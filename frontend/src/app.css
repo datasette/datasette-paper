@@ -69,6 +69,87 @@
   --pp-selected-cell: rgba(11, 92, 173, 0.08);
 }
 
+/* Dark theme. Values serve the SAME roles as the light block above (read
+ * the light role comments) — GitHub-dark-adjacent, hand-tuned so every
+ * text-on-surface pairing clears WCAG AA (the contrast gate in
+ * frontend/src/lib/__tests__/themeContrast.test.ts enforces it, per theme).
+ * Dark-mode rules applied: no pure #000 bg / #fff fg (halation); accents
+ * desaturated + lightened; elevation via a LIGHTENING surface ramp
+ * (surface < surface-2 < surface-3), not shadows; every rgba wash re-tuned
+ * (a light-mode darkening wash would invert to a lightening one); selection
+ * / selected-cell alphas raised.
+ *
+ * LOCK-STEP: this `[data-theme="dark"]` block and the media-branch block
+ * below MUST hold identical values — the contrast gate asserts token-set
+ * equality between the two. Edit both together. */
+:root[data-theme="dark"] {
+  /* Tell the UA to render native form controls, scrollbars and the default
+   * canvas in dark — fixes unstyled <input>/<select>/<button> that would
+   * otherwise paint light-on-light. Not a --pp-* token, so the contrast gate
+   * ignores it. */
+  color-scheme: dark;
+  --pp-bg: #0d1117;
+  --pp-fg: #e6edf3;
+  --pp-fg-muted: #9aa7b4;
+  --pp-fg-subtle: #6e7681;
+  --pp-surface: #161b22;
+  --pp-surface-2: #1d232b;
+  --pp-surface-3: #262d36;
+  --pp-border: #303844;
+  --pp-border-strong: #3d4652;
+  --pp-accent: #4a9eff;
+  --pp-accent-fg: #0d1117;
+  --pp-accent-bg: rgba(74, 158, 255, 0.14);
+  --pp-link: #c9a3ff;
+  /* Purple-tinted wash (mirrors the light role: paired with --pp-link for
+   * hovers/chip fills), lifted for dark. */
+  --pp-code-bg: #251d33;
+  --pp-danger: #f85149;
+  --pp-danger-bg: rgba(248, 81, 73, 0.15);
+  --pp-warn: #d29922;
+  --pp-warn-bg: rgba(210, 153, 34, 0.12);
+  --pp-selection: rgba(74, 158, 255, 0.3);
+  --pp-shadow: rgba(0, 0, 0, 0.55);
+  --pp-overlay: rgba(0, 0, 0, 0.65);
+  --pp-focus-ring: #6cb0ff;
+  --pp-table-header-bg: #1a2029;
+  --pp-selected-cell: rgba(74, 158, 255, 0.22);
+}
+
+/* "System" = no explicit choice (data-theme="system" or unset): follow the OS.
+ * Values MUST stay identical to the :root[data-theme="dark"] block above —
+ * the contrast gate asserts it. Edit both together. */
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="system"],
+  :root:not([data-theme]) {
+    color-scheme: dark;
+    --pp-bg: #0d1117;
+    --pp-fg: #e6edf3;
+    --pp-fg-muted: #9aa7b4;
+    --pp-fg-subtle: #6e7681;
+    --pp-surface: #161b22;
+    --pp-surface-2: #1d232b;
+    --pp-surface-3: #262d36;
+    --pp-border: #303844;
+    --pp-border-strong: #3d4652;
+    --pp-accent: #4a9eff;
+    --pp-accent-fg: #0d1117;
+    --pp-accent-bg: rgba(74, 158, 255, 0.14);
+    --pp-link: #c9a3ff;
+    --pp-code-bg: #251d33;
+    --pp-danger: #f85149;
+    --pp-danger-bg: rgba(248, 81, 73, 0.15);
+    --pp-warn: #d29922;
+    --pp-warn-bg: rgba(210, 153, 34, 0.12);
+    --pp-selection: rgba(74, 158, 255, 0.3);
+    --pp-shadow: rgba(0, 0, 0, 0.55);
+    --pp-overlay: rgba(0, 0, 0, 0.65);
+    --pp-focus-ring: #6cb0ff;
+    --pp-table-header-bg: #1a2029;
+    --pp-selected-cell: rgba(74, 158, 255, 0.22);
+  }
+}
+
 *,
 *::before,
 *::after {

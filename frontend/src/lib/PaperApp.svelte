@@ -439,6 +439,77 @@
   .status-banner.status-trashed button:hover {
     background: #ffe8b8;
   }
+  /* Dark theme for the status-banner solid-pastel callouts (the light fills
+   * above would glare on a dark page). Written twice: the explicit
+   * `[data-theme="dark"]` choice and, inside the media query, the
+   * "system"/unset case that follows the OS. `:global(...)` keeps the
+   * component's scoped class hash on the descendant. Keep the copies in sync. */
+  :global([data-theme="dark"]) .status-banner.status-delay {
+    background: #3a2f14;
+    color: #e5c07b;
+  }
+  :global([data-theme="dark"]) .status-banner.status-fail,
+  :global([data-theme="dark"]) .status-banner.status-step-error {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  :global([data-theme="dark"]) .status-banner.status-step-error {
+    border-color: #6b3838;
+  }
+  :global([data-theme="dark"]) .status-banner.status-offline {
+    background: #1d2530;
+    color: #c9d4e0;
+    border-color: #3d4652;
+  }
+  :global([data-theme="dark"]) .status-banner.status-trashed {
+    background: #33280f;
+    color: #e5c07b;
+  }
+  :global([data-theme="dark"]) .status-banner.status-trashed button {
+    border-color: #7a5a1a;
+    color: #e5c07b;
+  }
+  :global([data-theme="dark"]) .status-banner.status-trashed button:hover {
+    background: rgba(210, 153, 34, 0.25);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .status-banner.status-delay {
+      background: #3a2f14;
+      color: #e5c07b;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .status-banner.status-fail,
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .status-banner.status-step-error {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .status-banner.status-step-error {
+      border-color: #6b3838;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .status-banner.status-offline {
+      background: #1d2530;
+      color: #c9d4e0;
+      border-color: #3d4652;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .status-banner.status-trashed {
+      background: #33280f;
+      color: #e5c07b;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .status-banner.status-trashed button {
+      border-color: #7a5a1a;
+      color: #e5c07b;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .status-banner.status-trashed button:hover {
+      background: rgba(210, 153, 34, 0.25);
+    }
+  }
   .archived-pill {
     display: inline-block;
     margin-bottom: 8px;

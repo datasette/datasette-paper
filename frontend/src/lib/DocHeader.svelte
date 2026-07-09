@@ -860,4 +860,86 @@
       row-gap: 6px;
     }
   }
+
+  /* --- Dark theme (append-only; the light rules above are untouched, so light
+     pixels can't change). Each override is written twice: for the explicit
+     `[data-theme="dark"]` choice and, in the media query, for the "system"/unset
+     case that follows the OS. `:global(...)` keeps the component scope hash on
+     the descendant class. The .title input had NO explicit color, so it fell to
+     the browser default (near-black) and vanished on dark — the biggest fix
+     here. --- */
+  :global([data-theme="dark"]) .title {
+    color: var(--pp-fg);
+  }
+  :global([data-theme="dark"]) .doc-icon-link {
+    color: #6cb0ff;
+  }
+  :global([data-theme="dark"]) .saved {
+    color: #7ee787;
+  }
+  :global([data-theme="dark"]) .copy-feedback.copied {
+    background: rgba(63, 185, 80, 0.15);
+    color: #7ee787;
+  }
+  :global([data-theme="dark"]) .copy-feedback.failed {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  :global([data-theme="dark"]) .mi-danger,
+  :global([data-theme="dark"]) .mi-danger .mi-icon {
+    color: #ff7b72;
+  }
+  :global([data-theme="dark"]) .mi-danger:hover {
+    background: rgba(248, 81, 73, 0.15);
+  }
+  :global([data-theme="dark"]) .template-pill {
+    background: #182a44;
+    color: #9dc3ff;
+    border-color: #2f4d78;
+  }
+  :global([data-theme="dark"])
+    .meta-actions
+    :global(.datasette-acl-share__trigger.has-label:hover) {
+    background: #6cb0ff;
+    border-color: #6cb0ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .title {
+      color: var(--pp-fg);
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .doc-icon-link {
+      color: #6cb0ff;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .saved {
+      color: #7ee787;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .copy-feedback.copied {
+      background: rgba(63, 185, 80, 0.15);
+      color: #7ee787;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .copy-feedback.failed {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .mi-danger,
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .mi-danger .mi-icon {
+      color: #ff7b72;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .mi-danger:hover {
+      background: rgba(248, 81, 73, 0.15);
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .template-pill {
+      background: #182a44;
+      color: #9dc3ff;
+      border-color: #2f4d78;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .meta-actions
+      :global(.datasette-acl-share__trigger.has-label:hover) {
+      background: #6cb0ff;
+      border-color: #6cb0ff;
+    }
+  }
 </style>

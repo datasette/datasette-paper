@@ -329,4 +329,27 @@
       max-height: 60vh;
     }
   }
+
+  /* --- Dark theme (append-only; light rules untouched). The active-pill's
+     light-blue fill would glare on dark, so swap it for a translucent-accent
+     fill + lifted-blue glyph. Both theme conditions covered. --- */
+  :global([data-theme="dark"]) .paper-rail-btn.is-active,
+  :global([data-theme="dark"]) .paper-rail-mobile-btn.is-active {
+    background: rgba(74, 158, 255, 0.18);
+    color: #9dc3ff;
+  }
+  :global([data-theme="dark"]) .paper-rail-mobile-btn.is-active {
+    border-color: rgba(74, 158, 255, 0.35);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .paper-rail-btn.is-active,
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .paper-rail-mobile-btn.is-active {
+      background: rgba(74, 158, 255, 0.18);
+      color: #9dc3ff;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .paper-rail-mobile-btn.is-active {
+      border-color: rgba(74, 158, 255, 0.35);
+    }
+  }
 </style>

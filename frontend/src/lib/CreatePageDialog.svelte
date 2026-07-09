@@ -218,4 +218,17 @@
     opacity: 0.5;
     cursor: default;
   }
+
+  /* --- Dark theme (append-only; light rules untouched). Solid pink error box
+     glares on dark; swap for a dark wash. Both theme conditions. --- */
+  :global([data-theme="dark"]) .create-page-dialog__error {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .create-page-dialog__error {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+  }
 </style>

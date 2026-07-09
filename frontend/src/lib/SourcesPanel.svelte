@@ -595,4 +595,41 @@
   .sources-panel-probe.is-error {
     color: var(--pp-danger);
   }
+
+  /* --- Dark theme (append-only; light rules untouched). The filled danger +
+     primary buttons set `color: var(--pp-accent-fg)`, which flips to the dark
+     ink on dark — unreadable on their saturated fills — so pin light labels and
+     lift the fills; the amber warn is lifted for legibility. Both conditions. --- */
+  :global([data-theme="dark"]) .sources-panel-warn {
+    color: #e3a008;
+  }
+  :global([data-theme="dark"]) .sources-panel-item button.danger {
+    background: #da3633;
+    border-color: #da3633;
+    color: #fff;
+  }
+  :global([data-theme="dark"]) .sources-panel-form-actions button.primary {
+    background: #3a7bd0;
+    border-color: #3a7bd0;
+    color: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .sources-panel-warn {
+      color: #e3a008;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .sources-panel-item
+      button.danger {
+      background: #da3633;
+      border-color: #da3633;
+      color: #fff;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .sources-panel-form-actions
+      button.primary {
+      background: #3a7bd0;
+      border-color: #3a7bd0;
+      color: #fff;
+    }
+  }
 </style>

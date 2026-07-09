@@ -404,4 +404,22 @@
     opacity: 0.5;
     cursor: default;
   }
+
+  /* --- Dark theme (append-only; light rules untouched). The near-white red-50
+     error callout and the light-blue result hover would bleed on dark — swap for
+     dark washes. Both theme conditions. --- */
+  :global([data-theme="dark"]) .ds-embed-error {
+    background: rgba(248, 81, 73, 0.15);
+  }
+  :global([data-theme="dark"]) .ds-embed-result:hover {
+    background: rgba(74, 158, 255, 0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .ds-embed-error {
+      background: rgba(248, 81, 73, 0.15);
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .ds-embed-result:hover {
+      background: rgba(74, 158, 255, 0.12);
+    }
+  }
 </style>

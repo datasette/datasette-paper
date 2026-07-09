@@ -128,6 +128,27 @@ function parseThemes(css: string): Record<string, Record<string, string>> {
 
 const parsed = parseThemes(cssText);
 const themeNames = Object.keys(parsed);
+
+// --- media-branch mirror -------------------------------------------------
+// The dark palette is declared TWICE: once on `:root[data-theme="dark"]`
+// (parsed above) and once inside `@media (prefers-color-scheme: dark)` for
+// the "system"/unset case. The blockRe above deliberately ignores the media
+// branch (its selector list — `:root[data-theme="system"], :root:not([data-theme])`
+// — isn't a single `:root`-ish token). Parse it here on its own so the test
+// can assert the two dark copies never drift.
+function parseMediaDarkTokens(css: string): Record<string, string> | null {
+  const noComments = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const m = noComments.match(
+    /@media[^{]*prefers-color-scheme:\s*dark[^{]*\{[\s\S]*?:root:not\(\[data-theme\]\)\s*\{([^}]*)\}/,
+  );
+  if (!m) return null;
+  const tokens: Record<string, string> = {};
+  const declRe = /(--pp-[\w-]+)\s*:\s*([^;]+);/g;
+  let decl: RegExpExecArray | null;
+  while ((decl = declRe.exec(m[1]))) tokens[decl[1]] = decl[2].trim();
+  return tokens;
+}
+const mediaDark = parseMediaDarkTokens(cssText);
 // Effective palette per theme: dark (and any future theme) inherits light's
 // tokens for anything it doesn't override; light is the base.
 const light = parsed.light ?? {};
@@ -260,6 +281,15 @@ describe("theme token parser", () => {
   it("every pairing token exists in the base palette", () => {
     const needed = new Set(PAIRINGS.flatMap((p) => [p.fg, p.bg]));
     for (const token of needed) expect(light).toHaveProperty(token);
+  });
+
+  it("the @media dark branch is identical to the :root[data-theme=dark] block", () => {
+    // The dark palette is duplicated (explicit toggle vs. OS "system"); this
+    // guards the classic "tuned one copy" drift. Requires the media branch to
+    // exist AND to match the data-theme block token-for-token (keys + values).
+    expect(mediaDark, "no @media (prefers-color-scheme: dark) branch found").not.toBeNull();
+    expect(parsed.dark, "no :root[data-theme=dark] block found").toBeDefined();
+    expect(mediaDark).toEqual(parsed.dark);
   });
 });
 

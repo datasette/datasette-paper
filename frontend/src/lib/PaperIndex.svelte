@@ -1274,4 +1274,34 @@
       padding: 0;
     }
   }
+
+  /* --- Dark theme (append-only; light rules above untouched). The solid-pastel
+     error box and the one-off danger red/wash have no matching --pp-* role, so
+     re-tune the literals here. Native <input>/<select>/<button> pick up dark
+     rendering from `color-scheme: dark` (app.css), so they need no rules. Both
+     the explicit-dark and system/OS-dark conditions are covered. --- */
+  :global([data-theme="dark"]) .error {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  :global([data-theme="dark"]) .menu button.danger {
+    color: #ff7b72;
+  }
+  :global([data-theme="dark"]) .menu button.danger:hover {
+    background: rgba(248, 81, 73, 0.15);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .error {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .menu button.danger {
+      color: #ff7b72;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .menu
+      button.danger:hover {
+      background: rgba(248, 81, 73, 0.15);
+    }
+  }
 </style>

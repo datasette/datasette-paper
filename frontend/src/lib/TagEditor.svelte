@@ -247,4 +247,25 @@
     margin-top: 14px;
     text-align: right;
   }
+
+  /* --- Dark theme (append-only; light rules untouched). Solid pink error box +
+     dark-red remove-hover both fail on dark; swap for dark wash + lifted red.
+     Both theme conditions. --- */
+  :global([data-theme="dark"]) .te-error {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  :global([data-theme="dark"]) .te-remove:hover:not(:disabled) {
+    color: #ff7b72;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:is([data-theme="system"], :root:not([data-theme]))) .te-error {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+    :global(:is([data-theme="system"], :root:not([data-theme])))
+      .te-remove:hover:not(:disabled) {
+      color: #ff7b72;
+    }
+  }
 </style>
