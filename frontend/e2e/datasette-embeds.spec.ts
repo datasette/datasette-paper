@@ -413,4 +413,44 @@ test.describe("block-embed filters", () => {
     await expect(menu.getByText("Download", { exact: true })).toBeVisible();
     await expect(menu.getByText("Copy", { exact: true })).toBeVisible();
   });
+
+  test("copying an embed puts its Datasette URL (with config) on the clipboard", async ({
+    page,
+  }) => {
+    const { url } = await createPaper(page);
+    await gotoPaper(page, url);
+    // A filtered + sorted embed, so the copied URL must carry the config query.
+    await pasteText(page, FILTERED_URL);
+    const embed = page.locator(".pm-block-embed");
+    await expect(embed).toBeVisible({ timeout: 10000 });
+    await expect(embed).toContainText("of 11 rows", { timeout: 10000 });
+
+    // Select the embed node by clicking a plain (non-link) data cell — the
+    // `name` column; `id` is now a pk link that would navigate. Then read what
+    // ProseMirror writes on a real copy event, straight off the event's
+    // clipboardData (headless chromium has no OS clipboard).
+    await embed.locator("tbody tr").first().locator("td").nth(1).click();
+    const copied = await page.evaluate(() => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const view = (window as any).__pmView;
+      const sel = view.state.selection;
+      const dt = new DataTransfer();
+      view.dom.dispatchEvent(
+        new ClipboardEvent("copy", { clipboardData: dt, bubbles: true, cancelable: true }),
+      );
+      return {
+        selNode: sel.node ? sel.node.type.name : null,
+        text: dt.getData("text/plain"),
+      };
+    });
+
+    // Clicking the embed selected the whole node…
+    expect(copied.selNode).toBe("block_embed");
+    // …and text/plain is its full same-origin Datasette URL, filter + sort intact.
+    const u = new URL(copied.text);
+    expect(u.origin).toBe(new URL(page.url()).origin);
+    expect(u.pathname).toBe("/datasette-paper-e2e-data/vendors");
+    expect(u.searchParams.get("name__contains")).toBe("Vendor 1");
+    expect(u.searchParams.get("_sort_desc")).toBe("id");
+  });
 });

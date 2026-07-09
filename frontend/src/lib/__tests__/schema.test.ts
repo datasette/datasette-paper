@@ -218,6 +218,28 @@ describe("block_embed node", () => {
     expect(inserted.type.name).toBe("block_embed");
     expect(inserted.attrs.ref).toBe("/fixtures/facetable");
   });
+
+  // @feat embed-copy-url: plain-text copy of an embed is its Datasette URL
+  it("serializes to its Datasette URL as clipboard text (leafText/textBetween)", () => {
+    const node = schema.nodes.block_embed.create({
+      ref: "/data/vendors",
+      config: {
+        filters: [{ column: "state", op: "exact", value: "CA" }],
+        sort: { column: "population", desc: true },
+        columns: ["id", "name"],
+      },
+    });
+    const doc = schema.node("doc", null, [node]);
+    // This is exactly the path ProseMirror's clipboard text serialization
+    // takes (`slice.content.textBetween(0, size, "\n\n")`), so a plain-text
+    // copy of the embed yields the full URL, config query and all.
+    const text = doc.textBetween(0, doc.content.size, "\n\n");
+    expect(text).toContain(
+      "/data/vendors?state__exact=CA&_sort_desc=population&_col=id&_col=name",
+    );
+    // Prefixed with the page origin (jsdom's window.location.origin here).
+    expect(text.startsWith(window.location.origin)).toBe(true);
+  });
 });
 
 describe("sql_block node", () => {

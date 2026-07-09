@@ -23,6 +23,7 @@ this table and the markers in sync.
 | `video-embed` | "Lite" YouTube embed: a lone YouTube URL pasted in its own paragraph becomes a facade block (thumbnail → click-to-iframe); round-trips as a bare canonical watch URL on its own line | `frontend/src/lib/videoEmbedView.ts` |
 | `embed-filters` | Datasette-style filter/sort config on table embeds, stored in the paper-embed fence | `frontend/src/lib/embedFilters.ts` |
 | `embed-pk-links` | Table-embed rows link to their Datasette row page (single pk → the pk cell; compound pk → a leading "#" column), pk path tilde-encoded; pk headers carry a key glyph and can't be hidden | `frontend/src/lib/blockEmbedView.ts` |
+| `embed-copy-url` | Copying a block embed puts its full Datasette URL (filters/sort/hidden-columns in the query) on the clipboard as text/plain, via the node's `leafText` | `frontend/src/lib/embedFilters.ts` |
 | `result-cells` | Clamped, expandable cell rendering + h-scroll edge fades shared by embed/SQL result tables and the row card; blobs render as their byte size | `frontend/src/lib/resultCell.ts` |
 | `source` | A named, parameterless SQL query block (fenced `source name=NAME db=DB`) that inline `value` atoms reference | `frontend/src/lib/sourceBlockView.ts` |
 | `value` | Inline atom rendering a single live SQL value from a named source (`${{source.column}}`), fetched per-viewer | `frontend/src/lib/valueView.ts` |

@@ -135,6 +135,56 @@ export function filterQueryParams(
 }
 
 /**
+ * The valid `config.columns` selection — the array's non-empty strings, order
+ * preserved. Non-array (or all-bad) → `[]`. Mirrors `BlockEmbedView`'s private
+ * `selectedColumns`, factored out so the copy-URL builder can reuse it.
+ */
+export function sanitizeColumns(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((c): c is string => typeof c === "string" && c.length > 0);
+}
+
+// @feat embed-copy-url: a block embed's shareable Datasette URL (path + config query)
+/**
+ * The full Datasette URL for a `block_embed`, rebuilt from its `ref` and
+ * `config` so it opens exactly what the embed shows: the `/db/table` (or
+ * `/db/table/pk`, `/db`) path, plus the config's filters, sort, and column
+ * selection as `col__op=…` / `_sort`(`_desc`) / `_col` query params. This is
+ * what copying a block embed puts on the clipboard as text/plain, and the
+ * inverse of the paste parser (`parseFilterParams` + the paste ref logic), so
+ * a copied embed pasted back becomes the same filtered embed.
+ *
+ * Path segments are rebuilt from the ref (never string-concatenated) so a
+ * crafted ref can't inject query/hash. `origin` is prefixed verbatim — pass
+ * `window.location.origin` for an absolute URL, or `""` for a root-relative one.
+ */
+export function blockEmbedUrl(
+  attrs: { ref?: unknown; config?: unknown },
+  origin = "",
+): string {
+  const ref = typeof attrs.ref === "string" ? attrs.ref : "";
+  const path =
+    "/" +
+    ref
+      .replace(/^\/+|\/+$/g, "")
+      .split("/")
+      .filter(Boolean)
+      .map(encodeURIComponent)
+      .join("/");
+  const config = (attrs.config ?? {}) as {
+    filters?: unknown;
+    sort?: unknown;
+    columns?: unknown;
+  };
+  const params = new URLSearchParams(
+    filterQueryParams(sanitizeFilters(config.filters), sanitizeSort(config.sort)),
+  );
+  for (const col of sanitizeColumns(config.columns)) params.append("_col", col);
+  const query = params.toString();
+  return `${origin}${path}${query ? `?${query}` : ""}`;
+}
+
+/**
  * The inverse of `filterQueryParams`: parse a table-page URL's query string
  * into the `filters` / `sort` / `columns` config keys, mirroring Datasette's
  * own parse (`Filters.selections()` splits each key on the *last* `__`) so a

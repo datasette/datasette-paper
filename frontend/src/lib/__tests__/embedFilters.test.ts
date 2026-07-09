@@ -12,6 +12,8 @@ import {
   filterQueryParams,
   sanitizeFilters,
   sanitizeSort,
+  sanitizeColumns,
+  blockEmbedUrl,
 } from "../embedFilters";
 import { TOOLBAR_ICONS } from "../icons";
 
@@ -263,5 +265,78 @@ describe("configFromUrlParams", () => {
     const sort = { column: "population", desc: true };
     const params = new URLSearchParams(filterQueryParams(filters, sort));
     expect(configFromUrlParams(params)).toEqual({ filters, sort });
+  });
+});
+
+// @feat embed-copy-url: unit tests — sanitizeColumns + config→URL builder
+describe("sanitizeColumns", () => {
+  it("keeps non-empty strings in order, drops the rest", () => {
+    expect(sanitizeColumns(["id", "", "name", 3, null, "id"])).toEqual([
+      "id",
+      "name",
+      "id",
+    ]);
+  });
+  it("returns [] for a non-array", () => {
+    expect(sanitizeColumns(undefined)).toEqual([]);
+    expect(sanitizeColumns("id")).toEqual([]);
+  });
+});
+
+describe("blockEmbedUrl", () => {
+  it("returns the bare path for an unfiltered table (empty config)", () => {
+    expect(blockEmbedUrl({ ref: "/data/vendors", config: {} })).toBe("/data/vendors");
+  });
+
+  it("prefixes the origin when given one", () => {
+    expect(
+      blockEmbedUrl({ ref: "/data/vendors", config: {} }, "https://ds.example"),
+    ).toBe("https://ds.example/data/vendors");
+  });
+
+  it("encodes filters, sort, and column selection into the query", () => {
+    const url = blockEmbedUrl({
+      ref: "/data/vendors",
+      config: {
+        filters: [
+          { column: "state", op: "exact", value: "CA" },
+          { column: "notes", op: "isnull" },
+        ],
+        sort: { column: "population", desc: true },
+        columns: ["id", "name"],
+      },
+    });
+    // Same encoding the fetch URL and header link use (URLSearchParams owns it).
+    expect(url).toBe(
+      "/data/vendors?state__exact=CA&notes__isnull=1&_sort_desc=population&_col=id&_col=name",
+    );
+  });
+
+  it("round-trips through the paste parser (configFromUrlParams)", () => {
+    const config = {
+      filters: [{ column: "state", op: "contains", value: "C A" }],
+      sort: { column: "id", desc: false },
+      columns: ["id", "name"],
+    };
+    const url = blockEmbedUrl({ ref: "/data/vendors", config });
+    const params = new URLSearchParams(url.split("?")[1]);
+    expect(configFromUrlParams(params)).toEqual({
+      filters: [{ column: "state", op: "contains", value: "C A" }],
+      sort: { column: "id" },
+      columns: ["id", "name"],
+    });
+  });
+
+  it("rebuilds the path from segments so a crafted ref can't inject query", () => {
+    // A ref carrying its own '?' has it percent-encoded into a single segment,
+    // never treated as a query separator.
+    const url = blockEmbedUrl({ ref: "/data/vendors?evil=1", config: {} });
+    expect(url).toBe("/data/vendors%3Fevil%3D1");
+  });
+
+  it("handles a row ref (no config) as a plain path", () => {
+    expect(blockEmbedUrl({ ref: "/data/vendors/2", config: {} })).toBe(
+      "/data/vendors/2",
+    );
   });
 });

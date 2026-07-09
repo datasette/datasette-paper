@@ -3,6 +3,7 @@ import { schema as basic } from "prosemirror-schema-basic";
 import { addListNodes } from "prosemirror-schema-list";
 import { tableNodes } from "prosemirror-tables";
 import { safeHref, safeImageSrc } from "./safeHref";
+import { blockEmbedUrl } from "./embedFilters";
 
 // The render sink for link/image URLs. `prosemirror-schema-basic` ships the
 // stock `link` mark and `image` node whose `toDOM` emit `href`/`src` verbatim,
@@ -298,6 +299,17 @@ const blockEmbedNode: NodeSpec = {
     },
     String(node.attrs.ref ?? "?"),
   ],
+  // embed-copy-url (blockEmbedUrl lives in embedFilters.ts): as a leaf atom the
+  // embed has no text, so a plain-text copy (and any `textBetween`) would yield
+  // "". Emit its full Datasette URL instead — filters/sort/hidden-columns in the
+  // query — so pasting into a browser/chat gives a working link, and pasting
+  // back into paper re-creates the embed. Frontend-only serialization (no Python
+  // mirror), so the marker sits in embedFilters.ts, off the lock-step path.
+  leafText: (node) =>
+    blockEmbedUrl(
+      node.attrs,
+      typeof window !== "undefined" ? window.location.origin : "",
+    ),
 };
 
 // Block atom for a "lite" YouTube embed — created when a lone YouTube URL is
