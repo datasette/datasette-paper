@@ -65,6 +65,7 @@ import type { MarkType } from "prosemirror-model";
 import { schema } from "./schema";
 import { isSafeHref } from "./safeHref";
 import { foldHeadingsPlugin } from "./foldHeadings";
+import { codeHighlightPlugin } from "./codeHighlight";
 import { TocView, tocPlugin } from "./tocView";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
@@ -1331,6 +1332,10 @@ export class EditorConnection {
           clientID: this.clientID,
         }),
         remoteCursorsPlugin(),
+        // Static (tier-0) syntax highlighting: decorates code_block /
+        // sql_block / source text with `tok-*` classes via lazily-loaded lezer
+        // grammars. Read-path only; no @codemirror/* is pulled in here.
+        codeHighlightPlugin(),
         foldHeadingsPlugin,
         // Re-renders every mounted table-of-contents block when the doc's
         // top-level heading signature changes (a TocView's own update() only

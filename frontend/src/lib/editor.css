@@ -76,6 +76,49 @@
   padding: 0;
   font-size: inherit;
 }
+/* Static syntax-highlighting token map — the `tok-*` classes emitted by
+ * @lezer/highlight's classHighlighter (codeHighlight.ts, and identical to what
+ * CodeMirror emits in tier 1) collapse onto the 8 semantic --pp-code-* slots
+ * declared in app.css. Any tok-* class not listed here inherits the plain code
+ * color (markdown decoratives like tok-heading / tok-emphasis, diff markers).
+ * @feat code-highlight: tok-* → --pp-code-* color map for tier-0 decorations */
+.editor-host .tok-keyword,
+.editor-host .tok-atom,
+.editor-host .tok-bool {
+  color: var(--pp-code-keyword);
+}
+.editor-host .tok-string,
+.editor-host .tok-string2,
+.editor-host .tok-literal,
+.editor-host .tok-inserted {
+  color: var(--pp-code-string);
+}
+.editor-host .tok-comment,
+.editor-host .tok-meta {
+  color: var(--pp-code-comment);
+}
+.editor-host .tok-number {
+  color: var(--pp-code-number);
+}
+.editor-host .tok-function,
+.editor-host .tok-macroName,
+.editor-host .tok-labelName {
+  color: var(--pp-code-function);
+}
+.editor-host .tok-variableName,
+.editor-host .tok-variableName2,
+.editor-host .tok-propertyName,
+.editor-host .tok-namespace {
+  color: var(--pp-code-variable);
+}
+.editor-host .tok-typeName,
+.editor-host .tok-className {
+  color: var(--pp-code-type);
+}
+.editor-host .tok-punctuation,
+.editor-host .tok-operator {
+  color: var(--pp-code-punct);
+}
 /* Heading-fold chevron (rendered as a Decoration.widget by foldHeadings.ts).
  * Sits in the heading's left gutter via a negative absolute offset; the
  * heading itself is the positioning ancestor. Hidden until hover for

@@ -32,7 +32,12 @@ export interface PaperLanguage {
   label: string;
   /** Alternate fence tokens, matched case-insensitively alongside `id`. */
   aliases: string[];
-  /** Tier-0 loader: the bare lezer parser. */
+  /**
+   * Tier-0 loader: the bare lezer parser. Feeds the static-highlight
+   * decoration plugin (codeHighlight.ts).
+   */
+  // @feat code-highlight: per-language memoized lezer grammar loaders the
+  // static-highlight plugin resolves to parse each block's text
   highlight: () => Promise<{ parser: Parser }>;
   /** Tier-1 loader: the full CodeMirror `LanguageSupport`. */
   cm: () => Promise<{ support: LanguageSupport }>;

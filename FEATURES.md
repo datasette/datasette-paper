@@ -29,6 +29,7 @@ this table and the markers in sync.
 | `value` | Inline atom rendering a single live SQL value from a named source (`${{source.column}}`), fetched per-viewer | `frontend/src/lib/valueView.ts` |
 | `sql-block` | Editable SQL query block (fenced `sql db=NAME`) run per-viewer against a named Datasette database | `frontend/src/lib/sqlBlockView.ts` |
 | `code-language` | `code_block` carries a `language` attr — typed via ` ```lang ` + space/Enter, round-tripped as the markdown fence info string (reserved/unsafe tokens refused), preserved through the markdown paste path | `frontend/src/lib/schema.ts` |
+| `code-highlight` | Tier-0 static syntax highlighting for `code_block` / `sql_block` / `source` — a PM decoration plugin runs lazily-loaded lezer grammars and emits `tok-*` inline classes (zero `@codemirror/*` on the read path), mapped incrementally and colored via the `--pp-code-*` palette | `frontend/src/lib/codeHighlight.ts` |
 | `tables` | Table family (table / table_row / table_cell / table_header) hand-ported from prosemirror-tables, with a custom `name` attr addressable via `/tables/{name}` | `frontend/src/lib/tables.ts` |
 | `task-list` | Checkbox lists (task_list / task_item) — GFM `- [ ]` round-trip, a live checkbox NodeView, and a `/tasks` extractor | `frontend/src/lib/taskItemView.ts` |
 | `collab-sse` | Realtime collaboration protocol — client EditorConnection state machine + server SSE stream, step submission with 409/410/400 version semantics and broadcast | `frontend/src/lib/collab.ts` |

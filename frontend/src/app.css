@@ -44,6 +44,18 @@
    * --pp-link (block/sql-block menu-item hover, filter badge, sorted-column
    * header tint). */
   --pp-code-bg: #f1ecf8;
+  /* Syntax-highlighting palette — the 8 semantic slots the `tok-*` classes
+   * (classHighlighter, tier 0) map onto in editor.css. Each is contrast-gated
+   * against --pp-code-bg (the strictest of the two code-block backgrounds) by
+   * themeContrast.test.ts, both themes. GitHub-light-adjacent. */
+  --pp-code-keyword: #cf222e;
+  --pp-code-string: #0a3069;
+  --pp-code-comment: #57606a;
+  --pp-code-number: #0550ae;
+  --pp-code-function: #6639ba;
+  --pp-code-variable: #953800;
+  --pp-code-type: #116329;
+  --pp-code-punct: #24292f;
   /* Destructive / error text or icon. */
   --pp-danger: #b91c1c;
   /* Destructive / error wash background. */
@@ -102,6 +114,16 @@
   /* Purple-tinted wash (mirrors the light role: paired with --pp-link for
    * hovers/chip fills), lifted for dark. */
   --pp-code-bg: #251d33;
+  /* Syntax-highlighting palette (see light role comments) — GitHub-dark-
+   * adjacent, each gated against --pp-code-bg by themeContrast.test.ts. */
+  --pp-code-keyword: #ff7b72;
+  --pp-code-string: #a5d6ff;
+  --pp-code-comment: #9aa4b0;
+  --pp-code-number: #79c0ff;
+  --pp-code-function: #d2a8ff;
+  --pp-code-variable: #ffa657;
+  --pp-code-type: #7ee787;
+  --pp-code-punct: #c9d1d9;
   --pp-danger: #f85149;
   --pp-danger-bg: rgba(248, 81, 73, 0.15);
   --pp-warn: #d29922;
@@ -136,6 +158,14 @@
     --pp-accent-bg: rgba(74, 158, 255, 0.14);
     --pp-link: #c9a3ff;
     --pp-code-bg: #251d33;
+    --pp-code-keyword: #ff7b72;
+    --pp-code-string: #a5d6ff;
+    --pp-code-comment: #9aa4b0;
+    --pp-code-number: #79c0ff;
+    --pp-code-function: #d2a8ff;
+    --pp-code-variable: #ffa657;
+    --pp-code-type: #7ee787;
+    --pp-code-punct: #c9d1d9;
     --pp-danger: #f85149;
     --pp-danger-bg: rgba(248, 81, 73, 0.15);
     --pp-warn: #d29922;
