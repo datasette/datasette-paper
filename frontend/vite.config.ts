@@ -9,6 +9,16 @@ export default defineConfig({
   // to that prefix — `static/gen/foo.css` becomes `gen/foo.css` after the
   // helper strips the leading `static/`.
   base: "/-/static-plugins/datasette_paper/",
+  experimental: {
+    // Vite's runtime URLs (import-dep preloads, absolute asset refs) join
+    // base + fileName verbatim, but the file `static/gen/foo.js` is served
+    // from `<base>gen/foo.js` — apply the same leading-`static/` strip as
+    // `vite_entry`. Without it those URLs 404, and a 404'd CSS preload
+    // rejects the dynamic import that pulled it in.
+    renderBuiltUrl(filename) {
+      return `/-/static-plugins/datasette_paper/${filename.replace(/^static\//, "")}`;
+    },
+  },
   build: {
     target: "esnext",
     // Mirrors datasette-libfec: outDir = plugin package root so
@@ -26,82 +36,40 @@ export default defineConfig({
         tag: path.resolve(__dirname, "src/pages/tag/main.ts"),
       },
       output: {
-        // Name the CodeMirror chunks predictably (plans/codemirror/02-design.md
-        // §7 promised `cm-core.<hash>.js` / `lang-<id>.<hash>.js`; left to
-        // Rollup's default naming they all collapse to indistinguishable
-        // `index-<hash>.js`, since every `@codemirror/*`/`@lezer/*` package's
-        // entry point is literally `dist/index.js`). Named chunks are what let
-        // the bundle-size tripwire (bundleSize.test.ts) and the e2e
-        // viewer-cost assertion (codemirror.spec.ts) identify "was the CM/
-        // grammar chunk fetched?" by request URL rather than a content hash.
-        //
-        // The bare `@lezer/*` grammar packages (tier-0's `highlight()`
-        // loader — the near-zero-cost path codeHighlight.ts uses for every
-        // viewer) get one `lang-<id>` chunk each. Deliberately NOT merged
-        // with their `@codemirror/lang-*` CM wrapper counterpart (tier-1,
-        // `cm()`): merging them once made Rollup's chunk graph route the
-        // wrapper's OWN static edge to `@codemirror/language` (part of
-        // `cm-core`) through the merged chunk, so a plain tier-0 grammar
-        // load (e.g. python highlight() — no `@codemirror/*` involved at
-        // all per languages.ts's docstring) started preloading `cm-core`
-        // too — exactly the viewer-cost regression this config exists to
-        // prevent. Left unbucketed, `@codemirror/lang-*` gets Rollup's
-        // default automatic chunk (unnamed — nothing needs to reference it
-        // by name); the base `@codemirror/{view,state,language,commands,
-        // autocomplete}` packages share one `cm-core` chunk.
-        //
-        // (SQL is the one exception where tier-0 and tier-1 can't be
-        // separated: there's no bare `@lezer/sql` package, so both loaders
-        // import `@codemirror/lang-sql` itself — languages.ts's own comment
-        // notes vite emits one shared chunk for it, and that chunk's own
-        // `@codemirror/language` dependency means SQL's tier-0 highlighting
-        // was already reaching into `@codemirror/*` before this config
-        // existed. Accepted; codemirror.spec.ts's viewer-cost scenario uses
-        // a python doc specifically to avoid asserting past that caveat.)
-        //
-        // `@lezer/common`/`lr`/`highlight` (parser primitives + the tier-0
-        // token classifier codeHighlight.ts imports eagerly) get their own
-        // `lezer-common` chunk — every lang-* chunk and cm-core need
-        // `@lezer/common`, so leaving it unbucketed let Rollup drop it
-        // inside one arbitrary lang-* chunk and produced a lang-* ⇄ cm-core
-        // chunk cycle. `lezer-common` legitimately ships in the doc entry's
-        // static graph (the bundle-size tripwire allowlists it, same as
-        // `@lezer/highlight` always did before this config existed).
-        //
-        // `w3c-keyname` gets the same standalone-chunk treatment for a
-        // subtler reason: it's a dependency BOTH `prosemirror-keymap`
-        // (static, in every doc) and `@codemirror/view` (dynamic, inside
-        // cm-core) share. Left unbucketed, Rollup picked exactly one
-        // physical home for its (tiny) code and it landed inside whichever
-        // CM chunk referenced it first, then had the *static* `doc` entry
-        // import that CM chunk to reach it — i.e. it leaked a
-        // `@codemirror/*` static edge into the entry, exactly what this
-        // tripwire exists to catch. Pinning it to its own chunk breaks that:
-        // the doc entry statically importing `vendor-keyname` (not
-        // `@codemirror/*`/`@lezer/*`) is unremarkable and matches how
-        // `prosemirror-keymap` used it before any CM chunk existed.
-        manualChunks(id) {
-          if (/node_modules\/w3c-keyname\//.test(id)) return "vendor-keyname";
-          // Bash's shell mode comes from @codemirror/legacy-modes (no bare
-          // @lezer/* grammar exists) — without this rule the @codemirror
-          // catch-all below would fold it into cm-core, hiding it from the
-          // per-language chunk assertions. The StreamLanguage wrapper it
-          // needs still lives in cm-core, so bash tier-0 loads share SQL's
-          // documented caveat.
-          if (/node_modules\/@codemirror\/legacy-modes\//.test(id)) {
-            return "lang-bash";
-          }
-          if (/node_modules\/@lezer\/(common|lr|highlight)\//.test(id)) {
-            return "lezer-common";
-          }
-          const grammar = /node_modules\/@lezer\/([a-z]+)\//.exec(id);
-          if (grammar) return `lang-${grammar[1]}`;
-          if (
-            /node_modules\/@codemirror\//.test(id) &&
-            !/node_modules\/@codemirror\/lang-/.test(id)
-          ) {
-            return "cm-core";
-          }
+        // Name chunks by CONTENT so the bundle tripwire (bundleSize.test.ts)
+        // and the e2e viewer-cost assertion can identify CM/grammar fetches
+        // by file name (every `@codemirror/*`/`@lezer/*` entry point is
+        // `dist/index.js`, so default names collapse to `index-<hash>.js`).
+        // Unlike `manualChunks`, naming never moves modules between chunks —
+        // Rollup's default (correctly lazy) chunk graph stays intact, and a
+        // name-based assertion like "no cm-core-* in the entry's static
+        // graph" is content-based by construction. Precedence: grammar names
+        // win over `cm-core` (SQL/bash have no bare `@lezer/*` package, both
+        // tiers import a `@codemirror/*` one); `@lezer/{common,lr,highlight}`
+        // are shared primitives that legitimately ship statically, named
+        // distinctly so they never trip the `lang-*` assertions.
+        chunkFileNames(chunk) {
+          const ids = chunk.moduleIds ?? [];
+          const first = (re: RegExp) => {
+            for (const id of ids) {
+              const m = re.exec(id);
+              if (m) return m;
+            }
+            return null;
+          };
+          const grammar =
+            first(/node_modules\/@lezer\/(?!common\/|lr\/|highlight\/)([a-z]+)\//) ??
+            first(/node_modules\/@codemirror\/lang-([a-z]+)\//);
+          const name = grammar
+            ? `lang-${grammar[1]}`
+            : first(/node_modules\/@codemirror\/legacy-modes\//)
+              ? "lang-bash"
+              : first(/node_modules\/@codemirror\//)
+                ? "cm-core"
+                : first(/node_modules\/@lezer\//)
+                  ? "lezer-common"
+                  : chunk.name;
+          return `static/gen/${name}-[hash].js`;
         },
       },
     },
