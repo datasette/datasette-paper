@@ -71,7 +71,7 @@ describe("SourceBlockView", () => {
     const name = view.dom.querySelector(".pm-source-card-name") as HTMLInputElement;
     expect(name.value).toBe("revenue");
     expect(view.dom.querySelector(".pm-source-card-db")).not.toBeNull();
-    expect(view.contentDOM.tagName).toBe("CODE");
+    expect(view.contentDOM!.tagName).toBe("CODE");
     // No results table — that's what separates it from sql_block.
     expect(view.dom.querySelector("table")).toBeNull();
   });

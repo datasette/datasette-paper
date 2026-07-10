@@ -34,9 +34,13 @@ type StateMod = typeof import("@codemirror/state");
 
 /** Config for `baseExtensions`: PM-facing key bindings (arrow-escape, PM
  * undo/redo, the double-Enter-at-doc-end escape) that must win over CM's own
- * indent/newline keymap, so they're installed at higher precedence. */
+ * indent/newline keymap, so they're installed at higher precedence. `extra`
+ * extensions (e.g. the SQL completion bundle) sit just below that keymap and
+ * above the indent/newline handlers, so a completion keymap can accept on
+ * Tab/Enter when the popup is open yet fall through to indent otherwise. */
 export interface BaseExtensionsConfig {
   keymap: KeyBinding[];
+  extra?: Extension[];
 }
 
 /** The resolved CM core surface every consumer works through. */
@@ -50,6 +54,11 @@ export interface CmCore {
    * step or the picker), so the update listener doesn't echo it back. */
   fromPM: ReturnType<StateMod["Annotation"]["define"]>;
   baseExtensions(config: BaseExtensionsConfig): Extension[];
+  /** The autocomplete surface (popup + its accept/navigate keymap). The
+   * completion *source* rides the mounted language's data (lang-sql attaches
+   * keyword/function completion to the SQLite dialect), so this just turns the
+   * machinery on — pass it via `baseExtensions`'s `extra`. */
+  completion(): Extension[];
 }
 
 let coreValue: CmCore | null = null;
@@ -129,6 +138,9 @@ function buildCore(
       // PM-navigation bindings first (highest precedence) so arrow-at-edge,
       // Escape and PM undo/redo win over CM's own indent/newline handlers.
       view.keymap.of(config.keymap),
+      // Consumer extras (e.g. SQL completion) — above indent/newline so the
+      // completion keymap can claim Tab/Enter while the popup is open.
+      ...(config.extra ?? []),
       language.bracketMatching(),
       autocomplete.closeBrackets(),
       language.indentUnit.of("  "),
@@ -142,6 +154,10 @@ function buildCore(
     ];
   }
 
+  function completion(): Extension[] {
+    return [autocomplete.autocompletion(), view.keymap.of(autocomplete.completionKeymap)];
+  }
+
   return {
     EditorView,
     EditorState: state.EditorState,
@@ -150,5 +166,6 @@ function buildCore(
     Annotation: state.Annotation,
     fromPM,
     baseExtensions,
+    completion,
   };
 }

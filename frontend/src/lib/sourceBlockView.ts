@@ -17,11 +17,15 @@
  * editor on demand. XSS rule: every db-derived string (probe columns, error
  * text) enters the DOM as a text node only.
  */
+import { Selection } from "prosemirror-state";
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView, ViewMutationRecord } from "prosemirror-view";
 import { iconMarkup } from "./datasetteEmbed";
 import { listQueryableDatabases } from "./sqlQuery";
 import type { SourceStore, SourceState } from "./sourceStore";
+import { codeFocusKey } from "./codeFocusPlugin";
+import { CmTextSurface } from "./cmTextSurface";
+import { type CmCore, type LanguageSupport } from "./cmCore";
 
 /** Light normalization so a name is referenceable as `${{name.col}}`:
  *  lowercase, non-word chars → `_`. The Sources panel does the canonical
@@ -35,11 +39,17 @@ export function normalizeSourceName(raw: string): string {
 }
 
 // @feat source: NodeView — editable SQL card with name/db/collapse
+// @feat source: two-tier text surface — static <pre> vs a mounted CM6 SQL
+// editor (SQLite dialect + keyword completion), rebuilt on the codeFocusPlugin
+// mode flip; a collapsed pill declines the mount (NodeView-local state)
 export class SourceBlockView implements NodeView {
   dom: HTMLDivElement;
-  contentDOM: HTMLElement;
+  contentDOM?: HTMLElement;
   private node: PMNode;
-  private codeWrap: HTMLPreElement;
+  private surfaceEl: HTMLElement;
+  // CM-mode state (null in static mode).
+  private cmMode = false;
+  private cm: CmTextSurface | null = null;
   private probeEl: HTMLDivElement;
   private nameInput!: HTMLInputElement;
   private dbSelect!: HTMLSelectElement;
@@ -56,17 +66,22 @@ export class SourceBlockView implements NodeView {
     private store: SourceStore,
   ) {
     this.node = node;
+    // Collapsed is NodeView-local and resets on each rebuild — so a static↔CM
+    // rebuild would otherwise re-collapse a source the reader had expanded (and
+    // then decline the very CM mount that triggered the rebuild). Seed it from
+    // the plugin: if this block is the active CM candidate, the reader is
+    // focused inside it, so start expanded; otherwise default to the pill.
+    this.collapsed = this.initialCollapsed();
 
     this.dom = document.createElement("div");
     this.dom.className = "pm-source-card";
 
     this.dom.appendChild(this.buildHeader());
 
-    this.codeWrap = document.createElement("pre");
-    this.codeWrap.className = "pm-source-card-code";
-    this.contentDOM = document.createElement("code");
-    this.codeWrap.appendChild(this.contentDOM);
-    this.dom.appendChild(this.codeWrap);
+    // The SQL text surface swaps between a PM-managed <pre> (static) and a
+    // mounted CM editor; the header/probe chrome survives the rebuilds.
+    this.surfaceEl = this.buildSurface();
+    this.dom.appendChild(this.surfaceEl);
 
     this.probeEl = document.createElement("div");
     this.probeEl.className = "pm-source-card-probe";
@@ -74,6 +89,63 @@ export class SourceBlockView implements NodeView {
 
     void this.populateDatabases();
     this.subscribeProbe();
+  }
+
+  // ── Text surface (static <pre> ↔ CM) ────────────────────────────────────────
+
+  /** True when the block should render as a live CM editor: codeFocusPlugin has
+   * marked it active, its CM core has resolved, AND the pill is expanded. The
+   * collapsed guard is NodeView-local (the plugin can't see it), so a collapsed
+   * source declines the mount here even though the plugin marked it active. */
+  private shouldCm(): boolean {
+    if (this.collapsed) return false;
+    return this.pluginWantsCm();
+  }
+
+  /** codeFocusPlugin has marked this block active and its CM core resolved
+   * (independent of the collapse guard). */
+  private pluginWantsCm(): boolean {
+    const pos = this.getPos();
+    if (pos == null) return false;
+    const s = codeFocusKey.getState(this.view.state);
+    return !!s && s.active === pos && s.core != null;
+  }
+
+  /** Start expanded only when the plugin is actively focusing this block (a
+   * static↔CM rebuild mid-edit) — otherwise the compact pill. */
+  private initialCollapsed(): boolean {
+    return !this.pluginWantsCm();
+  }
+
+  private buildSurface(): HTMLElement {
+    this.cmMode = this.shouldCm();
+    if (this.cmMode) return this.mountCm();
+    const pre = document.createElement("pre");
+    pre.className = "pm-source-card-code";
+    this.contentDOM = document.createElement("code");
+    pre.appendChild(this.contentDOM);
+    return pre;
+  }
+
+  // @feat source: mount the CM6 SQL surface — SQLite support + keyword
+  // completion, reusing the shared PM↔CM sync core
+  private mountCm(): HTMLElement {
+    const s = codeFocusKey.getState(this.view.state);
+    const core = s?.core as CmCore;
+    const support = (s?.support ?? null) as LanguageSupport | null;
+    this.cm = new CmTextSurface({
+      view: this.view,
+      getPos: this.getPos,
+      node: this.node,
+      core,
+      support,
+      extraExtensions: [core.completion()],
+    });
+    this.contentDOM = undefined;
+    const wrap = document.createElement("div");
+    wrap.className = "pm-source-card-code pm-source-card-code--cm";
+    wrap.appendChild(this.cm.dom);
+    return wrap;
   }
 
   // ── Header chrome ──────────────────────────────────────────────────────────
@@ -137,6 +209,11 @@ export class SourceBlockView implements NodeView {
       e.preventDefault();
       this.collapsed = !this.collapsed;
       this.applyCollapsed();
+      // Collapsing while the SQL is a live CM editor: step the selection out of
+      // the block so codeFocusPlugin deactivates it and the NodeView rebuilds
+      // static (a collapsed pill never keeps a mounted CM). Expanding needs no
+      // nudge — a click into the SQL activates it the normal way.
+      if (this.collapsed && this.cmMode) this.exitBlock();
     });
     head.appendChild(this.toggleBtn);
     this.applyCollapsed();
@@ -164,6 +241,16 @@ export class SourceBlockView implements NodeView {
   private applyCollapsed(): void {
     this.dom.classList.toggle("is-collapsed", this.collapsed);
     this.toggleBtn.textContent = this.collapsed ? "▸ Show SQL" : "Hide SQL";
+  }
+
+  /** Move the PM selection just before the block so codeFocusPlugin
+   * deactivates it (used when collapsing a CM-mounted card). */
+  private exitBlock(): void {
+    const pos = this.getPos();
+    if (pos == null) return;
+    const selection = Selection.near(this.view.state.doc.resolve(pos), -1);
+    this.view.dispatch(this.view.state.tr.setSelection(selection));
+    this.view.focus();
   }
 
   private async populateDatabases(): Promise<void> {
@@ -253,9 +340,15 @@ export class SourceBlockView implements NodeView {
 
   update(node: PMNode): boolean {
     if (node.type.name !== "source") return false;
+    // Mode is an extra rebuild trigger: a mismatch forces PM to recreate the
+    // NodeView in the other tier (static ↔ CM). A collapsed pill is folded into
+    // shouldCm(), so it never honors a flip to CM.
+    if (this.shouldCm() !== this.cmMode) return false;
     const nameChanged = node.attrs.name !== this.node.attrs.name;
     const dbChanged = node.attrs.db !== this.node.attrs.db;
     this.node = node;
+    // In CM mode mirror synced text changes (remote collab steps) into CM.
+    if (this.cm) this.cm.syncFromNode(node);
     if (nameChanged) {
       if (document.activeElement !== this.nameInput) {
         this.nameInput.value = (node.attrs.name as string | null) ?? "";
@@ -271,17 +364,31 @@ export class SourceBlockView implements NodeView {
     return true;
   }
 
+  /** In CM mode PM asks us to place a selection inside the block (content-
+   * relative offsets); delegate to the mounted surface. */
+  setSelection(anchor: number, head: number): void {
+    this.cm?.setSelection(anchor, head);
+  }
+
   destroy(): void {
     this.unsubscribe?.();
     this.unsubscribe = null;
+    if (this.cm) {
+      this.cm.destroy();
+      this.cm = null;
+    }
   }
 
-  // Let PM manage the editable SQL (contentDOM); everything else is ours.
+  // In CM mode CM owns its whole DOM subtree, so PM must ignore every mutation
+  // and stop every event within it. In static mode PM manages the SQL text
+  // (contentDOM); only chrome mutations/events are ours.
   ignoreMutation(mutation: ViewMutationRecord): boolean {
-    return !this.contentDOM.contains(mutation.target as Node);
+    if (this.cmMode) return true;
+    return !this.contentDOM?.contains(mutation.target as Node);
   }
 
   stopEvent(event: Event): boolean {
-    return !this.contentDOM.contains(event.target as Node | null);
+    if (this.cmMode) return true;
+    return !this.contentDOM?.contains(event.target as Node | null);
   }
 }

@@ -977,6 +977,16 @@
 .editor-host .pm-source-card.is-collapsed .pm-source-card-code {
   display: none;
 }
+/* CM tier: the mounted editor fills the code slot (see the sql_block note). */
+.editor-host .pm-source-card-code--cm {
+  padding: 0;
+}
+.editor-host .pm-source-card-code--cm .cm-editor {
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  background: transparent;
+}
 /* Collapsed = a compact pill: shrink to content, drop the code + probe rows,
  * and fold the header into a single rounded chip. Editing happens in the
  * sidebar Sources panel (or after expanding via "Show SQL"). */
@@ -2238,6 +2248,18 @@
   white-space: pre-wrap;
   background: var(--pp-bg);
   color: var(--pp-fg);
+}
+/* CM tier: the mounted editor fills the code slot; drop the <pre> padding (CM
+ * has its own) and neutralize the standalone cmCore theme's border/radius/
+ * margin so it reads as one flush panel between header and results. */
+.editor-host .pm-sql-block-code--cm {
+  padding: 0;
+}
+.editor-host .pm-sql-block-code--cm .cm-editor {
+  border: none;
+  border-radius: 0;
+  margin: 0;
+  background: var(--pp-bg);
 }
 /* Hidden = collapse the editor to the Show-SQL toggle; results stay visible. */
 .editor-host .pm-sql-block.is-hidden .pm-sql-block-code {
