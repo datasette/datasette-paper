@@ -183,6 +183,26 @@ const TOC =
   "### Data model\n\nThe core tables and how they relate.\n\n" +
   "## Deployment\n\nShipping changes safely to production.\n";
 
+// Code block with the static-highlight + language-picker + CM-on-focus
+// shots (code-block, code-lang-picker, code-block-focused). Own doc, distinct
+// from every other fixture, so none of the three shots' interactions (hover,
+// filter-typing, focusing the block) can mutate a doc another shot depends on
+// being clean.
+const CODE_BLOCK = `# Language support
+
+Code blocks get real syntax highlighting, and clicking in upgrades the plain
+text surface to a full CodeMirror editor — bracket matching, indentation, and
+(for SQL) keyword completion.
+
+\`\`\`py
+def fibonacci(n):
+    # classic recursive definition
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+\`\`\`
+`;
+
 export async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -244,6 +264,7 @@ export async function seed(ctx) {
   const sqlBlockHiddenId = await create("Q2 vendor report (hidden)", ACTOR, SQL_BLOCK_HIDDEN);
   const inlineValueId = await create("Vendor snapshot", ACTOR, INLINE_VALUE);
   const tocId = await create("Engineering handbook", ACTOR, TOC);
+  const codeBlockId = await create("Language support", ACTOR, CODE_BLOCK);
   return {
     richId,
     linkId,
@@ -264,5 +285,6 @@ export async function seed(ctx) {
     sqlBlockHiddenId,
     inlineValueId,
     tocId,
+    codeBlockId,
   };
 }

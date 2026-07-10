@@ -141,6 +141,24 @@ _image_spec = {
     ],
 }
 
+# Override the basic-schema `code_block` to carry a `language` attr — mirrors
+# schema.ts. toDOM is never rendered server-side but is kept in lock-step; the
+# attr is what matters for node_from_json / Step.apply.
+# @feat code-language: server code_block spec adds language attr (mirrors schema.ts)
+_code_block_spec = {
+    **_list_nodes["code_block"],
+    "attrs": {"language": {"default": None}},
+    "toDOM": lambda node: [
+        "pre",
+        (
+            {"data-language": str(node.attrs["language"])}
+            if node.attrs.get("language")
+            else {}
+        ),
+        ["code", 0],
+    ],
+}
+
 # Sanitize the link `href` at the render sink — mirrors schema.ts.
 _link_mark_spec = {
     **basic_schema.spec["marks"]["link"],
@@ -527,6 +545,7 @@ _source_spec = {
 _nodes = {
     **_list_nodes,
     "image": _image_spec,
+    "code_block": _code_block_spec,
     "placeholder": _placeholder_spec,
     "paper_link": _paper_link_spec,
     "mention": _mention_spec,

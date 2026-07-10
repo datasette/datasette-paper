@@ -37,7 +37,7 @@
 // ids keys available (from seed()): richId, linkId, mentionId, inlineTagId, slashId,
 //   embedPickerId, inlineDbId, inlineTableId, inlineRowId, blockDbId,
 //   blockTableId, blockRowId, blockColumnsId, sqlBlockId, sqlBlockHiddenId,
-//   inlineValueId.
+//   inlineValueId, codeBlockId.
 import { gotoEditor, freezeVolatile } from "./helpers.mjs";
 import { PAPER, out } from "./config.mjs";
 

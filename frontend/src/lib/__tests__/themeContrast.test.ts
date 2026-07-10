@@ -217,6 +217,19 @@ const PAIRINGS: Pairing[] = [
     // NOT a WCAG number. Hairlines/dividers are decorative; this is just a
     // visibility floor so a theme can't ship a border that vanishes into bg.
   },
+  // Syntax-highlighting palette (codeHighlight.ts / editor.css tok-* map). Code
+  // is body text read at length, so each slot clears the 4.5:1 bar against
+  // --pp-code-bg (the darker/stricter of the two code-block backgrounds; the
+  // `pre` surface it actually renders on is lighter, so passing here passes
+  // there too).
+  { fg: "--pp-code-keyword", bg: "--pp-code-bg", min: 4.5 },
+  { fg: "--pp-code-string", bg: "--pp-code-bg", min: 4.5 },
+  { fg: "--pp-code-comment", bg: "--pp-code-bg", min: 4.5 },
+  { fg: "--pp-code-number", bg: "--pp-code-bg", min: 4.5 },
+  { fg: "--pp-code-function", bg: "--pp-code-bg", min: 4.5 },
+  { fg: "--pp-code-variable", bg: "--pp-code-bg", min: 4.5 },
+  { fg: "--pp-code-type", bg: "--pp-code-bg", min: 4.5 },
+  { fg: "--pp-code-punct", bg: "--pp-code-bg", min: 4.5 },
 ];
 
 function pairKey(theme: string, p: Pairing): string {

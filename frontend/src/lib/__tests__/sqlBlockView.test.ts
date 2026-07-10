@@ -4,11 +4,11 @@
  * leak discipline on 403, SQL error display, XSS (text nodes only), the
  * hidden/collapsed state, and the Show/Hide toggle dispatching a setNodeMarkup.
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import type { EditorView } from "prosemirror-view";
 
 import { schema } from "../schema";
-import { SqlBlockView } from "../sqlBlockView";
+import { SqlBlockView, clearSqlResultCache } from "../sqlBlockView";
 
 type QueryInit = { ok?: boolean; status?: number };
 
@@ -63,6 +63,7 @@ async function build(
 }
 
 describe("SqlBlockView", () => {
+  beforeEach(() => clearSqlResultCache());
   afterEach(() => vi.unstubAllGlobals());
 
   it("auto-runs on mount and renders a results table with column headers", async () => {
@@ -131,7 +132,7 @@ describe("SqlBlockView", () => {
   it("exposes the SQL as an editable contentDOM", async () => {
     const { view } = await build("select 1", { ok: true, columns: [], rows: [] });
     expect(view.contentDOM).not.toBeNull();
-    expect(view.contentDOM.tagName).toBe("CODE");
+    expect(view.contentDOM!.tagName).toBe("CODE");
   });
 
   it("shows a no-rows status when the query returns nothing", async () => {
@@ -237,6 +238,23 @@ describe("SqlBlockView", () => {
     toggle.click();
     expect(dispatched).toHaveLength(1);
     expect((dispatched[0] as { attrs: { hidden: boolean } }).attrs.hidden).toBe(true);
+  });
+
+  it("disables spellcheck on the SQL surface and keeps chrome non-editable", async () => {
+    const { view } = await build("select 1", { ok: true, columns: ["n"], rows: [[1]] });
+    const pre = view.dom.querySelector(".pm-sql-block-code") as HTMLPreElement;
+    expect(pre.getAttribute("spellcheck")).toBe("false");
+    expect(pre.getAttribute("autocorrect")).toBe("off");
+    expect(pre.getAttribute("autocapitalize")).toBe("off");
+    expect(view.dom.querySelector(".pm-sql-block-head")!.getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    expect(view.dom.querySelector(".pm-sql-block-results")!.getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    // The contentDOM carries no override — it inherits the real editable
+    // state from the editor root instead of being hardcoded editable.
+    expect(view.contentDOM!.getAttribute("contenteditable")).toBeNull();
   });
 
   it("discards a stale in-flight result after destroy", async () => {

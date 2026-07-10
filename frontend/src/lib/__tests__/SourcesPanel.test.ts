@@ -9,6 +9,14 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/svelte";
 import { EditorState } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 
+// Keep the SQL field on its textarea fallback: the real CmSqlField.create
+// resolves at a nondeterministic point mid-test (dynamic imports), yanking
+// the textarea these tests type into. The CM field itself is covered by
+// cmSqlField.test.ts.
+vi.mock("../cmSqlField", () => ({
+  CmSqlField: { create: () => new Promise(() => {}) },
+}));
+
 vi.mock("../sqlQuery", async () => {
   const actual = await vi.importActual<typeof import("../sqlQuery")>("../sqlQuery");
   return {

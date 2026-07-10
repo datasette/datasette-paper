@@ -71,7 +71,7 @@ describe("SourceBlockView", () => {
     const name = view.dom.querySelector(".pm-source-card-name") as HTMLInputElement;
     expect(name.value).toBe("revenue");
     expect(view.dom.querySelector(".pm-source-card-db")).not.toBeNull();
-    expect(view.contentDOM.tagName).toBe("CODE");
+    expect(view.contentDOM!.tagName).toBe("CODE");
     // No results table — that's what separates it from sql_block.
     expect(view.dom.querySelector("table")).toBeNull();
   });
@@ -119,6 +119,23 @@ describe("SourceBlockView", () => {
     name.dispatchEvent(new Event("input"));
     expect(name.size).toBeGreaterThan(initial);
     expect(name.size).toBeGreaterThanOrEqual("entries_matching_transcript_search".length);
+  });
+
+  it("disables spellcheck on the SQL surface and keeps chrome non-editable", async () => {
+    const { view } = await build({ name: "revenue" }, ok(["n"]));
+    const pre = view.dom.querySelector(".pm-source-card-code") as HTMLPreElement;
+    expect(pre.getAttribute("spellcheck")).toBe("false");
+    expect(pre.getAttribute("autocorrect")).toBe("off");
+    expect(pre.getAttribute("autocapitalize")).toBe("off");
+    expect(view.dom.querySelector(".pm-source-card-head")!.getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    expect(view.dom.querySelector(".pm-source-card-probe")!.getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    // The contentDOM carries no override — it inherits the real editable
+    // state from the editor root instead of being hardcoded editable.
+    expect(view.contentDOM!.getAttribute("contenteditable")).toBeNull();
   });
 
   it("prompts to name an unnamed source", async () => {

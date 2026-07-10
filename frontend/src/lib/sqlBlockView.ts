@@ -32,18 +32,67 @@ import {
   type SqlResult,
 } from "./sqlQuery";
 import { rowsToCsv, rowsToJson } from "./tableExport";
+import { codeFocusKey } from "./codeFocusPlugin";
+import { CmTextSurface } from "./cmTextSurface";
+import { type CmCore, type LanguageSupport } from "./cmCore";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 100];
 const DEFAULT_PAGE_SIZE = 10;
 
+// ── Result cache (across the static ↔ CM NodeView rebuild) ────────────────────
+// The constructor auto-runs, so every static↔CM mode flip — and any other
+// NodeView recreation — would otherwise refetch the same query. A small
+// module-level LRU keyed by (db, sql) lets `run()` render a prior result
+// without a round-trip; an explicit Run / Mod-Enter bypasses it (force
+// refresh). Insertion order in a Map is the LRU order: a hit re-inserts to the
+// most-recent end, and the oldest key is evicted past the cap.
+export const SQL_RESULT_CACHE_CAP = 20;
+const sqlResultCache = new Map<string, SqlResult>();
+
+function cacheKey(db: string, sql: string): string {
+  return `${db}\n${sql}`;
+}
+
+// @feat sql-block: (db, sql) result LRU consulted across the static↔CM rebuild
+export function cachedSqlResult(db: string, sql: string): SqlResult | undefined {
+  const key = cacheKey(db, sql);
+  const hit = sqlResultCache.get(key);
+  if (hit !== undefined) {
+    sqlResultCache.delete(key);
+    sqlResultCache.set(key, hit); // touch → most-recent
+  }
+  return hit;
+}
+
+export function cacheSqlResult(db: string, sql: string, result: SqlResult): void {
+  const key = cacheKey(db, sql);
+  sqlResultCache.delete(key);
+  sqlResultCache.set(key, result);
+  while (sqlResultCache.size > SQL_RESULT_CACHE_CAP) {
+    const oldest = sqlResultCache.keys().next().value as string;
+    sqlResultCache.delete(oldest);
+  }
+}
+
+/** Drop every cached result (test isolation; the cache is module-level). */
+export function clearSqlResultCache(): void {
+  sqlResultCache.clear();
+}
+
 // @feat sql-block: NodeView — editable SQL, per-viewer results, XSS discipline
+// @feat sql-block: two-tier text surface — static <pre> vs a mounted CM6 SQL
+// editor (SQLite dialect + keyword completion, Mod-Enter runs), rebuilt on the
+// codeFocusPlugin mode flip; the result cache spares the flip a refetch
 export class SqlBlockView implements NodeView {
   dom: HTMLDivElement;
-  contentDOM: HTMLElement;
+  contentDOM?: HTMLElement;
   private view: EditorView;
   private getPos: () => number | undefined;
   private node: PMNode;
-  private codeWrap: HTMLPreElement;
+  private surfaceEl: HTMLElement;
+  // CM-mode state (null in static mode).
+  private cmMode = false;
+  private cm: CmTextSurface | null = null;
   private resultsEl: HTMLDivElement;
   // Assigned in buildHeader(), called synchronously from the constructor.
   private dbSelect!: HTMLSelectElement;
@@ -72,14 +121,15 @@ export class SqlBlockView implements NodeView {
 
     this.dom.appendChild(this.buildHeader());
 
-    this.codeWrap = document.createElement("pre");
-    this.codeWrap.className = "pm-sql-block-code";
-    this.contentDOM = document.createElement("code");
-    this.codeWrap.appendChild(this.contentDOM);
-    this.dom.appendChild(this.codeWrap);
+    // The text surface swaps between a PM-managed <pre> (static) and a mounted
+    // CM editor; the header/results chrome around it is built once and survives
+    // the static↔CM rebuilds unchanged.
+    this.surfaceEl = this.buildSurface();
+    this.dom.appendChild(this.surfaceEl);
 
     this.resultsEl = document.createElement("div");
     this.resultsEl.className = "pm-sql-block-results";
+    this.resultsEl.setAttribute("contenteditable", "false");
     this.dom.appendChild(this.resultsEl);
 
     this.applyHidden();
@@ -87,11 +137,65 @@ export class SqlBlockView implements NodeView {
     void this.run();
   }
 
+  // ── Text surface (static <pre> ↔ CM) ────────────────────────────────────────
+
+  /** True when codeFocusPlugin has marked this block active AND its CM core
+   * has resolved — the block should render as a live CM editor. A hidden block
+   * never mounts CM (the plugin already declines it; guarded here too). */
+  private wantsCm(): boolean {
+    if (this.node.attrs.hidden) return false;
+    const pos = this.getPos();
+    if (pos == null) return false;
+    const s = codeFocusKey.getState(this.view.state);
+    return !!s && s.active === pos && s.core != null;
+  }
+
+  private buildSurface(): HTMLElement {
+    this.cmMode = this.wantsCm();
+    if (this.cmMode) return this.mountCm();
+    const pre = document.createElement("pre");
+    pre.className = "pm-sql-block-code";
+    pre.setAttribute("spellcheck", "false");
+    pre.setAttribute("autocorrect", "off");
+    pre.setAttribute("autocapitalize", "off");
+    this.contentDOM = document.createElement("code");
+    pre.appendChild(this.contentDOM);
+    return pre;
+  }
+
+  // @feat sql-block: mount the CM6 SQL surface — SQLite support + keyword
+  // completion, Mod-Enter → run(force), reusing the shared PM↔CM sync core
+  private mountCm(): HTMLElement {
+    const s = codeFocusKey.getState(this.view.state);
+    const core = s?.core as CmCore;
+    const support = (s?.support ?? null) as LanguageSupport | null;
+    this.cm = new CmTextSurface({
+      view: this.view,
+      getPos: this.getPos,
+      node: this.node,
+      core,
+      support,
+      extraKeys: [{ key: "Mod-Enter", run: () => this.runFromKeymap() }],
+      extraExtensions: [core.completion()],
+    });
+    this.contentDOM = undefined;
+    const wrap = document.createElement("div");
+    wrap.className = "pm-sql-block-code pm-sql-block-code--cm";
+    wrap.appendChild(this.cm.dom);
+    return wrap;
+  }
+
+  private runFromKeymap(): boolean {
+    void this.run(true);
+    return true;
+  }
+
   // ── Header chrome ──────────────────────────────────────────────────────────
 
   private buildHeader(): HTMLElement {
     const head = document.createElement("div");
     head.className = "pm-sql-block-head";
+    head.setAttribute("contenteditable", "false");
 
     const icon = document.createElement("span");
     icon.className = "pm-sql-block-icon";
@@ -130,7 +234,7 @@ export class SqlBlockView implements NodeView {
     this.runBtn.append("Run");
     this.runBtn.addEventListener("click", (e) => {
       e.preventDefault();
-      void this.run();
+      void this.run(true); // explicit Run bypasses the cache (force refresh)
     });
     head.appendChild(this.runBtn);
     this.refreshRunState();
@@ -312,13 +416,27 @@ export class SqlBlockView implements NodeView {
 
   // ── Query run + results ────────────────────────────────────────────────────
 
-  private async run(): Promise<void> {
+  // @feat sql-block: run consults the (db, sql) LRU (so a static↔CM rebuild
+  // re-renders without a refetch); force=true (Run / Mod-Enter) bypasses it
+  private async run(force = false): Promise<void> {
     const token = ++this.token;
     const db = (this.node.attrs.db as string | null) ?? "";
     const sql = this.node.textContent;
+    if (!force) {
+      const cached = cachedSqlResult(db, sql);
+      if (cached) {
+        this.applyResult(cached, sql);
+        return;
+      }
+    }
     this.renderLoading();
     const result = await runSqlQuery(db, sql);
     if (token !== this.token) return; // superseded by a newer run / destroy
+    cacheSqlResult(db, sql, result);
+    this.applyResult(result, sql);
+  }
+
+  private applyResult(result: SqlResult, sql: string): void {
     this.lastResult = result;
     this.ranSql = sql; // results now reflect this SQL → Run goes quiet
     this.page = 0; // a fresh result starts at the first page
@@ -523,9 +641,14 @@ export class SqlBlockView implements NodeView {
 
   update(node: PMNode): boolean {
     if (node.type.name !== "sql_block") return false;
+    // Mode is an extra rebuild trigger: a mismatch forces PM to destroy and
+    // recreate the NodeView in the other tier (static ↔ CM).
+    if (this.wantsCm() !== this.cmMode) return false;
     const dbChanged = node.attrs.db !== this.node.attrs.db;
     const hiddenChanged = node.attrs.hidden !== this.node.attrs.hidden;
     this.node = node;
+    // In CM mode mirror synced text changes (remote collab steps) into CM.
+    if (this.cm) this.cm.syncFromNode(node);
     if (hiddenChanged) {
       this.applyHidden();
       this.refreshToggleLabel();
@@ -537,22 +660,37 @@ export class SqlBlockView implements NodeView {
       void this.run();
     }
     // Deliberately NOT re-running on text edits — the user clicks Run for that.
-    // But reflect staleness: editing the SQL lights the Run button up.
+    // But reflect staleness: editing the SQL (in either tier — CM edits arrive
+    // as PM updates) lights the Run button up.
     this.refreshRunState();
     return true;
+  }
+
+  /** In CM mode PM asks us to place a selection inside the block (content-
+   * relative offsets); delegate to the mounted surface. */
+  setSelection(anchor: number, head: number): void {
+    this.cm?.setSelection(anchor, head);
   }
 
   destroy(): void {
     this.token++; // drop any pending fetch render
     this.closeMenu();
+    if (this.cm) {
+      this.cm.destroy();
+      this.cm = null;
+    }
   }
 
-  // Let PM manage the editable SQL (contentDOM); everything else is ours.
+  // In CM mode CM owns its whole DOM subtree, so PM must ignore every mutation
+  // and stop every event within it. In static mode PM manages the SQL text
+  // (contentDOM); only chrome mutations/events are ours.
   ignoreMutation(mutation: ViewMutationRecord): boolean {
-    return !this.contentDOM.contains(mutation.target as Node);
+    if (this.cmMode) return true;
+    return !this.contentDOM?.contains(mutation.target as Node);
   }
 
   stopEvent(event: Event): boolean {
-    return !this.contentDOM.contains(event.target as Node | null);
+    if (this.cmMode) return true;
+    return !this.contentDOM?.contains(event.target as Node | null);
   }
 }
