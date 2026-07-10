@@ -977,9 +977,11 @@
 .editor-host .pm-source-card.is-collapsed .pm-source-card-code {
   display: none;
 }
-/* CM tier: the mounted editor fills the code slot (see the sql_block note). */
+/* CM tier: the mounted editor fills the code slot (see the sql_block note,
+ * incl. the font-size-compounding rationale for `inherit`). */
 .editor-host .pm-source-card-code--cm {
   padding: 0;
+  font-size: inherit;
 }
 .editor-host .pm-source-card-code--cm .cm-editor {
   border: none;
@@ -2251,9 +2253,15 @@
 }
 /* CM tier: the mounted editor fills the code slot; drop the <pre> padding (CM
  * has its own) and neutralize the standalone cmCore theme's border/radius/
- * margin so it reads as one flush panel between header and results. */
+ * margin so it reads as one flush panel between header and results.
+ * font-size: the static surface is a <pre>, where the generic
+ * `.editor-host .ProseMirror pre` 0.9em outranks this class's 13px — but this
+ * CM host is a div, so the 13px applies and compounds with the cmCore theme's
+ * own 0.9em into visibly smaller text; inherit the editor base instead so
+ * both tiers render at the same size. */
 .editor-host .pm-sql-block-code--cm {
   padding: 0;
+  font-size: inherit;
 }
 .editor-host .pm-sql-block-code--cm .cm-editor {
   border: none;
