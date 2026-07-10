@@ -82,8 +82,11 @@ const manifest = loadManifest();
 
 // `describe.skip` (rather than throwing) is the "guard + skip" the ticket
 // asks for: a plain `vitest` run with no prior `just frontend` stays green.
+// The suite callback still RUNS under `describe.skip` (vitest evaluates it
+// to collect the tests), so everything outside an `it` body must tolerate
+// a null manifest — hence the `?? {}`.
 (manifest ? describe : describe.skip)("bundle-size tripwire (doc entry)", () => {
-  const m = manifest as Manifest;
+  const m = (manifest ?? {}) as Manifest;
   const entry = m[DOC_ENTRY];
 
   it("has a manifest entry for the doc page", () => {
