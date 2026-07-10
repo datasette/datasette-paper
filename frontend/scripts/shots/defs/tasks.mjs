@@ -6,6 +6,7 @@ export default defineShot({
   name: "tasks",
   order: 26,
   doc: "richId",
+  themes: ["light", "dark"],
   prepare: async (page) => {
     await page.locator("ul[data-task-list]").first().waitFor({ timeout: 10_000 });
   },

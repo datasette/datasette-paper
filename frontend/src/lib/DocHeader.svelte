@@ -5,6 +5,7 @@
   // on the doc page by paper's extra_js_urls hook, which registers the
   // <datasette-acl-share-dialog> custom element before this component mounts.
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+  import { getStoredTheme, setTheme, type Theme } from "./theme";
 
   // acl resource identity for a paper doc: type "paper-doc", a fixed parent
   // sentinel ("_paper", == PAPER_DOCS_PARENT in permissions.py), child = doc id.
@@ -71,11 +72,30 @@
   let copyState: CopyFeedback = $state("idle");
   let menuOpen = $state(false);
   let apiSubOpen = $state(false);
+  let themeSubOpen = $state(false);
   let menuRoot: HTMLDivElement | undefined = $state();
+
+  // Current per-device theme choice (Light / Dark / System), initialised from
+  // the persisted value so the radio reflects reality when the menu opens.
+  let currentTheme = $state<Theme>(getStoredTheme());
+  // Order mirrors THEMES in theme.ts (light is the default; dark/system are
+  // explicit opt-ins).
+  const THEME_OPTIONS: { value: Theme; label: string }[] = [
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+    { value: "system", label: "System" },
+  ];
+
+  function chooseTheme(theme: Theme) {
+    currentTheme = theme;
+    setTheme(theme);
+    closeMenu();
+  }
 
   function closeMenu() {
     menuOpen = false;
     apiSubOpen = false;
+    themeSubOpen = false;
   }
 
   async function handleCopy() {
@@ -154,8 +174,10 @@
 
   function onKey(evt: KeyboardEvent) {
     if (!menuOpen || evt.key !== "Escape") return;
-    if (apiSubOpen) apiSubOpen = false;
-    else menuOpen = false;
+    if (apiSubOpen || themeSubOpen) {
+      apiSubOpen = false;
+      themeSubOpen = false;
+    } else menuOpen = false;
   }
 
   $effect(() => {
@@ -394,7 +416,10 @@
                   role="menuitem"
                   class="mi"
                   onclick={handleCopy}
-                  onmouseenter={() => (apiSubOpen = false)}
+                  onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                 >
                   {@render icon("copy")}
                   <span>Copy as markdown</span>
@@ -403,7 +428,10 @@
               <div
                 class="sub-wrap"
                 role="none"
-                onmouseenter={() => (apiSubOpen = true)}
+                onmouseenter={() => {
+                  apiSubOpen = true;
+                  themeSubOpen = false;
+                }}
               >
                 <button
                   type="button"
@@ -449,6 +477,50 @@
                   </div>
                 {/if}
               </div>
+              <!-- @feat dark-mode: the doc page's Light/Dark/System control —
+                   a submenu of radio items that persist the choice via
+                   setTheme (localStorage + <html data-theme> stamp). -->
+              <div
+                class="sub-wrap"
+                role="none"
+                onmouseenter={() => {
+                  themeSubOpen = true;
+                  apiSubOpen = false;
+                }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  class="mi"
+                  aria-haspopup="menu"
+                  aria-expanded={themeSubOpen}
+                  onclick={() => (themeSubOpen = !themeSubOpen)}
+                >
+                  {@render icon("circleHalf")}
+                  <span>Theme</span>
+                  <span class="mi-caret">{@render icon("chevronRight")}</span>
+                </button>
+                {#if themeSubOpen}
+                  <div class="overflow-menu submenu" role="menu">
+                    {#each THEME_OPTIONS as opt (opt.value)}
+                      <button
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={currentTheme === opt.value}
+                        class="mi"
+                        onclick={() => chooseTheme(opt.value)}
+                      >
+                        {#if currentTheme === opt.value}
+                          {@render icon("check")}
+                        {:else}
+                          <span class="mi-icon-spacer" aria-hidden="true"></span>
+                        {/if}
+                        <span>{opt.label}</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
               {#if isOwner && docState !== "trashed"}
                 <hr class="mi-sep" />
                 {#if kind === "template"}
@@ -457,7 +529,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postTemplateAction("/unmake_template")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("fileText")}
                     <span>Demote to doc</span>
@@ -468,7 +543,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postTemplateAction("/make_template")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("copy")}
                     <span>Make template</span>
@@ -481,7 +559,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postLockAction("/unlock")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("unlock")}
                     <span>Unlock (make editable)</span>
@@ -492,7 +573,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postLockAction("/lock")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("lock")}
                     <span>Lock (read-only)</span>
@@ -506,7 +590,10 @@
                     role="menuitem"
                     class="mi"
                     onclick={() => postStateAction("/archive")}
-                    onmouseenter={() => (apiSubOpen = false)}
+                    onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                   >
                     {@render icon("archive")}
                     <span>Archive</span>
@@ -517,7 +604,10 @@
                   role="menuitem"
                   class="mi mi-danger"
                   onclick={() => postStateAction("/trash")}
-                  onmouseenter={() => (apiSubOpen = false)}
+                  onmouseenter={() => {
+                  apiSubOpen = false;
+                  themeSubOpen = false;
+                }}
                 >
                   {@render icon("trash3")}
                   <span>Move to trash</span>
@@ -552,7 +642,7 @@
   .doc-header {
     padding: 12px 4px;
     margin-bottom: 8px;
-    border-bottom: 1px solid #eee;
+    border-bottom: 1px solid var(--pp-border);
   }
   .title-row {
     display: flex;
@@ -563,14 +653,17 @@
     flex: 0 0 auto;
     display: inline-flex;
     align-items: center;
+    /* deliberate literal: a deliberately desaturated blue, not --pp-accent. */
     color: #276890;
     text-decoration: none;
     border-radius: 4px;
   }
   .doc-icon-link:hover {
-    color: #0b5cad;
+    color: var(--pp-accent);
   }
   .doc-icon-link:focus-visible {
+    /* deliberate literal: sky-blue focus ring, distinct from the darker
+       --pp-focus-ring brand blue. */
     outline: 2px solid #4a9eff;
     outline-offset: 2px;
   }
@@ -589,12 +682,13 @@
     border-radius: 4px;
   }
   .title:hover {
-    border-color: #e0e0e0;
+    border-color: var(--pp-border);
   }
   .title:focus {
     outline: none;
+    /* deliberate literal: sky-blue focus border, distinct from --pp-focus-ring. */
     border-color: #4a9eff;
-    background: #fff;
+    background: var(--pp-bg);
   }
   .meta {
     display: flex;
@@ -603,7 +697,7 @@
     margin-top: 4px;
     padding: 0 6px;
     font-size: 12px;
-    color: #666;
+    color: var(--pp-fg-muted);
   }
   .created-by {
     display: inline-flex;
@@ -617,6 +711,7 @@
     object-fit: cover;
     flex-shrink: 0;
   }
+  /* deliberate literal: one-off success green — no "success" role token. */
   .saved {
     color: #2a8a2a;
   }
@@ -631,6 +726,8 @@
     padding: 2px 8px;
     border-radius: 999px;
   }
+  /* deliberate literals: one-off success-green and error-box pink/maroon pills,
+     each its own palette with no matching role token. */
   .copy-feedback.copied {
     background: #e1f5e2;
     color: #1f7a2a;
@@ -648,12 +745,13 @@
     padding: 3px 12px;
     font-size: 12px;
     line-height: 1.4;
-    border: 1px solid #0b5cad;
-    background: #0b5cad;
-    color: #fff;
+    border: 1px solid var(--pp-accent);
+    background: var(--pp-accent);
+    color: var(--pp-accent-fg);
     border-radius: 999px;
     cursor: pointer;
   }
+  /* deliberate literal: hover-darken of --pp-accent, no dedicated hover token. */
   .meta-actions :global(.datasette-acl-share__trigger.has-label:hover) {
     background: #094a8b;
     border-color: #094a8b;
@@ -665,8 +763,8 @@
   /* Segmented Edit/View slider */
   .mode-slider {
     display: inline-flex;
-    border: 1px solid #d0d7de;
-    background: #f6f8fa;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-surface-2);
     border-radius: 999px;
     padding: 2px;
     gap: 0;
@@ -677,24 +775,24 @@
     line-height: 1.4;
     border: none;
     background: transparent;
-    color: #555;
+    color: var(--pp-fg-muted);
     border-radius: 999px;
     cursor: pointer;
   }
   .seg:hover:not(.active) {
-    color: #222;
+    color: var(--pp-fg);
   }
   .seg.active {
-    background: #fff;
-    color: #0b5cad;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    background: var(--pp-bg);
+    color: var(--pp-accent);
+    box-shadow: 0 1px 2px var(--pp-shadow);
   }
   .seg:disabled {
     cursor: not-allowed;
     opacity: 0.55;
   }
   .seg:disabled:hover {
-    color: #555;
+    color: var(--pp-fg-muted);
   }
 
   /* Overflow menu */
@@ -707,25 +805,25 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid #d0d7de;
-    background: #f6f8fa;
-    color: #444;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-surface);
+    color: var(--pp-fg-muted);
     border-radius: 999px;
     cursor: pointer;
     padding: 0;
   }
   .overflow-btn:hover {
-    background: #ebeef1;
+    background: var(--pp-surface-2);
   }
   .overflow-menu {
     position: absolute;
     right: 0;
     top: calc(100% + 4px);
     min-width: 200px;
-    background: #fff;
-    border: 1px solid #d0d7de;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
     border-radius: 8px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 14px var(--pp-shadow);
     padding: 4px;
     z-index: 20;
     display: flex;
@@ -741,26 +839,33 @@
     border: none;
     border-radius: 4px;
     font-size: 13px;
-    color: #222;
+    color: var(--pp-fg);
     cursor: pointer;
     white-space: nowrap;
     width: 100%;
   }
   .mi:hover {
-    background: #f0f3f6;
+    background: var(--pp-surface-2);
   }
   .mi-icon {
     flex: 0 0 auto;
-    color: #555;
+    color: var(--pp-fg-muted);
+  }
+  /* Keeps the label column aligned for an unchecked theme radio (no check
+     icon present) — matches the 14px icon box rendered by the snippet. */
+  .mi-icon-spacer {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
   }
   .mi-caret {
     margin-left: auto;
     display: inline-flex;
-    color: #999;
+    color: var(--pp-fg-subtle);
   }
   .mi-sep {
     border: none;
-    border-top: 1px solid #eaeef2;
+    border-top: 1px solid var(--pp-border);
     margin: 4px 0;
   }
   .mi-section {
@@ -769,8 +874,10 @@
     font-weight: 600;
     letter-spacing: 0.06em;
     text-transform: uppercase;
-    color: #888;
+    color: var(--pp-fg-subtle);
   }
+  /* deliberate literals: one-off crimson danger text + its faint hover wash,
+     distinct from --pp-danger / --pp-danger-bg. */
   .mi-danger {
     color: #a40e26;
   }
@@ -792,7 +899,7 @@
 
   .loading {
     padding: 6px;
-    color: #888;
+    color: var(--pp-fg-subtle);
     font-size: 13px;
   }
   .locked-pill {
@@ -801,9 +908,9 @@
     gap: 4px;
     margin-left: 6px;
     padding: 2px 9px 2px 7px;
-    background: #eef2f7;
-    color: #4a5568;
-    border: 1px solid #d0d7e0;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg-muted);
+    border: 1px solid var(--pp-border);
     border-radius: 999px;
     font-size: 11px;
     line-height: 1.5;
@@ -816,6 +923,9 @@
     display: inline-flex;
     margin-left: 6px;
     padding: 2px 10px;
+    /* deliberate literals: the template pill's own pastel-blue identity palette
+       (light-blue fill / deep-navy text / blue border), distinct from the
+       neutral + accent tokens. */
     background: #e6f0ff;
     color: #0b3b8a;
     border: 1px solid #b9d0f5;
@@ -845,6 +955,89 @@
       margin-top: 6px;
       flex-wrap: wrap;
       row-gap: 6px;
+    }
+  }
+
+  /* --- Dark theme (append-only; the light rules above are untouched, so light
+     pixels can't change). Each override is written twice: for the explicit
+     `[data-theme="dark"]` choice and, in the media query, for the explicit
+     `[data-theme="system"]` opt-in that follows the OS (an unset page defaults
+     to light, so it is not matched). `:global(...)` keeps the component scope hash on
+     the descendant class. The .title input had NO explicit color, so it fell to
+     the browser default (near-black) and vanished on dark — the biggest fix
+     here. --- */
+  :global([data-theme="dark"]) .title {
+    color: var(--pp-fg);
+  }
+  :global([data-theme="dark"]) .doc-icon-link {
+    color: #6cb0ff;
+  }
+  :global([data-theme="dark"]) .saved {
+    color: #7ee787;
+  }
+  :global([data-theme="dark"]) .copy-feedback.copied {
+    background: rgba(63, 185, 80, 0.15);
+    color: #7ee787;
+  }
+  :global([data-theme="dark"]) .copy-feedback.failed {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  :global([data-theme="dark"]) .mi-danger,
+  :global([data-theme="dark"]) .mi-danger .mi-icon {
+    color: #ff7b72;
+  }
+  :global([data-theme="dark"]) .mi-danger:hover {
+    background: rgba(248, 81, 73, 0.15);
+  }
+  :global([data-theme="dark"]) .template-pill {
+    background: #182a44;
+    color: #9dc3ff;
+    border-color: #2f4d78;
+  }
+  :global([data-theme="dark"])
+    .meta-actions
+    :global(.datasette-acl-share__trigger.has-label:hover) {
+    background: #6cb0ff;
+    border-color: #6cb0ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root[data-theme="system"]) .title {
+      color: var(--pp-fg);
+    }
+    :global(:root[data-theme="system"]) .doc-icon-link {
+      color: #6cb0ff;
+    }
+    :global(:root[data-theme="system"]) .saved {
+      color: #7ee787;
+    }
+    :global(:root[data-theme="system"])
+      .copy-feedback.copied {
+      background: rgba(63, 185, 80, 0.15);
+      color: #7ee787;
+    }
+    :global(:root[data-theme="system"])
+      .copy-feedback.failed {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+    :global(:root[data-theme="system"]) .mi-danger,
+    :global(:root[data-theme="system"]) .mi-danger .mi-icon {
+      color: #ff7b72;
+    }
+    :global(:root[data-theme="system"]) .mi-danger:hover {
+      background: rgba(248, 81, 73, 0.15);
+    }
+    :global(:root[data-theme="system"]) .template-pill {
+      background: #182a44;
+      color: #9dc3ff;
+      border-color: #2f4d78;
+    }
+    :global(:root[data-theme="system"])
+      .meta-actions
+      :global(.datasette-acl-share__trigger.has-label:hover) {
+      background: #6cb0ff;
+      border-color: #6cb0ff;
     }
   }
 </style>

@@ -24,5 +24,6 @@ export const OUT = resolve(HERE, "../../../docs/screenshots");
 
 export const VIEWPORT = { width: 1200, height: 780 };
 
-// Absolute path of a shot's output PNG.
-export const out = (name) => resolve(OUT, `${name}.png`);
+// Absolute path of a shot's output PNG. `suffix` (e.g. ".dark") lets a shot
+// write a themed twin (`<name>.dark.png`) alongside the default light PNG.
+export const out = (name, suffix = "") => resolve(OUT, `${name}${suffix}.png`);

@@ -163,15 +163,16 @@
 <style>
   .image-dialog {
     width: min(440px, 92vw);
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--pp-border);
     border-radius: 10px;
     padding: 16px;
+    /* deliberate literal: heavier dialog drop-shadow alpha than --pp-shadow. */
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
     font: inherit;
-    color: #1a1a1a;
+    color: var(--pp-fg);
   }
   .image-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--pp-overlay);
   }
   .image-dialog__head {
     display: flex;
@@ -186,13 +187,13 @@
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
-    color: #666;
+    color: var(--pp-fg-muted);
     padding: 0 4px;
   }
   .image-dialog__tabs {
     display: flex;
     gap: 4px;
-    border-bottom: 1px solid #e4e4e4;
+    border-bottom: 1px solid var(--pp-border);
     margin-bottom: 12px;
   }
   .img-tab {
@@ -202,13 +203,13 @@
     cursor: pointer;
     font: inherit;
     font-size: 13px;
-    color: #555;
+    color: var(--pp-fg-muted);
     border-bottom: 2px solid transparent;
     margin-bottom: -1px;
   }
   .img-tab.active {
-    color: #0b5cad;
-    border-bottom-color: #0b5cad;
+    color: var(--pp-accent);
+    border-bottom-color: var(--pp-accent);
   }
   .image-paste-zone {
     display: flex;
@@ -217,13 +218,15 @@
     text-align: center;
     min-height: 110px;
     padding: 12px;
-    border: 2px dashed #c4ccd4;
+    border: 2px dashed var(--pp-border-strong);
     border-radius: 8px;
-    color: #667;
+    color: var(--pp-fg-muted);
     font-size: 13px;
     cursor: text;
-    background: #fafbfc;
+    background: var(--pp-surface);
   }
+  /* deliberate literals: sky-blue focus/drag-active ring + tint, no matching
+     accent-focus tokens (--pp-focus-ring is the darker brand blue). */
   .image-paste-zone:focus {
     outline: none;
     border-color: #4a9eff;
@@ -235,13 +238,15 @@
     gap: 10px;
     min-height: 110px;
     padding: 12px;
-    border: 2px dashed #c4ccd4;
+    border: 2px dashed var(--pp-border-strong);
     border-radius: 8px;
-    background: #fafbfc;
+    background: var(--pp-surface);
     font-size: 13px;
-    color: #667;
+    color: var(--pp-fg-muted);
     cursor: pointer;
   }
+  /* deliberate literal: solid error-box pink/maroon, distinct from the faint
+     --pp-danger-bg wash. */
   .image-dialog__error {
     margin: 10px 0 0;
     padding: 6px 10px;
@@ -253,9 +258,9 @@
   .image-preview-wrap {
     margin-top: 12px;
     padding: 8px;
-    border: 1px solid #e4e4e4;
+    border: 1px solid var(--pp-border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--pp-bg);
     text-align: center;
   }
   .image-preview {
@@ -270,11 +275,11 @@
     gap: 4px;
     margin-top: 12px;
     font-size: 12px;
-    color: #555;
+    color: var(--pp-fg-muted);
   }
   .image-alt input {
     padding: 6px 8px;
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--pp-border);
     border-radius: 6px;
     font: inherit;
   }
@@ -291,17 +296,37 @@
     font: inherit;
     font-size: 13px;
     cursor: pointer;
-    border: 1px solid #d0d7de;
-    background: #fff;
-    color: #333;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
+    color: var(--pp-fg);
   }
   .image-insert-btn {
-    border-color: #0b5cad;
-    background: #0b5cad;
-    color: #fff;
+    border-color: var(--pp-accent);
+    background: var(--pp-accent);
+    color: var(--pp-accent-fg);
   }
   .image-insert-btn:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  /* --- Dark theme (append-only; light rules untouched). The sky-blue focus
+     tint (#f2f8ff) would flash near-white on dark, and the solid pink error box
+     would glare — swap both for dark equivalents. Both theme conditions. --- */
+  :global([data-theme="dark"]) .image-paste-zone:focus {
+    background: rgba(74, 158, 255, 0.12);
+  }
+  :global([data-theme="dark"]) .image-dialog__error {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root[data-theme="system"]) .image-paste-zone:focus {
+      background: rgba(74, 158, 255, 0.12);
+    }
+    :global(:root[data-theme="system"]) .image-dialog__error {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
   }
 </style>

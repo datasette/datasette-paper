@@ -18,7 +18,8 @@ async def test_manifest_served(ds):
     assert body["display"] == "standalone"
     assert body["start_url"].endswith("/-/paper/")
     assert body["scope"].endswith("/-/paper/")
-    # theme/background kept in lock-step with the paper_base.html meta tag.
+    # theme/background kept in lock-step with the paper_base.html meta tag
+    # (single light-default meta; the resolver rewrites it per resolved theme).
     assert body["theme_color"] == "#ffffff"
     assert any(i.get("purpose") == "maskable" for i in body["icons"]), (
         "manifest must advertise a maskable icon"
@@ -42,11 +43,23 @@ async def test_index_head_has_pwa_tags(ds):
     html = (await ds.client.get("/-/paper/")).text
     assert 'rel="manifest"' in html
     assert "/-/paper/manifest.webmanifest" in html
-    assert 'name="theme-color" content="#ffffff"' in html
+    # A single light-default theme-color meta (matching the manifest's
+    # theme_color). Paper defaults to light regardless of OS, so there are no
+    # media-scoped metas; the resolver rewrites this one to the resolved bg.
+    assert '<meta name="theme-color" content="#ffffff">' in html
+    assert 'media="(prefers-color-scheme: dark)"' not in html
     assert 'name="apple-mobile-web-app-capable"' in html
     assert 'name="apple-mobile-web-app-title" content="Papers"' in html
     assert 'rel="apple-touch-icon"' in html
     assert "icons/apple-touch-icon.png" in html
+    # FOUC-free resolver: the blocking inline script that stamps data-theme on
+    # <html> from localStorage.paperTheme before first paint, and rewrites the
+    # theme-color meta to the resolved bg (#0d1117 when the resolved theme is
+    # dark, else the #ffffff light default).
+    assert "paperTheme" in html
+    assert 'setAttribute("data-theme"' in html
+    assert "#0d1117" in html
+    assert 'meta[name="theme-color"]' in html
 
 
 @pytest.mark.asyncio

@@ -7,4 +7,5 @@ export default defineShot({
   order: 14,
   doc: "blockTableId",
   prepare: (page) => waitBlockEmbed(page, "Vendor 1"),
+  themes: ["light", "dark"],
 });

@@ -10,6 +10,7 @@ export default defineShot({
   name: "link-edit",
   order: 23,
   doc: "linkId",
+  themes: ["light", "dark"],
   prepare: async (page) => {
     const link = page.locator('.ProseMirror a[href^="https://datasette.io"]');
     await link.waitFor({ state: "visible", timeout: 10_000 });

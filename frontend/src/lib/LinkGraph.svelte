@@ -163,7 +163,6 @@
             y1={e.source.y}
             x2={e.target.x}
             y2={e.target.y}
-            stroke="#c0c8d0"
             stroke-width={Math.min(1 + e.occurrences, 6)}
           />
         {/each}
@@ -171,12 +170,7 @@
       <g class="link-graph-nodes">
         {#each nodes as n (n.id)}
           <a href="/-/paper/doc/{n.id}" class:muted={isMuted(n.state)}>
-            <circle
-              cx={n.x}
-              cy={n.y}
-              r={radius(n.id)}
-              fill={isMuted(n.state) ? "#cbd2da" : "#0b5cad"}
-            >
+            <circle cx={n.x} cy={n.y} r={radius(n.id)}>
               <title>{n.title}</title>
             </circle>
             <text x={n.x} y={n.y - radius(n.id) - 4} text-anchor="middle">
@@ -194,12 +188,13 @@
     font-family: inherit;
   }
   .link-graph-state {
-    color: #888;
+    color: var(--pp-fg-subtle);
     padding: 12px 0;
   }
   .link-graph-empty {
     font-style: italic;
   }
+  /* deliberate literal: one-off error red, distinct from --pp-danger. */
   .link-graph-error {
     color: #8a2a2a;
   }
@@ -211,10 +206,21 @@
   .link-graph-nodes a {
     cursor: pointer;
   }
+  /* deliberate literal: the graph's own grey ramp for edges and muted (linked-
+     but-not-current) nodes — no matching role token. The live node fill and its
+     accent-hover map to the palette. */
+  .link-graph-edges line {
+    stroke: #c0c8d0;
+  }
   .link-graph-nodes circle {
+    fill: var(--pp-accent);
     transition: fill 0.1s ease;
   }
+  .link-graph-nodes a.muted circle {
+    fill: #cbd2da;
+  }
   .link-graph-nodes a:hover circle {
+    /* deliberate literal: hover-darken of --pp-accent, no dedicated hover token. */
     fill: #08407a;
   }
   .link-graph-nodes a.muted:hover circle {
@@ -222,11 +228,11 @@
   }
   .link-graph-nodes text {
     font-size: 11px;
-    fill: #333;
+    fill: var(--pp-fg);
     pointer-events: none;
     user-select: none;
   }
   .link-graph-nodes a.muted text {
-    fill: #999;
+    fill: var(--pp-fg-subtle);
   }
 </style>

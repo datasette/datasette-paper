@@ -506,9 +506,11 @@
     align-items: center;
     gap: 2px;
     padding: 4px 6px;
-    border: 1px solid #e4e4e4;
+    border: 1px solid var(--pp-border);
     border-radius: 8px;
-    background: #fff;
+    background: var(--pp-bg);
+    /* deliberate literal: very faint toolbar elevation (.04), lighter than the
+       --pp-shadow (.12) used by popovers/dialogs. */
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
     flex-wrap: wrap;
     position: sticky;
@@ -528,25 +530,26 @@
     background: transparent;
     border-radius: 4px;
     cursor: pointer;
-    color: #333;
+    color: var(--pp-fg);
     padding: 0;
   }
   .tb-btn:hover:not(:disabled) {
-    background: #eaeaea;
+    background: var(--pp-surface-2);
   }
   .tb-btn:disabled {
     opacity: 0.4;
     cursor: default;
   }
   .tb-btn.active {
-    background: #d9e7f8;
-    color: #0b5cad;
+    background: var(--pp-surface-3);
+    color: var(--pp-accent);
+    /* deliberate literal: light-blue active-button border, no matching token. */
     border-color: #b8d3ee;
   }
   .tb-sep {
     width: 1px;
     height: 18px;
-    background: #ccc;
+    background: var(--pp-border-strong);
     margin: 0 4px;
   }
   .tb-embed-wrap {
@@ -559,10 +562,10 @@
     left: 0;
     z-index: 20;
     min-width: 200px;
-    background: #fff;
-    border: 1px solid #d0d7de;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
     border-radius: 8px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 14px var(--pp-shadow);
     padding: 4px;
     display: flex;
     flex-direction: column;
@@ -577,15 +580,15 @@
     border-radius: 4px;
     font: inherit;
     text-align: left;
-    color: #222;
+    color: var(--pp-fg);
     cursor: pointer;
   }
   .tb-embed-item:hover {
-    background: #f0f3f6;
+    background: var(--pp-surface-2);
   }
   .tb-embed-item svg {
     flex: 0 0 auto;
-    color: #555;
+    color: var(--pp-fg-muted);
   }
   .tb-placeholder-wrap {
     position: relative;
@@ -596,6 +599,7 @@
     padding: 0 8px;
     font-size: 12px;
     font-weight: 600;
+    /* deliberate literal: deep-navy placeholder accent, darker than --pp-accent. */
     color: #0b3b8a;
   }
   .tb-placeholder-label {
@@ -607,10 +611,10 @@
     right: 0;
     z-index: 20;
     min-width: 220px;
-    background: #fff;
-    border: 1px solid #d0d7de;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
     border-radius: 8px;
-    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 4px 14px var(--pp-shadow);
     padding: 4px;
     display: flex;
     flex-direction: column;
@@ -618,7 +622,7 @@
   .tb-placeholder-loading {
     padding: 8px 10px;
     font-size: 12px;
-    color: #666;
+    color: var(--pp-fg-muted);
   }
   .tb-placeholder-item {
     display: flex;
@@ -631,20 +635,21 @@
     border-radius: 4px;
     font: inherit;
     text-align: left;
-    color: #222;
+    color: var(--pp-fg);
     cursor: pointer;
   }
   .tb-placeholder-item:hover {
-    background: #f0f3f6;
+    background: var(--pp-surface-2);
   }
   .tb-placeholder-key {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 12px;
+    /* deliberate literal: deep-navy placeholder accent, darker than --pp-accent. */
     color: #0b3b8a;
   }
   .tb-placeholder-sample {
     font-size: 11px;
-    color: #888;
+    color: var(--pp-fg-subtle);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -701,17 +706,18 @@
       /* Match the strip height + safe-area so the button spans it fully. */
       height: calc(36px + env(safe-area-inset-bottom));
       padding-bottom: env(safe-area-inset-bottom);
-      border: 1px solid #e4e4e4;
+      border: 1px solid var(--pp-border);
       border-right: none;
       border-bottom: none;
       border-top-left-radius: 8px;
-      background: #fff;
-      color: #333;
+      background: var(--pp-bg);
+      color: var(--pp-fg);
       cursor: pointer;
+      /* deliberate literal: faint edge shadow (.06), lighter than --pp-shadow. */
       box-shadow: -2px 0 6px rgba(0, 0, 0, 0.06);
     }
     .tb-hide-keyboard:active {
-      background: #eaeaea;
+      background: var(--pp-surface-2);
     }
   }
 </style>

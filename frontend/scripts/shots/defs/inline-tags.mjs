@@ -5,6 +5,7 @@ export default defineShot({
   name: "inline-tags",
   order: 5,
   doc: "inlineTagId",
+  themes: ["light", "dark"],
   prepare: async (page) => {
     await page.waitForFunction(
       () => document.querySelectorAll(".pm-tag").length >= 3,

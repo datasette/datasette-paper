@@ -153,6 +153,7 @@
   .tag-editor-backdrop {
     position: fixed;
     inset: 0;
+    /* deliberate literal: lighter modal backdrop than --pp-overlay (.35). */
     background: rgba(0, 0, 0, 0.3);
     display: flex;
     align-items: center;
@@ -160,8 +161,9 @@
     z-index: 100;
   }
   .tag-editor {
-    background: #fff;
+    background: var(--pp-bg);
     border-radius: 8px;
+    /* deliberate literal: heavier dialog drop-shadow alpha than --pp-shadow. */
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2);
     padding: 18px 20px;
     width: 380px;
@@ -171,8 +173,10 @@
   .tag-editor h2 {
     margin: 0 0 12px;
     font-size: 1.05em;
-    color: #1a1a1a;
+    color: var(--pp-fg);
   }
+  /* deliberate literal: solid error-box pink/maroon, distinct from the faint
+     --pp-danger-bg wash. */
   .te-error {
     background: #ffd6d6;
     color: #5a0000;
@@ -189,16 +193,16 @@
     margin-bottom: 12px;
   }
   .te-empty {
-    color: #888;
+    color: var(--pp-fg-subtle);
     font-size: 0.9em;
   }
   .tag-chip {
     display: inline-flex;
     align-items: center;
     gap: 3px;
-    background: #eef2f7;
-    color: #2c3e50;
-    border: 1px solid #d0d7e0;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg);
+    border: 1px solid var(--pp-border);
     border-radius: 9px;
     padding: 1px 4px 1px 8px;
     font-size: 12px;
@@ -208,11 +212,12 @@
     border: none;
     background: transparent;
     cursor: pointer;
-    color: #6a737d;
+    color: var(--pp-fg-muted);
     font-size: 14px;
     line-height: 1;
     padding: 0 2px;
   }
+  /* deliberate literal: one-off dark danger red, distinct from --pp-danger. */
   .te-remove:hover:not(:disabled) {
     color: #8a1a1a;
   }
@@ -227,8 +232,8 @@
   }
   .te-add button,
   .te-done {
-    border: 1px solid #ccc;
-    background: #fff;
+    border: 1px solid var(--pp-border-strong);
+    background: var(--pp-bg);
     border-radius: 4px;
     padding: 6px 12px;
     cursor: pointer;
@@ -236,10 +241,31 @@
   }
   .te-add button:hover:not(:disabled),
   .te-done:hover {
-    background: #f0f3f6;
+    background: var(--pp-surface-2);
   }
   .te-footer {
     margin-top: 14px;
     text-align: right;
+  }
+
+  /* --- Dark theme (append-only; light rules untouched). Solid pink error box +
+     dark-red remove-hover both fail on dark; swap for dark wash + lifted red.
+     Both theme conditions. --- */
+  :global([data-theme="dark"]) .te-error {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  :global([data-theme="dark"]) .te-remove:hover:not(:disabled) {
+    color: #ff7b72;
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root[data-theme="system"]) .te-error {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+    :global(:root[data-theme="system"])
+      .te-remove:hover:not(:disabled) {
+      color: #ff7b72;
+    }
   }
 </style>

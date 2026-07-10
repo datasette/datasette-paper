@@ -196,10 +196,10 @@
     flex-direction: column;
     gap: 4px;
     padding: 4px;
-    background: #fff;
-    border: 1px solid #e2e8f0;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
     border-radius: 10px;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 1px 3px var(--pp-shadow);
   }
   .paper-rail-btn {
     display: flex;
@@ -211,13 +211,15 @@
     border: none;
     border-radius: 7px;
     background: none;
-    color: #64748b;
+    color: var(--pp-fg-muted);
     cursor: pointer;
   }
   .paper-rail-btn:hover {
-    background: #f1f5f9;
-    color: #1e293b;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg);
   }
+  /* deliberate literals: the blue active-pill identity (light-blue fill + deep-
+     navy glyph), kept as its own palette, distinct from the neutral tokens. */
   .paper-rail-btn.is-active {
     background: #e6effb;
     color: #1b4f86;
@@ -235,10 +237,10 @@
     max-height: calc(100vh - 96px);
     overflow-y: auto;
     padding: 12px 16px;
-    background: #fff;
-    border: 1px solid #e2e8f0;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
     border-radius: 10px;
-    box-shadow: 0 6px 24px rgba(15, 23, 42, 0.12);
+    box-shadow: 0 6px 24px var(--pp-shadow);
     font-size: 14px;
   }
 
@@ -256,13 +258,14 @@
     width: 34px;
     height: 34px;
     padding: 0;
-    color: #64748b;
+    color: var(--pp-fg-muted);
     cursor: pointer;
-    background: #fff;
-    border: 1px solid #e2e8f0;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
     border-radius: 9px;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+    box-shadow: 0 1px 3px var(--pp-shadow);
   }
+  /* deliberate literals: blue active-pill identity (see .paper-rail-btn.is-active). */
   .paper-rail-mobile-btn.is-active {
     background: #e6effb;
     color: #1b4f86;
@@ -273,10 +276,10 @@
     top: calc(100% + 4px);
     right: 0;
     min-width: 168px;
-    background: #fff;
-    border: 1px solid #e2e8f0;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
     border-radius: 10px;
-    box-shadow: 0 6px 24px rgba(15, 23, 42, 0.12);
+    box-shadow: 0 6px 24px var(--pp-shadow);
     padding: 4px;
     display: flex;
     flex-direction: column;
@@ -291,16 +294,16 @@
     border: none;
     border-radius: 6px;
     font-size: 14px;
-    color: #1e293b;
+    color: var(--pp-fg);
     cursor: pointer;
   }
   .paper-rail-mi:hover,
   .paper-rail-mi.is-active {
-    background: #eef2f7;
+    background: var(--pp-surface-2);
   }
   .paper-rail-mi svg {
     flex: 0 0 auto;
-    color: #64748b;
+    color: var(--pp-fg-muted);
   }
   /* Full-screen tap target that sits behind the overlay panel to dismiss it. */
   .paper-rail-backdrop {
@@ -309,6 +312,8 @@
     z-index: 18;
     border: none;
     padding: 0;
+    /* deliberate literal: light slate-tinted mobile backdrop, distinct from the
+       darker --pp-overlay. */
     background: rgba(15, 23, 42, 0.18);
     cursor: default;
   }
@@ -322,6 +327,29 @@
       width: auto;
       max-width: none;
       max-height: 60vh;
+    }
+  }
+
+  /* --- Dark theme (append-only; light rules untouched). The active-pill's
+     light-blue fill would glare on dark, so swap it for a translucent-accent
+     fill + lifted-blue glyph. Both theme conditions covered. --- */
+  :global([data-theme="dark"]) .paper-rail-btn.is-active,
+  :global([data-theme="dark"]) .paper-rail-mobile-btn.is-active {
+    background: rgba(74, 158, 255, 0.18);
+    color: #9dc3ff;
+  }
+  :global([data-theme="dark"]) .paper-rail-mobile-btn.is-active {
+    border-color: rgba(74, 158, 255, 0.35);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root[data-theme="system"]) .paper-rail-btn.is-active,
+    :global(:root[data-theme="system"]) .paper-rail-mobile-btn.is-active {
+      background: rgba(74, 158, 255, 0.18);
+      color: #9dc3ff;
+    }
+    :global(:root[data-theme="system"])
+      .paper-rail-mobile-btn.is-active {
+      border-color: rgba(74, 158, 255, 0.35);
     }
   }
 </style>

@@ -9,6 +9,7 @@ export default defineShot({
   name: "tag-page",
   order: 7,
   goto: (page) => page.goto(`${PAPER}/tag/roadmap`),
+  themes: ["light", "dark"],
   prepare: async (page) => {
     await page.locator(".tag-page-list").waitFor({ state: "visible", timeout: 10_000 });
     await page.waitForFunction(

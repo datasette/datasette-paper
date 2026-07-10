@@ -182,7 +182,7 @@
 <style>
   .links-panel {
     margin: 16px 0;
-    border-top: 1px solid #e0e4e8;
+    border-top: 1px solid var(--pp-border);
     font-size: 14px;
   }
   /* Embedded (icon-rail flyout): the host supplies the card chrome, so drop the
@@ -200,7 +200,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #64748b;
+    color: var(--pp-fg-muted);
   }
   .links-panel-toggle {
     display: inline-flex;
@@ -210,26 +210,27 @@
     padding: 4px 0;
     background: transparent;
     border: none;
-    color: #4a5568;
+    color: var(--pp-fg-muted);
     font: inherit;
     font-weight: 600;
     cursor: pointer;
   }
   .links-panel-toggle:hover {
-    color: #1a1a1a;
+    color: var(--pp-fg);
   }
   .links-panel-caret {
     font-size: 0.8em;
-    color: #888;
+    color: var(--pp-fg-subtle);
   }
   .links-panel-body {
     /* Slight indent so the body reads as nested under the toggle header. */
     padding: 4px 0 8px 10px;
   }
   .links-panel-state {
-    color: #888;
+    color: var(--pp-fg-subtle);
     padding: 4px 0;
   }
+  /* deliberate literal: one-off error red, distinct from --pp-danger. */
   .links-panel-error {
     color: #8a2a2a;
   }
@@ -241,11 +242,11 @@
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    color: #888;
+    color: var(--pp-fg-subtle);
     font-weight: 600;
   }
   .links-panel-none {
-    color: #999;
+    color: var(--pp-fg-subtle);
     font-style: italic;
   }
   .links-panel-list {
@@ -260,21 +261,21 @@
     padding: 2px 0;
   }
   .links-panel-item .pm-paper-link {
-    color: #0b5cad;
+    color: var(--pp-accent);
     text-decoration: none;
   }
   .links-panel-item .pm-paper-link:hover {
     text-decoration: underline;
   }
   .links-panel-denied {
-    color: #888;
+    color: var(--pp-fg-subtle);
   }
   .links-panel-missing {
-    color: #888;
+    color: var(--pp-fg-subtle);
     text-decoration: line-through;
   }
   .links-panel-count {
-    color: #aaa;
+    color: var(--pp-fg-subtle);
     font-size: 0.85em;
   }
 </style>

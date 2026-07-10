@@ -270,15 +270,16 @@
 <style>
   .ds-embed-dialog {
     width: min(480px, 92vw);
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--pp-border);
     border-radius: 10px;
     padding: 16px;
+    /* deliberate literal: heavier dialog drop-shadow alpha than --pp-shadow. */
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18);
     font: inherit;
-    color: #1a1a1a;
+    color: var(--pp-fg);
   }
   .ds-embed-dialog::backdrop {
-    background: rgba(0, 0, 0, 0.35);
+    background: var(--pp-overlay);
   }
   .ds-embed-dialog__head {
     display: flex;
@@ -293,22 +294,24 @@
     font-size: 20px;
     line-height: 1;
     cursor: pointer;
-    color: #666;
+    color: var(--pp-fg-muted);
     padding: 0 4px;
   }
   .ds-embed-error {
     margin: 4px 0 12px;
     padding: 10px 12px;
     border-radius: 6px;
+    /* deliberate literal: light danger-callout background (red-50), distinct
+       from the --pp-danger-bg wash. */
     background: #fef2f2;
-    color: #b91c1c;
+    color: var(--pp-danger);
     font-size: 14px;
   }
   .ds-embed-search,
   .ds-embed-manual-input {
     width: 100%;
     padding: 7px 9px;
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--pp-border);
     border-radius: 6px;
     font: inherit;
     box-sizing: border-box;
@@ -319,7 +322,7 @@
     padding: 0;
     max-height: 240px;
     overflow-y: auto;
-    border: 1px solid #eee;
+    border: 1px solid var(--pp-border);
     border-radius: 6px;
   }
   .ds-embed-result {
@@ -335,12 +338,13 @@
     font: inherit;
   }
   .ds-embed-result:hover {
+    /* deliberate literal: light-blue hover tint, no matching surface token. */
     background: #f2f8ff;
   }
   .ds-embed-result-kind {
     font-size: 11px;
     text-transform: uppercase;
-    color: #888;
+    color: var(--pp-fg-subtle);
     min-width: 42px;
   }
   .ds-embed-result-label {
@@ -349,11 +353,11 @@
   .ds-embed-result-db {
     margin-left: auto;
     font-size: 12px;
-    color: #999;
+    color: var(--pp-fg-subtle);
   }
   .ds-embed-empty {
     padding: 10px;
-    color: #999;
+    color: var(--pp-fg-subtle);
     font-size: 13px;
     text-align: center;
   }
@@ -365,12 +369,12 @@
   }
   .ds-embed-manual-label {
     font-size: 12px;
-    color: #555;
+    color: var(--pp-fg-muted);
     white-space: nowrap;
   }
   .ds-embed-mode {
     padding: 6px;
-    border: 1px solid #d0d7de;
+    border: 1px solid var(--pp-border);
     border-radius: 6px;
     font: inherit;
   }
@@ -387,17 +391,35 @@
     font: inherit;
     font-size: 13px;
     cursor: pointer;
-    border: 1px solid #d0d7de;
-    background: #fff;
-    color: #333;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
+    color: var(--pp-fg);
   }
   .ds-embed-insert-btn {
-    border-color: #0b5cad;
-    background: #0b5cad;
-    color: #fff;
+    border-color: var(--pp-accent);
+    background: var(--pp-accent);
+    color: var(--pp-accent-fg);
   }
   .ds-embed-insert-btn:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  /* --- Dark theme (append-only; light rules untouched). The near-white red-50
+     error callout and the light-blue result hover would bleed on dark — swap for
+     dark washes. Both theme conditions. --- */
+  :global([data-theme="dark"]) .ds-embed-error {
+    background: rgba(248, 81, 73, 0.15);
+  }
+  :global([data-theme="dark"]) .ds-embed-result:hover {
+    background: rgba(74, 158, 255, 0.12);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root[data-theme="system"]) .ds-embed-error {
+      background: rgba(248, 81, 73, 0.15);
+    }
+    :global(:root[data-theme="system"]) .ds-embed-result:hover {
+      background: rgba(74, 158, 255, 0.12);
+    }
   }
 </style>

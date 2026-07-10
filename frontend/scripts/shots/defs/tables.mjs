@@ -8,6 +8,7 @@ export default defineShot({
   name: "tables",
   order: 25,
   doc: "richId",
+  themes: ["light", "dark"],
   prepare: async (page) => {
     // Click a data cell to summon the floating in-table action bar.
     const table = page.locator(".ProseMirror table");

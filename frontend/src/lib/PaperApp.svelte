@@ -393,6 +393,11 @@
     border-radius: 4px;
     margin-bottom: 8px;
   }
+  /* deliberate literals: the status-banner family is a set of solid-pastel
+     callout identity palettes (amber / red / slate) — each is its own bg+fg(+
+     border) triplet with no matching role token (the --pp-danger-bg / --pp-warn-bg
+     washes are faint, not these solid fills). #fff8ec below is the one exact
+     --pp-warn-bg match. */
   .status-banner.status-delay {
     background: #fff5d4;
     color: #5a4a00;
@@ -426,7 +431,7 @@
     font-size: 0.95em;
     padding: 3px 10px;
     border: 1px solid #c08000;
-    background: #fff8ec;
+    background: var(--pp-warn-bg);
     color: #5a3a00;
     border-radius: 3px;
     cursor: pointer;
@@ -434,15 +439,87 @@
   .status-banner.status-trashed button:hover {
     background: #ffe8b8;
   }
+  /* Dark theme for the status-banner solid-pastel callouts (the light fills
+   * above would glare on a dark page). Written twice: the explicit
+   * `[data-theme="dark"]` choice and, inside the media query, the explicit
+   * `[data-theme="system"]` opt-in that follows the OS (an unset page defaults
+   * to light, so it is not matched). `:global(...)` keeps the
+   * component's scoped class hash on the descendant. Keep the copies in sync. */
+  :global([data-theme="dark"]) .status-banner.status-delay {
+    background: #3a2f14;
+    color: #e5c07b;
+  }
+  :global([data-theme="dark"]) .status-banner.status-fail,
+  :global([data-theme="dark"]) .status-banner.status-step-error {
+    background: #3a1d1d;
+    color: #ffb4ab;
+  }
+  :global([data-theme="dark"]) .status-banner.status-step-error {
+    border-color: #6b3838;
+  }
+  :global([data-theme="dark"]) .status-banner.status-offline {
+    background: #1d2530;
+    color: #c9d4e0;
+    border-color: #3d4652;
+  }
+  :global([data-theme="dark"]) .status-banner.status-trashed {
+    background: #33280f;
+    color: #e5c07b;
+  }
+  :global([data-theme="dark"]) .status-banner.status-trashed button {
+    border-color: #7a5a1a;
+    color: #e5c07b;
+  }
+  :global([data-theme="dark"]) .status-banner.status-trashed button:hover {
+    background: rgba(210, 153, 34, 0.25);
+  }
+  @media (prefers-color-scheme: dark) {
+    :global(:root[data-theme="system"])
+      .status-banner.status-delay {
+      background: #3a2f14;
+      color: #e5c07b;
+    }
+    :global(:root[data-theme="system"])
+      .status-banner.status-fail,
+    :global(:root[data-theme="system"])
+      .status-banner.status-step-error {
+      background: #3a1d1d;
+      color: #ffb4ab;
+    }
+    :global(:root[data-theme="system"])
+      .status-banner.status-step-error {
+      border-color: #6b3838;
+    }
+    :global(:root[data-theme="system"])
+      .status-banner.status-offline {
+      background: #1d2530;
+      color: #c9d4e0;
+      border-color: #3d4652;
+    }
+    :global(:root[data-theme="system"])
+      .status-banner.status-trashed {
+      background: #33280f;
+      color: #e5c07b;
+    }
+    :global(:root[data-theme="system"])
+      .status-banner.status-trashed button {
+      border-color: #7a5a1a;
+      color: #e5c07b;
+    }
+    :global(:root[data-theme="system"])
+      .status-banner.status-trashed button:hover {
+      background: rgba(210, 153, 34, 0.25);
+    }
+  }
   .archived-pill {
     display: inline-block;
     margin-bottom: 8px;
     padding: 2px 8px;
-    background: #eef2f7;
-    color: #4a5568;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg-muted);
     font-size: 12px;
     border-radius: 10px;
-    border: 1px solid #d0d7e0;
+    border: 1px solid var(--pp-border);
   }
   /* In fullscreen layout the host gets flex:1; make the ProseMirror
    * surface stretch to fill it instead of capping at min-height: 60vh. */
@@ -465,16 +542,16 @@
     width: 40px;
     height: 40px;
     padding: 0;
-    border: 1px solid #d8dde3;
+    border: 1px solid var(--pp-border);
     border-radius: 50%;
-    background: #fff;
-    color: #40474f;
+    background: var(--pp-bg);
+    color: var(--pp-fg-muted);
     cursor: pointer;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.14);
+    box-shadow: 0 2px 8px var(--pp-shadow);
   }
   .scroll-to-top:hover {
-    background: #f3f5f7;
-    color: #1a1a1a;
+    background: var(--pp-surface-2);
+    color: var(--pp-fg);
   }
   @media (max-width: 640px) {
     /* The toolbar is `position: fixed` at the bottom on phones; reserve room so

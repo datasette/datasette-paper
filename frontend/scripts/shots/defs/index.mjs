@@ -4,6 +4,7 @@ import { defineShot } from "../defineShot.mjs";
 export default defineShot({
   name: "index",
   order: 1,
+  themes: ["light", "dark"],
   prepare: async (page) => {
     await page.locator(".paper-index table tbody tr").first().waitFor({ timeout: 15_000 });
   },
