@@ -81,42 +81,46 @@
  * CodeMirror emits in tier 1) collapse onto the 8 semantic --pp-code-* slots
  * declared in app.css. Any tok-* class not listed here inherits the plain code
  * color (markdown decoratives like tok-heading / tok-emphasis, diff markers).
+ * Scope: the in-doc editors (.editor-host) plus the Sources panel's standalone
+ * CM field (.sources-panel-sql, cmSqlField.ts) — the rail flyout sits outside
+ * .editor-host, so without the second scope its tokens carry classes but no
+ * color.
  * @feat code-highlight: tok-* → --pp-code-* color map for tier-0 decorations */
-.editor-host .tok-keyword,
-.editor-host .tok-atom,
-.editor-host .tok-bool {
+:is(.editor-host, .sources-panel-sql) .tok-keyword,
+:is(.editor-host, .sources-panel-sql) .tok-atom,
+:is(.editor-host, .sources-panel-sql) .tok-bool {
   color: var(--pp-code-keyword);
 }
-.editor-host .tok-string,
-.editor-host .tok-string2,
-.editor-host .tok-literal,
-.editor-host .tok-inserted {
+:is(.editor-host, .sources-panel-sql) .tok-string,
+:is(.editor-host, .sources-panel-sql) .tok-string2,
+:is(.editor-host, .sources-panel-sql) .tok-literal,
+:is(.editor-host, .sources-panel-sql) .tok-inserted {
   color: var(--pp-code-string);
 }
-.editor-host .tok-comment,
-.editor-host .tok-meta {
+:is(.editor-host, .sources-panel-sql) .tok-comment,
+:is(.editor-host, .sources-panel-sql) .tok-meta {
   color: var(--pp-code-comment);
 }
-.editor-host .tok-number {
+:is(.editor-host, .sources-panel-sql) .tok-number {
   color: var(--pp-code-number);
 }
-.editor-host .tok-function,
-.editor-host .tok-macroName,
-.editor-host .tok-labelName {
+:is(.editor-host, .sources-panel-sql) .tok-function,
+:is(.editor-host, .sources-panel-sql) .tok-macroName,
+:is(.editor-host, .sources-panel-sql) .tok-labelName {
   color: var(--pp-code-function);
 }
-.editor-host .tok-variableName,
-.editor-host .tok-variableName2,
-.editor-host .tok-propertyName,
-.editor-host .tok-namespace {
+:is(.editor-host, .sources-panel-sql) .tok-variableName,
+:is(.editor-host, .sources-panel-sql) .tok-variableName2,
+:is(.editor-host, .sources-panel-sql) .tok-propertyName,
+:is(.editor-host, .sources-panel-sql) .tok-namespace {
   color: var(--pp-code-variable);
 }
-.editor-host .tok-typeName,
-.editor-host .tok-className {
+:is(.editor-host, .sources-panel-sql) .tok-typeName,
+:is(.editor-host, .sources-panel-sql) .tok-className {
   color: var(--pp-code-type);
 }
-.editor-host .tok-punctuation,
-.editor-host .tok-operator {
+:is(.editor-host, .sources-panel-sql) .tok-punctuation,
+:is(.editor-host, .sources-panel-sql) .tok-operator {
   color: var(--pp-code-punct);
 }
 /* code_block language-picker chrome (codeBlockView.ts). The wrapper is the

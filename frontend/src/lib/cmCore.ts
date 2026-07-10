@@ -61,6 +61,16 @@ export interface CmCore {
    * keyword/function completion to the SQLite dialect), so this just turns the
    * machinery on — pass it via `baseExtensions`'s `extra`. */
   completion(): Extension[];
+  /** CM-owned undo/redo (history + its keymap) for *standalone* fields whose
+   * text lives outside the PM doc (the Sources panel draft). The NodeView
+   * surfaces must NOT install this — their undo/redo stay PM-owned (collab
+   * requires it; see cmTextSurface.ts / codeBlockView.ts). */
+  history(): Extension[];
+  /** `position: fixed` tooltips, for editors inside a clipping ancestor with
+   * its own scroll (the Sources panel flyout is `overflow-y: auto`, which
+   * would crop the in-editor completion popup at the card edge; fixed
+   * descendants escape ancestor overflow). The in-doc editors don't need it. */
+  fixedTooltips(): Extension;
 }
 
 let coreValue: CmCore | null = null;
@@ -188,6 +198,14 @@ function buildCore(
     return [autocomplete.autocompletion(), view.keymap.of(autocomplete.completionKeymap)];
   }
 
+  function history(): Extension[] {
+    return [commands.history(), view.keymap.of(commands.historyKeymap)];
+  }
+
+  function fixedTooltips(): Extension {
+    return view.tooltips({ position: "fixed" });
+  }
+
   return {
     EditorView,
     EditorState: state.EditorState,
@@ -197,5 +215,7 @@ function buildCore(
     fromPM,
     baseExtensions,
     completion,
+    history,
+    fixedTooltips,
   };
 }

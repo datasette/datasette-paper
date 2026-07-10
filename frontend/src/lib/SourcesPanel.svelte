@@ -18,6 +18,7 @@
   import { listQueryableDatabases, runSqlQuery, type SqlResult } from "./sqlQuery";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import type { SourceStore } from "./sourceStore";
+  import { CmSqlField } from "./cmSqlField";
 
   // `initiallyOpen` lets a host (the right sidebar) expand the panel on mount;
   // stacked inline it defaults collapsed. `embedded` renders the panel headless
@@ -162,6 +163,46 @@
   // source's pos) rather than deleting immediately.
   let confirmDeletePos = $state<number | null>(null);
 
+  // @feat source: the panel's SQL field upgrades from a textarea to a
+  // standalone CM editor once the lazy CM chunk resolves; the draft survives
+  // the swap and row switches push their SQL in via setValue
+  let sqlHost = $state<HTMLDivElement | null>(null);
+  let sqlTextarea = $state<HTMLTextAreaElement | null>(null);
+  let sqlField: CmSqlField | null = null;
+  let sqlFieldReady = $state(false);
+
+  // Mount the CM field while the form is open (`sqlHost` exists only then).
+  // Until it resolves the plain textarea below edits `draftSql`; on resolve
+  // the field adopts the current draft (the user may have typed meanwhile)
+  // and takes over, keeping focus if the textarea had it.
+  $effect(() => {
+    const host = sqlHost;
+    if (!host) return;
+    let cancelled = false;
+    void CmSqlField.create({
+      parent: host,
+      doc: untrack(() => draftSql),
+      onChange: (doc) => (draftSql = doc),
+      onSubmit: () => void test(),
+    }).then((field) => {
+      if (cancelled) {
+        field.destroy();
+        return;
+      }
+      const hadFocus = document.activeElement === sqlTextarea;
+      field.setValue(untrack(() => draftSql));
+      sqlField = field;
+      sqlFieldReady = true;
+      if (hadFocus) field.focus();
+    });
+    return () => {
+      cancelled = true;
+      sqlField?.destroy();
+      sqlField = null;
+      sqlFieldReady = false;
+    };
+  });
+
   function toggle(): void {
     open = !open;
   }
@@ -173,6 +214,9 @@
     draftSql = "";
     probe = null;
     confirmDeletePos = null;
+    // The mount effect keys on the host element, so switching rows while the
+    // form stays open doesn't recreate the field — push the new draft in.
+    sqlField?.setValue(draftSql);
   }
 
   function openEdit(s: Row): void {
@@ -182,6 +226,7 @@
     draftSql = s.sql;
     probe = null;
     confirmDeletePos = null;
+    sqlField?.setValue(draftSql);
   }
 
   function closeForm(): void {
@@ -336,10 +381,18 @@
               {/each}
             </select>
           </label>
-          <label class="sources-panel-field">
+          <div class="sources-panel-field">
             <span>SQL</span>
-            <textarea bind:value={draftSql} rows="3" placeholder="select … "></textarea>
-          </label>
+            {#if !sqlFieldReady}
+              <textarea
+                bind:this={sqlTextarea}
+                bind:value={draftSql}
+                rows="3"
+                placeholder="select … "
+              ></textarea>
+            {/if}
+            <div class="sources-panel-sql" bind:this={sqlHost}></div>
+          </div>
           <div class="sources-panel-form-actions">
             <button type="button" onclick={test} disabled={probing}>Test</button>
             <span class="sources-panel-spacer"></span>
@@ -571,6 +624,20 @@
     padding: 4px 6px;
     font-size: 13px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  /* CM upgrade of the SQL field (cmSqlField.ts): match the sibling input
+     chrome (13px, 5px radius, --pp-bg fill) and keep the textarea's ~3-row
+     floor — the cmCore theme's 0.9em/10px-padding defaults are sized for the
+     in-doc blocks, not a form field. */
+  .sources-panel-sql :global(.cm-editor) {
+    margin: 0;
+    font-size: 13px;
+    border-radius: 5px;
+    background: var(--pp-bg);
+  }
+  .sources-panel-sql :global(.cm-content) {
+    padding: 4px 6px;
+    min-height: 4.5em;
   }
   .sources-panel-form-actions {
     display: flex;
