@@ -27,9 +27,16 @@ test.describe("inline sql values", () => {
     await app.locator(".sources-panel-add").click();
     await app.locator(".sources-panel-field input").fill("vendors");
     await app.locator(".sources-panel-field select").selectOption(E2E_DB);
-    await app
-      .locator(".sources-panel-field textarea")
-      .fill("select count(*) as n from vendors");
+    // The SQL field renders as a plain textarea only until the lazy CM chunk
+    // resolves, then swaps in a standalone CM editor (the draft survives the
+    // swap — SourcesPanel.svelte). Filling the textarea races that swap: on a
+    // slow runner it detaches mid-fill and locator.fill retries forever
+    // against a textarea that never returns. Wait for the upgrade and type
+    // into CM instead — the surface a settled panel actually shows.
+    const sqlField = app.locator(".sources-panel-sql .cm-content");
+    await expect(sqlField).toBeVisible({ timeout: 10000 });
+    await sqlField.click();
+    await page.keyboard.type("select count(*) as n from vendors");
 
     // Test runs the probe and reports the column.
     await app.getByRole("button", { name: "Test" }).click();
@@ -54,6 +61,23 @@ test.describe("inline sql values", () => {
     const chip = app.locator(".pm-value");
     await expect(chip).toBeVisible({ timeout: 10000 });
     await expect(chip).toHaveText("30", { timeout: 10000 });
+
+    // Persist before reload — reload aborts in-flight POST batches, and the
+    // typed paragraph lands as several of them with the value chip in the
+    // last. Rather than guessing a version floor (waitForServerVersion needs
+    // an exact step count), poll the materialized doc for the chip's node;
+    // the page stays alive during the poll, so the connection keeps flushing.
+    await expect
+      .poll(
+        async () => {
+          const r = await page.request.get(`/-/paper/api/docs/${host.id}/document`);
+          // The envelope carries the doc as markdown; the chip round-trips
+          // as the `${{source.column}}` atom.
+          return r.ok() ? JSON.stringify(await r.json()).includes("${{vendors.n}}") : false;
+        },
+        { timeout: 10000, message: "value chip never persisted server-side" },
+      )
+      .toBe(true);
 
     // Survives a reload — the chip re-fetches on mount.
     await page.reload();
