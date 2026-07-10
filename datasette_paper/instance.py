@@ -48,7 +48,7 @@ import logging
 import time
 from typing import Optional
 
-from .db import PaperDB
+from .db import PaperDB, _utc_now_iso
 from .errors import BadVersionError, ConflictError, GoneError, InvalidStepError
 from .sql import _queries
 
@@ -408,6 +408,17 @@ class Instance:
                 assert inserted is not None
                 new_ver = inserted
                 _queries.bump_doc_version(conn, doc_id=self.doc_id, version=new_ver)
+            # @feat profile-papers: record this actor's edit for the profile
+            # "Papers" rollup. This closure — not PaperDB.insert_step — is the
+            # real choke point every live append (collab POST + markdown
+            # append_fragment) funnels through; anonymous edits don't attribute.
+            if actor_id is not None and new_ver != base_version:
+                _queries.upsert_doc_activity(
+                    conn,
+                    doc_id=self.doc_id,
+                    actor_id=actor_id,
+                    last_edited_at=_utc_now_iso(),
+                )
             return new_ver
 
         new_version = await self.db.database.execute_write_fn(write_all)

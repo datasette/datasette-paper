@@ -1975,6 +1975,188 @@
         }
       ],
       "result_class": "TagRef"
+    },
+    {
+      "name": "upsertDocActivity",
+      "result_type": "Void",
+      "sql": "INSERT INTO _datasette_paper_doc_activity (doc_id, actor_id, last_edited_at)\nVALUES ($doc_id::integer, $actor_id::text, $last_edited_at::text)\nON CONFLICT(doc_id, actor_id) DO UPDATE SET\n    last_edited_at = excluded.last_edited_at;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$actor_id::text",
+          "name": "actor_id",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$last_edited_at::text",
+          "name": "last_edited_at",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "deleteActivityForDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_doc_activity WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "listProfileDocs",
+      "result_type": "Rows",
+      "sql": "SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name,\n       d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at,\n       d.kind, d.locked, a.last_edited_at\nFROM _datasette_paper_doc d\nLEFT JOIN _datasette_paper_doc_activity a\n    ON a.doc_id = d.id AND a.actor_id = $actor::text\nWHERE d.id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n  )\n  AND d.state = 'active'\n  AND (d.created_by = $actor::text OR a.actor_id IS NOT NULL)\nORDER BY COALESCE(a.last_edited_at, d.created_at) DESC\nLIMIT $limit::integer;",
+      "parameters": [
+        {
+          "full_name": "$actor::text",
+          "name": "actor",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$doc_ids_json::text",
+          "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$limit::integer",
+          "name": "limit",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "updated_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "updated_at",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "created_by",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "created_by",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "schema_name",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "schema_name",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "current_version",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "current_version",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "state",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "state",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "archived_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "archived_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "trashed_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "trashed_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "delete_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "delete_at",
+          "decltype": "TEXT",
+          "nullable": true
+        },
+        {
+          "name": "kind",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "kind",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "locked",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "locked",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "last_edited_at",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc_activity",
+          "origin_column": "last_edited_at",
+          "decltype": "TEXT",
+          "nullable": false
+        }
+      ],
+      "result_class": "ProfileDoc"
     }
   ]
 }

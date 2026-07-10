@@ -18,10 +18,22 @@ talks to the acl JSON API directly.
 
 from __future__ import annotations
 
+import datetime
 import json
 from typing import Optional
 
 from .sql import _queries
+
+
+def _utc_now_iso() -> str:
+    """Current UTC time as an ISO-8601 string matching the created_at columns.
+
+    The table defaults use ``strftime('%Y-%m-%dT%H:%M:%fZ','now')`` — UTC with
+    millisecond precision. Match that shape exactly so ``last_edited_at`` sorts
+    lexically alongside ``created_at`` in listProfileDocs' COALESCE key.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
 class PaperDB:
@@ -182,6 +194,21 @@ class PaperDB:
 
         def read(conn):
             return _queries.list_docs_by_ids(conn, doc_ids_json=doc_ids_json)
+
+        return await self.database.execute_write_fn(read)
+
+    async def list_profile_docs(
+        self, *, doc_ids: list[int], actor: str, limit: int
+    ) -> list[_queries.ProfileDoc]:
+        """Active docs a profile actor created or edited, scoped to the
+        viewer's visible ``doc_ids``, newest-activity first, capped at
+        ``limit``. Backs the profile "Papers" section."""
+        doc_ids_json = json.dumps(doc_ids)
+
+        def read(conn):
+            return _queries.list_profile_docs(
+                conn, actor=actor, doc_ids_json=doc_ids_json, limit=limit
+            )
 
         return await self.database.execute_write_fn(read)
 
@@ -390,6 +417,9 @@ class PaperDB:
             # kept (see m005: resolve-time decides 'not found').
             _queries.delete_links_for_src(conn, src_doc_id=doc_id)
             _queries.delete_tags_for_doc(conn, doc_id=doc_id)
+            # Activity rollup carries no FK cascade (matching steps/snapshots),
+            # so purge it here alongside the other child rows.
+            _queries.delete_activity_for_doc(conn, doc_id=doc_id)
             _queries.hard_delete_doc(conn, doc_id=doc_id)
 
         await self.database.execute_write_fn(write)
@@ -418,6 +448,18 @@ class PaperDB:
             )
             assert new_version is not None
             _queries.bump_doc_version(conn, doc_id=doc_id, version=new_version)
+            # @feat profile-papers: record this actor's edit for the profile
+            # "Papers" rollup. Mirrors the upsert in Instance's write_all —
+            # the live collab path does NOT go through this method, so both
+            # step-insert sites must keep the rollup in lock-step. Anonymous
+            # steps (actor_id is None) don't attribute.
+            if actor_id is not None:
+                _queries.upsert_doc_activity(
+                    conn,
+                    doc_id=doc_id,
+                    actor_id=actor_id,
+                    last_edited_at=_utc_now_iso(),
+                )
             return new_version
 
         return await self.database.execute_write_fn(write)

@@ -92,6 +92,24 @@ class TagRef:
     occurrences: int
 
 
+@dataclass
+class ProfileDoc:
+    id: int
+    name: str
+    created_at: str
+    updated_at: str
+    created_by: str | None
+    schema_name: str
+    current_version: int
+    state: str
+    archived_at: str | None
+    trashed_at: str | None
+    delete_at: str | None
+    kind: str
+    locked: int
+    last_edited_at: str
+
+
 def insert_doc(
     conn: sqlite3.Connection,
     name: str,
@@ -663,3 +681,55 @@ ORDER BY d.updated_at DESC, d.id DESC;
     params = {"tag::text": tag, "viewable_json::text": viewable_json}
     cursor = conn.execute(sql, params)
     return [TagRef(*row) for row in cursor.fetchall()]
+
+
+def upsert_doc_activity(
+    conn: sqlite3.Connection, doc_id: int, actor_id: str, last_edited_at: str
+) -> None:
+    sql = """\
+INSERT INTO _datasette_paper_doc_activity (doc_id, actor_id, last_edited_at)
+VALUES ($doc_id::integer, $actor_id::text, $last_edited_at::text)
+ON CONFLICT(doc_id, actor_id) DO UPDATE SET
+    last_edited_at = excluded.last_edited_at;
+"""
+    params = {
+        "doc_id::integer": doc_id,
+        "actor_id::text": actor_id,
+        "last_edited_at::text": last_edited_at,
+    }
+    conn.execute(sql, params)
+    return None
+
+
+def delete_activity_for_doc(conn: sqlite3.Connection, doc_id: int) -> None:
+    sql = "DELETE FROM _datasette_paper_doc_activity WHERE doc_id = $doc_id::integer;"
+    params = {"doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def list_profile_docs(
+    conn: sqlite3.Connection, actor: str, doc_ids_json: str, limit: int
+) -> list[ProfileDoc]:
+    sql = """\
+SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name,
+       d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at,
+       d.kind, d.locked, a.last_edited_at
+FROM _datasette_paper_doc d
+LEFT JOIN _datasette_paper_doc_activity a
+    ON a.doc_id = d.id AND a.actor_id = $actor::text
+WHERE d.id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+  )
+  AND d.state = 'active'
+  AND (d.created_by = $actor::text OR a.actor_id IS NOT NULL)
+ORDER BY COALESCE(a.last_edited_at, d.created_at) DESC
+LIMIT $limit::integer;
+"""
+    params = {
+        "actor::text": actor,
+        "doc_ids_json::text": doc_ids_json,
+        "limit::integer": limit,
+    }
+    cursor = conn.execute(sql, params)
+    return [ProfileDoc(*row) for row in cursor.fetchall()]

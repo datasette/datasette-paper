@@ -635,3 +635,52 @@ def m007_inline_tag_index(db: Database):
             ON _datasette_paper_inline_tag(tag);
         """
     )
+
+
+@migrations()
+def m008_doc_activity(db: Database):
+    # @feat profile-papers: durable per-(doc, actor) last-edited rollup. The
+    # step log is compacted after every snapshot, so "recently edited by P"
+    # can't be derived from surviving history; this one-row-per-pair table is
+    # upserted on every accepted step (see db.insert_step) and outlives
+    # compaction. Backfill below is best-effort — it seeds from whatever the
+    # step/snapshot log still holds; anything already compacted away is gone,
+    # attribution accrues in full from deployment forward. Creation is never
+    # backfilled here (``created_by`` answers that directly).
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _datasette_paper_doc_activity (
+            --! Rollup of the most recent edit per (doc, actor). One row per
+            --! pair, bumped on every accepted step; survives step compaction
+            --! (unlike _datasette_paper_step, which is pruned after snapshots).
+            doc_id         INTEGER NOT NULL,
+            --- FK by convention, not declared: cleanup is explicit on doc hard
+            --- delete (mirrors steps/snapshots, which don't rely on cascades).
+            actor_id       TEXT NOT NULL,
+            --- ISO-8601 UTC, same shape as created_at columns so the two are
+            --- lexically comparable in listProfileDocs' COALESCE sort key.
+            last_edited_at TEXT NOT NULL,
+            PRIMARY KEY (doc_id, actor_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_activity_actor
+            ON _datasette_paper_doc_activity(actor_id, last_edited_at);
+
+        -- Best-effort backfill from surviving history: max edit time per pair
+        -- across the step tail and snapshot rows (both carry a nullable
+        -- actor_id; anonymous edits don't attribute). One UNION ALL + MAX
+        -- keeps the later of the two sources per pair.
+        INSERT OR REPLACE INTO _datasette_paper_doc_activity
+            (doc_id, actor_id, last_edited_at)
+        SELECT doc_id, actor_id, MAX(created_at)
+        FROM (
+            SELECT doc_id, actor_id, created_at
+            FROM _datasette_paper_step
+            WHERE actor_id IS NOT NULL
+            UNION ALL
+            SELECT doc_id, actor_id, created_at
+            FROM _datasette_paper_snapshot
+            WHERE actor_id IS NOT NULL
+        )
+        GROUP BY doc_id, actor_id;
+        """
+    )
