@@ -133,6 +133,29 @@ function buildCore(
     ".cm-line": { padding: "0" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--pp-fg)" },
     ".cm-content ::selection": { background: "var(--pp-selection)" },
+    // Tooltips (the autocomplete popup) fall through to CM's light-only base
+    // theme otherwise — unreadable in dark mode. Same popup chrome as
+    // .pm-code-block-lang-popup / .pm-sql-block-menu (editor.css), active row
+    // matching .pm-code-block-lang-item--active.
+    ".cm-tooltip": {
+      background: "var(--pp-bg)",
+      color: "var(--pp-fg)",
+      border: "1px solid var(--pp-border)",
+      borderRadius: "6px",
+      boxShadow: "0 4px 12px var(--pp-shadow)",
+      overflow: "hidden",
+    },
+    ".cm-tooltip.cm-tooltip-autocomplete > ul": {
+      fontFamily: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+    },
+    ".cm-tooltip-autocomplete ul li[aria-selected]": {
+      background: "var(--pp-code-bg)",
+      color: "var(--pp-link)",
+    },
+    // CM's stock completion type icons are emoji glyphs; icons.ts is the only
+    // sanctioned icon source, so hide them (they're all "keyword" here anyway).
+    ".cm-completionIcon": { display: "none" },
+    ".cm-completionMatchedText": { textDecoration: "none", fontWeight: "600" },
   });
 
   function baseExtensions(config: BaseExtensionsConfig): Extension[] {
