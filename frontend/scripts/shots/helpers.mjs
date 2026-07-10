@@ -26,6 +26,9 @@ export async function freezeVolatile(page) {
       .querySelectorAll(".paper-index tbody tr td:nth-child(3)")
       .forEach((el) => (el.textContent = "2 hours ago"));
     set(".delete-at", "Deletes in 7 days");
+    // <profile-papers> section: per-row relative edit/create time ("just now",
+    // "5m ago", …), volatile because it's computed from now at capture.
+    set(".paper-profile-time", "2 hours ago");
   });
 }
 

@@ -1,0 +1,88 @@
+/*
+ * Styling for the <profile-papers> section rendered on another plugin's
+ * profile page. Every selector is prefixed `.paper-profile-` so nothing
+ * leaks into the host page, and colours are literal neutral grays (matching
+ * the sibling kanban/comments sections) — paper's semantic token CSS
+ * variables do not exist on this page, so we cannot reference them.
+ */
+
+.paper-profile-message {
+  margin: 0;
+  color: #6c757d;
+  font-size: 0.875rem;
+}
+
+.paper-profile-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.paper-profile-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.375rem 0;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.paper-profile-item:last-child {
+  border-bottom: none;
+}
+
+.paper-profile-link {
+  color: #212529;
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 0.875rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paper-profile-link:hover {
+  text-decoration: underline;
+}
+
+.paper-profile-badge {
+  flex: 0 0 auto;
+  color: #495057;
+  background: #f1f3f5;
+  border-radius: 10px;
+  padding: 0.1rem 0.45rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.paper-profile-time {
+  flex: 0 0 auto;
+  color: #868e96;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+  .paper-profile-message {
+    color: #adb5bd;
+  }
+
+  .paper-profile-item {
+    border-bottom-color: #343a40;
+  }
+
+  .paper-profile-link {
+    color: #e9ecef;
+  }
+
+  .paper-profile-badge {
+    color: #ced4da;
+    background: #343a40;
+  }
+
+  .paper-profile-time {
+    color: #868e96;
+  }
+}
