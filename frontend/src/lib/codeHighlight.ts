@@ -27,6 +27,7 @@ import type { Node as PMNode } from "prosemirror-model";
 import { classHighlighter, highlightTree } from "@lezer/highlight";
 import type { Parser } from "@lezer/common";
 import { resolveLanguage, type PaperLanguage } from "./languages";
+import { activeCodePos, codeFocusKey } from "./codeFocusPlugin";
 
 // Blocks larger than this many characters are left un-highlighted at tier 0.
 const MAX_HIGHLIGHT_CHARS = 50_000;
@@ -116,8 +117,13 @@ export function codeHighlightPlugin(): Plugin<CodeHighlightState> {
     );
   }
 
-  /** Inline decorations for one code-carrying block, or `[]` (plain). */
-  function decosForBlock(node: PMNode, pos: number): Decoration[] {
+  /** Inline decorations for one code-carrying block, or `[]` (plain). A block
+   * the CM tier owns (codeFocusPlugin's active pos) is skipped: it has no
+   * contentDOM for inline decorations to attach to, and CM highlights it. */
+  function decosForBlock(node: PMNode, pos: number, activePos: number | null): Decoration[] {
+    // @feat code-cm-focus: tier-0 skips the block CM currently owns (no
+    // contentDOM to decorate; CM highlights it itself)
+    if (pos === activePos) return [];
     const entry = languageFor(node);
     if (!entry) return [];
     const text = node.textContent;
@@ -138,11 +144,11 @@ export function codeHighlightPlugin(): Plugin<CodeHighlightState> {
     return out;
   }
 
-  function buildAll(doc: PMNode): DecorationSet {
+  function buildAll(doc: PMNode, activePos: number | null): DecorationSet {
     const decos: Decoration[] = [];
     doc.descendants((node, pos) => {
       if (!CODE_CARRYING.has(node.type.name)) return true;
-      decos.push(...decosForBlock(node, pos));
+      decos.push(...decosForBlock(node, pos, activePos));
       return false;
     });
     return DecorationSet.create(doc, decos);
@@ -152,15 +158,21 @@ export function codeHighlightPlugin(): Plugin<CodeHighlightState> {
     key: codeHighlightKey,
     state: {
       init(_config, state) {
-        return { decorations: buildAll(state.doc) };
+        return { decorations: buildAll(state.doc, activeCodePos(state)) };
       },
       apply(tr, prev, _oldState, newState) {
+        const activePos = activeCodePos(newState);
         const meta = tr.getMeta(codeHighlightKey) as
           | GrammarReadyMeta
           | undefined;
         // A newly loaded grammar can affect blocks anywhere — full rebuild.
         if (meta?.type === "grammar-ready") {
-          return { decorations: buildAll(newState.doc) };
+          return { decorations: buildAll(newState.doc, activePos) };
+        }
+        // A CM block activated / deactivated: rebuild so the block CM now owns
+        // sheds its inline decorations (and the one it released regains them).
+        if (tr.getMeta(codeFocusKey)) {
+          return { decorations: buildAll(newState.doc, activePos) };
         }
         // No doc change → positions and text are stable; keep the set as-is.
         if (!tr.docChanged) return prev;
@@ -173,7 +185,7 @@ export function codeHighlightPlugin(): Plugin<CodeHighlightState> {
           const to = pos + node.nodeSize;
           if (overlapsChanged(from, to, changed)) {
             decos = decos.remove(decos.find(from, to));
-            const fresh = decosForBlock(node, pos);
+            const fresh = decosForBlock(node, pos, activePos);
             if (fresh.length) decos = decos.add(tr.doc, fresh);
           }
           return false;

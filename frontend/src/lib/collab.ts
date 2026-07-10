@@ -66,6 +66,7 @@ import { schema } from "./schema";
 import { isSafeHref } from "./safeHref";
 import { foldHeadingsPlugin } from "./foldHeadings";
 import { codeHighlightPlugin } from "./codeHighlight";
+import { codeFocusPlugin } from "./codeFocusPlugin";
 import { TocView, tocPlugin } from "./tocView";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
@@ -1333,6 +1334,11 @@ export class EditorConnection {
           clientID: this.clientID,
         }),
         remoteCursorsPlugin(),
+        // Tracks the one code_block the selection is inside (edit mode) and,
+        // once the CM core + grammar chunks resolve, flips it into tier-1 CM
+        // mode. Registered before codeHighlightPlugin so the latter can read
+        // its active pos and skip the block CM owns.
+        codeFocusPlugin(),
         // Static (tier-0) syntax highlighting: decorates code_block /
         // sql_block / source text with `tok-*` classes via lazily-loaded lezer
         // grammars. Read-path only; no @codemirror/* is pulled in here.

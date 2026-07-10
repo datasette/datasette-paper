@@ -24,6 +24,21 @@ export default [
     },
   },
   {
+    // `@codemirror/*` core packages may be imported only through the single
+    // chokepoint (cmCore.ts) so CM6 stays one lazy chunk absent from the entry
+    // bundle — see plans/codemirror/02-design.md §4. languages.ts is the other
+    // exemption: its lazy `cm()` loaders legitimately dynamic-import the
+    // `@codemirror/lang-*` grammar wrappers.
+    ignores: ["src/lib/cmCore.ts", "src/lib/languages.ts"],
+    files: ["src/**/*.{ts,svelte}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        { patterns: ["@codemirror/*"] },
+      ],
+    },
+  },
+  {
     ignores: ["dist/", "node_modules/", "../datasette_paper/static/"],
   },
 ];
