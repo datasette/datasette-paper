@@ -7,7 +7,13 @@
  *
  * A block is a *candidate* when the view is editable, the PM selection sits
  * wholly inside one of those types, and the view isn't mid-composition — with
- * two per-type guards: a `sql_block` is never a candidate while `attrs.hidden`
+ * one global guard and two per-type guards. The global guard: activation is
+ * *armed* only after the first user interaction (an explicit selection
+ * placement — click, arrow-key entry, any command calling `setSelection` — or
+ * focus entering the editor). A fresh EditorState's selection sits at doc
+ * start, so without the latch a doc whose first block is code-carrying would
+ * mount CM (and cmTextSurface would then pull page focus into it) on every
+ * unfocused editable load. The per-type guards: a `sql_block` is never a candidate while `attrs.hidden`
  * (its editor is collapsed to results), and a `source`'s NodeView-local
  * "collapsed" pill state is invisible here, so the plugin still marks a
  * collapsed `source` a candidate and the NodeView declines the CM mount itself
@@ -91,6 +97,12 @@ export function codeFocusPlugin(): Plugin<CodeFocusState> {
   // sequence so a superseded load (selection moved on) is discarded on resolve.
   let requested: number | null | undefined = undefined;
   let seq = 0;
+  // One-way user-interaction latch (see the module docstring). A closure
+  // variable, not plugin *state*, so it survives EditorConnection swapping in
+  // fresh EditorStates; flipping it from apply() (which can also run on
+  // speculative, undispatched states) is harmless for a one-way latch whose
+  // signals are all user-driven.
+  let armed = false;
 
   return new Plugin<CodeFocusState>({
     key: codeFocusKey,
@@ -99,6 +111,7 @@ export function codeFocusPlugin(): Plugin<CodeFocusState> {
         return INACTIVE;
       },
       apply(tr, value): CodeFocusState {
+        if (tr.selectionSet) armed = true;
         const meta = tr.getMeta(codeFocusKey) as CodeFocusMeta | undefined;
         if (meta) return meta;
         if (value.active == null) return value;
@@ -113,7 +126,9 @@ export function codeFocusPlugin(): Plugin<CodeFocusState> {
       requested = codeFocusKey.getState(editorView.state)?.active ?? null;
       return {
         update(view) {
-          const cand = candidatePos(view.state, view);
+          // Pre-interaction, never activate; deactivation (cand null while
+          // something is active) can't arise since nothing activated yet.
+          const cand = armed ? candidatePos(view.state, view) : null;
           if (cand === requested) return;
           requested = cand;
           const token = ++seq;
@@ -145,6 +160,25 @@ export function codeFocusPlugin(): Plugin<CodeFocusState> {
       };
     },
     props: {
+      handleDOMEvents: {
+        // Focus arms too: a click landing exactly on the pre-existing
+        // selection position dispatches no selection transaction, so
+        // selectionSet alone would miss it. The no-op meta dispatch nudges a
+        // view-update cycle so a caret already inside a code block mounts
+        // promptly rather than on the next keystroke.
+        focus(view) {
+          if (!armed) {
+            armed = true;
+            view.dispatch(
+              view.state.tr.setMeta(
+                codeFocusKey,
+                codeFocusKey.getState(view.state) ?? INACTIVE,
+              ),
+            );
+          }
+          return false;
+        },
+      },
       // A node decoration on the active block; its appearance/disappearance is
       // what makes PM re-run the NodeView's update() so the mode swap fires.
       decorations(state) {
