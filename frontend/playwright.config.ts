@@ -50,7 +50,11 @@ export default defineConfig({
     // `--plugins-dir ../tests/sample-plugin` loads the sample embed providers
     // (playlist/widget) so sample-embeds.spec.ts can exercise the JS render +
     // permission path. Harmless to the other specs (they don't use it).
-    command: `rm -f ${INTERNAL_DB} ${DATA_DB} && ${SETUP_DATA_DB} && uv run --prerelease=allow datasette --internal ${INTERNAL_DB} ${DATA_DB} --plugins-dir ../tests/sample-plugin --secret '${E2E_SECRET}' -s permissions.datasette-paper-create true -s permissions.paper-view true -s permissions.paper-edit true -p ${PORT}`,
+    // `profile_access true` opens datasette-user-profiles' own profile page
+    // (its routes gate on that action) so profile-papers.spec.ts can load a
+    // profile and assert paper's registered "Papers" section — additive to
+    // another plugin's surface, not a change to paper's own view+edit grants.
+    command: `rm -f ${INTERNAL_DB} ${DATA_DB} && ${SETUP_DATA_DB} && uv run --prerelease=allow datasette --internal ${INTERNAL_DB} ${DATA_DB} --plugins-dir ../tests/sample-plugin --secret '${E2E_SECRET}' -s permissions.datasette-paper-create true -s permissions.paper-view true -s permissions.paper-edit true -s permissions.profile_access true -p ${PORT}`,
     env: { DATASETTE_PAPER_E2E_SECRET: E2E_SECRET },
     url: `http://localhost:${PORT}`,
     reuseExistingServer: false,

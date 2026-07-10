@@ -217,6 +217,19 @@ export async function seed(ctx) {
     }
     return (await r.json()).id;
   };
+  // Append markdown to a doc as `author`, recording an edit attributed to them
+  // (the step's actor_id populates the `_datasette_paper_doc_activity` rollup
+  // the profile-papers endpoint reads). Requires edit perm → send the owner's
+  // cookie (create seeds owner = author, so the owner can edit their own doc).
+  const append = async (id, content, author) => {
+    const r = await ctx.request.post(`${PAPER}/api/docs/${id}/append`, {
+      data: { content, content_type: "markdown" },
+      headers: { Cookie: `ds_actor=${signActorCookie(author)}` },
+    });
+    if (r.status() !== 200) {
+      throw new Error(`append "${id}" failed: ${r.status()} ${await r.text()}`);
+    }
+  };
   // Set a doc's tags via the replace API. Mutations require manage, so send
   // the owner's signed cookie (the create endpoint seeds owner = author).
   const tagDoc = async (id, tags, owner) => {
@@ -246,6 +259,12 @@ export async function seed(ctx) {
   await tagDoc(designId, ["design"], "carol");
   await tagDoc(budgetId, ["budget", "q3"], "bob");
   await tagDoc(richId, ["roadmap", "q3"], ACTOR);
+  // profile-papers shot: bob owns "Product Roadmap" + "Budget 2026" (both show a
+  // "Created" badge on his profile). One authenticated append attributes an edit
+  // to bob so "Product Roadmap" also rolls up activity → "Created · edited". The
+  // two docs are the profile's whole Papers list; no new docs are added (that
+  // would perturb the index shot).
+  await append(roadmapId, "Reviewed the Q3 milestones and confirmed owners.", "bob");
   // Empty docs for the slash-menu / embed-picker authoring shots (each mutates
   // its own doc so the shots don't contaminate one another).
   const slashId = await create("Slash menu demo", ACTOR);
@@ -266,6 +285,8 @@ export async function seed(ctx) {
   const tocId = await create("Engineering handbook", ACTOR, TOC);
   const codeBlockId = await create("Language support", ACTOR, CODE_BLOCK);
   return {
+    // The actor whose user-profiles profile the profile-papers shot visits.
+    profileActor: "bob",
     richId,
     linkId,
     mentionId,

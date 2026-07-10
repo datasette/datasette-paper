@@ -3,6 +3,7 @@
 import datetime
 import json
 from typing import Annotated
+from urllib.parse import unquote
 
 from datasette import Forbidden, Response
 from datasette_plugin_router import Body
@@ -91,6 +92,75 @@ def _doc_flags_payload(doc) -> dict:
 # ---------------------------------------------------------------------------
 # API routes
 # ---------------------------------------------------------------------------
+
+
+@router.GET(r"^/-/paper/api/profile/(?P<profile_actor_id>[^/]+)/docs$")
+async def profile_docs(datasette, request, profile_actor_id: str):
+    """Docs a profile actor created or recently edited, viewer-acl-filtered.
+
+    Powers the "Papers" section on user-profiles pages. Returns the profile
+    actor's active docs (created_by them OR with edit activity), intersected
+    with the docs the *viewer* holds ``paper-view`` on, newest-activity first,
+    capped (default 10, ``?limit=`` 1..25). Each row carries ``created`` and a
+    nullable ``last_edited_at`` so the component can badge Created/Edited.
+
+    @feat profile-papers: viewer-acl-filtered listing of a profile actor's
+    created/recently-edited active docs, backed by db.list_profile_docs over the
+    _datasette_paper_doc_activity rollup. Data layer (migration, queries, upsert)
+    is T01.
+
+    No permission gate on the route and no ``profile_access`` check — this is a
+    listing, and paper's rule is "listing is ungated, results are acl-filtered"
+    (docs/PERMISSIONS.md; the ``list_docs`` precedent). Every row returned is a
+    doc the viewer can already open, and the payload is doc metadata only (no
+    profile names/avatars), so the §14 profile_access degrade rule isn't
+    triggered. An unknown/never-seen ``profile_actor_id`` yields
+    ``{"docs": []}`` — no actor-existence oracle. Don't "fix" this by adding a
+    gate.
+    """
+    # The frontend calls this with encodeURIComponent(actorId); the router
+    # matches the raw path and doesn't percent-decode the capture, so decode
+    # it here. A no-op on an already-decoded id (e.g. an ASGI server that
+    # decoded scope["path"]) since a plain actor id has no percent escapes.
+    profile_actor_id = unquote(profile_actor_id)
+
+    try:
+        limit = int(request.args.get("limit") or 10)
+    except (TypeError, ValueError):
+        limit = 10
+    limit = max(1, min(limit, 25))
+
+    # Viewer's visible set, same 1000-doc precedent as list_docs. The doc id
+    # lives in `child` (parent is the fixed PAPER_DOCS_PARENT sentinel).
+    page = await datasette.allowed_resources(
+        action=PAPER_VIEW, actor=request.actor, limit=1000
+    )
+    viewer_ids = [int(r.child) for r in page.resources]
+    # Empty → nothing to intersect (also covers anonymous viewers on
+    # locked-down instances).
+    if not viewer_ids:
+        return Response.json({"docs": []})
+
+    db = paper_db(datasette)
+    rows = await db.list_profile_docs(
+        doc_ids=viewer_ids, actor=profile_actor_id, limit=limit
+    )
+    return Response.json(
+        {
+            "docs": [
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "url": f"/-/paper/doc/{r.id}",
+                    "created": r.created_by == profile_actor_id,
+                    "last_edited_at": r.last_edited_at,
+                    "created_at": r.created_at,
+                    "updated_at": r.updated_at,
+                }
+                for r in rows
+            ]
+        }
+    )
 
 
 @router.GET(r"^/-/paper/api/docs$")

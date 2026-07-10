@@ -640,6 +640,7 @@ degrade-on-`profile_access`).
 | `/-/paper/api/tags` | GET | ungated route; ACL-filtered through `viewable_doc_ids` (`paper-view`) |
 | `/-/paper/api/tags/{tag}/refs` | GET | ungated route; ACL-filtered through `viewable_doc_ids` (`paper-view`) |
 | `/-/paper/tag/{tag}` | GET | ungated HTML shell (the client then calls the ACL-filtered `…/refs` API) |
+| `/-/paper/api/profile/{actor}/docs` | GET | ungated route; ACL-filtered through `allowed_resources("paper-view")` (`list_docs` precedent). **No `profile_access` involvement** — see §16 |
 
 Notes:
 
@@ -665,3 +666,33 @@ Notes:
   only the docs `allowed_resources("paper-view")` returns, so a no-grant actor
   gets an empty result rather than a 403. This is the same "listing is not
   gated" pattern as the doc index (TL;DR).
+
+## 16. Profile docs — the "Papers" section endpoint
+
+`GET /-/paper/api/profile/{actor}/docs` backs the "Papers" section paper
+registers on datasette-user-profiles' profile pages
+(`datasette_user_profile_sections` hook). For a profile actor **P** viewed by
+**V**, it lists P's **active** docs (`created_by = P` **or** P has an edit row
+in the `_datasette_paper_doc_activity` rollup), **intersected with the docs V
+holds `paper-view` on**, newest-activity first. The handler is
+`profile_docs` in `routes/docs.py`.
+
+Its stance is the same "listing is not gated, results are acl-filtered"
+pattern as `list_docs` (TL;DR; §6):
+
+- **No gate on the route itself** — anyone may call it, and the visible set is
+  built from `allowed_resources("paper-view")` for the *viewer* (the 1000-doc
+  precedent). A no-grant viewer short-circuits to `{"docs": []}`. Everything
+  returned is a doc V can already open, so the intersection — not a route gate —
+  is what enforces access.
+- **Active docs only.** Archived / trashed docs never appear, even to a viewer
+  who could see them under the index's archive tab — a profile is a public-ish
+  surface.
+- **No `profile_access` involvement.** The response is doc **metadata only**
+  (id, name, url, `created`, `last_edited_at`, timestamps) — no resolved names
+  or avatars. The §14 degrade rule fires only for endpoints that emit a resolved
+  name/avatar, so it isn't triggered here and there is nothing to resolve or
+  degrade. (The profile page already displays P; paper doesn't re-resolve it.)
+- **Unknown / never-seen `{actor}` → `200 {"docs": []}`, not 404.** The endpoint
+  is not an actor-existence oracle: a valid-but-empty response is
+  indistinguishable from "actor P has no visible docs".

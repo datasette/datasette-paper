@@ -34,6 +34,10 @@ export default defineConfig({
         index: path.resolve(__dirname, "src/pages/index/main.ts"),
         doc: path.resolve(__dirname, "src/pages/doc/main.ts"),
         tag: path.resolve(__dirname, "src/pages/tag/main.ts"),
+        profile_section: path.resolve(
+          __dirname,
+          "src/pages/profile_section/main.ts",
+        ),
       },
       output: {
         // Name chunks by CONTENT so the bundle tripwire (bundleSize.test.ts)
