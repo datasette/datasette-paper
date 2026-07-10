@@ -69,6 +69,7 @@ import { codeHighlightPlugin } from "./codeHighlight";
 import { TocView, tocPlugin } from "./tocView";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
+import { CodeBlockView } from "./codeBlockView";
 import { LinkResolver } from "./linkResolver";
 import { AccessChecker } from "./linkAccessCheck";
 import { PaperLinkView } from "./paperLinkView";
@@ -1415,6 +1416,8 @@ export class EditorConnection {
       nodeViews: {
         task_item: (node, view, getPos) =>
           new TaskItemView(node, view, getPos as () => number | undefined),
+        code_block: (node, view, getPos) =>
+          new CodeBlockView(node, view, getPos as () => number | undefined),
         paper_link: (node, view, getPos) =>
           new PaperLinkView(
             node,

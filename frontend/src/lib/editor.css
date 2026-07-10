@@ -119,6 +119,105 @@
 .editor-host .tok-operator {
   color: var(--pp-code-punct);
 }
+/* code_block language-picker chrome (codeBlockView.ts). The wrapper is the
+ * NodeView's `dom`; the corner button sits absolutely over the pre's
+ * top-right and is edit-mode-only (gated by the --editable class, applied
+ * from view.editable) and hover/focus-within revealed like the fold toggle
+ * above. The popup anchors below the button, same menu chrome as
+ * .pm-sql-block-menu but with a filter input + arrow-key-navigable list.
+ * @feat code-lang-picker: corner-button + popup chrome CSS, edit-mode gating */
+.editor-host .pm-code-block {
+  position: relative;
+}
+.editor-host .pm-code-block-lang-btn {
+  display: none;
+}
+.editor-host .pm-code-block--editable .pm-code-block-lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  border: 1px solid var(--pp-border);
+  background: var(--pp-surface);
+  color: var(--pp-fg-subtle);
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+}
+.editor-host .pm-code-block--editable:hover .pm-code-block-lang-btn,
+.editor-host .pm-code-block--editable:focus-within .pm-code-block-lang-btn,
+.editor-host .pm-code-block--picker-open .pm-code-block-lang-btn {
+  opacity: 1;
+}
+.editor-host .pm-code-block-lang-btn:hover {
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
+}
+.editor-host .pm-code-block-lang-icon {
+  display: inline-flex;
+}
+.editor-host .pm-code-block-lang-popup {
+  display: none;
+  position: absolute;
+  top: 34px;
+  right: 6px;
+  z-index: 12;
+  min-width: 200px;
+  max-height: 260px;
+  padding: 4px;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px var(--pp-shadow);
+}
+.editor-host .pm-code-block-lang-popup--open {
+  display: block;
+}
+.editor-host .pm-code-block-lang-input {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--pp-border);
+  border-radius: 4px;
+  background: var(--pp-surface);
+  color: var(--pp-fg);
+  font: inherit;
+  font-size: 13px;
+  padding: 4px 6px;
+  margin-bottom: 4px;
+}
+.editor-host .pm-code-block-lang-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+.editor-host .pm-code-block-lang-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: var(--pp-fg);
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+.editor-host .pm-code-block-lang-item:hover,
+.editor-host .pm-code-block-lang-item--active {
+  background: var(--pp-code-bg);
+  color: var(--pp-link);
+}
+.editor-host .pm-code-block-lang-empty {
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--pp-fg-subtle);
+}
 /* Heading-fold chevron (rendered as a Decoration.widget by foldHeadings.ts).
  * Sits in the heading's left gutter via a negative absolute offset; the
  * heading itself is the positioning ancestor. Hidden until hover for
