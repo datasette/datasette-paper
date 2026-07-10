@@ -154,6 +154,25 @@ describe("CM mode flip", () => {
     await waitForCm(view);
   });
 
+  it("never mounts CM for the pristine load-time selection (doc starts with a code block)", async () => {
+    // A fresh EditorState's default selection sits at doc start — inside the
+    // code block when it's the first node. Without the user-interaction latch
+    // the plugin mounted CM (and stole page focus) on every unfocused load.
+    const doc = schema.node("doc", null, [
+      schema.node("code_block", { language: null }, [schema.text("print(1)")]),
+      schema.node("paragraph", null, [schema.text("outro")]),
+    ]);
+    const view = mount(doc);
+    // Collab-style traffic — a doc change with no explicit selection
+    // placement — gives the plugin update cycles but must not arm it either.
+    view.dispatch(view.state.tr.insertText("!", view.state.doc.content.size - 1));
+    await new Promise((r) => setTimeout(r, 100));
+    expect(view.dom.querySelector(".cm-editor")).toBeNull();
+    // An explicit selection placement (click / arrow-key entry) arms + mounts.
+    selectInCode(view, 3);
+    await waitForCm(view);
+  });
+
   it("returns to the static <pre> when the selection leaves", async () => {
     const view = mount(codeDoc("print(1)"));
     selectInCode(view, 3);
