@@ -79,13 +79,18 @@ class TestBlocks:
         assert cb["type"] == "code_block"
         assert cb["content"] == [{"type": "text", "text": "print('x')"}]
 
-    def test_code_block_fenced_with_language_drops_info(self):
-        # The schema has no language attr today; verify we silently drop it
-        # without producing an invalid doc.
+    # @feat code-language: parse a ```lang fence into code_block(language=lang)
+    def test_code_block_fenced_with_language_kept(self):
         doc = parse_and_validate("```python\nx = 1\n```\n")
         cb = doc["content"][0]
         assert cb["type"] == "code_block"
-        assert "attrs" not in cb or "language" not in (cb.get("attrs") or {})
+        assert cb["attrs"] == {"language": "python"}
+
+    def test_plain_fence_has_null_language(self):
+        doc = parse_and_validate("```\nprint('x')\n```\n")
+        cb = doc["content"][0]
+        assert cb["type"] == "code_block"
+        assert cb["attrs"] == {"language": None}
 
     def test_code_block_indented(self):
         doc = parse_and_validate("    indented code\n")
@@ -108,10 +113,37 @@ class TestBlocks:
 
     def test_plain_sql_fence_without_db_stays_code_block(self):
         # The `db=` token is the discriminator: a plain ```sql fence is just a
-        # syntax-display code block, not a runnable SQL query block.
+        # syntax-display code block (now tagged `language="sql"`), not a
+        # runnable SQL query block.
         doc = parse_and_validate("```sql\nselect 1\n```\n")
         cb = doc["content"][0]
         assert cb["type"] == "code_block"
+        assert cb["attrs"] == {"language": "sql"}
+
+    def test_plain_sql_fence_round_trips_as_language_code_block(self):
+        md = "```sql\nselect 1\n```\n"
+        assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_code_block_language_source_does_not_round_trip_into_source(self):
+        # A code_block whose language is the reserved `source` token must NOT
+        # serialize as ```source (which would parse back as a `source` node).
+        # The serializer drops the language to a bare fence — the collision
+        # guard — so it round-trips as a plain code_block.
+        doc = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "code_block",
+                    "attrs": {"language": "source"},
+                    "content": [{"type": "text", "text": "select 1"}],
+                }
+            ],
+        }
+        md = doc_to_markdown(doc)
+        assert md == "```\nselect 1\n```\n"
+        back = parse_and_validate(md)
+        assert back["content"][0]["type"] == "code_block"
+        assert back["content"][0]["attrs"] == {"language": None}
 
     def test_sql_block_round_trips(self):
         md = "```sql db=data hidden\nselect * from t\n```\n"
@@ -970,6 +1002,10 @@ ROUNDTRIP_STABLE = [
     "- [ ] open\n- [x] done\n",
     "> quote\n>\n> > nested\n",
     "```\ncode\n```\n",
+    # @feat code-language: a language-tagged fence round-trips verbatim
+    "```python\nx = 1\n```\n",
+    # an unknown language survives untouched (info string is opaque)
+    "```foolang\ncode\n```\n",
     "| h | h |\n| --- | --- |\n| a | b |\n",
     "para 1\n\n---\n\npara 2\n",
     "soft\nbreak\n",

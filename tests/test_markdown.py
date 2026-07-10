@@ -128,6 +128,59 @@ def test_code_block_fenced():
     assert md.rstrip().endswith("```")
 
 
+# @feat code-language: serialize a code_block's language into the fence info string
+def test_code_block_serializes_language():
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "code_block",
+                "attrs": {"language": "python"},
+                "content": [{"type": "text", "text": "x = 1"}],
+            }
+        )
+    )
+    assert md == "```python\nx = 1\n```\n"
+
+
+def test_code_block_null_language_is_bare_fence():
+    md = doc_to_markdown(
+        _doc({"type": "code_block", "attrs": {"language": None}, "content": []})
+    )
+    assert md == "```\n\n```\n"
+
+
+@pytest.mark.parametrize("lang", ["source", "paper-embed", "paper-toc", "paper-table"])
+def test_code_block_reserved_language_serializes_bare(lang):
+    # A reserved token would parse back as a *different* node (e.g. `source`),
+    # so the serializer must drop it to a bare fence.
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "code_block",
+                "attrs": {"language": lang},
+                "content": [{"type": "text", "text": "body"}],
+            }
+        )
+    )
+    assert md == "```\nbody\n```\n"
+
+
+@pytest.mark.parametrize("lang", ["db=data", "two words", "back`tick"])
+def test_code_block_unsafe_language_serializes_bare(lang):
+    # An unsafe token (whitespace / backtick / `=`) could smuggle a `db=`-shaped
+    # token and flip a code block into a sql_block; drop it to a bare fence.
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "code_block",
+                "attrs": {"language": lang},
+                "content": [{"type": "text", "text": "body"}],
+            }
+        )
+    )
+    assert md == "```\nbody\n```\n"
+
+
 def test_horizontal_rule():
     md = doc_to_markdown(
         _doc(

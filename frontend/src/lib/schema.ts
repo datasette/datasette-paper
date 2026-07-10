@@ -15,14 +15,46 @@ import { blockEmbedUrl } from "./embedFilters";
 // for the stored-XSS hole; creation-site guards and the server-side step
 // validator (`instance.py`) are defense-in-depth around it.
 const _imageBase = basic.spec.nodes.get("image") as NodeSpec;
+
+// `prosemirror-schema-basic` ships `code_block` with no attrs. Override it in
+// place (same pattern as the `image` override above) to carry a `language`
+// attr — the fence info string on the markdown round-trip and the highlight
+// target for later CodeMirror work. `toDOM` emits `data-language` when set so
+// viewers / copy-paste carry it; the stock `pre` parseDOM rule stays as a
+// fallback for a `<pre>` with no marker. Mirrors datasette_paper/pm_schema.py.
+// @feat code-language: client code_block spec adds language attr (mirrors pm_schema.py)
+const _codeBlockBase = basic.spec.nodes.get("code_block") as NodeSpec;
+const codeBlockSpec: NodeSpec = {
+  ..._codeBlockBase,
+  attrs: { language: { default: null } },
+  parseDOM: [
+    {
+      tag: "pre[data-language]",
+      preserveWhitespace: "full",
+      getAttrs: (el) => {
+        const lang = (el as HTMLElement).getAttribute("data-language");
+        return { language: lang && lang.length ? lang : null };
+      },
+    },
+    { tag: "pre", preserveWhitespace: "full" },
+  ],
+  toDOM: (node) => {
+    const attrs: Record<string, string> = {};
+    if (node.attrs.language) attrs["data-language"] = String(node.attrs.language);
+    return ["pre", attrs, ["code", 0]];
+  },
+};
+
 const baseNodes = addListNodes(
-  basic.spec.nodes.update("image", {
-    ..._imageBase,
-    toDOM: (node) => [
-      "img",
-      { src: safeImageSrc(node.attrs.src), alt: node.attrs.alt, title: node.attrs.title },
-    ],
-  }),
+  basic.spec.nodes
+    .update("image", {
+      ..._imageBase,
+      toDOM: (node) => [
+        "img",
+        { src: safeImageSrc(node.attrs.src), alt: node.attrs.alt, title: node.attrs.title },
+      ],
+    })
+    .update("code_block", codeBlockSpec),
   "paragraph block*",
   "block",
 );

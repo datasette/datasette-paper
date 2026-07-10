@@ -71,6 +71,56 @@ def test_toc_without_config_applies_default():
     assert toc.attrs["config"] == {}
 
 
+# @feat code-language: a code_block(language=…) materializes through the server schema
+def test_code_block_language_materializes():
+    doc = _materialize(
+        {
+            "type": "code_block",
+            "attrs": {"language": "python"},
+            "content": [{"type": "text", "text": "x = 1"}],
+        }
+    )
+    cb = doc.content.child(0)
+    assert cb.type.name == "code_block"
+    assert cb.attrs["language"] == "python"
+
+
+def test_code_block_without_language_applies_default():
+    # A snapshot predating the `language` attr has no `language` key —
+    # ProseMirror fills the `None` default (no data migration / step-log
+    # rewrite needed).
+    doc = _materialize({"type": "code_block", "content": []})
+    assert doc.content.child(0).attrs["language"] is None
+
+
+def test_code_block_language_step_applies_over_snapshot():
+    # Lock-step regression guard: a ReplaceStep splicing a language-tagged
+    # code_block applies cleanly through the server-side materializer.
+    from prosemirror.model import Fragment, Node, Slice
+    from prosemirror.transform import ReplaceStep
+
+    start_doc = Node.from_json(
+        schema, {"type": "doc", "content": [{"type": "paragraph"}]}
+    )
+    code_block = Node.from_json(
+        schema,
+        {
+            "type": "code_block",
+            "attrs": {"language": "rust"},
+            "content": [{"type": "text", "text": "let x = 1;"}],
+        },
+    )
+    step = ReplaceStep(
+        start_doc.content.size,
+        start_doc.content.size,
+        Slice(Fragment.from_array([code_block]), 0, 0),
+    )
+    result = step.apply(start_doc)
+    assert not result.failed
+    result.doc.check()
+    assert result.doc.content.child(1).attrs["language"] == "rust"
+
+
 # ---------------------------------------------------------------------------
 # Link / image href sanitization (stored-XSS fix, blockers-0629/01).
 # Mirrors frontend/src/lib/__tests__/safeHref.test.ts — keep the allowlist in

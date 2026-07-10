@@ -355,7 +355,16 @@ def _tokens_to_doc(tokens) -> dict:
                     sql_block["content"].append({"type": "text", "text": text})
                 append(sql_block)
                 continue
-            cb: dict = {"type": "code_block", "content": []}
+            # @feat code-language: fence info first token becomes the code_block language attr
+            # A plain fence falls through here: its first info-string token
+            # (dropped by every earlier discriminator branch) is the language.
+            # An indented `code_block` token carries no info string → None.
+            lang = (info.split() or [None])[0] if info else None
+            cb: dict = {
+                "type": "code_block",
+                "attrs": {"language": lang},
+                "content": [],
+            }
             if text:
                 cb["content"].append({"type": "text", "text": text})
             append(cb)
@@ -414,6 +423,7 @@ def _tokens_to_doc(tokens) -> dict:
             append(
                 {
                     "type": "code_block",
+                    "attrs": {"language": None},
                     "content": [{"type": "text", "text": tok.content.rstrip("\n")}],
                 }
             )

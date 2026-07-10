@@ -1404,6 +1404,130 @@ describe("structural input rules", () => {
   });
 });
 
+// ─── Test: code_block language attr (typing + Enter + paste) ─────────────────
+
+describe("code_block language attr", () => {
+  // @feat code-language: ```lang input rule sets the code_block language attr
+  it("` ```py `<space> creates a code_block tagged `py`", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // Paragraph "```py"; typing the trailing space fires the input rule.
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("```py")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 6, 6, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    const block = view.state.doc.firstChild!;
+    expect(block.type).toBe(schema.nodes.code_block);
+    expect(block.attrs.language).toBe("py");
+    expect(block.textContent).toBe("");
+
+    conn.close();
+  });
+
+  it("` ``` `<space> creates a code_block with a null language", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("```")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 4, 4, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    const block = view.state.doc.firstChild!;
+    expect(block.type).toBe(schema.nodes.code_block);
+    expect(block.attrs.language).toBe(null);
+
+    conn.close();
+  });
+
+  it("a reserved token (`source`) is refused → null language", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("```source")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 10, 10, " ", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    const block = view.state.doc.firstChild!;
+    expect(block.type).toBe(schema.nodes.code_block);
+    expect(block.attrs.language).toBe(null);
+
+    conn.close();
+  });
+
+  it("` ```python `<Enter> creates a code_block tagged `python`", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("```python")));
+    // Cursor at the end of the marker (content is 9 chars → pos 10).
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 10)),
+    );
+
+    const evt = new KeyboardEvent("keydown", { key: "Enter" });
+    const handled = view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    expect(handled).toBe(true);
+
+    const block = view.state.doc.firstChild!;
+    expect(block.type).toBe(schema.nodes.code_block);
+    expect(block.attrs.language).toBe("python");
+    expect(block.textContent).toBe("");
+
+    conn.close();
+  });
+
+  it("pasting a ` ```python ` fence keeps the language", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    await preloadMarkdownParser();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    const $context = view.state.doc.resolve(1);
+
+    const parsed = view.someProp("clipboardTextParser", (f) =>
+      f("```python\nx = 1\n```", $context, false, view),
+    );
+    expect(parsed).toBeDefined();
+
+    const cb = parsed!.content.firstChild!;
+    expect(cb.type).toBe(schema.nodes.code_block);
+    expect(cb.attrs.language).toBe("python");
+    expect(cb.textContent).toBe("x = 1");
+
+    conn.close();
+  });
+});
+
 // ─── Test: heading folding ─────────────────────────────────────────────────
 
 describe("heading folding", () => {

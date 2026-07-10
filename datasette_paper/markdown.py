@@ -24,6 +24,17 @@ from .youtube import youtube_watch_url
 # Returning ``None`` instead of a tuple is equivalent to ``(None, None)``.
 ResourceResolver = Callable[[str, str], Optional[Tuple[Optional[str], Optional[str]]]]
 
+# A `code_block`'s language becomes the fence info string on serialize. Refuse
+# any token that would make the fence parse back as a *different* node: the
+# reserved set collides with the source / paper-embed / paper-toc / paper-table
+# discriminators in markdown_parser.py (a ```source fence parses as a `source`
+# node), and an unsafe token — whitespace / backtick / `=` — could smuggle a
+# `db=`-shaped token that flips a plain code block into a sql_block. `sql` is
+# deliberately NOT reserved: the parser's `db=` discriminator keeps ```sql
+# unambiguous, so a `sql`-tagged code block stays a highlighted code block.
+RESERVED_FENCE_TOKENS = {"source", "paper-embed", "paper-toc", "paper-table"}
+_SAFE_LANG_RE = re.compile(r"^[^\s`=]+$")
+
 # Optional {actor_id: display_name} map consulted by the `mention` inline
 # renderer, scoped to a single ``doc_to_markdown`` call. A ContextVar avoids
 # threading the map through every recursive `_render_*` helper. Absent a name
@@ -122,9 +133,14 @@ def _render_block(node: dict) -> str:
         return "#" * level + " " + _render_inlines(content) + "\n"
     if t == "horizontal_rule":
         return "---\n"
-    if t == "code_block":
+    if (
+        t == "code_block"
+    ):  # @feat code-language: serialize language into the fence info string
+        lang = (node.get("attrs") or {}).get("language") or ""
+        if lang in RESERVED_FENCE_TOKENS or not _SAFE_LANG_RE.match(lang):
+            lang = ""
         text = "".join(c.get("text", "") for c in content)
-        return "```\n" + text + "\n```\n"
+        return "```" + lang + "\n" + text + "\n```\n"
     if t == "sql_block":  # @feat sql-block: serialize to a ```sql db=NAME fence
         # An editable SQL query fenced with an info string of `sql db=NAME`
         # (+ a trailing `hidden` when the editor is collapsed). The `db=`

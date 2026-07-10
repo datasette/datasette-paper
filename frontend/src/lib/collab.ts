@@ -254,6 +254,33 @@ interface SendableResult {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+// Fence-language tokens that must never tag a `code_block`: they collide with
+// the source / paper-embed / paper-toc / paper-table fence discriminators in
+// datasette_paper/markdown_parser.py (a ```source fence parses as a `source`
+// node). Kept in lock-step with RESERVED_FENCE_TOKENS in
+// datasette_paper/markdown.py.
+const RESERVED_FENCE_TOKENS = new Set([
+  "source",
+  "paper-embed",
+  "paper-toc",
+  "paper-table",
+]);
+
+/**
+ * Normalize a fence-language token — typed into a ` ```lang ` input rule / the
+ * Enter path, or carried on a pasted `code_block` — into the `language` attr.
+ * Empty, reserved, and unsafe tokens (whitespace / backtick / `=`, which can't
+ * round-trip through the markdown fence info string) collapse to `null`, so the
+ * block is an untagged code block rather than a mis-tagged one. Mirrors the
+ * `_SAFE_LANG_RE` + reserved-set guard in datasette_paper/markdown.py.
+ */
+function normalizeLanguageToken(raw: string): string | null {
+  const token = raw.trim();
+  if (!token || RESERVED_FENCE_TOKENS.has(token)) return null;
+  if (/[\s`=]/.test(token)) return null;
+  return token;
+}
+
 /**
  * Curated structural input rules — re-implementation of
  * `prosemirror-example-setup`'s `buildInputRules` with the typographic
@@ -278,7 +305,17 @@ function buildPaperStructuralRules(): InputRule[] {
         node.childCount + (node.attrs.order as number) === +match[1],
     ),
     wrappingInputRule(/^\s*([-+*])\s$/, schema.nodes.bullet_list),
-    textblockTypeInputRule(/^```$/, schema.nodes.code_block),
+    // ` ```lang ` + space → a code_block tagged with `lang`. Replaces the old
+    // instant ` ``` ` rule, which fired on the third backtick and made
+    // ` ```python ` untypeable (the "python" landed inside the freshly-created
+    // block). The Enter path is handled by `createCodeBlockOnEnter` (input
+    // rules never see Enter).
+    // @feat code-language: ```lang input rule tags the new code_block
+    textblockTypeInputRule(
+      /^```([^\s`]*)\s$/,
+      schema.nodes.code_block,
+      (match) => ({ language: normalizeLanguageToken(match[1]) }),
+    ),
     textblockTypeInputRule(
       /^(#{1,6})\s$/,
       schema.nodes.heading,
@@ -501,6 +538,42 @@ function exitCodeBlockAtDocEnd(): Command {
     // Cursor sits one position inside the new paragraph (past its open token).
     const cursor = tr.doc.content.size - paragraph.nodeSize + 1;
     tr = tr.setSelection(TextSelection.create(tr.doc, cursor));
+    dispatch(tr.scrollIntoView());
+    return true;
+  };
+}
+
+/**
+ * On Enter: when the current textblock's entire text is ` ```lang ` (no
+ * trailing space — the input rule covers the space case), turn it into an empty
+ * `code_block` tagged with `lang` instead of splitting the block. Input rules
+ * never see Enter, so this is the keyboard path to ` ```python `<Enter>.
+ *
+ * Mirrors `textblockTypeInputRule`'s `canReplaceWith` guard so it only fires
+ * where a `code_block` may legally replace the current block (e.g. not as a
+ * `list_item`'s required leading paragraph).
+ */
+function createCodeBlockOnEnter(): Command {
+  return (state, dispatch) => {
+    const { $from, empty } = state.selection;
+    if (!empty) return false;
+    const block = $from.parent;
+    const codeType = schema.nodes.code_block;
+    if (block.type === codeType) return false;
+    if ($from.parentOffset !== block.content.size) return false;
+    const match = /^```([^\s`]*)$/.exec(block.textContent);
+    if (!match) return false;
+    if (
+      !$from
+        .node(-1)
+        .canReplaceWith($from.index(-1), $from.indexAfter(-1), codeType)
+    )
+      return false;
+    if (!dispatch) return true;
+    const language = normalizeLanguageToken(match[1]);
+    const start = $from.start();
+    const tr = state.tr.delete(start, $from.pos);
+    tr.setBlockType(start, start, codeType, { language });
     dispatch(tr.scrollIntoView());
     return true;
   };
@@ -739,6 +812,27 @@ export function preloadMarkdownParser(): Promise<void> {
   return mdParserLoading;
 }
 
+// Walk parsed prosemirror-markdown JSON and copy each `code_block`'s fence
+// language (kept by that schema as `attrs.params`, its first token) into our
+// `attrs.language`, normalized. Without this the language is lost: our schema
+// has no `params` attr, so `computeAttrs` silently drops it (see the caller).
+// @feat code-language: keep the fence language when pasting markdown code blocks
+function remapCodeBlockLanguage(json: unknown): void {
+  if (Array.isArray(json)) {
+    for (const item of json) remapCodeBlockLanguage(item);
+    return;
+  }
+  if (!json || typeof json !== "object") return;
+  const node = json as Record<string, unknown>;
+  if (node.type === "code_block") {
+    const attrs = (node.attrs as Record<string, unknown> | undefined) ?? {};
+    const params = typeof attrs.params === "string" ? attrs.params : "";
+    const first = params.split(/\s+/)[0] ?? "";
+    node.attrs = { ...attrs, language: normalizeLanguageToken(first) };
+  }
+  for (const value of Object.values(node)) remapCodeBlockLanguage(value);
+}
+
 function clipboardMarkdownParser(
   text: string,
   _$context: ResolvedPos,
@@ -755,11 +849,14 @@ function clipboardMarkdownParser(
   if (!parsed) return null;
   // The default parser is bound to prosemirror-markdown's own schema. Round-
   // trip through JSON to rebuild against ours — node names line up; extra
-  // attrs like `code_block.params` / list `tight` are silently dropped by
-  // `computeAttrs`.
+  // attrs like list `tight` are silently dropped by `computeAttrs`. We map
+  // `code_block.params` → our `language` attr first (it would otherwise drop
+  // the same way) so pasted fenced code keeps its language.
   let ourDoc;
   try {
-    ourDoc = schema.nodeFromJSON(parsed.toJSON());
+    const json = parsed.toJSON() as unknown;
+    remapCodeBlockLanguage(json);
+    ourDoc = schema.nodeFromJSON(json);
   } catch {
     return null;
   }
@@ -1176,11 +1273,13 @@ export class EditorConnection {
           "Alt-ArrowDown": moveListItemCommand(1),
           // Enter handlers, tried in order:
           //   1. Escape a code_block at the end of the doc on the second Enter.
-          //   2. Inside a task_item, split into a fresh unchecked item.
-          // Both return false outside their target context, so buildKeymap's
+          //   2. Turn a ` ```lang ` marker line into an empty tagged code_block.
+          //   3. Inside a task_item, split into a fresh unchecked item.
+          // All return false outside their target context, so buildKeymap's
           // generic list_item / paragraph Enter handlers still get a turn.
           Enter: chainCommands(
             exitCodeBlockAtDocEnd(),
+            createCodeBlockOnEnter(),
             splitListItem(schema.nodes.task_item, { checked: false }),
           ),
           // Tab / Shift-Tab indent / outdent the current list item. Wrapped

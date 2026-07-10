@@ -28,6 +28,7 @@ this table and the markers in sync.
 | `source` | A named, parameterless SQL query block (fenced `source name=NAME db=DB`) that inline `value` atoms reference | `frontend/src/lib/sourceBlockView.ts` |
 | `value` | Inline atom rendering a single live SQL value from a named source (`${{source.column}}`), fetched per-viewer | `frontend/src/lib/valueView.ts` |
 | `sql-block` | Editable SQL query block (fenced `sql db=NAME`) run per-viewer against a named Datasette database | `frontend/src/lib/sqlBlockView.ts` |
+| `code-language` | `code_block` carries a `language` attr — typed via ` ```lang ` + space/Enter, round-tripped as the markdown fence info string (reserved/unsafe tokens refused), preserved through the markdown paste path | `frontend/src/lib/schema.ts` |
 | `tables` | Table family (table / table_row / table_cell / table_header) hand-ported from prosemirror-tables, with a custom `name` attr addressable via `/tables/{name}` | `frontend/src/lib/tables.ts` |
 | `task-list` | Checkbox lists (task_list / task_item) — GFM `- [ ]` round-trip, a live checkbox NodeView, and a `/tasks` extractor | `frontend/src/lib/taskItemView.ts` |
 | `collab-sse` | Realtime collaboration protocol — client EditorConnection state machine + server SSE stream, step submission with 409/410/400 version semantics and broadcast | `frontend/src/lib/collab.ts` |
