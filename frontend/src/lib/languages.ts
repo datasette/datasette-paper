@@ -124,11 +124,6 @@ registerLanguage({
   ),
 });
 
-// The javascript/typescript/jsx/tsx family all share `@lezer/javascript`'s
-// parser at tier 0 (dialect-configured to match `@codemirror/lang-javascript`'s
-// own `javascriptLanguage`/`typescriptLanguage`/`jsxLanguage`/`tsxLanguage`
-// definitions) so highlighting never pulls in `@codemirror/*`; tier 1 uses
-// the CM wrapper's own `javascript({jsx, typescript})` config.
 registerLanguage({
   id: "javascript",
   label: "JavaScript",
@@ -139,54 +134,6 @@ registerLanguage({
   cm: memoizeLoader(() =>
     import("@codemirror/lang-javascript").then((m) => ({
       support: m.javascript(),
-    })),
-  ),
-});
-
-registerLanguage({
-  id: "typescript",
-  label: "TypeScript",
-  aliases: ["ts"],
-  highlight: memoizeLoader(() =>
-    import("@lezer/javascript").then((m) => ({
-      parser: m.parser.configure({ dialect: "ts" }),
-    })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-javascript").then((m) => ({
-      support: m.javascript({ typescript: true }),
-    })),
-  ),
-});
-
-registerLanguage({
-  id: "jsx",
-  label: "JSX",
-  aliases: [],
-  highlight: memoizeLoader(() =>
-    import("@lezer/javascript").then((m) => ({
-      parser: m.parser.configure({ dialect: "jsx" }),
-    })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-javascript").then((m) => ({
-      support: m.javascript({ jsx: true }),
-    })),
-  ),
-});
-
-registerLanguage({
-  id: "tsx",
-  label: "TSX",
-  aliases: [],
-  highlight: memoizeLoader(() =>
-    import("@lezer/javascript").then((m) => ({
-      parser: m.parser.configure({ dialect: "jsx ts" }),
-    })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-javascript").then((m) => ({
-      support: m.javascript({ jsx: true, typescript: true }),
     })),
   ),
 });
@@ -224,44 +171,6 @@ registerLanguage({
 });
 
 registerLanguage({
-  id: "html",
-  label: "HTML",
-  aliases: [],
-  highlight: memoizeLoader(() =>
-    import("@lezer/html").then((m) => ({ parser: m.parser })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-html").then((m) => ({ support: m.html() })),
-  ),
-});
-
-registerLanguage({
-  id: "css",
-  label: "CSS",
-  aliases: [],
-  highlight: memoizeLoader(() =>
-    import("@lezer/css").then((m) => ({ parser: m.parser })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-css").then((m) => ({ support: m.css() })),
-  ),
-});
-
-registerLanguage({
-  id: "markdown",
-  label: "Markdown",
-  aliases: ["md"],
-  highlight: memoizeLoader(() =>
-    import("@lezer/markdown").then((m) => ({ parser: m.parser })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-markdown").then((m) => ({
-      support: m.markdown(),
-    })),
-  ),
-});
-
-registerLanguage({
   id: "yaml",
   label: "YAML",
   aliases: ["yml"],
@@ -273,62 +182,30 @@ registerLanguage({
   ),
 });
 
+// Bash has no bare `@lezer/*` grammar package; both tiers wrap
+// `@codemirror/legacy-modes`' shell StreamParser in a `StreamLanguage` from
+// `@codemirror/language`. Like SQL above, that means tier-0 highlighting
+// reaches into `@codemirror/*` (cm-core) — accepted for the same reason.
+// The shell mode itself is pinned to its own `lang-bash` chunk in
+// vite.config.ts's `manualChunks` so the bundle tripwire can see it.
 registerLanguage({
-  id: "rust",
-  label: "Rust",
-  aliases: ["rs"],
+  id: "bash",
+  label: "Bash",
+  aliases: ["sh", "shell", "zsh"],
   highlight: memoizeLoader(() =>
-    import("@lezer/rust").then((m) => ({ parser: m.parser })),
+    Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/shell"),
+    ]).then(([lang, mode]) => ({
+      parser: lang.StreamLanguage.define(mode.shell).parser,
+    })),
   ),
   cm: memoizeLoader(() =>
-    import("@codemirror/lang-rust").then((m) => ({ support: m.rust() })),
-  ),
-});
-
-registerLanguage({
-  id: "go",
-  label: "Go",
-  aliases: ["golang"],
-  highlight: memoizeLoader(() =>
-    import("@lezer/go").then((m) => ({ parser: m.parser })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-go").then((m) => ({ support: m.go() })),
-  ),
-});
-
-registerLanguage({
-  id: "java",
-  label: "Java",
-  aliases: [],
-  highlight: memoizeLoader(() =>
-    import("@lezer/java").then((m) => ({ parser: m.parser })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-java").then((m) => ({ support: m.java() })),
-  ),
-});
-
-registerLanguage({
-  id: "cpp",
-  label: "C++",
-  aliases: ["c", "c++"],
-  highlight: memoizeLoader(() =>
-    import("@lezer/cpp").then((m) => ({ parser: m.parser })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-cpp").then((m) => ({ support: m.cpp() })),
-  ),
-});
-
-registerLanguage({
-  id: "xml",
-  label: "XML",
-  aliases: [],
-  highlight: memoizeLoader(() =>
-    import("@lezer/xml").then((m) => ({ parser: m.parser })),
-  ),
-  cm: memoizeLoader(() =>
-    import("@codemirror/lang-xml").then((m) => ({ support: m.xml() })),
+    Promise.all([
+      import("@codemirror/language"),
+      import("@codemirror/legacy-modes/mode/shell"),
+    ]).then(([lang, mode]) => ({
+      support: new lang.LanguageSupport(lang.StreamLanguage.define(mode.shell)),
+    })),
   ),
 });

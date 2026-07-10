@@ -47,10 +47,10 @@ describe("filterLanguages", () => {
   });
 
   it("filters by substring across label/id/alias", () => {
-    const labels = filterLanguages("ja").map((r) => r.label);
-    expect(labels).toContain("Java");
-    expect(labels).toContain("JavaScript");
-    expect(labels).not.toContain("Plain text");
+    const labels = filterLanguages("s").map((r) => r.label);
+    expect(labels).toEqual(["JavaScript", "SQL", "JSON", "Bash"]);
+    const byAlias = filterLanguages("zsh").map((r) => r.label);
+    expect(byAlias).toEqual(["Bash"]);
   });
 
   it("matches the Plain text row by its own label", () => {
@@ -113,16 +113,16 @@ describe("CodeBlockView", () => {
     expect(popup?.classList.contains("pm-code-block-lang-popup--open")).toBe(true);
 
     const input = view.dom.querySelector(".pm-code-block-lang-input") as HTMLInputElement;
-    input.value = "ja";
+    input.value = "s";
     input.dispatchEvent(new Event("input"));
     const items = () => [...view.dom.querySelectorAll(".pm-code-block-lang-item")];
-    expect(items().map((i) => i.textContent)).toEqual(["JavaScript", "Java"]);
+    expect(items().map((i) => i.textContent)).toEqual(["JavaScript", "SQL", "JSON", "Bash"]);
 
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
 
     const node = view.state.doc.firstChild!;
-    expect(node.attrs.language).toBe("java");
+    expect(node.attrs.language).toBe("sql");
     // Selection closes the popup and refocuses the editor.
     expect(popup?.classList.contains("pm-code-block-lang-popup--open")).toBe(false);
   });

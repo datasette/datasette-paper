@@ -82,6 +82,15 @@ export default defineConfig({
         // `prosemirror-keymap` used it before any CM chunk existed.
         manualChunks(id) {
           if (/node_modules\/w3c-keyname\//.test(id)) return "vendor-keyname";
+          // Bash's shell mode comes from @codemirror/legacy-modes (no bare
+          // @lezer/* grammar exists) — without this rule the @codemirror
+          // catch-all below would fold it into cm-core, hiding it from the
+          // per-language chunk assertions. The StreamLanguage wrapper it
+          // needs still lives in cm-core, so bash tier-0 loads share SQL's
+          // documented caveat.
+          if (/node_modules\/@codemirror\/legacy-modes\//.test(id)) {
+            return "lang-bash";
+          }
           if (/node_modules\/@lezer\/(common|lr|highlight)\//.test(id)) {
             return "lezer-common";
           }

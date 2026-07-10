@@ -37,24 +37,7 @@ describe("registry shape", () => {
 
   it("includes the v1 preset ids", () => {
     const ids = allLanguages().map((lang) => lang.id);
-    expect(ids).toEqual([
-      "python",
-      "javascript",
-      "typescript",
-      "jsx",
-      "tsx",
-      "sql",
-      "json",
-      "html",
-      "css",
-      "markdown",
-      "yaml",
-      "rust",
-      "go",
-      "java",
-      "cpp",
-      "xml",
-    ]);
+    expect(ids).toEqual(["python", "javascript", "sql", "json", "yaml", "bash"]);
   });
 });
 
@@ -70,10 +53,10 @@ describe("resolveLanguage", () => {
     expect(resolveLanguage("PY")?.id).toBe("python");
   });
 
-  it("resolves the multi-alias cpp entry", () => {
-    expect(resolveLanguage("c")?.id).toBe("cpp");
-    expect(resolveLanguage("c++")?.id).toBe("cpp");
-    expect(resolveLanguage("C++")?.id).toBe("cpp");
+  it("resolves the multi-alias bash entry", () => {
+    expect(resolveLanguage("sh")?.id).toBe("bash");
+    expect(resolveLanguage("shell")?.id).toBe("bash");
+    expect(resolveLanguage("ZSH")?.id).toBe("bash");
   });
 
   it("returns undefined for an unknown token", () => {

@@ -41,27 +41,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const MANIFEST_PATH = resolve(HERE, "../../../../datasette_paper/manifest.json");
 const DOC_ENTRY = "src/pages/doc/main.ts";
 
-// One distinct named `lang-<id>` chunk per bare `@lezer/*` grammar package in
-// languages.ts (vite.config.ts's `manualChunks` buckets by grammar package
-// name). "javascript" covers the javascript/typescript/jsx/tsx presets too —
-// all four registrations import the exact same `@lezer/javascript` specifier,
-// just parsed with a different dialect, so they share one physical chunk.
-// SQL is excluded — see the module docstring. Update this list if
-// languages.ts registers a language backed by a new bare `@lezer/*` package.
-const EXPECTED_LANG_CHUNKS = [
-  "python",
-  "javascript",
-  "json",
-  "html",
-  "css",
-  "markdown",
-  "yaml",
-  "rust",
-  "go",
-  "java",
-  "cpp",
-  "xml",
-];
+// One distinct named `lang-<id>` chunk per grammar package in languages.ts
+// (vite.config.ts's `manualChunks` buckets bare `@lezer/*` packages by name,
+// plus an explicit `lang-bash` bucket for `@codemirror/legacy-modes`' shell
+// mode — bash has no bare grammar package). SQL is excluded — see the module
+// docstring. Update this list if languages.ts registers a language backed by
+// a new grammar package.
+const EXPECTED_LANG_CHUNKS = ["python", "javascript", "json", "yaml", "bash"];
 
 // SQL's `@codemirror/lang-sql` module id (both `highlight()` and `cm()`
 // import it — no separate bare grammar package to bucket by name).
