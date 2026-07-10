@@ -85,6 +85,7 @@ export class SourceBlockView implements NodeView {
 
     this.probeEl = document.createElement("div");
     this.probeEl.className = "pm-source-card-probe";
+    this.probeEl.setAttribute("contenteditable", "false");
     this.dom.appendChild(this.probeEl);
 
     void this.populateDatabases();
@@ -122,6 +123,9 @@ export class SourceBlockView implements NodeView {
     if (this.cmMode) return this.mountCm();
     const pre = document.createElement("pre");
     pre.className = "pm-source-card-code";
+    pre.setAttribute("spellcheck", "false");
+    pre.setAttribute("autocorrect", "off");
+    pre.setAttribute("autocapitalize", "off");
     this.contentDOM = document.createElement("code");
     pre.appendChild(this.contentDOM);
     return pre;
@@ -153,6 +157,7 @@ export class SourceBlockView implements NodeView {
   private buildHeader(): HTMLElement {
     const head = document.createElement("div");
     head.className = "pm-source-card-head";
+    head.setAttribute("contenteditable", "false");
 
     const icon = document.createElement("span");
     icon.className = "pm-source-card-icon";

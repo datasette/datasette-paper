@@ -17,7 +17,9 @@
  * `baseExtensions()` is the minimal editing surface: bracket matching, close
  * brackets, a two-space indent unit, `syntaxHighlighting(classHighlighter)`
  * (the same `tok-*` classes tier-0 emits, so the mode swap is color-stable),
- * an injected PM-navigation keymap ahead of the indent/newline keymap, and an
+ * `EditorView.contentAttributes` turning off spellcheck/autocorrect/
+ * autocapitalize on the content DOM (code is not prose), an injected
+ * PM-navigation keymap ahead of the indent/newline keymap, and an
  * `EditorView.theme` reading the `--pp-*` vars so the CM surface is
  * pixel-identical to editor.css's `pre` (same font stack/size/line-height/
  * padding/border/background). No gutter, no active-line highlight, no search.
@@ -145,6 +147,11 @@ function buildCore(
       autocomplete.closeBrackets(),
       language.indentUnit.of("  "),
       language.syntaxHighlighting(classHighlighter),
+      EditorView.contentAttributes.of({
+        spellcheck: "false",
+        autocorrect: "off",
+        autocapitalize: "off",
+      }),
       view.keymap.of([
         ...autocomplete.closeBracketsKeymap,
         { key: "Tab", run: commands.indentMore, shift: commands.indentLess },

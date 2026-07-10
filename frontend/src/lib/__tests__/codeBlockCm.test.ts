@@ -166,6 +166,17 @@ describe("CM mode flip", () => {
     });
   });
 
+  it("disables spellcheck/autocorrect/autocapitalize on the mounted CM surface", async () => {
+    const view = mount(codeDoc("print(1)"));
+    selectInCode(view, 3);
+    const cmEl = await waitForCm(view);
+    const core = await loadCmCore();
+    const cm = core.EditorView.findFromDOM(cmEl)!;
+    expect(cm.contentDOM.getAttribute("spellcheck")).toBe("false");
+    expect(cm.contentDOM.getAttribute("autocorrect")).toBe("off");
+    expect(cm.contentDOM.getAttribute("autocapitalize")).toBe("off");
+  });
+
   it("never mounts CM in a non-editable view", async () => {
     const view = mount(codeDoc("print(1)"), false);
     selectInCode(view, 3);

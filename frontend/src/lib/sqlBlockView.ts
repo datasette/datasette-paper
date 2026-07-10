@@ -129,6 +129,7 @@ export class SqlBlockView implements NodeView {
 
     this.resultsEl = document.createElement("div");
     this.resultsEl.className = "pm-sql-block-results";
+    this.resultsEl.setAttribute("contenteditable", "false");
     this.dom.appendChild(this.resultsEl);
 
     this.applyHidden();
@@ -154,6 +155,9 @@ export class SqlBlockView implements NodeView {
     if (this.cmMode) return this.mountCm();
     const pre = document.createElement("pre");
     pre.className = "pm-sql-block-code";
+    pre.setAttribute("spellcheck", "false");
+    pre.setAttribute("autocorrect", "off");
+    pre.setAttribute("autocapitalize", "off");
     this.contentDOM = document.createElement("code");
     pre.appendChild(this.contentDOM);
     return pre;
@@ -191,6 +195,7 @@ export class SqlBlockView implements NodeView {
   private buildHeader(): HTMLElement {
     const head = document.createElement("div");
     head.className = "pm-sql-block-head";
+    head.setAttribute("contenteditable", "false");
 
     const icon = document.createElement("span");
     icon.className = "pm-sql-block-icon";

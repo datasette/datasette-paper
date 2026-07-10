@@ -240,6 +240,23 @@ describe("SqlBlockView", () => {
     expect((dispatched[0] as { attrs: { hidden: boolean } }).attrs.hidden).toBe(true);
   });
 
+  it("disables spellcheck on the SQL surface and keeps chrome non-editable", async () => {
+    const { view } = await build("select 1", { ok: true, columns: ["n"], rows: [[1]] });
+    const pre = view.dom.querySelector(".pm-sql-block-code") as HTMLPreElement;
+    expect(pre.getAttribute("spellcheck")).toBe("false");
+    expect(pre.getAttribute("autocorrect")).toBe("off");
+    expect(pre.getAttribute("autocapitalize")).toBe("off");
+    expect(view.dom.querySelector(".pm-sql-block-head")!.getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    expect(view.dom.querySelector(".pm-sql-block-results")!.getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    // The contentDOM carries no override — it inherits the real editable
+    // state from the editor root instead of being hardcoded editable.
+    expect(view.contentDOM!.getAttribute("contenteditable")).toBeNull();
+  });
+
   it("discards a stale in-flight result after destroy", async () => {
     stubFetch({ ok: true, columns: ["n"], rows: [[1]] });
     const node = makeNode("select 1");

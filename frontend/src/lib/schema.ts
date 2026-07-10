@@ -39,7 +39,11 @@ const codeBlockSpec: NodeSpec = {
     { tag: "pre", preserveWhitespace: "full" },
   ],
   toDOM: (node) => {
-    const attrs: Record<string, string> = {};
+    const attrs: Record<string, string> = {
+      spellcheck: "false",
+      autocorrect: "off",
+      autocapitalize: "off",
+    };
     if (node.attrs.language) attrs["data-language"] = String(node.attrs.language);
     return ["pre", attrs, ["code", 0]];
   },

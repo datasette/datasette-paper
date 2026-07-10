@@ -184,10 +184,13 @@ export class CodeBlockView implements NodeView {
     this.dom.className = "pm-code-block";
 
     // Chrome (button + popup) is independent of the text surface, so it's
-    // built once and survives the static↔CM rebuilds unchanged.
+    // built once and survives the static↔CM rebuilds unchanged. Neither is
+    // part of the doc, so both are non-editable — only the text surface below
+    // tracks the editor's real editable state (via inheritance from view.dom).
     this.langBtn = document.createElement("button");
     this.langBtn.type = "button";
     this.langBtn.className = "pm-code-block-lang-btn";
+    this.langBtn.setAttribute("contenteditable", "false");
     this.langBtnLabel = document.createElement("span");
     this.langBtn.appendChild(this.langBtnLabel);
     const chevron = document.createElement("span");
@@ -207,6 +210,7 @@ export class CodeBlockView implements NodeView {
 
     this.popupEl = document.createElement("div");
     this.popupEl.className = "pm-code-block-lang-popup";
+    this.popupEl.setAttribute("contenteditable", "false");
     this.inputEl = document.createElement("input");
     this.inputEl.type = "text";
     this.inputEl.className = "pm-code-block-lang-input";
@@ -224,6 +228,9 @@ export class CodeBlockView implements NodeView {
       this.surfaceEl = this.mountCm();
     } else {
       const pre = document.createElement("pre");
+      pre.setAttribute("spellcheck", "false");
+      pre.setAttribute("autocorrect", "off");
+      pre.setAttribute("autocapitalize", "off");
       const code = document.createElement("code");
       pre.appendChild(code);
       this.contentDOM = code;

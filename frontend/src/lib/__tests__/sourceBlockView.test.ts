@@ -121,6 +121,23 @@ describe("SourceBlockView", () => {
     expect(name.size).toBeGreaterThanOrEqual("entries_matching_transcript_search".length);
   });
 
+  it("disables spellcheck on the SQL surface and keeps chrome non-editable", async () => {
+    const { view } = await build({ name: "revenue" }, ok(["n"]));
+    const pre = view.dom.querySelector(".pm-source-card-code") as HTMLPreElement;
+    expect(pre.getAttribute("spellcheck")).toBe("false");
+    expect(pre.getAttribute("autocorrect")).toBe("off");
+    expect(pre.getAttribute("autocapitalize")).toBe("off");
+    expect(view.dom.querySelector(".pm-source-card-head")!.getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    expect(view.dom.querySelector(".pm-source-card-probe")!.getAttribute("contenteditable")).toBe(
+      "false",
+    );
+    // The contentDOM carries no override — it inherits the real editable
+    // state from the editor root instead of being hardcoded editable.
+    expect(view.contentDOM!.getAttribute("contenteditable")).toBeNull();
+  });
+
   it("prompts to name an unnamed source", async () => {
     const { view } = await build({ name: null }, { status: "missing" });
     const probe = view.dom.querySelector(".pm-source-card-probe")!;

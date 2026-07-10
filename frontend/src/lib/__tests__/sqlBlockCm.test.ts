@@ -221,6 +221,21 @@ describe("sql_block CM mode flip", () => {
     expect(view.dom.querySelector("table")).not.toBeNull();
   });
 
+  it("disables spellcheck/autocorrect/autocapitalize on the mounted CM surface", async () => {
+    stubFetch({ columns: ["n"], rows: [[1]] });
+    const view = mount(sqlDoc("select 1"), "sql_block");
+    await vi.waitFor(() => {
+      if (!view.dom.querySelector("table")) throw new Error("no results yet");
+    });
+    selectInBlock(view, "sql_block", 3);
+    const cmEl = await waitForCm(view);
+    const core = await loadCmCore();
+    const cm = core.EditorView.findFromDOM(cmEl)!;
+    expect(cm.contentDOM.getAttribute("spellcheck")).toBe("false");
+    expect(cm.contentDOM.getAttribute("autocorrect")).toBe("off");
+    expect(cm.contentDOM.getAttribute("autocapitalize")).toBe("off");
+  });
+
   it("Mod-Enter in the CM keymap runs the query, bypassing the cache", async () => {
     stubFetch({ columns: ["n"], rows: [[1]] });
     const view = mount(sqlDoc("select 1"), "sql_block");
