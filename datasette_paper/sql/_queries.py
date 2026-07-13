@@ -683,20 +683,14 @@ ORDER BY d.updated_at DESC, d.id DESC;
     return [TagRef(*row) for row in cursor.fetchall()]
 
 
-def upsert_doc_activity(
-    conn: sqlite3.Connection, doc_id: int, actor_id: str, last_edited_at: str
-) -> None:
+def upsert_doc_activity(conn: sqlite3.Connection, doc_id: int, actor_id: str) -> None:
     sql = """\
 INSERT INTO _datasette_paper_doc_activity (doc_id, actor_id, last_edited_at)
-VALUES ($doc_id::integer, $actor_id::text, $last_edited_at::text)
+VALUES ($doc_id::integer, $actor_id::text, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 ON CONFLICT(doc_id, actor_id) DO UPDATE SET
     last_edited_at = excluded.last_edited_at;
 """
-    params = {
-        "doc_id::integer": doc_id,
-        "actor_id::text": actor_id,
-        "last_edited_at::text": last_edited_at,
-    }
+    params = {"doc_id::integer": doc_id, "actor_id::text": actor_id}
     conn.execute(sql, params)
     return None
 

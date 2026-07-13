@@ -10,11 +10,12 @@ history, and hard-delete purge. The endpoint + web component (T02+) land in
 the follow-up PR with their own tests.
 """
 
+import asyncio
+
 import pytest
 from datasette.app import Datasette
 from sqlite_utils import Database
 
-import datasette_paper.db as db_module
 import datasette_paper.instance as instance_module
 from datasette_paper.db import PaperDB
 from datasette_paper.instance import Instance
@@ -43,23 +44,26 @@ async def activity_rows(ds: Datasette, doc_id: int):
 
 
 @pytest.mark.asyncio
-async def test_two_steps_same_actor_one_row_bumped(monkeypatch):
+async def test_two_steps_same_actor_one_row_bumped():
     """Two edits by one actor collapse to a single row at the later time."""
     ds, paper = await make_paper_db()
     doc = await paper.insert_doc(name="Notes", created_by="alice")
 
-    # Control the timestamps so "bumped to the later step" is deterministic.
-    stamps = iter(["2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"])
-    monkeypatch.setattr(db_module, "_utc_now_iso", lambda: next(stamps))
-
     await paper.insert_step(
         doc_id=doc.id, client_id=1, actor_id="alice", step_json="{}"
     )
+    first = (await activity_rows(ds, doc.id))["alice"]
+
+    # Stamps are SQL-side with millisecond precision; a 2ms sleep guarantees
+    # the second edit lands on a strictly later stamp.
+    await asyncio.sleep(0.002)
     await paper.insert_step(
         doc_id=doc.id, client_id=1, actor_id="alice", step_json="{}"
     )
 
-    assert await activity_rows(ds, doc.id) == {"alice": "2026-01-02T00:00:00.000Z"}
+    rows = await activity_rows(ds, doc.id)
+    assert set(rows) == {"alice"}
+    assert rows["alice"] > first
 
 
 @pytest.mark.asyncio
@@ -187,26 +191,21 @@ async def test_migration_backfills_from_surviving_history():
 
 
 @pytest.mark.asyncio
-async def test_list_profile_docs_filters_and_orders(monkeypatch):
+async def test_list_profile_docs_filters_and_orders():
     """The listProfileDocs helper: created-or-edited, active-only, scoped to
     the viewer's id set, newest-activity first (created-only falls back to
     creation time)."""
     ds, paper = await make_paper_db()
 
-    # Future stamps so an edit always sorts ahead of a created-only doc
-    # (whose COALESCE key is its real "now" created_at).
-    stamps = iter(
-        [
-            "2099-03-01T00:00:00.000Z",  # bob edits carol's doc "Shared"
-            "2099-03-05T00:00:00.000Z",  # alice edits "Edited"
-        ]
-    )
-    monkeypatch.setattr(db_module, "_utc_now_iso", lambda: next(stamps))
-
     created = await paper.insert_doc(name="Created", created_by="alice")
     edited = await paper.insert_doc(name="Edited", created_by="alice")
     shared = await paper.insert_doc(name="Shared", created_by="carol")
     await paper.insert_doc(name="Stranger", created_by="dave")  # outside viewable
+
+    # The edits below must sort ahead of "Created"'s COALESCE fallback (its
+    # created_at); stamps have millisecond precision, so a 2ms sleep keeps
+    # them strictly later.
+    await asyncio.sleep(0.002)
 
     # bob edited carol's "Shared" doc; alice edited her own "Edited" doc.
     await paper.insert_step(
@@ -220,9 +219,8 @@ async def test_list_profile_docs_filters_and_orders(monkeypatch):
 
     # bob: only "Shared" (edited, not created) — "stranger" is outside the set.
     bob_docs = await paper.list_profile_docs(doc_ids=viewable, actor="bob", limit=25)
-    assert [(d.name, d.last_edited_at) for d in bob_docs] == [
-        ("Shared", "2099-03-01T00:00:00.000Z")
-    ]
+    assert [d.name for d in bob_docs] == ["Shared"]
+    assert bob_docs[0].last_edited_at is not None
 
     # alice: "Edited" (has activity, newest) then "Created" (created-only,
     # last_edited_at is NULL, sorted by created_at).
@@ -231,7 +229,7 @@ async def test_list_profile_docs_filters_and_orders(monkeypatch):
     )
     assert [d.name for d in alice_docs] == ["Edited", "Created"]
     by_name = {d.name: d for d in alice_docs}
-    assert by_name["Edited"].last_edited_at == "2099-03-05T00:00:00.000Z"
+    assert by_name["Edited"].last_edited_at > by_name["Created"].created_at
     assert by_name["Created"].last_edited_at is None
 
     # Empty visible set → no rows.

@@ -18,22 +18,10 @@ talks to the acl JSON API directly.
 
 from __future__ import annotations
 
-import datetime
 import json
 from typing import Optional
 
 from .sql import _queries
-
-
-def _utc_now_iso() -> str:
-    """Current UTC time as an ISO-8601 string matching the created_at columns.
-
-    The table defaults use ``strftime('%Y-%m-%dT%H:%M:%fZ','now')`` — UTC with
-    millisecond precision. Match that shape exactly so ``last_edited_at`` sorts
-    lexically alongside ``created_at`` in listProfileDocs' COALESCE key.
-    """
-    now = datetime.datetime.now(datetime.timezone.utc)
-    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
 
 class PaperDB:
@@ -454,12 +442,7 @@ class PaperDB:
             # step-insert sites must keep the rollup in lock-step. Anonymous
             # steps (actor_id is None) don't attribute.
             if actor_id is not None:
-                _queries.upsert_doc_activity(
-                    conn,
-                    doc_id=doc_id,
-                    actor_id=actor_id,
-                    last_edited_at=_utc_now_iso(),
-                )
+                _queries.upsert_doc_activity(conn, doc_id=doc_id, actor_id=actor_id)
             return new_version
 
         return await self.database.execute_write_fn(write)

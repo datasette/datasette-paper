@@ -48,7 +48,7 @@ import logging
 import time
 from typing import Optional
 
-from .db import PaperDB, _utc_now_iso
+from .db import PaperDB
 from .errors import BadVersionError, ConflictError, GoneError, InvalidStepError
 from .sql import _queries
 
@@ -414,10 +414,7 @@ class Instance:
             # append_fragment) funnels through; anonymous edits don't attribute.
             if actor_id is not None and new_ver != base_version:
                 _queries.upsert_doc_activity(
-                    conn,
-                    doc_id=self.doc_id,
-                    actor_id=actor_id,
-                    last_edited_at=_utc_now_iso(),
+                    conn, doc_id=self.doc_id, actor_id=actor_id
                 )
             return new_ver
 

@@ -419,9 +419,12 @@ ORDER BY d.updated_at DESC, d.id DESC;
 -- @feat profile-papers: bump a (doc, actor)'s last_edited_at on every
 -- accepted step; keyed on the (doc_id, actor_id) PK so repeat edits update
 -- in place rather than accumulate rows. The single load-bearing write.
+-- Stamped here (same strftime shape as the created_at defaults) so
+-- last_edited_at sorts lexically against created_at in listProfileDocs'
+-- COALESCE key.
 -- name: upsertDocActivity
 INSERT INTO _datasette_paper_doc_activity (doc_id, actor_id, last_edited_at)
-VALUES ($doc_id::integer, $actor_id::text, $last_edited_at::text)
+VALUES ($doc_id::integer, $actor_id::text, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 ON CONFLICT(doc_id, actor_id) DO UPDATE SET
     last_edited_at = excluded.last_edited_at;
 
