@@ -408,6 +408,14 @@ class Instance:
                 assert inserted is not None
                 new_ver = inserted
                 _queries.bump_doc_version(conn, doc_id=self.doc_id, version=new_ver)
+            # @feat doc-activity: record this actor's edit in the activity
+            # rollup. This closure — not PaperDB.insert_step — is the
+            # real choke point every live append (collab POST + markdown
+            # append_fragment) funnels through; anonymous edits don't attribute.
+            if actor_id is not None and new_ver != base_version:
+                _queries.upsert_doc_activity(
+                    conn, doc_id=self.doc_id, actor_id=actor_id
+                )
             return new_ver
 
         new_version = await self.db.database.execute_write_fn(write_all)

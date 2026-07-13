@@ -141,6 +141,7 @@ check-queries-fresh:
 check-features:
     uv run --prerelease=allow python tools/features_check.py \
         --scan datasette_paper --scan frontend/src --scan tests \
+        --ext .sql \
         --lockstep frontend/src/lib/schema.ts,datasette_paper/pm_schema.py,datasette_paper/markdown.py,datasette_paper/markdown_parser.py
 
 # --- Tests ---

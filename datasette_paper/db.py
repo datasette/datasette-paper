@@ -185,6 +185,21 @@ class PaperDB:
 
         return await self.database.execute_write_fn(read)
 
+    async def list_profile_docs(
+        self, *, doc_ids: list[int], actor: str, limit: int
+    ) -> list[_queries.ProfileDoc]:
+        """Active docs a profile actor created or edited, scoped to the
+        viewer's visible ``doc_ids``, newest-activity first, capped at
+        ``limit``. Backs the profile "Papers" section."""
+        doc_ids_json = json.dumps(doc_ids)
+
+        def read(conn):
+            return _queries.list_profile_docs(
+                conn, actor=actor, doc_ids_json=doc_ids_json, limit=limit
+            )
+
+        return await self.database.execute_write_fn(read)
+
     # ------------------------------------------------------------------
     # Links
     # ------------------------------------------------------------------
@@ -390,6 +405,9 @@ class PaperDB:
             # kept (see m005: resolve-time decides 'not found').
             _queries.delete_links_for_src(conn, src_doc_id=doc_id)
             _queries.delete_tags_for_doc(conn, doc_id=doc_id)
+            # Activity rollup carries no FK cascade (matching steps/snapshots),
+            # so purge it here alongside the other child rows.
+            _queries.delete_activity_for_doc(conn, doc_id=doc_id)
             _queries.hard_delete_doc(conn, doc_id=doc_id)
 
         await self.database.execute_write_fn(write)
@@ -418,6 +436,13 @@ class PaperDB:
             )
             assert new_version is not None
             _queries.bump_doc_version(conn, doc_id=doc_id, version=new_version)
+            # @feat doc-activity: record this actor's edit in the activity
+            # rollup. Mirrors the upsert in Instance's write_all —
+            # the live collab path does NOT go through this method, so both
+            # step-insert sites must keep the rollup in lock-step. Anonymous
+            # steps (actor_id is None) don't attribute.
+            if actor_id is not None:
+                _queries.upsert_doc_activity(conn, doc_id=doc_id, actor_id=actor_id)
             return new_version
 
         return await self.database.execute_write_fn(write)

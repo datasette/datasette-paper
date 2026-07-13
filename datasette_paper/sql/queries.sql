@@ -407,3 +407,50 @@ WHERE d.id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($viewable_json::text)
   )
 ORDER BY d.updated_at DESC, d.id DESC;
+
+-- ============================================================================
+-- Doc activity (m008 _datasette_paper_doc_activity)
+--
+-- Durable per-(doc, actor) last-edited rollup. Upserted on every accepted
+-- step (survives step compaction), purged with the doc on hard delete.
+-- Currently read by listProfileDocs for the profile "Papers" section.
+-- ============================================================================
+
+-- @feat doc-activity: bump a (doc, actor)'s last_edited_at on every
+-- accepted step; keyed on the (doc_id, actor_id) PK so repeat edits update
+-- in place rather than accumulate rows. The single load-bearing write.
+-- Stamped here (same strftime shape as the created_at defaults) so
+-- last_edited_at sorts lexically against created_at in listProfileDocs'
+-- COALESCE key.
+-- name: upsertDocActivity
+INSERT INTO _datasette_paper_doc_activity (doc_id, actor_id, last_edited_at)
+VALUES ($doc_id::integer, $actor_id::text, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+ON CONFLICT(doc_id, actor_id) DO UPDATE SET
+    last_edited_at = excluded.last_edited_at;
+
+-- @feat doc-activity: purge a doc's activity rows on hard delete. Mirrors
+-- deleteStepsForDoc — activity carries no FK cascade (matching steps/
+-- snapshots), so the hard-delete closure removes it explicitly.
+-- name: deleteActivityForDoc
+DELETE FROM _datasette_paper_doc_activity WHERE doc_id = $doc_id::integer;
+
+-- @feat profile-papers: list profile actor $actor's active docs the viewer
+-- can see (id set $doc_ids_json, same IN-list shape as
+-- listDocsByIdsStatesAndKinds) — those the actor created OR has recorded
+-- edit activity on — ordered by the actor's most recent edit, falling back
+-- to doc creation, capped at $limit. Returns the standard Doc columns plus
+-- the actor's last_edited_at (null for created-but-never-edited docs).
+-- name: listProfileDocs :rows -> ProfileDoc
+SELECT d.id, d.name, d.created_at, d.updated_at, d.created_by, d.schema_name,
+       d.current_version, d.state, d.archived_at, d.trashed_at, d.delete_at,
+       d.kind, d.locked, a.last_edited_at
+FROM _datasette_paper_doc d
+LEFT JOIN _datasette_paper_doc_activity a
+    ON a.doc_id = d.id AND a.actor_id = $actor::text
+WHERE d.id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+  )
+  AND d.state = 'active'
+  AND (d.created_by = $actor::text OR a.actor_id IS NOT NULL)
+ORDER BY COALESCE(a.last_edited_at, d.created_at) DESC
+LIMIT $limit::integer;
