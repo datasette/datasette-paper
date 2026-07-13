@@ -27,3 +27,20 @@ def actors_from_ids(actor_ids):
             actor["name"] = DISPLAY_NAMES[sid]
         out[sid] = actor
     return out
+
+
+@hookimpl
+def datasette_user_profile_seeds():
+    """Seed a real profile record so the `profile-papers` shot's profile page
+    renders a name + avatar (not a bare actor id). Only the actor the shot
+    visits (bob) needs one; a full profile makes the screenshot look real."""
+    return [
+        {
+            "actor_id": "bob",
+            "display_name": "Bob Babbage",
+            "bio": "Backend engineer. Owns the roadmap and the budget.",
+            "email": "bob@example.com",
+            "avatar_icon": "rocket",
+            "avatar_color": "#1e66f5",
+        }
+    ]

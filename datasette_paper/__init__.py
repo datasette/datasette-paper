@@ -2,7 +2,14 @@ import re
 
 from datasette import hookimpl, Response
 from datasette.permissions import Action
-from datasette_vite import vite_entry
+from datasette_vite import vite_entry, vite_js_urls, vite_css_urls
+
+# Unconditional import — datasette-user-profiles is a hard dependency
+# (pyproject.toml). Siblings like datasette-kanban / datasette-comments guard
+# this import with try/except because for them user-profiles is optional; here
+# it is not, so a missing package should fail loudly at import rather than
+# silently dropping the "Papers" profile section.
+from datasette_user_profiles.hookspecs import ProfileSection
 from datasette_acl.roles import standard_roles
 from datasette_acl_share import datasette_share_assets as _share_assets
 from datasette.plugins import pm
@@ -270,6 +277,56 @@ PAPER_ICON_SVG = (
     "6h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5M5 8h6a.5.5 0 0 1 0 1H5a.5.5 0 "
     '0 1 0-1m0 2h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1 0-1"/></svg>'
 )
+
+
+# --- user-profiles "Papers" section --------------------------------------
+# Vite entry key; must match the manifest key exactly (= the
+# rollupOptions.input path in frontend/vite.config.ts). If this drifts,
+# vite_js_urls raises "Entrypoint … not found in manifest".
+PROFILE_SECTION_ENTRYPOINT = "src/pages/profile_section/main.ts"
+
+# Icon rendered next to the "Papers" heading on the profile page (host sizes
+# it to ~18px). bootstrap-icons / file-earmark-text-fill — must stay
+# fill="currentColor" with a viewBox and NO fixed width/height so the host
+# page can size it.
+PAPERS_SECTION_ICON = (
+    '<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" '
+    'class="bi bi-file-earmark-text-fill" viewBox="0 0 16 16">'
+    '<path d="M9.293 0H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 '
+    "2-2V4.707A1 1 0 0 0 13.707 4L10 .293A1 1 0 0 0 9.293 0M9.5 "
+    "3.5v-2l3 3h-2a1 1 0 0 1-1-1M4.5 9a.5.5 0 0 1 0-1h7a.5.5 0 0 1 0 "
+    "1zM4 10.5a.5.5 0 0 1 .5-.5h7a.5.5 0 0 1 0 1h-7a.5.5 0 0 "
+    '1-.5-.5m.5 2.5a.5.5 0 0 1 0-1h4a.5.5 0 0 1 0 1z"/></svg>'
+)
+
+
+@hookimpl
+def datasette_user_profile_sections(datasette):
+    # @feat profile-papers: registers the "Papers" section on user-profiles
+    # profile pages — loads the profile_section Vite bundle so the host page
+    # renders <profile-papers>, which fetches the actor's created/edited docs.
+    return [
+        ProfileSection(
+            id="papers",
+            label="Papers",
+            tag_name="profile-papers",
+            js_urls=[
+                u["url"]
+                for u in vite_js_urls(
+                    datasette,
+                    entrypoint=PROFILE_SECTION_ENTRYPOINT,
+                    plugin_package="datasette_paper",
+                )
+            ],
+            css_urls=vite_css_urls(
+                datasette,
+                entrypoint=PROFILE_SECTION_ENTRYPOINT,
+                plugin_package="datasette_paper",
+            ),
+            sort_order=40,
+            icon=PAPERS_SECTION_ICON,  # raw SVG, fill="currentColor"
+        )
+    ]
 
 
 # Optional integration with `datasette-sidebar` — if the package is
