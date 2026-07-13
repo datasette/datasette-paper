@@ -1,13 +1,14 @@
-"""Tests for the profile activity rollup (`_datasette_paper_doc_activity`).
+"""Tests for the doc activity rollup (`_datasette_paper_doc_activity`).
 
-@feat profile-papers: durable per-(doc, actor) last-edited attribution backing
-the profile "Papers" section. One row per (doc, actor), bumped on every
-accepted step, surviving step compaction and purged on doc hard-delete.
+@feat doc-activity: durable per-(doc, actor) last-edited attribution. One row
+per (doc, actor), bumped on every accepted step, surviving step compaction
+and purged on doc hard-delete. Currently backs the profile "Papers" section;
+built to serve other "who touched this doc" consumers.
 
 Covers the data layer only (T01): the upsert on step insert, anonymous edits
 not attributing, compaction survival, the migration backfill from surviving
-history, and hard-delete purge. The endpoint + web component (T02+) land in
-the follow-up PR with their own tests.
+history, hard-delete purge, and the listProfileDocs read. The endpoint + web
+component (T02+) land in the follow-up PR with their own tests.
 """
 
 import asyncio
@@ -194,7 +195,11 @@ async def test_migration_backfills_from_surviving_history():
 async def test_list_profile_docs_filters_and_orders():
     """The listProfileDocs helper: created-or-edited, active-only, scoped to
     the viewer's id set, newest-activity first (created-only falls back to
-    creation time)."""
+    creation time).
+
+    @feat profile-papers: the profile "Papers" read over the doc-activity
+    rollup — this is the T01 slice; the endpoint + web component tests live
+    in test_profile_docs.py (follow-up PR)."""
     ds, paper = await make_paper_db()
 
     created = await paper.insert_doc(name="Created", created_by="alice")

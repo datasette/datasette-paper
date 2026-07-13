@@ -639,7 +639,7 @@ def m007_inline_tag_index(db: Database):
 
 @migrations()
 def m008_doc_activity(db: Database):
-    # @feat profile-papers: durable per-(doc, actor) last-edited rollup. The
+    # @feat doc-activity: durable per-(doc, actor) last-edited rollup. The
     # step log is compacted after every snapshot, so "recently edited by P"
     # can't be derived from surviving history; this one-row-per-pair table is
     # upserted on every accepted step (see db.insert_step) and outlives

@@ -409,14 +409,14 @@ WHERE d.id IN (
 ORDER BY d.updated_at DESC, d.id DESC;
 
 -- ============================================================================
--- Profile activity (m008 _datasette_paper_doc_activity)
+-- Doc activity (m008 _datasette_paper_doc_activity)
 --
--- Durable per-(doc, actor) last-edited rollup backing the profile "Papers"
--- section. Upserted on every accepted step (survives step compaction),
--- purged with the doc on hard delete, read by listProfileDocs.
+-- Durable per-(doc, actor) last-edited rollup. Upserted on every accepted
+-- step (survives step compaction), purged with the doc on hard delete.
+-- Currently read by listProfileDocs for the profile "Papers" section.
 -- ============================================================================
 
--- @feat profile-papers: bump a (doc, actor)'s last_edited_at on every
+-- @feat doc-activity: bump a (doc, actor)'s last_edited_at on every
 -- accepted step; keyed on the (doc_id, actor_id) PK so repeat edits update
 -- in place rather than accumulate rows. The single load-bearing write.
 -- Stamped here (same strftime shape as the created_at defaults) so
@@ -428,7 +428,7 @@ VALUES ($doc_id::integer, $actor_id::text, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 ON CONFLICT(doc_id, actor_id) DO UPDATE SET
     last_edited_at = excluded.last_edited_at;
 
--- @feat profile-papers: purge a doc's activity rows on hard delete. Mirrors
+-- @feat doc-activity: purge a doc's activity rows on hard delete. Mirrors
 -- deleteStepsForDoc — activity carries no FK cascade (matching steps/
 -- snapshots), so the hard-delete closure removes it explicitly.
 -- name: deleteActivityForDoc

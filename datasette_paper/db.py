@@ -436,8 +436,8 @@ class PaperDB:
             )
             assert new_version is not None
             _queries.bump_doc_version(conn, doc_id=doc_id, version=new_version)
-            # @feat profile-papers: record this actor's edit for the profile
-            # "Papers" rollup. Mirrors the upsert in Instance's write_all —
+            # @feat doc-activity: record this actor's edit in the activity
+            # rollup. Mirrors the upsert in Instance's write_all —
             # the live collab path does NOT go through this method, so both
             # step-insert sites must keep the rollup in lock-step. Anonymous
             # steps (actor_id is None) don't attribute.
