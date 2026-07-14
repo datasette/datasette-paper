@@ -350,7 +350,12 @@ _date_spec = {
     "atom": True,
     "selectable": True,
     "draggable": False,
-    "attrs": {"date": {}, "time": {"default": None}, "tz": {"default": None}},
+    "attrs": {
+        "date": {},
+        "time": {"default": None},
+        "tz": {"default": None},
+        "format": {"default": None},
+    },
     "parseDOM": [{"tag": "span[data-date]"}],
     "toDOM": lambda node: [
         "span",
@@ -358,6 +363,7 @@ _date_spec = {
             "data-date": str(node.attrs.get("date") or ""),
             "data-date-time": str(node.attrs.get("time") or ""),
             "data-date-tz": str(node.attrs.get("tz") or ""),
+            "data-date-format": str(node.attrs.get("format") or ""),
             "class": "pm-date",
         },
         # Static fallback only (the real chip is the NodeView); never rendered

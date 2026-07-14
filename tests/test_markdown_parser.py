@@ -715,7 +715,12 @@ class TestDate:
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["text", "date", "text"]
         assert content[0]["text"] == "due "
-        assert content[1]["attrs"] == {"date": "2026-07-20", "time": None, "tz": None}
+        assert content[1]["attrs"] == {
+            "date": "2026-07-20",
+            "time": None,
+            "tz": None,
+            "format": None,
+        }
         assert "marks" not in content[1]
         assert content[2]["text"] == " ok"
 
@@ -729,6 +734,7 @@ class TestDate:
             "date": "2026-07-20",
             "time": "15:00",
             "tz": "America/Los_Angeles",
+            "format": None,
         }
 
     def test_timed_date_without_tz_query(self):
@@ -738,6 +744,22 @@ class TestDate:
             "date": "2026-07-20",
             "time": "09:05",
             "tz": None,
+            "format": None,
+        }
+
+    def test_date_reads_format_from_query(self):
+        # A custom display format rides as a `fmt` query param on a date-only
+        # (and timed) ref; the `%` directives are percent-encoded.
+        doc = parse_and_validate(
+            "[Monday, July 20th](paper:/date/2026-07-20?fmt=%25A%2C%20%25B%20%25o)\n"
+        )
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["date"]
+        assert content[0]["attrs"] == {
+            "date": "2026-07-20",
+            "time": None,
+            "tz": None,
+            "format": "%A, %B %o",
         }
 
     def test_date_only_with_stray_tz_query_drops_tz(self):
@@ -747,7 +769,12 @@ class TestDate:
         doc = parse_and_validate("[x](paper:/date/2026-07-20?tz=UTC)\n")
         content = doc["content"][0]["content"]
         assert [n["type"] for n in content] == ["date"]
-        assert content[0]["attrs"] == {"date": "2026-07-20", "time": None, "tz": None}
+        assert content[0]["attrs"] == {
+            "date": "2026-07-20",
+            "time": None,
+            "tz": None,
+            "format": None,
+        }
 
     def test_date_reads_canonical_from_link_title(self):
         # Real href + canonical paper: ref in the title — parser reads title.
@@ -787,10 +814,23 @@ class TestDate:
     @pytest.mark.parametrize(
         "attrs",
         [
-            {"date": "2026-07-20", "time": None, "tz": None},
-            {"date": "2026-07-20", "time": "15:00", "tz": "America/Los_Angeles"},
-            {"date": "1999-11-02", "time": "00:00", "tz": "UTC"},
-            {"date": "2026-12-31", "time": "23:59", "tz": "Asia/Tokyo"},
+            {"date": "2026-07-20", "time": None, "tz": None, "format": None},
+            {
+                "date": "2026-07-20",
+                "time": "15:00",
+                "tz": "America/Los_Angeles",
+                "format": None,
+            },
+            {"date": "1999-11-02", "time": "00:00", "tz": "UTC", "format": None},
+            {"date": "2026-12-31", "time": "23:59", "tz": "Asia/Tokyo", "format": None},
+            # with a custom format (date-only + timed)
+            {"date": "2026-07-20", "time": None, "tz": None, "format": "%Y-%m-%d"},
+            {
+                "date": "2026-07-20",
+                "time": "15:00",
+                "tz": "America/Los_Angeles",
+                "format": "%A, %B %o",
+            },
         ],
     )
     def test_roundtrips_through_markdown(self, attrs):

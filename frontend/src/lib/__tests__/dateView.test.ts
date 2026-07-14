@@ -223,4 +223,34 @@ describe("DateView popup", () => {
     expect(chip.querySelector(".pm-date-popup")).toBeNull();
     expect(view.state.doc.firstChild!.firstChild!.attrs.date).toBe("2026-07-20");
   });
+
+  it("picking a format preset commits it as the node's format attr", () => {
+    const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // The ISO preset button is labelled with its rendered example.
+    const isoBtn = Array.from(
+      chip.querySelectorAll<HTMLButtonElement>(".pm-date-format"),
+    ).find((b) => b.dataset.format === "%Y-%m-%d")!;
+    expect(isoBtn.textContent).toBe("2026-07-20");
+    isoBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(chip.querySelector(".pm-date-popup-preview")?.textContent).toBe(
+      "→ 2026-07-20",
+    );
+    // Enter commits the date + the selected format together.
+    typeAndEnter(chip, "2026-07-20");
+    expect(view.state.doc.firstChild!.firstChild!.attrs.format).toBe("%Y-%m-%d");
+  });
+
+  it("a custom strftime string commits verbatim", () => {
+    const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const custom = chip.querySelector(".pm-date-popup-custom") as HTMLInputElement;
+    custom.value = "%A the %o";
+    custom.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(chip.querySelector(".pm-date-popup-preview")?.textContent).toBe(
+      "→ Monday the 20th",
+    );
+    typeAndEnter(chip, "2026-07-20");
+    expect(view.state.doc.firstChild!.firstChild!.attrs.format).toBe("%A the %o");
+  });
 });

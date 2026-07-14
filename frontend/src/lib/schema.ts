@@ -235,7 +235,12 @@ const dateNode: NodeSpec = {
   atom: true,
   selectable: true,
   draggable: false,
-  attrs: { date: {}, time: { default: null }, tz: { default: null } },
+  attrs: {
+    date: {},
+    time: { default: null },
+    tz: { default: null },
+    format: { default: null },
+  },
   parseDOM: [
     {
       tag: "span[data-date]",
@@ -245,6 +250,7 @@ const dateNode: NodeSpec = {
           date: e.getAttribute("data-date") || "",
           time: e.getAttribute("data-date-time") || null,
           tz: e.getAttribute("data-date-tz") || null,
+          format: e.getAttribute("data-date-format") || null,
         };
       },
     },
@@ -255,6 +261,7 @@ const dateNode: NodeSpec = {
       "data-date": String(node.attrs.date ?? ""),
       "data-date-time": String(node.attrs.time ?? ""),
       "data-date-tz": String(node.attrs.tz ?? ""),
+      "data-date-format": String(node.attrs.format ?? ""),
       class: "pm-date",
     },
     formatDateLabel(node.attrs as DateAttrs),

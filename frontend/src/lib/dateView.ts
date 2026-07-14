@@ -28,7 +28,7 @@ import { Decoration, DecorationSet } from "prosemirror-view";
 import type { EditorView, NodeView } from "prosemirror-view";
 import { TOOLBAR_ICONS } from "./icons";
 import { guardChromeMousedown } from "./caretGuard";
-import { formatDateLabel, type DateAttrs } from "./dateFormat";
+import { formatDateLabel, strftimeDate, type DateAttrs } from "./dateFormat";
 import { parseDateInput, type ParsedDate } from "./dateParse";
 
 const MONTHS = [
@@ -53,8 +53,25 @@ function attrsOf(node: PMNode): DateAttrs {
     date: String(node.attrs.date ?? ""),
     time: node.attrs.time ?? null,
     tz: node.attrs.tz ?? null,
+    format: node.attrs.format ?? null,
   };
 }
+
+/** Built-in format presets surfaced as popup buttons (custom strftime is also
+ *  always available). Stored as strftime strings — a preset is just a shortcut
+ *  that fills one in; `null` clears back to the smart default. */
+export interface FormatPreset {
+  key: string;
+  format: string | null;
+}
+export const FORMAT_PRESETS: FormatPreset[] = [
+  { key: "default", format: null },
+  { key: "iso", format: "%Y-%m-%d" },
+  { key: "medium", format: "%b %-d, %Y" },
+  { key: "long", format: "%B %-d, %Y" },
+  { key: "weekday", format: "%A, %B %o" },
+  { key: "short", format: "%b %-d" },
+];
 
 // --- zone-aware time helpers (pure; jsdom's Intl is enough for tests) -------
 
@@ -129,8 +146,15 @@ export function chipLabel(
   now: Date,
 ): { text: string; title: string | null } {
   const [y, mo, d] = attrs.date.split("-").map(Number);
-  let dateText = `${MONTHS[mo - 1]} ${d}`;
-  if (y !== now.getFullYear()) dateText += `, ${y}`;
+  // A custom format renders the date portion verbatim; the default omits the
+  // year when it's the viewer's current year (a client-only nicety).
+  let dateText: string;
+  if (attrs.format) {
+    dateText = strftimeDate(attrs.format, y, mo, d);
+  } else {
+    dateText = `${MONTHS[mo - 1]} ${d}`;
+    if (y !== now.getFullYear()) dateText += `, ${y}`;
+  }
 
   if (!attrs.time) return { text: dateText, title: null };
 
@@ -152,13 +176,10 @@ export function chipLabel(
  *  open (dispatched by `insertDateAndEdit` after the surrounding focus settles). */
 const OPEN_POPUP_EVENT = "paper:open-date-popup";
 
-/** A friendly one-line preview of a parse result ("Mon, Jul 20, 2026 3:00 PM"). */
-function previewText(parsed: ParsedDate): string {
-  const [y, mo, d] = parsed.date.split("-").map(Number);
-  const weekday = new Date(y, mo - 1, d).toLocaleDateString(undefined, {
-    weekday: "short",
-  });
-  return `${weekday}, ${formatDateLabel({ date: parsed.date, time: parsed.time, tz: null })}`;
+/** A one-line preview of a parse result rendered through the selected format —
+ *  exactly what the committed chip's label will read. */
+function previewText(parsed: ParsedDate, format: string | null): string {
+  return formatDateLabel({ date: parsed.date, time: parsed.time, tz: null, format });
 }
 
 // @feat date: NodeView — compact viewer-facing chip (glyph + zone-aware label)
@@ -172,6 +193,9 @@ export class DateView implements NodeView {
   private popupEl: HTMLDivElement | null = null;
   private inputEl: HTMLInputElement | null = null;
   private previewEl: HTMLDivElement | null = null;
+  private customEl: HTMLInputElement | null = null;
+  private presetButtons: HTMLButtonElement[] = [];
+  private selectedFormat: string | null = null;
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.attrs = attrsOf(node);
@@ -210,6 +234,7 @@ export class DateView implements NodeView {
     this.dom.setAttribute("data-date", this.attrs.date);
     this.dom.setAttribute("data-date-time", this.attrs.time ?? "");
     this.dom.setAttribute("data-date-tz", this.attrs.tz ?? "");
+    this.dom.setAttribute("data-date-format", this.attrs.format ?? "");
     const { text, title } = chipLabel(this.attrs, new Date());
     this.labelEl.textContent = text; // text node, never innerHTML
     if (title) this.dom.setAttribute("title", title);
@@ -220,6 +245,7 @@ export class DateView implements NodeView {
 
   private openPopup(): void {
     if (this.popupEl) return;
+    this.selectedFormat = this.attrs.format ?? null;
     const popup = document.createElement("div");
     popup.className = "pm-date-popup";
     popup.setAttribute("contenteditable", "false");
@@ -239,6 +265,7 @@ export class DateView implements NodeView {
 
     popup.appendChild(input);
     popup.appendChild(preview);
+    popup.appendChild(this.buildFormatSection());
     this.dom.appendChild(popup);
     this.popupEl = popup;
     this.inputEl = input;
@@ -253,6 +280,45 @@ export class DateView implements NodeView {
     input.select();
   }
 
+  /** The format picker: a row of preset buttons (each labelled with its own
+   *  rendered example) plus a custom strftime field. */
+  private buildFormatSection(): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "pm-date-popup-formats";
+
+    this.presetButtons = [];
+    for (const preset of FORMAT_PRESETS) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "pm-date-format";
+      btn.dataset.format = preset.format ?? "";
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", (e) => {
+        e.preventDefault();
+        this.selectedFormat = preset.format;
+        if (this.customEl) this.customEl.value = preset.format ?? "";
+        this.refreshPreview();
+      });
+      this.presetButtons.push(btn);
+      wrap.appendChild(btn);
+    }
+
+    const custom = document.createElement("input");
+    custom.type = "text";
+    custom.className = "pm-date-popup-custom";
+    custom.placeholder = "custom strftime, e.g. %A %-d";
+    custom.value = this.selectedFormat ?? "";
+    custom.addEventListener("input", () => {
+      this.selectedFormat = custom.value.trim() ? custom.value : null;
+      this.refreshPreview();
+    });
+    custom.addEventListener("keydown", (e) => this.onInputKeydown(e));
+    this.customEl = custom;
+    wrap.appendChild(custom);
+
+    return wrap;
+  }
+
   private closePopup(refocus: boolean): void {
     if (!this.popupEl) return;
     document.removeEventListener("mousedown", this.onOutsideClick, true);
@@ -260,6 +326,8 @@ export class DateView implements NodeView {
     this.popupEl = null;
     this.inputEl = null;
     this.previewEl = null;
+    this.customEl = null;
+    this.presetButtons = [];
     if (refocus && !this.view.isDestroyed) this.view.focus();
   }
 
@@ -271,12 +339,24 @@ export class DateView implements NodeView {
     if (!this.inputEl || !this.previewEl) return null;
     const parsed = parseDateInput(this.inputEl.value, new Date());
     if (parsed) {
-      this.previewEl.textContent = `→ ${previewText(parsed)}`;
+      this.previewEl.textContent = `→ ${previewText(parsed, this.selectedFormat)}`;
       this.previewEl.classList.remove("pm-date-popup-preview--bad");
     } else {
       this.previewEl.textContent = "unrecognized";
       this.previewEl.classList.add("pm-date-popup-preview--bad");
     }
+    // Label each preset button with its own rendered example for the current
+    // (parsed, else stored) date, and mark the active one.
+    const [y, mo, d] = (parsed?.date ?? this.attrs.date).split("-").map(Number);
+    FORMAT_PRESETS.forEach((preset, i) => {
+      const btn = this.presetButtons[i];
+      if (!btn) return;
+      btn.textContent = preset.format ? strftimeDate(preset.format, y, mo, d) : "Default";
+      btn.classList.toggle(
+        "pm-date-format--active",
+        (preset.format ?? null) === (this.selectedFormat ?? null),
+      );
+    });
     return parsed;
   }
 
@@ -312,6 +392,7 @@ export class DateView implements NodeView {
       date: parsed.date,
       time: parsed.time,
       tz: parsed.time ? Intl.DateTimeFormat().resolvedOptions().timeZone : null,
+      format: this.selectedFormat,
     };
     this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, attrs));
     this.closePopup(true);
@@ -323,7 +404,8 @@ export class DateView implements NodeView {
     if (
       next.date !== this.attrs.date ||
       next.time !== this.attrs.time ||
-      next.tz !== this.attrs.tz
+      next.tz !== this.attrs.tz ||
+      next.format !== this.attrs.format
     ) {
       this.attrs = next;
       this.render();
@@ -366,6 +448,26 @@ export function insertDateAndEdit(view: EditorView): void {
     const dom = view.nodeDOM(from);
     if (dom instanceof HTMLElement) dom.dispatchEvent(new CustomEvent(OPEN_POPUP_EVENT));
   });
+}
+
+/** Slash-menu action: insert a date atom resolved to `now + offsetDays` at the
+ *  caret, WITHOUT opening the popup — the quick `/today` / `/tomorrow` /
+ *  `/yesterday` path. */
+// @feat date: slash quick-insert — a resolved date chip, no popup
+export function insertRelativeDate(view: EditorView, offsetDays: number): void {
+  const now = new Date();
+  const target = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate() + offsetDays,
+  );
+  const node = view.state.schema.nodes.date.create({
+    date: localYmd(target),
+    time: null,
+    tz: null,
+    format: null,
+  });
+  view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
 }
 
 // --- overdue / today decoration plugin --------------------------------------

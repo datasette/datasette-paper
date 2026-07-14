@@ -746,6 +746,13 @@ def _date_ref_to_node(value: str) -> dict | None:
     shipping an IANA allow-list here would only reject harmless input.
     """
     path, _, query = value.partition("?")
+    params = parse_qs(query) if query else {}  # parse_qs percent-decodes
+
+    def _param(name):
+        vals = params.get(name)
+        return vals[0] if vals and vals[0] else None
+
+    fmt = _param("fmt")
     m = _DATE_TIME_RE.match(path)
     if m:
         date_s, time_s = m.group(1), m.group(2)
@@ -756,16 +763,22 @@ def _date_ref_to_node(value: str) -> dict | None:
             return None
         if not _valid_calendar_date(date_s):
             return None
-        tz = None
-        if query:
-            tz_vals = parse_qs(query).get("tz")  # parse_qs percent-decodes
-            if tz_vals and tz_vals[0]:
-                tz = tz_vals[0]
-        return {"type": "date", "attrs": {"date": date_s, "time": time_s, "tz": tz}}
+        return {
+            "type": "date",
+            "attrs": {
+                "date": date_s,
+                "time": time_s,
+                "tz": _param("tz"),
+                "format": fmt,
+            },
+        }
     if _DATE_ONLY_RE.match(path) and _valid_calendar_date(path):
         # A stray `tz` on a date-only ref is dropped: a calendar date is the
-        # same for everyone, so only timed atoms carry a zone.
-        return {"type": "date", "attrs": {"date": path, "time": None, "tz": None}}
+        # same for everyone, so only timed atoms carry a zone. A `fmt` is kept.
+        return {
+            "type": "date",
+            "attrs": {"date": path, "time": None, "tz": None, "format": fmt},
+        }
     return None
 
 

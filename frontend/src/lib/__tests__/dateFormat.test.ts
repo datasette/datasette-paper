@@ -7,7 +7,46 @@
  */
 import { describe, it, expect } from "vitest";
 
-import { formatDateLabel, type DateAttrs } from "../dateFormat";
+import { formatDateLabel, strftimeDate, type DateAttrs } from "../dateFormat";
+
+// strftimeDate fixtures — mirrored byte-for-byte with STRFTIME_FIXTURES in
+// tests/test_markdown.py. 2026-07-20 is a Monday.
+const STRFTIME_FIXTURES: [string, number, number, number, string][] = [
+  ["%Y-%m-%d", 2026, 7, 20, "2026-07-20"],
+  ["%b %-d, %Y", 2026, 7, 20, "Jul 20, 2026"],
+  ["%B %-d, %Y", 2026, 7, 5, "July 5, 2026"],
+  ["%A, %B %o", 2026, 7, 20, "Monday, July 20th"],
+  ["%a %b %-d", 2026, 7, 20, "Mon Jul 20"],
+  ["%m/%d/%y", 2026, 7, 5, "07/05/26"],
+  ["%o", 2026, 7, 1, "1st"],
+  ["%o", 2026, 7, 2, "2nd"],
+  ["%o", 2026, 7, 3, "3rd"],
+  ["%o", 2026, 7, 11, "11th"],
+  ["%o", 2026, 7, 21, "21st"],
+  ["100%% sure on the %-d", 2026, 7, 4, "100% sure on the 4"],
+  ["%Q", 2026, 7, 4, "%Q"], // unknown directive passes through literally
+];
+
+describe("strftimeDate", () => {
+  for (const [fmt, y, m, d, expected] of STRFTIME_FIXTURES) {
+    it(`"${fmt}" on ${y}-${m}-${d} → "${expected}"`, () => {
+      expect(strftimeDate(fmt, y, m, d)).toBe(expected);
+    });
+  }
+});
+
+describe("formatDateLabel with a custom format", () => {
+  it("styles the date and auto-appends the time", () => {
+    expect(
+      formatDateLabel({
+        date: "2026-07-20",
+        time: "15:00",
+        tz: "UTC",
+        format: "%A, %B %o",
+      }),
+    ).toBe("Monday, July 20th 3:00 PM");
+  });
+});
 
 // (attrs, expected label) — mirrored in tests/test_markdown.py
 const FIXTURES: [DateAttrs, string][] = [

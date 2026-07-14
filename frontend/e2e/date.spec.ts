@@ -76,6 +76,65 @@ test.describe("date atom", () => {
       .toContain("paper:/date/2030-03-15");
   });
 
+  test("/tomorrow inserts a resolved chip directly, no popup", async ({ page }) => {
+    const resp = await page.request.post(`${BASE}/api/docs`, {
+      data: { name: "Date Quick Insert Host" },
+    });
+    expect(resp.status()).toBe(201);
+    const { id } = await resp.json();
+    await gotoPaper(page, `${BASE}/doc/${id}`);
+
+    const app = page.locator("#app-root");
+    await app.locator(".ProseMirror").click();
+    await page.keyboard.type("/tomorrow");
+    await expect(app.locator(".pm-slash-menu")).toBeVisible({ timeout: 10000 });
+    await page.keyboard.press("Enter");
+
+    // A chip appears immediately; no popup opens for the quick-insert path.
+    const chip = app.locator(".pm-date");
+    await expect(chip).toBeVisible({ timeout: 10000 });
+    await expect(app.locator(".pm-date-popup")).toHaveCount(0);
+    // Its date is a real ISO date (exact value is clock-dependent, so just
+    // assert the shape).
+    await expect(chip).toHaveAttribute("data-date", /^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  test("picking a format preset persists the fmt param through markdown", async ({
+    page,
+  }) => {
+    const id = await seed(
+      page,
+      "Date Format Host",
+      "due [Jul 20, 2026](paper:/date/2026-07-20)\n",
+    );
+    await gotoPaper(page, `${BASE}/doc/${id}`);
+
+    const app = page.locator("#app-root");
+    const chip = app.locator(".pm-date");
+    await expect(chip).toBeVisible({ timeout: 10000 });
+    await chip.click();
+
+    // The ISO preset button is labelled with its rendered example.
+    await app.locator('.pm-date-format[data-format="%Y-%m-%d"]').click();
+    await page.keyboard.press("Enter");
+
+    await expect(app.locator(".pm-date-popup")).toHaveCount(0);
+    await expect(chip).toHaveText(/2026-07-20/);
+    await expect(chip).toHaveAttribute("data-date-format", "%Y-%m-%d");
+
+    // The format rides the markdown as a fmt query param.
+    await expect
+      .poll(
+        async () => {
+          const r = await page.request.get(`${BASE}/api/docs/${id}/document`);
+          if (!r.ok()) return "";
+          return (await r.json()).content_markdown as string;
+        },
+        { timeout: 10000, message: "date format never persisted" },
+      )
+      .toContain("fmt=%25Y-%25m-%25d");
+  });
+
   test("a seeded timed+tz date renders a chip", async ({ page }) => {
     const id = await seed(
       page,
