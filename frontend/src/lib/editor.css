@@ -607,7 +607,12 @@
 .editor-host .pm-date .pm-date-icon {
   margin-right: 0.25em;
 }
+/* Size the glyph in `em` so it tracks the surrounding font — the chip renders
+ * at H1 size inside a heading, not just body size. (The SVG carries a fixed
+ * 12px attr as a no-JS fallback; this overrides it.) */
 .editor-host .pm-date .pm-date-icon svg {
+  width: 0.9em;
+  height: 0.9em;
   vertical-align: -0.1em;
 }
 /* Tints — decoration classes on the chip, so they win over the neutral base. */
