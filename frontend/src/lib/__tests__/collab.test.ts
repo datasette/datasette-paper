@@ -9,6 +9,7 @@ import {
 import { getVersion, sendableSteps } from "prosemirror-collab";
 import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
+import { Slice, Fragment } from "prosemirror-model";
 import type { Node as PMNode } from "prosemirror-model";
 import { EditorConnection, preloadMarkdownParser } from "../collab";
 import type { ConnectionOpts, StepApplyError } from "../collab";
@@ -2901,6 +2902,77 @@ describe("clipboardTextParser markdown paste", () => {
       `expected anchor wrapping <code>code</code>, got: ${html}`,
     ).toContain('<code>code</code>');
     expect(html).toMatch(/<a [^>]*href="https:\/\/link"[^>]*>/);
+
+    conn.close();
+  });
+});
+
+// ─── Markdown clipboard serializer (copy) ────────────────────────────────────
+
+// @feat callout: copying a callout-bearing selection yields its markdown as text/plain
+describe("clipboardTextSerializer markdown copy", () => {
+  async function setupView() {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    await preloadMarkdownParser(); // also builds the serializer
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    return conn;
+  }
+
+  function sliceOf(...children: PMNode[]): Slice {
+    return new Slice(Fragment.fromArray(children), 0, 0);
+  }
+
+  it("a slice containing a callout serializes to `> [!KIND] Title` markdown", async () => {
+    const conn = await setupView();
+    const view = conn.view!;
+
+    const callout = schema.nodes.callout.create({ kind: "warning" }, [
+      schema.nodes.callout_title.create(null, [schema.text("Heads up")]),
+      schema.nodes.paragraph.create(null, [schema.text("Careful now")]),
+    ]);
+    const before = schema.nodes.paragraph.create(null, [schema.text("intro")]);
+
+    const text = view.someProp("clipboardTextSerializer", (f) =>
+      f(sliceOf(before, callout), view),
+    );
+    expect(text).toBe("intro\n\n> [!WARNING] Heads up\n> Careful now");
+
+    conn.close();
+  });
+
+  // The prop returns "" to fall through; someProp treats that as "no result"
+  // (undefined here), and prosemirror-view's copy path then uses the default
+  // `textBetween` — same convention as the parser's null fall-through above.
+  it("a callout-free slice falls through to ProseMirror's default text path", async () => {
+    const conn = await setupView();
+    const view = conn.view!;
+
+    const text = view.someProp("clipboardTextSerializer", (f) =>
+      f(sliceOf(schema.nodes.paragraph.create(null, [schema.text("plain")])), view),
+    );
+    expect(text).toBeUndefined();
+
+    conn.close();
+  });
+
+  it("falls through when the slice holds a node with no markdown rule (table)", async () => {
+    const conn = await setupView();
+    const view = conn.view!;
+
+    const callout = schema.nodes.callout.create(null, [
+      schema.nodes.callout_title.create(),
+      schema.nodes.paragraph.create(null, [schema.text("body")]),
+    ]);
+    const table = schema.nodes.table.create(null, [
+      schema.nodes.table_row.create(null, [schema.nodes.table_cell.createAndFill()!]),
+    ]);
+
+    const text = view.someProp("clipboardTextSerializer", (f) =>
+      f(sliceOf(callout, table), view),
+    );
+    expect(text).toBeUndefined();
 
     conn.close();
   });

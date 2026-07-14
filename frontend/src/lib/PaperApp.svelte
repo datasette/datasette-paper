@@ -21,7 +21,7 @@
   import type { EmbedKindFilter } from "./slashMenu";
   import CreatePageDialog from "./CreatePageDialog.svelte";
   import { insertImage } from "./image";
-  import { youtubeWatchUrl } from "./youtube";
+  import { buildMarkdownSerializer, serializeDoc } from "./markdownSerializer";
   import { insertDatasetteEmbed } from "./datasetteEmbed";
   import { TOOLBAR_ICONS } from "./icons";
 
@@ -208,36 +208,12 @@
     try {
       // Lazy-load prosemirror-markdown — it bundles markdown-it for the
       // parser side that we don't use here, ~50k gzipped. Code-split so
-      // it only downloads when the user actually clicks copy.
-      const { defaultMarkdownSerializer, MarkdownSerializer } = await import(
-        "prosemirror-markdown"
-      );
-      // Extend the default serializer with rules for our custom task_list
-      // / task_item nodes. GFM-style `- [ ] foo` / `- [x] foo`.
-      const serializer = new MarkdownSerializer(
-        {
-          ...defaultMarkdownSerializer.nodes,
-          task_list(state, node) {
-            state.renderList(node, "  ", () => "");
-          },
-          task_item(state, node) {
-            const marker = node.attrs.checked ? "- [x] " : "- [ ] ";
-            state.write(marker);
-            state.renderContent(node);
-          },
-          // A lone canonical YouTube URL on its own line — the bare-URL form
-          // the backend markdown round-trips (datasette_paper/markdown.py).
-          video_embed(state, node) {
-            if ((node.attrs.provider ?? "youtube") === "youtube" && node.attrs.videoId) {
-              const start = typeof node.attrs.start === "number" ? node.attrs.start : null;
-              state.write(youtubeWatchUrl(node.attrs.videoId, start));
-            }
-            state.closeBlock(node);
-          },
-        },
-        defaultMarkdownSerializer.marks,
-      );
-      const md = serializer.serialize(view.state.doc);
+      // it only downloads when the user actually clicks copy. The custom-node
+      // rules live in the shared builder (markdownSerializer.ts), also used
+      // by the callout copy path in collab.ts.
+      const m = await import("prosemirror-markdown");
+      const serializer = buildMarkdownSerializer(m);
+      const md = serializeDoc(serializer, view.state.doc);
       await navigator.clipboard.writeText(md);
       return true;
     } catch {

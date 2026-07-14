@@ -63,6 +63,7 @@ import type { Command } from "prosemirror-state";
 import type { MarkType } from "prosemirror-model";
 
 import { schema } from "./schema";
+import { buildMarkdownSerializer, serializeDoc } from "./markdownSerializer";
 import { isSafeHref } from "./safeHref";
 import { foldHeadingsPlugin } from "./foldHeadings";
 import { codeHighlightPlugin } from "./codeHighlight";
@@ -843,9 +844,12 @@ function linkifyPastedSlice(slice: Slice): Slice {
 // markdown-it ~50k gzipped). Cmd+V parses pasted text as markdown when this
 // module is ready; first paste before the chunk lands falls through to
 // ProseMirror's default plain-text behavior. Cmd+Shift+V (`plain=true`)
-// always falls through.
+// always falls through. The same load also builds the markdown *serializer*
+// used by the copy path below (clipboardMarkdownSerializer).
 type MarkdownParser = import("prosemirror-markdown").MarkdownParser;
+type MarkdownSerializer = import("prosemirror-markdown").MarkdownSerializer;
 let mdParser: MarkdownParser | null = null;
+let mdSerializer: MarkdownSerializer | null = null;
 let mdParserLoading: Promise<void> | null = null;
 
 export function preloadMarkdownParser(): Promise<void> {
@@ -854,6 +858,7 @@ export function preloadMarkdownParser(): Promise<void> {
     mdParserLoading = import("prosemirror-markdown").then(
       (m) => {
         mdParser = m.defaultMarkdownParser;
+        mdSerializer = buildMarkdownSerializer(m);
       },
       () => {
         mdParserLoading = null;
@@ -912,6 +917,35 @@ function clipboardMarkdownParser(
     return null;
   }
   return Slice.maxOpen(ourDoc.content);
+}
+
+// ─── Markdown clipboard serializer ───────────────────────────────────────────
+
+// Copy path (`clipboardTextSerializer`): when the copied slice contains a
+// callout, put the selection's *markdown* on the clipboard as text/plain —
+// the default `textBetween` flattens the callout to bare text, losing the
+// `> [!KIND] Title` structure. Scoped to callout-bearing slices on purpose:
+// everything else keeps ProseMirror's default text (including `leafText`
+// behaviors like embed-copy-url). Returning "" falls through to that default,
+// which also covers the not-yet-loaded serializer and any node the client
+// serializer has no rule for (tables) — `serialize` throws and we fall back.
+// @feat callout: copying a selection with a callout puts its markdown on the clipboard
+function clipboardMarkdownSerializer(content: Slice): string {
+  if (!mdSerializer) return "";
+  let hasCallout = false;
+  content.content.descendants((node) => {
+    if (node.type === schema.nodes.callout) hasCallout = true;
+    return !hasCallout;
+  });
+  if (!hasCallout) return "";
+  try {
+    // Wrap the slice fragment in a doc node so the serializer can walk it.
+    // Unvalidated `create` on purpose — a slice's boundary nodes may be
+    // "open" (e.g. a callout cut mid-body) and fail a strict content check.
+    return serializeDoc(mdSerializer, schema.nodes.doc.create(null, content.content));
+  } catch {
+    return "";
+  }
 }
 
 // ─── EditorConnection ────────────────────────────────────────────────────────
@@ -1535,6 +1569,9 @@ export class EditorConnection {
         plain: boolean,
         view: EditorView,
       ) => Slice,
+      // Copy counterpart: markdown text/plain for callout-bearing selections;
+      // "" falls through to the default textBetween (see the function).
+      clipboardTextSerializer: clipboardMarkdownSerializer,
       // Mirror the autoLink input rule: any bare http(s) URL in a paste
       // becomes a link, regardless of whether the source was plain text,
       // a markdown round-trip, or rich HTML. Runs after clipboardTextParser
