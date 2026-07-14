@@ -696,3 +696,33 @@ pattern as `list_docs` (TL;DR; §6):
 - **Unknown / never-seen `{actor}` → `200 {"docs": []}`, not 404.** The endpoint
   is not an actor-existence oracle: a valid-but-empty response is
   indistinguishable from "actor P has no visible docs".
+
+## 17. Profile TODOs — the cross-doc task listing endpoint
+
+`GET /-/paper/api/profile/{actor}/todos` (the `task-assign` feature) backs both
+TODO surfaces: the `<profile-todos>` profile section and the dedicated
+`/-/paper/todos` page. For a subject actor **P** viewed by **V**, it lists the
+tasks assigned to P — a `@mention` inside a task item is an assignment, and it
+inherits down the task subtree — across P's **active** docs, **intersected with
+the docs V holds `paper-view` on**. The handler is `profile_todos` in
+`routes/docs.py`, reading the derived `_datasette_paper_task_assignment` index.
+
+Its access stance is **the same clause as `profile-papers` (§16)** — the
+viewer-ACL `paper-view` filter is applied at query time, not at index time:
+
+- **No gate on the route itself** — the visible set is
+  `allowed_resources("paper-view")` for the *viewer*; a no-grant viewer
+  short-circuits to `{"todos": []}`. A task assigned to P in a doc V cannot see
+  is filtered out **even when V is P viewing their own list** — the index rows
+  exist, but the query never returns them (the assignment index is a derived
+  cache, never an access-control decision).
+- **Active docs only.** Archived / trashed / template docs' tasks never appear.
+- **No `profile_access` involvement.** Rows are task/doc metadata (text, doc
+  name/url, due date, assignee ids); assignee *names* are resolved separately by
+  the client through the existing `actors/resolve` endpoint, which owns the
+  `profile_access` degrade — this endpoint emits no resolved names/avatars.
+- **`status=open|done|all`** (default `open`; 400 otherwise), the same vocabulary
+  and contract as the per-doc `/tasks` endpoint. Bucketing is the client's job
+  (it needs the viewer's timezone), so the endpoint returns a flat ordered list.
+- **Unknown / never-seen `{actor}` → `200 {"todos": []}`, not 404** — not an
+  actor-existence oracle, exactly as §16.

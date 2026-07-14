@@ -9,7 +9,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { ActorResolver } from "./actorResolver";
-  import { iconMarkup } from "./datasetteEmbed";
+  import { TOOLBAR_ICONS } from "./icons";
   import { loadPageData } from "./pageData";
   import { bucketTodos, dueChip, sectionBreadcrumb } from "./todos";
   import type { TodoRow, TodosResponse } from "./todos";
@@ -171,7 +171,7 @@
                     class:is-overdue={chip.tint === "overdue"}
                     class:is-today={chip.tint === "today"}
                   >
-                    <span class="todos-due-icon">{@html iconMarkup("calendarEvent")}</span>
+                    <span class="todos-due-icon">{@render calendarIcon()}</span>
                     {chip.label}
                   </span>
                 {/if}
@@ -187,6 +187,20 @@
     {/if}
   {/if}
 </div>
+
+{#snippet calendarIcon()}
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width="12"
+    height="12"
+    viewBox="0 0 16 16"
+    fill="currentColor"
+    aria-hidden="true"
+  >
+    <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+    {@html TOOLBAR_ICONS.calendarEvent}
+  </svg>
+{/snippet}
 
 <style>
   .todos-page {
