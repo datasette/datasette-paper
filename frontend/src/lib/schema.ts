@@ -583,7 +583,11 @@ const calloutTitleNode: NodeSpec = {
   content: "text*",
   marks: "",
   parseDOM: [{ tag: "div[data-callout-title]" }],
-  toDOM: () => ["div", { class: "pm-callout-title" }, 0],
+  // The data attr must round-trip through parseDOM: PM re-parses rendered DOM
+  // (paste, and the mutation-observer read path), and a title div its own
+  // parse rule can't match degrades to a paragraph — which cascades into an
+  // endless redraw loop when a doc holds 2+ callouts.
+  toDOM: () => ["div", { "data-callout-title": "", class: "pm-callout-title" }, 0],
 };
 
 // @feat task-list: client task_list / task_item specs (mirrors pm_schema.py)

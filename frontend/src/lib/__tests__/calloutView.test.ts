@@ -57,11 +57,18 @@ describe("CalloutView rendering", () => {
     expect(btn(view).querySelector("svg")).not.toBeNull();
   });
 
-  it("stamps the kind label on an empty title for the CSS placeholder", async () => {
+  it("renders the title with the round-trippable data attr; the placeholder is pure CSS", () => {
+    // The empty-title placeholder comes from `--callout-label` on the kind
+    // class (editor.css) — the view must NOT write into PM-managed DOM (a
+    // contentDOM mutation triggers PM's re-parse and live-locked docs with
+    // 2+ callouts). Assert the pieces CSS keys off: the kind class on the
+    // wrapper and the parseDOM-matchable attr on the title.
     const view = mount("tip", "");
-    await Promise.resolve(); // constructor stamps via a microtask
+    const el = view.dom.querySelector(".pm-callout") as HTMLElement;
+    expect(el.classList.contains("pm-callout--tip")).toBe(true);
     const title = view.dom.querySelector(".pm-callout-title") as HTMLElement;
-    expect(title.getAttribute("data-kind-label")).toBe("Tip");
+    expect(title.hasAttribute("data-callout-title")).toBe(true);
+    expect(title.getAttribute("data-kind-label")).toBeNull();
   });
 
   it("clamps an unknown kind to note", () => {

@@ -587,7 +587,13 @@ _callout_title_spec = {
     "content": "text*",
     "marks": "",
     "parseDOM": [{"tag": "div[data-callout-title]"}],
-    "toDOM": lambda _node: ["div", {"class": "pm-callout-title"}, 0],
+    # data-callout-title must round-trip through parseDOM (mirrors schema.ts —
+    # a toDOM its own parse rule can't match breaks the client's DOM re-parse).
+    "toDOM": lambda _node: [
+        "div",
+        {"data-callout-title": "", "class": "pm-callout-title"},
+        0,
+    ],
 }
 
 # Doc content override enabling callout's top-level-only nesting — mirrors

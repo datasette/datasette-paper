@@ -10,12 +10,15 @@
  * own — `ignoreMutation` / `stopEvent` fence the chrome off.
  *
  * `update(node)` re-styles in place on a `kind` change (class + `data-callout`
- * + icon path + the title's placeholder label), so a remote or local kind flip
- * never rebuilds the view. The empty-title placeholder is pure CSS: the view
- * stamps `data-kind-label` on the PM-rendered `.pm-callout-title` element and
- * `:empty::before { content: attr(data-kind-label) }` (editor.css) renders it.
- * PM's attribute reconciliation only manages attributes present in a node's
- * `toDOM` output, so a hand-added `data-kind-label` survives title edits.
+ * + icon path), so a remote or local kind flip never rebuilds the view. The
+ * empty-title placeholder is pure CSS: the `pm-callout--{kind}` wrapper class
+ * sets a `--callout-label` custom property ("Note"/"Tip"/…) alongside the
+ * accent, and `.pm-callout-title:empty::before { content: var(--callout-label) }`
+ * (editor.css) renders it. The view must NOT write into `contentDOM` (the
+ * earlier design stamped a `data-kind-label` attribute on the title): any
+ * mutation there is one PM's observer doesn't ignore, and the resulting DOM
+ * re-parse → redraw → re-stamp cycle live-locked the page on docs with 2+
+ * callouts.
  *
  * The kind picker mirrors codeBlockView's language popup chrome: 5 kind rows
  * (icon + label, current kind checked) then a divider and the "Quote" /
@@ -97,9 +100,6 @@ export class CalloutView implements NodeView {
     this.dom.appendChild(this.contentDOM);
 
     this.applyKind();
-    // PM fills contentDOM after the constructor returns, so stamp the title's
-    // placeholder label once that's happened.
-    queueMicrotask(() => this.stampTitleLabel());
   }
 
   // ── Styling ───────────────────────────────────────────────────────────────
@@ -110,14 +110,6 @@ export class CalloutView implements NodeView {
     this.dom.setAttribute("data-callout", this.kind);
     this.iconBtn.innerHTML = iconMarkup(KIND_ICON[this.kind]); // trusted constant SVG
     this.iconBtn.setAttribute("aria-label", `Callout kind: ${KIND_LABEL[this.kind]}`);
-    this.stampTitleLabel();
-  }
-
-  /** Put the kind's label on the PM-rendered title so the CSS `:empty::before`
-   * placeholder can render it. No-op until PM has built the title element. */
-  private stampTitleLabel(): void {
-    const title = this.contentDOM.querySelector(".pm-callout-title");
-    if (title) title.setAttribute("data-kind-label", KIND_LABEL[this.kind]);
   }
 
   // ── Kind picker ─────────────────────────────────────────────────────────────
@@ -259,10 +251,6 @@ export class CalloutView implements NodeView {
       this.kind = kind;
       this.applyKind();
       if (this.popupOpen) this.renderRows();
-    } else {
-      // Title may have gone empty/non-empty or been re-rendered; keep the
-      // placeholder label attached.
-      this.stampTitleLabel();
     }
     return true;
   }
@@ -272,12 +260,20 @@ export class CalloutView implements NodeView {
   }
 
   // Chrome (button + popup) is not part of the doc: hide its mutations from PM
-  // and swallow its events so clicks don't move the PM selection.
+  // and swallow its events so clicks don't move the PM selection. Bug fixed
+  // here (found via e2e, plans/callout/tickets/04): the allow-list form (only
+  // iconBtn/popupEl fenced) missed mutations on `this.dom` itself — e.g.
+  // openPicker's own `this.dom.classList.add("pm-callout--picker-open")`.
+  // `Node.contains(self)` is true, but a class change ON `this.dom` isn't
+  // "contained" by either iconBtn or popupEl (both are children, not
+  // ancestors), so PM's MutationObserver saw an "unexplained" DOM change on
+  // the NodeView's own root and self-healed by destroying + rebuilding it —
+  // instantly closing the picker that had just opened. Mirrors
+  // codeBlockView.ts's `ignoreMutation`: deny-list everything outside the
+  // real PM-managed surface (`contentDOM`, the title + body) instead of
+  // allow-listing specific chrome nodes.
   ignoreMutation(mutation: ViewMutationRecord): boolean {
-    return (
-      this.iconBtn.contains(mutation.target as Node) ||
-      this.popupEl.contains(mutation.target as Node)
-    );
+    return !this.contentDOM.contains(mutation.target as Node);
   }
 
   stopEvent(event: Event): boolean {

@@ -228,9 +228,11 @@
  * sits in the left gutter beside the title's first line, and the
  * `.pm-callout-content` div is the contentDOM (title + body). The per-kind
  * `--callout-accent` var flips light↔dark in one token (app.css
- * `--pp-callout-*`). The empty-title placeholder is pure CSS via the stamped
- * `data-kind-label`; PM leaves a `ProseMirror-trailingBreak` <br> in an empty
- * textblock, so the placeholder matches both the `:empty` and only-a-break case.
+ * `--pp-callout-*`). The empty-title placeholder is pure CSS: each kind class
+ * also sets `--callout-label`, and the ::before below renders it — the NodeView
+ * must never write attributes into PM-managed DOM (see calloutView.ts). PM
+ * leaves a `ProseMirror-trailingBreak` <br> in an empty textblock, so the
+ * placeholder matches both the `:empty` and only-a-break case.
  * @feat callout: bordered admonition CSS + kind-picker popup chrome */
 .editor-host .pm-callout {
   position: relative;
@@ -240,18 +242,23 @@
 }
 .editor-host .pm-callout--note {
   --callout-accent: var(--pp-callout-note);
+  --callout-label: "Note";
 }
 .editor-host .pm-callout--tip {
   --callout-accent: var(--pp-callout-tip);
+  --callout-label: "Tip";
 }
 .editor-host .pm-callout--important {
   --callout-accent: var(--pp-callout-important);
+  --callout-label: "Important";
 }
 .editor-host .pm-callout--warning {
   --callout-accent: var(--pp-callout-warning);
+  --callout-label: "Warning";
 }
 .editor-host .pm-callout--caution {
   --callout-accent: var(--pp-callout-caution);
+  --callout-label: "Caution";
 }
 /* Kind icon button — in the left gutter, aligned with the title's first line.
  * Edit-mode reveals a hover background; view mode leaves it as a static
@@ -284,7 +291,7 @@
 }
 .editor-host .pm-callout-title:empty::before,
 .editor-host .pm-callout-title:has(> br.ProseMirror-trailingBreak:only-child)::before {
-  content: attr(data-kind-label);
+  content: var(--callout-label);
   color: var(--callout-accent);
   opacity: 0.55;
   pointer-events: none;
