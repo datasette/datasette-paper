@@ -117,6 +117,11 @@ class DocEditor:
     last_edited_at: Any
 
 
+@dataclass
+class DocId:
+    id: int
+
+
 def insert_doc(
     conn: sqlite3.Connection,
     name: str,
@@ -750,3 +755,62 @@ GROUP BY doc_id;
     params = {"doc_ids_json::text": doc_ids_json}
     cursor = conn.execute(sql, params)
     return [DocEditor(*row) for row in cursor.fetchall()]
+
+
+def delete_task_assignments_for_doc(conn: sqlite3.Connection, doc_id: int) -> None:
+    sql = (
+        "DELETE FROM _datasette_paper_task_assignment WHERE doc_id = $doc_id::integer;"
+    )
+    params = {"doc_id::integer": doc_id}
+    conn.execute(sql, params)
+    return None
+
+
+def insert_task_assignment(
+    conn: sqlite3.Connection,
+    doc_id: int,
+    ordinal: int,
+    assignee: str,
+    inherited: int,
+    checked: int,
+    text: str,
+    section: str,
+    due_date: str,
+    due_time: str,
+    due_tz: str,
+    due_inherited: int,
+    src_version: int,
+) -> None:
+    sql = """\
+INSERT INTO _datasette_paper_task_assignment
+    (doc_id, ordinal, assignee, inherited, checked, text, section,
+     due_date, due_time, due_tz, due_inherited, src_version)
+VALUES
+    ($doc_id::integer, $ordinal::integer, $assignee::text, $inherited::integer,
+     $checked::integer, $text::text, $section::text, $due_date::text,
+     $due_time::text, $due_tz::text, $due_inherited::integer,
+     $src_version::integer);
+"""
+    params = {
+        "doc_id::integer": doc_id,
+        "ordinal::integer": ordinal,
+        "assignee::text": assignee,
+        "inherited::integer": inherited,
+        "checked::integer": checked,
+        "text::text": text,
+        "section::text": section,
+        "due_date::text": due_date,
+        "due_time::text": due_time,
+        "due_tz::text": due_tz,
+        "due_inherited::integer": due_inherited,
+        "src_version::integer": src_version,
+    }
+    conn.execute(sql, params)
+    return None
+
+
+def select_all_doc_ids(conn: sqlite3.Connection) -> list[DocId]:
+    sql = "SELECT id FROM _datasette_paper_doc;"
+    params: dict[str, Any] = {}
+    cursor = conn.execute(sql, params)
+    return [DocId(*row) for row in cursor.fetchall()]

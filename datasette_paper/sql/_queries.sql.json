@@ -2191,6 +2191,119 @@
         }
       ],
       "result_class": "DocEditor"
+    },
+    {
+      "name": "deleteTaskAssignmentsForDoc",
+      "result_type": "Void",
+      "sql": "DELETE FROM _datasette_paper_task_assignment WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "insertTaskAssignment",
+      "result_type": "Void",
+      "sql": "INSERT INTO _datasette_paper_task_assignment\n    (doc_id, ordinal, assignee, inherited, checked, text, section,\n     due_date, due_time, due_tz, due_inherited, src_version)\nVALUES\n    ($doc_id::integer, $ordinal::integer, $assignee::text, $inherited::integer,\n     $checked::integer, $text::text, $section::text, $due_date::text,\n     $due_time::text, $due_tz::text, $due_inherited::integer,\n     $src_version::integer);",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$ordinal::integer",
+          "name": "ordinal",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$assignee::text",
+          "name": "assignee",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$inherited::integer",
+          "name": "inherited",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$checked::integer",
+          "name": "checked",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$text::text",
+          "name": "text",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$section::text",
+          "name": "section",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$due_date::text",
+          "name": "due_date",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$due_time::text",
+          "name": "due_time",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$due_tz::text",
+          "name": "due_tz",
+          "annotated_type": "text",
+          "nullable": false
+        },
+        {
+          "full_name": "$due_inherited::integer",
+          "name": "due_inherited",
+          "annotated_type": "integer",
+          "nullable": false
+        },
+        {
+          "full_name": "$src_version::integer",
+          "name": "src_version",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [],
+      "result_class": null
+    },
+    {
+      "name": "selectAllDocIds",
+      "result_type": "Rows",
+      "sql": "SELECT id FROM _datasette_paper_doc;",
+      "parameters": [],
+      "columns": [
+        {
+          "name": "id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc",
+          "origin_column": "id",
+          "decltype": "INTEGER",
+          "nullable": false
+        }
+      ],
+      "result_class": "DocId"
     }
   ]
 }

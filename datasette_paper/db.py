@@ -305,6 +305,47 @@ class PaperDB:
         )
 
     # ------------------------------------------------------------------
+    # Task assignment index (m009)
+    # ------------------------------------------------------------------
+
+    async def replace_task_assignments(
+        self,
+        *,
+        doc_id: int,
+        src_version: int,
+        rows: list[dict],
+    ) -> None:
+        # Rebuild one doc's task-assignment rows in a single transaction
+        # (mirror replace_inline_tags): delete all of the doc's rows, then
+        # re-insert the current set. ``rows`` is the per-(ordinal, assignee)
+        # fan-out the reindex derives from extract_tasks — assigned tasks only.
+        def write(conn):
+            _queries.delete_task_assignments_for_doc(conn, doc_id=doc_id)
+            for r in rows:
+                _queries.insert_task_assignment(
+                    conn,
+                    doc_id=doc_id,
+                    ordinal=r["ordinal"],
+                    assignee=r["assignee"],
+                    inherited=r["inherited"],
+                    checked=r["checked"],
+                    text=r["text"],
+                    section=r["section"],
+                    due_date=r["due_date"],
+                    due_time=r["due_time"],
+                    due_tz=r["due_tz"],
+                    due_inherited=r["due_inherited"],
+                    src_version=src_version,
+                )
+
+        await self.database.execute_write_fn(write)
+
+    async def all_doc_ids(self) -> list[int]:
+        # Every doc id, any state/kind — drives the one-time backfill.
+        rows = await self._read(_queries.select_all_doc_ids)
+        return [r.id for r in rows]
+
+    # ------------------------------------------------------------------
     # Document tags
     # ------------------------------------------------------------------
 
@@ -414,6 +455,10 @@ class PaperDB:
             # Activity rollup carries no FK cascade (matching steps/snapshots),
             # so purge it here alongside the other child rows.
             _queries.delete_activity_for_doc(conn, doc_id=doc_id)
+            # @feat task-assign: the derived assignment index is likewise not
+            # cascade-backed here — purge it so a reused rowid can't inherit a
+            # dead doc's TODOs.
+            _queries.delete_task_assignments_for_doc(conn, doc_id=doc_id)
             _queries.hard_delete_doc(conn, doc_id=doc_id)
 
         await self.database.execute_write_fn(write)

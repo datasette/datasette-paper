@@ -469,3 +469,34 @@ WHERE doc_id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
   )
 GROUP BY doc_id;
+
+-- ============================================================================
+-- Task assignment index (m009 _datasette_paper_task_assignment)
+--
+-- Derived cross-doc index of assigned task_items — one row per (doc, ordinal,
+-- effective assignee). Rebuilt wholesale per doc by the write-tail reindex
+-- (mirrors _datasette_paper_inline_tag / reindex_tags), purged with the doc on
+-- hard delete. Read by the /todos endpoint that backs both TODO surfaces.
+-- ============================================================================
+
+-- Clear a doc's assignment rows — the first half of replace_task_assignments,
+-- and the doc hard-delete purge (mirrors deleteInlineTagsForDoc).
+-- name: deleteTaskAssignmentsForDoc
+DELETE FROM _datasette_paper_task_assignment WHERE doc_id = $doc_id::integer;
+
+-- name: insertTaskAssignment
+INSERT INTO _datasette_paper_task_assignment
+    (doc_id, ordinal, assignee, inherited, checked, text, section,
+     due_date, due_time, due_tz, due_inherited, src_version)
+VALUES
+    ($doc_id::integer, $ordinal::integer, $assignee::text, $inherited::integer,
+     $checked::integer, $text::text, $section::text, $due_date::text,
+     $due_time::text, $due_tz::text, $due_inherited::integer,
+     $src_version::integer);
+
+-- Every doc id (any state/kind) — drives the one-time task-assignment backfill,
+-- which materializes each doc and reindexes it best-effort. Archived/trashed/
+-- template docs are indexed too (rows filtered at query time), so a later
+-- restore needs no reindex.
+-- name: selectAllDocIds :rows -> DocId
+SELECT id FROM _datasette_paper_doc;

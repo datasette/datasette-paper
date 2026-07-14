@@ -294,7 +294,11 @@ if JumpSQL is not None:
 
 @hookimpl
 async def startup(datasette):
-    from .migrations import ensure_migrations, migrate_shares_to_acl
+    from .migrations import (
+        backfill_task_assignments,
+        ensure_migrations,
+        migrate_shares_to_acl,
+    )
 
     internal = datasette.get_internal_database()
     if getattr(internal, "is_temp_disk", False):
@@ -313,6 +317,10 @@ async def startup(datasette):
     # _datasette_paper_share) and is guarded by its own marker so it's a no-op
     # on every startup after the first. Safe when acl isn't installed.
     await migrate_shares_to_acl(datasette)
+    # One-time reindex of pre-existing docs into the m009 task-assignment index
+    # (the write tail only covers docs edited after deploy). Marker-guarded, so
+    # it's a no-op on every startup after the first.
+    await backfill_task_assignments(datasette)
 
 
 # bootstrap-icons / file-text-fill — kept in sync with the icon used in
