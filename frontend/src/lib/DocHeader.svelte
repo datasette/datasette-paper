@@ -304,6 +304,11 @@
           meta?.last_edited_by_name ?? null,
         ),
   );
+  // Raw actor id behind editedBy, so the label can link to a profile even
+  // when it reads "you". Tracks the same live-vs-fetched precedence.
+  let editedById = $derived(
+    lastEdited ? lastEdited.actor : (meta?.last_edited_by ?? null),
+  );
 
   onMount(() => {
     void load();
@@ -374,17 +379,27 @@
                 ((e.currentTarget as HTMLImageElement).style.display = "none")}
             />
           {/if}
-          <strong title={meta.created_by}
-            >{meta.created_by_name ?? meta.created_by}</strong
+          <a
+            class="creator-link"
+            href="/-/profile/{encodeURIComponent(meta.created_by)}"
+            title="View {meta.created_by_name ?? meta.created_by}'s profile"
           >
+            <strong>{meta.created_by_name ?? meta.created_by}</strong>
+          </a>
         {:else}
           anonymous
         {/if}
       </span>
       <span aria-hidden="true">·</span>
       <span class="updated-at" title={editedAt ?? meta.updated_at}>
-        edited {relativeTime(editedAt ?? meta.updated_at, nowTick)}{#if editedBy}
-          by <strong class="last-editor">{editedBy}</strong>{/if}
+        edited {relativeTime(editedAt ?? meta.updated_at, nowTick)}{#if editedBy && editedById}&nbsp;by
+          <a
+            class="creator-link"
+            href="/-/profile/{encodeURIComponent(editedById)}"
+            title="View profile"
+          >
+            <strong class="last-editor">{editedBy}</strong>
+          </a>{/if}
       </span>
       <span aria-hidden="true">·</span>
       <span class="users">
@@ -762,6 +777,13 @@
     border-radius: 50%;
     object-fit: cover;
     flex-shrink: 0;
+  }
+  .creator-link {
+    color: inherit;
+    text-decoration: none;
+  }
+  .creator-link:hover strong {
+    text-decoration: underline;
   }
   /* deliberate literal: one-off success green — no "success" role token. */
   .saved {
