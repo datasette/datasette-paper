@@ -4,12 +4,14 @@
 
 {% block body_class %}{{ body_class or "" }}{% endblock %}
 
-{# @feat breadcrumbs: replace Datasette's "home" crumb with "[icon] Papers"
-   (linking to the index) plus an optional "/ <current page>" segment. Routes
-   pass `crumb_current` (doc name / #tag); the doc page updates the span text
-   live on rename via frontend/src/lib/crumbs.ts, keyed off its id. #}
+{# @feat breadcrumbs: "home / [icon] Papers / <current page>" in the header
+   bar. The leading segment reuses Datasette's own crumb_items() so the home
+   link keeps its view-instance permission gate; routes pass `crumb_current`
+   (doc name / #tag); the doc page updates the span text live on rename via
+   frontend/src/lib/crumbs.ts, keyed off its id. #}
 {% block crumbs %}
 <p class="crumbs paper-crumbs">
+  {% if crumb_items is defined %}{% for item in crumb_items(request=request) %}<a href="{{ item.href }}">{{ item.label }}</a> / {% endfor %}{% endif %}
   <a href="{{ urls.path('/-/paper/') }}">{{ paper_icon_svg | safe }}<span>Papers</span></a>
   {% if crumb_current %}/ <span id="paper-crumb-current">{{ crumb_current }}</span>{% endif %}
 </p>

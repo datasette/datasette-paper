@@ -13,16 +13,17 @@ from datasette_paper.instance import get_registry
 
 
 @pytest.mark.asyncio
-async def test_index_crumb_is_papers_only(ds):
+async def test_index_crumb_home_then_papers(ds):
     html = (await ds.client.get("/-/paper/")).text
     assert 'class="crumbs paper-crumbs"' in html
     assert "<span>Papers</span>" in html
     # The icon rides along inside the link (bootstrap file-text-fill).
     assert "bi-file-text-fill" in html
-    # No current-page segment on the index, and Datasette's default "home"
-    # crumb is replaced, not prepended.
+    # Datasette's own "home" crumb leads (via crumb_items, so it keeps its
+    # view-instance gate), then Papers. No current-page segment on the index.
+    assert ">home</a>" in html
+    assert html.index(">home</a>") < html.index("<span>Papers</span>")
     assert "paper-crumb-current" not in html
-    assert ">home</a>" not in html
 
 
 @pytest.mark.asyncio
