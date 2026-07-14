@@ -6,6 +6,7 @@
   import { undo, redo, undoDepth, redoDepth } from "prosemirror-history";
   import { schema } from "./schema";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+  import { wrapSelectionInCallout, unwrapCallout } from "./callout";
   import { canInsertTable, insertTable } from "./tables";
   import { insertToc } from "./tocView";
   import { embedInsertSources } from "./embedProviders";
@@ -177,6 +178,13 @@
     return () => run(wrapInList(node));
   }
 
+  // Callout toggle: mirrors the quote button. Outside a callout, wrap the
+  // selection as a Note; inside one, unwrap it back to plain blocks.
+  function toggleCallout() {
+    if (!view) return;
+    run(isCallout ? unwrapCallout : wrapSelectionInCallout("note"));
+  }
+
   function insertHorizontalRule() {
     if (!view) return;
     const hr = schema.nodes.horizontal_rule;
@@ -277,6 +285,18 @@
   const isCodeBlock = $derived.by(() => {
     void tick;
     return nodeActive(schema.nodes.code_block);
+  });
+  // Active when the selection sits anywhere inside a callout — walk the
+  // ancestor chain like isBlockquote (a callout wraps blocks above the
+  // current depth). Callouts only ever live at depth 1.
+  const isCallout = $derived.by(() => {
+    void tick;
+    if (!view) return false;
+    const sel = view.state.selection;
+    for (let d = sel.$from.depth; d > 0; d--) {
+      if (sel.$from.node(d).type === schema.nodes.callout) return true;
+    }
+    return false;
   });
   const isLink = $derived.by(() => {
     void tick;
@@ -387,6 +407,8 @@
   {@render btn("indent", "Indent list (⌘])", () => run(sinkListItem(schema.nodes.list_item)))}
   <span class="tb-sep" aria-hidden="true"></span>
   {@render btn("quote", "Blockquote", () => run(wrapIn(schema.nodes.blockquote)), isBlockquote)}
+  <!-- @feat callout: toolbar button wraps selection as a Note / unwraps when active -->
+  {@render btn("infoCircle", "Callout", toggleCallout, isCallout)}
   {@render btn("codeBlock", "Code block", () => run(setBlockType(schema.nodes.code_block)), isCodeBlock)}
   {@render btn("hr", "Horizontal rule", insertHorizontalRule)}
   {@render btn("listNested", "Insert table of contents", () => run(insertToc))}

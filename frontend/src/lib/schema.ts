@@ -530,12 +530,14 @@ const sourceNode: NodeSpec = {
 };
 
 // The five GitHub-style admonition kinds. Mirrors `_CALLOUT_KINDS` in
-// datasette_paper/pm_schema.py / datasette_paper/markdown.py.
-const CALLOUT_KINDS = ["note", "tip", "important", "warning", "caution"] as const;
-type CalloutKind = (typeof CALLOUT_KINDS)[number];
+// datasette_paper/pm_schema.py / datasette_paper/markdown.py. Exported so the
+// commands (callout.ts), NodeView (calloutView.ts) and input rule (collab.ts)
+// share one closed set rather than re-declaring it.
+export const CALLOUT_KINDS = ["note", "tip", "important", "warning", "caution"] as const;
+export type CalloutKind = (typeof CALLOUT_KINDS)[number];
 
 /** Clamp an arbitrary value to a valid callout kind, defaulting to "note". */
-function clampCalloutKind(kind: unknown): CalloutKind {
+export function clampCalloutKind(kind: unknown): CalloutKind {
   return (CALLOUT_KINDS as readonly string[]).includes(kind as string)
     ? (kind as CalloutKind)
     : "note";
