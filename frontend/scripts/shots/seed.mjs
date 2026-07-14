@@ -203,6 +203,41 @@ def fibonacci(n):
 \`\`\`
 `;
 
+// Callout (GitHub-style admonition) fixture — a "Deploy runbook" with one of
+// each of the five kinds, each carrying a title + a short body; the WARNING
+// one gets a multi-block body (a paragraph + a list) so the shot also proves
+// a callout's body isn't limited to a single paragraph. Own doc so the
+// picker shot's click-to-open interaction can't perturb any other fixture.
+const CALLOUTS = `# Deploy runbook
+
+Steps for shipping a production release, plus the gotchas the on-call
+rotation keeps rediscovering the hard way.
+
+> [!NOTE] Staging first
+> Every release goes to staging before production — the health check must
+> stay green for at least five minutes.
+
+> [!TIP] Rollback is one command
+> \`deploy rollback <version>\` reverts instantly, no rebuild needed — don't
+> hesitate to use it.
+
+> [!IMPORTANT] Notify #deploys before you start
+> Post the version and a one-line summary in #deploys before kicking off a
+> production rollout.
+
+> [!WARNING] Migrations run automatically on boot
+> Schema migrations execute the moment the new version starts — never
+> during a rolling restart.
+>
+> - Confirm the migration is backward compatible with the old code
+> - Confirm a rollback plan exists if it isn't
+> - Watch the migration log for the first minute after deploy
+
+> [!CAUTION] Don't skip the smoke test
+> Skipping the smoke test caused two outages this quarter — always click
+> through the five critical flows before declaring victory.
+`;
+
 export async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -284,6 +319,7 @@ export async function seed(ctx) {
   const inlineValueId = await create("Vendor snapshot", ACTOR, INLINE_VALUE);
   const tocId = await create("Engineering handbook", ACTOR, TOC);
   const codeBlockId = await create("Language support", ACTOR, CODE_BLOCK);
+  const calloutsId = await create("Deploy runbook", ACTOR, CALLOUTS);
   return {
     // The actor whose user-profiles profile the profile-papers shot visits.
     profileActor: "bob",
@@ -307,5 +343,6 @@ export async function seed(ctx) {
     inlineValueId,
     tocId,
     codeBlockId,
+    calloutsId,
   };
 }
