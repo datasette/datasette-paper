@@ -534,6 +534,11 @@ export class BlockEmbedView implements NodeView {
 
     const menu = document.createElement("div");
     menu.className = "pm-block-embed-menu";
+    // A non-editable island inside PM's contenteditable root — belt to the CSS
+    // `user-select: none` braces (which is what actually stops a click on the
+    // menu's label text from dropping a native caret; stopEvent separately
+    // blocks PM's node-selection).
+    menu.contentEditable = "false";
     // Cleared here so a render that produces no menu body (returns null below)
     // doesn't leave the badge pointing at a stale, detached menu element.
     this.overflowMenuEl = null;
@@ -866,11 +871,11 @@ export class BlockEmbedView implements NodeView {
   /**
    * Swap the open ⋮ menu's body for an inline checklist of `allColumns`, each
    * checked iff currently selected (all checked when no selection = "show all").
-   * Primary-key columns render checked + disabled with a key icon: Datasette
-   * always re-adds PKs to any `_col` projection, so they can't be hidden — the
-   * disabled box (with a hover explanation) reflects that rather than offering
-   * a toggle that wouldn't stick. "Apply" writes the ordered selection to
-   * `config.columns` and closes.
+   * Primary-key columns render checked + disabled with a key icon: the rendered
+   * per-row links address rows by their pk, so a hidden pk would break them —
+   * the disabled box (with a hover explanation) keeps every pk in the selection
+   * rather than offering a toggle we'd only have to force back on. "Apply"
+   * writes the ordered selection to `config.columns` and closes.
    */
   private showColumnsPanel(menu: HTMLElement): void {
     if (!this.view.editable) return; // belt-and-braces: viewers never write config
@@ -941,6 +946,15 @@ export class BlockEmbedView implements NodeView {
     const panel = document.createElement("div");
     panel.className = "pm-block-embed-filters";
 
+    // Section subheaders ("Filter", "Sort") — group the panel's two halves.
+    const subhead = (text: string): HTMLElement => {
+      const h = document.createElement("div");
+      h.className = "pm-block-embed-filter-subhead";
+      h.textContent = text;
+      return h;
+    };
+
+    panel.appendChild(subhead("Filter"));
     const rowsHost = document.createElement("div");
     rowsHost.className = "pm-block-embed-filter-rows";
     panel.appendChild(rowsHost);
@@ -974,7 +988,7 @@ export class BlockEmbedView implements NodeView {
       return select;
     };
 
-    const addRow = (seed?: EmbedFilter): void => {
+    const addRow = (seed?: EmbedFilter): FilterRow => {
       const el = document.createElement("div");
       el.className = "pm-block-embed-filter-row";
 
@@ -1005,11 +1019,6 @@ export class BlockEmbedView implements NodeView {
       };
       syncValue();
       op.addEventListener("change", syncValue);
-      // Choosing a column on the trailing blank row grows a fresh blank row
-      // (Datasette's always-one-empty-row form pattern).
-      column.addEventListener("change", () => {
-        if (column.value && rows[rows.length - 1]?.column === column) addRow();
-      });
 
       const remove = document.createElement("button");
       remove.type = "button";
@@ -1023,8 +1032,6 @@ export class BlockEmbedView implements NodeView {
         const i = rows.findIndex((r) => r.el === el);
         if (i >= 0) rows.splice(i, 1);
         el.remove();
-        // Keep the invariant: always one trailing blank row.
-        if (!rows.length || rows[rows.length - 1].column.value !== "") addRow();
       });
 
       el.appendChild(column);
@@ -1032,19 +1039,32 @@ export class BlockEmbedView implements NodeView {
       el.appendChild(value);
       el.appendChild(remove);
       rowsHost.appendChild(el);
-      rows.push({ el, column, op, value });
+      const row = { el, column, op, value };
+      rows.push(row);
+      return row;
     };
 
     for (const f of this.filters()) addRow(f);
-    addRow(); // the trailing blank row
+
+    // "Add filter" button — appends a fresh blank filter row (replaces the old
+    // always-present trailing blank row). Focus the new row's column select so
+    // it's ready to pick immediately.
+    const addFilter = document.createElement("button");
+    addFilter.type = "button";
+    addFilter.className = "pm-block-embed-filter-add";
+    addFilter.textContent = "Add filter";
+    addFilter.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      addRow().column.focus();
+    });
+    panel.appendChild(addFilter);
 
     // Sort row: "– no sort –" + every column, with an asc/desc control.
+    panel.appendChild(subhead("Sort"));
     const sort = this.sort();
     const sortRow = document.createElement("div");
     sortRow.className = "pm-block-embed-filter-sort";
-    const sortLabel = document.createElement("span");
-    sortLabel.className = "pm-block-embed-filter-sort-label";
-    sortLabel.textContent = "Sort";
     const sortColumn = columnSelect(
       "pm-block-embed-filter-sort-column",
       "– no sort –",
@@ -1062,7 +1082,6 @@ export class BlockEmbedView implements NodeView {
       if ((dirValue === "desc") === !!sort?.desc) opt.selected = true;
       sortDir.appendChild(opt);
     }
-    sortRow.appendChild(sortLabel);
     sortRow.appendChild(sortColumn);
     sortRow.appendChild(sortDir);
     panel.appendChild(sortRow);
@@ -1183,6 +1202,7 @@ export class BlockEmbedView implements NodeView {
 
     const menu = document.createElement("div");
     menu.className = "pm-block-embed-menu pm-block-embed-col-menu";
+    menu.contentEditable = "false"; // non-editable island — see overflowMenu()
 
     // menuButton closes the menu before running the action; prepending the
     // icon keeps the button's textContent equal to the plain label.
@@ -1495,10 +1515,10 @@ export class BlockEmbedView implements NodeView {
     const table = document.createElement("table");
 
     // @feat embed-pk-links: pk-aware header icons, per-row row-page links
-    // Primary keys the render actually shows (Datasette re-adds pks to any
-    // `_col` projection, so normally all of them). Row links need every pk
-    // column present to address a row; a single pk turns its own cell into the
-    // link, a compound pk gets a leading "#" column instead.
+    // Primary keys the render actually shows. The column picker keeps every pk
+    // selected (disabled checkbox), so normally all of them appear. Row links
+    // need every pk column present to address a row; a single pk turns its own
+    // cell into the link, a compound pk gets a leading "#" column instead.
     const pkSet = new Set(payload.primaryKeys);
     const pkIndices = payload.primaryKeys.map((c) => payload.columns.indexOf(c));
     const allPksShown = payload.primaryKeys.length > 0 && pkIndices.every((i) => i >= 0);
@@ -1795,6 +1815,10 @@ export class BlockEmbedView implements NodeView {
     if (!target) return false;
     // Interactive controls handle their own events.
     if (target.closest("a, button, select, input, label")) return true;
+    // Any click inside an open ⋮ / column / filter menu is menu interaction —
+    // PM must not turn a click on the panel's padding into a whole-node
+    // selection (which flashes the embed selected while the dialog is open).
+    if (target.closest(".pm-block-embed-menu")) return true;
     // Let the browser natively select (double-click a word, drag a range) and
     // copy text out of the result table / row-card values — PM must not hijack
     // those into a whole-node selection. Same region the mousedown/copy guards

@@ -166,19 +166,20 @@ describe("fetchEmbed (native .json)", () => {
     });
   });
 
-  it("sends _col= for each selected column and projects the response", async () => {
+  it("projects a column selection CLIENT-side, never sending _col=", async () => {
     const urls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         urls.push(url);
-        // Server re-adds the PK `rowid` first even though it wasn't requested.
+        // No `_col=` is sent, so the server returns the FULL schema — including
+        // the PK `rowid` and columns the author has hidden (`email`).
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            columns: ["rowid", "name", "id"],
-            rows: [[7, "Acme", 1]],
+            columns: ["rowid", "name", "email", "id"],
+            rows: [[7, "Acme", "a@b.c", 1]],
             count: 30,
             next: null,
           }),
@@ -186,16 +187,15 @@ describe("fetchEmbed (native .json)", () => {
       }),
     );
     const out = await fetchEmbed("/d/t", 25, ["name", "id"]);
-    // _col= is sent for each selected column (unselected ones stay server-side).
-    expect(urls[0]).toContain("_col=name");
-    expect(urls[0]).toContain("_col=id");
-    expect(urls[0]).not.toContain("_col=rowid");
-    // Projection drops the forced-in PK and applies the author's order.
+    // The projection is done in the browser — the wire request carries no _col=.
+    expect(urls[0]).not.toContain("_col=");
+    // Projection keeps only the author's selection, in their order.
     if (out.status !== "ok" || out.kind !== "table") throw new Error("expected table");
     expect(out.columns).toEqual(["name", "id"]);
     expect(out.rows).toEqual([["Acme", 1]]);
-    // The full set is preserved for the picker.
-    expect(out.allColumns).toEqual(["rowid", "name", "id"]);
+    // allColumns stays the FULL schema (hidden `email` + PK `rowid` included),
+    // so the filter panel / column picker can offer every column.
+    expect(out.allColumns).toEqual(["rowid", "name", "email", "id"]);
   });
 
   it("issues no _col= and returns full columns when no selection is given", async () => {

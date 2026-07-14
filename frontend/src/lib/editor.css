@@ -1554,6 +1554,14 @@
   border: 1px solid var(--pp-border);
   border-radius: 6px;
   box-shadow: 0 4px 12px var(--pp-shadow);
+  /* The menu/panel text (item labels, FILTER/SORT subheads, the shared-view
+     notice) lives inside PM's contenteditable root; without this a click on
+     that text or the panel padding drops a native caret into it. The value
+     input opts back in so its contents stay selectable. */
+  user-select: none;
+}
+.editor-host .pm-block-embed-menu input {
+  user-select: text;
 }
 .editor-host .pm-block-embed-menu--open {
   display: block;
@@ -1713,9 +1721,19 @@
   color: var(--pp-fg);
   min-width: 0;
 }
+/* Share the row evenly instead of letting each control size to its widest
+   option — otherwise the op select balloons to fit "array does not contain"
+   while the common short ops (=, !=, >, <) are all anyone picks. The closed
+   select ellipsizes a long label; the native dropdown still lists each option
+   in full. */
+.editor-host .pm-block-embed-filter-column,
+.editor-host .pm-block-embed-filter-op,
 .editor-host .pm-block-embed-filter-value {
-  flex: 1;
-  width: 90px;
+  flex: 1 1 0;
+}
+.editor-host .pm-block-embed-filter-column,
+.editor-host .pm-block-embed-filter-op {
+  text-overflow: ellipsis;
 }
 .editor-host .pm-block-embed-filter-remove {
   border: none;
@@ -1730,14 +1748,35 @@
   background: var(--pp-surface-2);
   color: var(--pp-fg);
 }
-.editor-host .pm-block-embed-filter-sort-label {
+/* Section subheaders ("Filter", "Sort") grouping the two halves of the panel. */
+.editor-host .pm-block-embed-filter-subhead {
+  font-size: 11px;
   font-weight: 600;
-  color: var(--pp-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pp-fg-subtle);
+  margin-top: 2px;
 }
-/* Soft informational strip — this is a heads-up, not a warning. */
+/* "Add filter" button — grows a fresh blank filter row. */
+.editor-host .pm-block-embed-filter-add {
+  align-self: flex-start;
+  border: 1px solid var(--pp-border);
+  background: var(--pp-bg);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  color: var(--pp-link);
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+.editor-host .pm-block-embed-filter-add:hover {
+  background: var(--pp-code-bg);
+}
+/* Soft informational strip — this is a heads-up, not a warning. Full width of
+   the panel, contents vertically centered. */
 .editor-host .pm-block-embed-shared-notice {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 6px;
   margin-top: 4px;
   padding: 6px 8px;
@@ -1746,7 +1785,6 @@
   color: var(--pp-fg-muted);
   background: var(--pp-code-bg);
   border-radius: 4px;
-  max-width: 260px;
 }
 .editor-host .pm-block-embed-shared-notice .pm-block-embed-icon {
   margin-top: 1px;

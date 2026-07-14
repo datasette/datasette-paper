@@ -648,13 +648,13 @@ describe("BlockEmbedView", () => {
     return [...view.dom.querySelectorAll(".pm-block-embed-columns-item input")] as HTMLInputElement[];
   }
 
-  it("issues _col= for config.columns and renders only the projected columns", async () => {
+  it("projects config.columns client-side (no _col=) and renders only them", async () => {
     const urls: string[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
         urls.push(url);
-        // PK `id` forced back in by the server even though only name/region picked.
+        // No _col= is sent, so the server returns the full schema (PK `id` + all).
         return {
           ok: true,
           status: 200,
@@ -672,8 +672,8 @@ describe("BlockEmbedView", () => {
     });
     const view = new BlockEmbedView(node, { editable: true, dom: document.createElement("div") } as unknown as EditorView, () => 0);
     await new Promise((r) => setTimeout(r, 0));
-    expect(urls[0]).toContain("_col=name");
-    expect(urls[0]).toContain("_col=region");
+    // The projection is client-side — the embed load never narrows on the wire.
+    expect(urls[0]).not.toContain("_col=");
     // Only the picked columns reach the rendered header — the PK is dropped.
     expect(thLabels(view.dom)).toEqual(["name", "region"]);
   });
@@ -1084,7 +1084,11 @@ describe("BlockEmbedView", () => {
     return view.dom.querySelector(".pm-block-embed-filter-apply") as HTMLButtonElement;
   }
 
-  it("opens the panel with one row per configured filter plus a trailing blank", async () => {
+  function addFilterRow(view: EditorView) {
+    (view.dom.querySelector(".pm-block-embed-filter-add") as HTMLButtonElement).click();
+  }
+
+  it("opens the panel with one row per configured filter (no trailing blank)", async () => {
     const { view } = await mountEmbed(
       {
         ref: "/data/vendors",
@@ -1101,7 +1105,7 @@ describe("BlockEmbedView", () => {
     const { panel, rows } = openFiltersPanel(view);
     expect(panel).not.toBeNull();
     const all = rows();
-    expect(all).toHaveLength(3);
+    expect(all).toHaveLength(2);
     const first = rowParts(all[0]);
     expect(first.column.value).toBe("state");
     expect(first.op.value).toBe("exact");
@@ -1110,8 +1114,8 @@ describe("BlockEmbedView", () => {
     expect(second.column.value).toBe("population");
     expect(second.op.value).toBe("gt");
     expect(second.value.value).toBe("100");
-    // The trailing blank row starts on the empty "– column –" option.
-    expect(rowParts(all[2]).column.value).toBe("");
+    // No trailing blank row — an "Add filter" button appends more instead.
+    expect(view.dom.querySelector(".pm-block-embed-filter-add")).not.toBeNull();
     // The op select carries every registry op, in order.
     expect([...first.op.options].map((o) => o.value)).toHaveLength(22);
     // The sort row seeds from config.sort.
@@ -1128,6 +1132,7 @@ describe("BlockEmbedView", () => {
   it("hides and disables the value input when a no-value op is chosen", async () => {
     const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
     const { rows } = openFiltersPanel(view);
+    addFilterRow(view);
     const r = rowParts(rows()[0]);
     expect(r.value.disabled).toBe(false);
     expect(r.value.hidden).toBe(false);
@@ -1143,17 +1148,15 @@ describe("BlockEmbedView", () => {
     view.destroy();
   });
 
-  it("grows a fresh blank row when the last row's column is chosen", async () => {
+  it("the Add filter button appends a blank filter row each click", async () => {
     const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
     const { rows } = openFiltersPanel(view);
+    // No configured filters → no rows until Add filter is clicked.
+    expect(rows()).toHaveLength(0);
+    addFilterRow(view);
     expect(rows()).toHaveLength(1);
-    const r = rowParts(rows()[0]);
-    r.column.value = "state";
-    r.column.dispatchEvent(new Event("change"));
-    expect(rows()).toHaveLength(2);
-    // Re-picking a column on a non-last row does not grow another.
-    r.column.value = "population";
-    r.column.dispatchEvent(new Event("change"));
+    expect(rowParts(rows()[0]).column.value).toBe("");
+    addFilterRow(view);
     expect(rows()).toHaveLength(2);
     view.destroy();
   });
@@ -1162,9 +1165,10 @@ describe("BlockEmbedView", () => {
     const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
     const dispatch = vi.spyOn(view, "dispatch");
     const { rows } = openFiltersPanel(view);
+    addFilterRow(view);
+    addFilterRow(view);
     const r = rowParts(rows()[0]);
     r.column.value = "state";
-    r.column.dispatchEvent(new Event("change"));
     r.value.value = "CA"; // op stays on the first registry entry: exact
     // Second row: column + value-taking op but no value → incomplete, dropped.
     const r2 = rowParts(rows()[1]);
@@ -1187,9 +1191,9 @@ describe("BlockEmbedView", () => {
   it("keeps a no-value op row without its value on Apply", async () => {
     const { view } = await mountEmbed({ ref: "/data/vendors" }, NATIVE_3COL);
     const { rows } = openFiltersPanel(view);
+    addFilterRow(view);
     const r = rowParts(rows()[0]);
     r.column.value = "state";
-    r.column.dispatchEvent(new Event("change"));
     r.op.value = "notblank";
     r.op.dispatchEvent(new Event("change"));
     applyBtn(view).click();
@@ -1212,8 +1216,8 @@ describe("BlockEmbedView", () => {
     );
     const { rows } = openFiltersPanel(view);
     (rows()[0].querySelector(".pm-block-embed-filter-remove") as HTMLButtonElement).click();
-    // The trailing blank row survives the removal.
-    expect(rows()).toHaveLength(1);
+    // Removing the only row leaves none — the Add filter button re-adds them.
+    expect(rows()).toHaveLength(0);
     applyBtn(view).click();
     // filters key gone; unrelated config keys untouched.
     expect(view.state.doc.firstChild!.attrs.config).toEqual({ columns: ["state"] });

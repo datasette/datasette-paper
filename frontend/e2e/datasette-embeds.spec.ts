@@ -259,7 +259,9 @@ test.describe("block-embed filters", () => {
     const apply = panel.locator(".pm-block-embed-filter-apply");
     await expect(apply).toHaveText("Apply for everyone");
 
-    // Fill the (initially blank) first filter row: name contains "Vendor 1".
+    // No configured filters yet — Add filter grows a blank row to fill:
+    // name contains "Vendor 1".
+    await panel.locator(".pm-block-embed-filter-add").click();
     const row = panel.locator(".pm-block-embed-filter-row").first();
     await row.locator(".pm-block-embed-filter-column").selectOption("name");
     await row.locator(".pm-block-embed-filter-op").selectOption("contains");

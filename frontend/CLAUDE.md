@@ -101,9 +101,18 @@ or a bug to learn; `datasette_embed.ts` `fetchTableEmbed` /
   (default), or `_size=max` = `max_returned_rows` (~1000). For "all rows"
   JSON you must follow the `next` token (`&_next=<token>`) until it's null
   (`fetchExportText` does this, with a 100k-row safety valve).
-- **`_extra=primary_keys`** lists PK column names. Datasette always re-adds
-  PKs to any `_col` projection (you can't hide them), so the Columns picker
-  shows them checked + disabled.
+- **`_extra=primary_keys`** lists PK column names. The Columns picker keeps
+  them selected (checked + disabled) because the per-row links need every pk to
+  address a row.
+- **The embed load never sends `?_col=`** — `config.columns` is projected
+  *client-side* (`fetchTableEmbed`). Projecting on the server would shrink the
+  `columns` extra to the selected set, but `allColumns` is contracted to be the
+  table's *full* schema so the filter panel / Columns picker can offer a column
+  the author has hidden (e.g. a saved filter on a hidden column — otherwise its
+  select shows a blank "– column –"). The actor's cookie already grants full
+  read on the table, so fetching all columns leaks nothing. (The export/copy
+  and "open in Datasette" URLs *do* carry `_col`, so a download matches the
+  displayed columns.)
 - **The embed load's `_extra` set** is `count,count_truncated,columns,
   primary_keys`; a mirror assertion in `datasetteEmbed.test.ts` fails if you
   change the list. The filter/sort summary line + header sort pill are rebuilt

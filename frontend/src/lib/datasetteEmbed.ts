@@ -50,8 +50,8 @@ export type EmbedPayload =
       // picker can offer every column with the selected ones checked.
       allColumns: string[];
       // The table's primary-key column names (Datasette's `primary_keys`
-      // extra). Datasette always re-adds these to any `_col` projection, so the
-      // column picker shows them as always-on (checked + disabled).
+      // extra). The column picker shows these as always-on (checked + disabled)
+      // — projection happens client-side, but PKs are never hideable.
       primaryKeys: string[];
       rows: CellValue[][];
       count: number | null;
@@ -222,12 +222,15 @@ async function fetchTableEmbed(
   filters?: EmbedFilter[],
   sort?: EmbedSort | null,
 ): Promise<EmbedPayload> {
-  // `config.columns` (if any): send `?_col=` so unselected columns never leave
-  // the server. `_col` can't *hide* PKs (Datasette always re-adds them) or
-  // reorder, so we still project the response client-side below — the hybrid
-  // gives both honesty (less on the wire) and full control (hide PKs, reorder).
+  // `config.columns` (if any) is applied CLIENT-side only (the projection below)
+  // — we deliberately do NOT send `?_col=`. Projecting on the server would make
+  // the `columns` extra (→ `allColumns`) report just the selected columns, but
+  // that field is contracted to be the table's *full* pre-projection schema: the
+  // filter panel and the column picker both need every column, e.g. to render a
+  // filter saved against a column the author has hidden (else its select shows a
+  // blank "– column –"). The actor's cookie already grants full read on this
+  // table, so fetching all columns and narrowing in the browser leaks nothing.
   const wanted = (columns ?? []).filter((c) => typeof c === "string" && c.length > 0);
-  const colParams = wanted.map((c) => `&_col=${encodeURIComponent(c)}`).join("");
   // `config.filters` / `config.sort` (sanitized by the caller) → the same
   // `column__op=value` / `_sort(_desc)` params Datasette's own table form
   // uses; URLSearchParams owns the encoding so crafted values stay one param.
@@ -243,7 +246,7 @@ async function fetchTableEmbed(
   const res = await fetch(
     jsonUrl(
       ref,
-      `?_shape=arrays&_extra=count,count_truncated,columns,primary_keys&_size=${encodeURIComponent(String(limit))}${colParams}${filterParams}`,
+      `?_shape=arrays&_extra=count,count_truncated,columns,primary_keys&_size=${encodeURIComponent(String(limit))}${filterParams}`,
     ),
   );
   if (!res.ok) {
@@ -279,9 +282,10 @@ async function fetchTableEmbed(
   const primaryKeys = (Array.isArray(j.primary_keys) ? j.primary_keys : []).filter(
     (c): c is string => typeof c === "string" && allColumns.includes(c),
   );
-  // Project to exactly the author's selection, in their order, dropping any PK
-  // `_col` forced back in. If every selected column has vanished from the
-  // schema, fall back to the full response rather than rendering nothing.
+  // Project to exactly the author's selection, in their order, dropping the
+  // unselected columns (incl. PKs the author didn't pick) from the full
+  // response. If every selected column has vanished from the schema, fall back
+  // to the full response rather than rendering nothing.
   let outColumns = allColumns;
   let outRows = rows;
   if (wanted.length) {
