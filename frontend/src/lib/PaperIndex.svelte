@@ -4,7 +4,21 @@
   import GraphModal from "./GraphModal.svelte";
   import TagEditor from "./TagEditor.svelte";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
+  import { loadPageData } from "./pageData";
   import { cycleTheme, getStoredTheme, type Theme } from "./theme";
+
+  // @feat task-assign: the signed-in actor (null for anonymous) gates the
+  // "My TODOs" header link — it points at the /-/paper/todos page, which
+  // defaults to this same actor server-side. Tolerate a missing pageData blob
+  // (component-mount tests): no blob → treat as anonymous, hide the link.
+  function readSignedInActor(): string | null {
+    try {
+      return loadPageData<{ actor_id: string | null }>().actor_id;
+    } catch {
+      return null;
+    }
+  }
+  const signedInActor = readSignedInActor();
 
   // Per-device theme, cycled Light → Dark → System by the header button.
   // Initialised from the persisted value so the label reflects reality
@@ -509,6 +523,10 @@
   <div class="index-header">
     <h1>Papers</h1>
     <div class="header-actions">
+      {#if signedInActor}
+        <!-- @feat task-assign: entry point to the cross-doc TODO page. -->
+        <a class="todos-link" href="/-/paper/todos">My TODOs</a>
+      {/if}
       <!-- @feat dark-mode: the index page's theme control — one button that
            cycles Light → Dark → System via cycleTheme (persist + stamp), with
            an aria-label/title that announces the current state. -->
@@ -956,6 +974,18 @@
     display: inline-flex;
     align-items: center;
     gap: 8px;
+  }
+  .todos-link {
+    border: 1px solid var(--pp-border-strong);
+    background: var(--pp-bg);
+    border-radius: 4px;
+    padding: 6px 12px;
+    font: inherit;
+    color: var(--pp-fg);
+    text-decoration: none;
+  }
+  .todos-link:hover {
+    background: var(--pp-surface-2);
   }
   .graph-toggle {
     border: 1px solid var(--pp-border-strong);

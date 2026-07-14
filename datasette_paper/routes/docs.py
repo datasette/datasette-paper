@@ -1445,13 +1445,33 @@ async def post_snapshot(datasette, request, doc_id: int):
 @router.GET(r"^/-/paper/?$")
 async def paper_index_page(datasette, request):
     # Ungated shell; the client fetches /api/docs, which is acl-filtered.
+    # actor_id lets the client show the signed-in user's "My TODOs" link.
     return Response.html(
         await datasette.render_template(
             "paper_base.html",
             {
                 "page_title": "Papers",
                 "entrypoint": "src/pages/index/main.ts",
-                "page_data": {},
+                "page_data": {"actor_id": actor_id(request)},
+            },
+            request=request,
+        )
+    )
+
+
+# @feat task-assign: the dedicated cross-doc TODO page. Ungated shell — the
+# /todos API it calls is viewer-acl-filtered. page_data carries the signed-in
+# actor id (or null for anonymous) as the default subject; ?actor= overrides it
+# to view someone else's list (the ACL filter still protects doc visibility).
+@router.GET(r"^/-/paper/todos/?$")
+async def paper_todos_page(datasette, request):
+    return Response.html(
+        await datasette.render_template(
+            "paper_base.html",
+            {
+                "page_title": "TODOs",
+                "entrypoint": "src/pages/todos/main.ts",
+                "page_data": {"actor_id": actor_id(request)},
             },
             request=request,
         )
