@@ -196,6 +196,35 @@ def test_substitute_walks_nested_content():
     }
 
 
+# @feat callout: the generic placeholder walk recurses into a callout's body
+def test_substitute_walks_callout_body():
+    """The walk is generic (recurses into any node's `content` list), so a
+    placeholder inside a callout body — a node the walk predates — is
+    reached with no callout-specific code."""
+    doc = {
+        "type": "doc",
+        "content": [
+            {
+                "type": "callout",
+                "attrs": {"kind": "note"},
+                "content": [
+                    {"type": "callout_title", "content": []},
+                    {
+                        "type": "paragraph",
+                        "content": [{"type": "placeholder", "attrs": {"key": "actor"}}],
+                    },
+                ],
+            }
+        ],
+    }
+    out = substitute_placeholders(doc, build_context(actor_id="carol"))
+    body_para = out["content"][0]["content"][1]
+    assert body_para == {
+        "type": "paragraph",
+        "content": [{"type": "text", "text": "carol"}],
+    }
+
+
 # ---------------------------------------------------------------------------
 # create_doc end-to-end
 # ---------------------------------------------------------------------------

@@ -49,8 +49,20 @@ const codeBlockSpec: NodeSpec = {
   },
 };
 
+// The stock `doc` spec is `block+`. Override its content to admit a top-level
+// `callout` alongside ordinary blocks — `callout` deliberately does NOT join
+// the `block` group (see calloutNode below), so this override is the *only*
+// place a callout can appear. Every other container (`blockquote`,
+// `list_item`, `table_cell`, a callout's own body) stays `block+`, so PM
+// structurally refuses to nest a callout anywhere else — no enabled-guards
+// needed elsewhere for the no-nesting rule. Mirrors the `_doc_spec` override
+// in datasette_paper/pm_schema.py.
+// @feat callout: doc content override — the no-nesting mechanism (mirrors pm_schema.py)
+const _docBase = basic.spec.nodes.get("doc") as NodeSpec;
+
 const baseNodes = addListNodes(
   basic.spec.nodes
+    .update("doc", { ..._docBase, content: "(block | callout)+" })
     .update("image", {
       ..._imageBase,
       toDOM: (node) => [
@@ -517,6 +529,61 @@ const sourceNode: NodeSpec = {
   ],
 };
 
+// The five GitHub-style admonition kinds. Mirrors `_CALLOUT_KINDS` in
+// datasette_paper/pm_schema.py / datasette_paper/markdown.py.
+const CALLOUT_KINDS = ["note", "tip", "important", "warning", "caution"] as const;
+type CalloutKind = (typeof CALLOUT_KINDS)[number];
+
+/** Clamp an arbitrary value to a valid callout kind, defaulting to "note". */
+function clampCalloutKind(kind: unknown): CalloutKind {
+  return (CALLOUT_KINDS as readonly string[]).includes(kind as string)
+    ? (kind as CalloutKind)
+    : "note";
+}
+
+// Block node for a GitHub-style admonition (the `> [!NOTE]` markdown family) —
+// a `callout_title` child (below) plus a `block+` body, rendered as a
+// bordered callout with header chrome by a NodeView (calloutView.ts, ticket
+// 02). Deliberately NOT in the `block` group: nesting is disallowed (matches
+// GitHub, which only honors `[!KIND]` in a top-level quote), enforced by the
+// `doc` content override above rather than an enabled-guard here. `kind` is a
+// closed five-value set; an unrecognized value (a hand-crafted step, a stale
+// snapshot) clamps to "note" rather than throwing — mirrors the "never
+// raises" materializer contract on the Python side (pm_schema.py). Mirrors
+// datasette_paper/pm_schema.py; datasette_paper/markdown.py round-trips it as
+// `> [!KIND] Title` + `> `-prefixed body.
+// @feat callout: client NodeSpec for the callout block (mirrors pm_schema.py)
+const calloutNode: NodeSpec = {
+  content: "callout_title block+",
+  defining: true,
+  attrs: { kind: { default: "note" } },
+  parseDOM: [
+    {
+      tag: "div[data-callout]",
+      getAttrs: (el) => ({
+        kind: clampCalloutKind((el as HTMLElement).getAttribute("data-callout")),
+      }),
+    },
+  ],
+  toDOM: (node) => {
+    const kind = clampCalloutKind(node.attrs.kind);
+    return ["div", { "data-callout": kind, class: `pm-callout pm-callout--${kind}` }, 0];
+  },
+};
+
+// Plain-text title child of `callout` — Obsidian-style `> [!NOTE] Title`.
+// Only reachable as a callout's first child (no `group` of its own); real
+// collab text like any other node, but `marks: ""` keeps it plain since it's
+// flattened onto the markdown marker line, not rendered as prose. Mirrors
+// datasette_paper/pm_schema.py.
+// @feat callout: client NodeSpec for the callout title child (mirrors pm_schema.py)
+const calloutTitleNode: NodeSpec = {
+  content: "text*",
+  marks: "",
+  parseDOM: [{ tag: "div[data-callout-title]" }],
+  toDOM: () => ["div", { class: "pm-callout-title" }, 0],
+};
+
 // @feat task-list: client task_list / task_item specs (mirrors pm_schema.py)
 const taskNodes: Record<string, NodeSpec> = {
   task_list: {
@@ -590,6 +657,8 @@ export const schema = new Schema({
     .append({ toc: tocNode })
     .append({ sql_block: sqlBlockNode })
     .append({ source: sourceNode })
+    .append({ callout: calloutNode })
+    .append({ callout_title: calloutTitleNode })
     .append(taskNodes)
     .append({ ...tNodes, table: tableWithName }),
   marks: baseMarks,

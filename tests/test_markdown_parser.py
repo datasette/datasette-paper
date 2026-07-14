@@ -363,6 +363,103 @@ class TestBlocks:
 
 
 # ---------------------------------------------------------------------------
+# callout (ticket 01 — schema + markdown round-trip)
+# ---------------------------------------------------------------------------
+
+
+class TestCallouts:
+    @pytest.mark.parametrize("kind", ["note", "tip", "important", "warning", "caution"])
+    # @feat callout: every valid `[!KIND]` marker round-trips through parse + serialize
+    def test_all_kinds_round_trip(self, kind):
+        md = f"> [!{kind.upper()}] Title\n> Body text\n"
+        doc = parse_and_validate(md)
+        callout = doc["content"][0]
+        assert callout["type"] == "callout"
+        assert callout["attrs"] == {"kind": kind}
+        assert doc_to_markdown(doc) == md
+
+    def test_title_present(self):
+        doc = parse_and_validate("> [!NOTE] Deployment gotcha\n> Body\n")
+        callout = doc["content"][0]
+        title = callout["content"][0]
+        assert title["type"] == "callout_title"
+        assert title["content"] == [{"type": "text", "text": "Deployment gotcha"}]
+
+    def test_title_absent(self):
+        doc = parse_and_validate("> [!NOTE]\n> Body\n")
+        title = doc["content"][0]["content"][0]
+        assert title["type"] == "callout_title"
+        assert title.get("content", []) == []
+
+    def test_no_body_synthesizes_empty_paragraph(self):
+        # `> [!NOTE]` alone (no body at all) synthesizes one empty paragraph
+        # — mirrors the bare-`>` handling for a plain blockquote.
+        md = "> [!NOTE]\n"
+        doc = parse_and_validate(md)
+        callout = doc["content"][0]
+        assert types_only(callout) == "callout[callout_title, paragraph]"
+        assert doc_to_markdown(doc) == md
+
+    def test_multi_block_body_list_and_code_fence(self):
+        md = (
+            "> [!WARNING] Deployment gotcha\n"
+            "> Body first paragraph.\n"
+            ">\n"
+            "> - item 1\n"
+            "> - item 2\n"
+            ">\n"
+            "> ```\n"
+            "> code here\n"
+            "> ```\n"
+        )
+        doc = parse_and_validate(md)
+        callout = doc["content"][0]
+        body_types = [c["type"] for c in callout["content"][1:]]
+        assert body_types == ["paragraph", "bullet_list", "code_block"]
+        assert doc_to_markdown(doc) == md
+
+    def test_unknown_kind_stays_blockquote(self):
+        # `[!FOO]` isn't one of the five valid kinds — stays a plain
+        # blockquote, lossless. The exact serialized string re-escapes the
+        # literal `[`/`]` (the plain-text escaper backslash-escapes brackets
+        # in *any* text run, a pre-existing behavior unrelated to callouts),
+        # so we assert doc-level idempotence: re-parsing the serialized
+        # output reproduces the identical doc.
+        md = "> [!FOO] unknown\n"
+        doc = parse_and_validate(md)
+        assert doc["content"][0]["type"] == "blockquote"
+        again = parse_and_validate(doc_to_markdown(doc))
+        assert again == doc
+
+    def test_lowercase_kind_reserializes_uppercase(self):
+        doc = parse_and_validate("> [!note] lower\n")
+        callout = doc["content"][0]
+        assert callout["type"] == "callout"
+        assert callout["attrs"] == {"kind": "note"}
+        assert doc_to_markdown(doc) == "> [!NOTE] lower\n"
+
+    def test_nested_quote_stays_plain_nested_blockquote(self):
+        # callout is legal only at doc top level — `> > [!TIP]` stays a
+        # plain nested blockquote (matches GitHub, which only honors
+        # `[!KIND]` in a top-level quote).
+        doc = parse_and_validate("> > [!TIP] nested\n")
+        outer = doc["content"][0]
+        assert outer["type"] == "blockquote"
+        inner = outer["content"][0]
+        assert inner["type"] == "blockquote"
+
+    def test_marker_not_at_start_stays_plain_blockquote(self):
+        doc = parse_and_validate("> some text [!NOTE] not at start\n")
+        assert doc["content"][0]["type"] == "blockquote"
+
+    def test_markdown_to_fragment_accepts_callout(self):
+        blocks = markdown_to_fragment("> [!TIP] Heads up\n> Some tip text.\n")
+        assert len(blocks) == 1
+        assert blocks[0]["type"] == "callout"
+        schema.node_from_json({"type": "doc", "content": blocks}).check()
+
+
+# ---------------------------------------------------------------------------
 # Inline marks
 # ---------------------------------------------------------------------------
 
