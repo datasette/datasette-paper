@@ -868,6 +868,50 @@ describe("markdown keybindings", () => {
     conn.close();
   });
 
+  it("stops propagation of shortcuts the editor consumed, so page-level listeners (datasette-sidebar's Cmd-B) don't double-fire", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 6)),
+    );
+
+    const windowSaw = vi.fn();
+    window.addEventListener("keydown", windowSaw);
+    try {
+      // Consumed by the keymap (bold) → preventDefault'd → must NOT bubble
+      // out of the editor.
+      view.dom.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "b",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      expect(view.state.doc.rangeHasMark(1, 6, schema.marks.strong)).toBe(true);
+      expect(windowSaw).not.toHaveBeenCalled();
+
+      // A key no keymap handles still reaches page-level listeners.
+      view.dom.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "b",
+          bubbles: true,
+          cancelable: true,
+        }),
+      );
+      expect(windowSaw).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener("keydown", windowSaw);
+    }
+
+    conn.close();
+  });
+
   it("`# ` input rule promotes the textblock to a heading", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();

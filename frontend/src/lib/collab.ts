@@ -1606,6 +1606,19 @@ export class EditorConnection {
       dispatchTransaction: (tr) => this.dispatchTransaction(tr),
     });
 
+    // Shortcuts the keymaps consume (Mod-b bold, Mod-i, Mod-k, …) get
+    // preventDefault() from prosemirror-keymap but keep bubbling, so a
+    // page-level shortcut listener fires *on top of* the editor action —
+    // e.g. datasette-sidebar's window Cmd-B toggle opening while text
+    // bolds. ProseMirror registered its own keydown listener on view.dom
+    // during construction, so this later same-node listener runs after
+    // the keymaps have had their turn: anything they consumed stops here.
+    // (Capture-phase document listeners — our NodeView popovers — run
+    // before the event reaches view.dom and are unaffected.)
+    this.view.dom.addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) event.stopPropagation();
+    });
+
     // Seed the source store from the bootstrapped doc so value chips resolve
     // on first paint (the NodeViews subscribe as they mount).
     this.sourceStore.sync(this.view.state.doc);
