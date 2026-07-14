@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
   import { client } from "./client";
+  import type { LastEditedInfo } from "./collab";
+  import { ActorResolver } from "./actorResolver";
   // Importing the bundle is unnecessary here: datasette-acl-share's JS is included
   // on the doc page by paper's extra_js_urls hook, which registers the
   // <datasette-acl-share-dialog> custom element before this component mounts.
@@ -22,6 +24,7 @@
     locked = false,
     kind = "doc",
     selfActor = null,
+    lastEdited = null,
     copyMarkdown,
   }: {
     docId: string;
@@ -33,6 +36,7 @@
     locked?: boolean;
     kind?: "doc" | "template";
     selfActor?: string | null;
+    lastEdited?: LastEditedInfo | null;
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
@@ -197,6 +201,8 @@
     created_by: string | null;
     created_by_name: string | null;
     created_by_avatar: string | null;
+    last_edited_by: string | null;
+    last_edited_by_name: string | null;
     updated_at: string;
     current_version: number;
   };
@@ -252,16 +258,61 @@
     setTimeout(() => (savedRecently = false), 1500);
   }
 
-  function relativeTime(iso: string): string {
+  function relativeTime(iso: string, now: number): string {
     const t = new Date(iso).getTime();
-    const diff = Date.now() - t;
+    const diff = now - t;
     if (diff < 60_000) return "just now";
     if (diff < 3600_000) return `${Math.floor(diff / 60_000)}m ago`;
     if (diff < 86400_000) return `${Math.floor(diff / 3600_000)}h ago`;
     return new Date(t).toLocaleDateString();
   }
 
-  onMount(load);
+  // @feat last-edited-indicator: live "edited Xm ago by Y" line. Initial
+  // paint comes off the fetched doc row (last_edited_by* from the
+  // doc-activity rollup); once an edit arrives this session (SSE
+  // ride-along or our own confirm), `lastEdited` takes over. The wall-
+  // clock ticker keeps the relative time honest between edits.
+  let nowTick = $state(Date.now());
+  const resolver = new ActorResolver();
+  // Display name for lastEdited.actor — resolved async, so it starts as
+  // the raw id and upgrades in place.
+  let liveEditorName = $state<string | null>(null);
+  $effect(() => {
+    const actor = lastEdited?.actor;
+    if (!actor) {
+      liveEditorName = null;
+      return;
+    }
+    return resolver.request(actor, (s) => {
+      liveEditorName = s.status === "ok" ? s.name : actor;
+    });
+  });
+
+  function editorLabel(id: string | null, name: string | null): string | null {
+    if (!id) return null;
+    if (selfActor && id === selfActor) return "you";
+    return name ?? id;
+  }
+  let editedAt = $derived(lastEdited?.at ?? meta?.updated_at ?? null);
+  let editedBy = $derived(
+    lastEdited
+      ? // Anonymous live edit (actor null) → no attribution, and
+        // deliberately don't fall back to the stale fetched editor.
+        editorLabel(lastEdited.actor, liveEditorName)
+      : editorLabel(
+          meta?.last_edited_by ?? null,
+          meta?.last_edited_by_name ?? null,
+        ),
+  );
+
+  onMount(() => {
+    void load();
+    const t = setInterval(() => (nowTick = Date.now()), 30_000);
+    return () => {
+      clearInterval(t);
+      resolver.dispose();
+    };
+  });
 </script>
 
 <header class="doc-header">
@@ -331,8 +382,9 @@
         {/if}
       </span>
       <span aria-hidden="true">·</span>
-      <span class="updated-at" title={meta.updated_at}>
-        edited {relativeTime(meta.updated_at)}
+      <span class="updated-at" title={editedAt ?? meta.updated_at}>
+        edited {relativeTime(editedAt ?? meta.updated_at, nowTick)}{#if editedBy}
+          by <strong class="last-editor">{editedBy}</strong>{/if}
       </span>
       <span aria-hidden="true">·</span>
       <span class="users">

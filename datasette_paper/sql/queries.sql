@@ -454,3 +454,18 @@ WHERE d.id IN (
   AND (d.created_by = $actor::text OR a.actor_id IS NOT NULL)
 ORDER BY COALESCE(a.last_edited_at, d.created_at) DESC
 LIMIT $limit::integer;
+
+-- @feat last-edited-indicator: per-doc latest *attributed* editor for the
+-- listing page — the actor holding MAX(last_edited_at) per doc (SQLite
+-- bare-column-with-MAX semantics pick actor_id from the max row). Reads the
+-- rollup, not the step log, so it survives step compaction. Anonymous edits
+-- never wrote a rollup row, so a doc whose latest edit was anonymous
+-- reports its last attributed editor (timestamp older than doc.updated_at);
+-- pre-m008 docs with no surviving history return no row at all.
+-- name: latestEditorForDocs :rows -> DocEditor
+SELECT doc_id, actor_id, MAX(last_edited_at) AS last_edited_at
+FROM _datasette_paper_doc_activity
+WHERE doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+  )
+GROUP BY doc_id;

@@ -442,6 +442,11 @@ class Instance:
             "steps": [json.loads(r["step_json"]) for r in new_step_records],
             "clientIDs": [r["client_id"] for r in new_step_records],
             "users": len(self.subscribers),
+            # @feat last-edited-indicator: attribution ride-along so open
+            # editors can update "edited Xm ago by Y" without a refetch.
+            # lastActor is None for anonymous edits.
+            "lastActor": new_step_records[-1]["actor_id"],
+            "lastEditedAt": new_step_records[-1]["created_at"],
         }
         # Skip the originator: their POST 200 already confirmed these steps
         # locally via prosemirror-collab's receiveTransaction. Sending the
@@ -674,6 +679,10 @@ class Instance:
             "steps": [json.loads(r["step_json"]) for r in sliced],
             "clientIDs": [r["client_id"] for r in sliced],
             "users": len(self.subscribers),
+            # @feat last-edited-indicator: same attribution ride-along as the
+            # live broadcast, so catch-up batches carry it too.
+            "lastActor": sliced[-1]["actor_id"],
+            "lastEditedAt": sliced[-1]["created_at"],
         }
 
     async def subscribe(

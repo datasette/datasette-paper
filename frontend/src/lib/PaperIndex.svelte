@@ -40,6 +40,11 @@
     kind: "doc" | "template";
     locked: boolean;
     tags: string[];
+    // @feat last-edited-indicator: latest attributed editor off the
+    // doc-activity rollup; null when the doc has none (anonymous-only
+    // edits or pre-rollup history).
+    last_edited_by: string | null;
+    last_edited_by_name: string | null;
   };
 
   // Lazy per-tab caches. `null` means "not fetched yet"; switching tabs
@@ -713,7 +718,13 @@
               {/if}
             </td>
             <td data-label="Last updated" title={doc.updated_at}
-              >{relativeTime(doc.updated_at)}</td
+              >{relativeTime(doc.updated_at)}{#if doc.last_edited_by}
+                <span
+                  class="last-editor"
+                  title={doc.last_edited_by}
+                >
+                  by {doc.last_edited_by_name ?? doc.last_edited_by}</span
+                >{/if}</td
             >
             {#if tab === "trashed"}
               <td class="delete-at" data-label="Status">
@@ -1220,6 +1231,9 @@
     background: var(--pp-surface-2);
     color: var(--pp-fg-muted);
     border: 1px solid var(--pp-border);
+  }
+  .last-editor {
+    color: var(--pp-fg-muted);
   }
   .tag-filter {
     display: flex;

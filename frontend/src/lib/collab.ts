@@ -120,6 +120,16 @@ export interface BootstrapPermissions {
 
 export type DocState = "active" | "archived" | "trashed";
 
+/**
+ * Last-edited attribution for the doc header — see
+ * `ConnectionOpts.onLastEdited`. `at` is an ISO timestamp (server
+ * `created_at` for remote batches, client clock for our own confirms).
+ */
+export interface LastEditedInfo {
+  actor: string | null;
+  at: string;
+}
+
 export interface DocStatePayload {
   state: DocState;
   archived_at: string | null;
@@ -165,6 +175,15 @@ export interface ConnectionOpts {
    * bootstrap and from each SSE update). Useful for the doc header.
    */
   onUsers?: (count: number) => void;
+  /**
+   * Called when the doc's last-edited attribution advances: on each SSE
+   * update batch (the batch's last step's actor + created_at) and when the
+   * server confirms our own step POST (self actor + client clock — the
+   * broadcast deliberately skips the originator, so this is the only
+   * signal for our own edits). `actor` is null for anonymous edits.
+   * Drives the header's live "edited Xm ago by Y" line.
+   */
+  onLastEdited?: (info: LastEditedInfo) => void;
   /**
    * Called once per bootstrap with the permissions block from the
    * server. Use this to flip the editor read-only when canEdit is
@@ -1564,6 +1583,8 @@ export class EditorConnection {
         clientIDs?: Array<number | string>;
         version?: number;
         users?: number;
+        lastActor?: string | null;
+        lastEditedAt?: string;
       };
       try {
         data = JSON.parse(evt.data);
@@ -1584,6 +1605,17 @@ export class EditorConnection {
 
       if (typeof data.users === "number") {
         this.opts.onUsers?.(data.users);
+      }
+
+      // @feat last-edited-indicator: surface the batch's attribution
+      // ride-along. Ahead of the stepError guard on purpose — even when we
+      // can't apply the steps, the server-side doc did advance, so the
+      // header's "edited … by …" line stays truthful.
+      if (typeof data.lastEditedAt === "string") {
+        this.opts.onLastEdited?.({
+          actor: data.lastActor ?? null,
+          at: data.lastEditedAt,
+        });
       }
 
       // Skip step application if bootstrap already failed: the local doc
@@ -1783,6 +1815,14 @@ export class EditorConnection {
         // 200 — clear unconfirmed buffer
         this.report.success();
         this.backOff = 0;
+        // @feat last-edited-indicator: our own steps never come back over
+        // SSE (the broadcast skips the originator), so the confirm is the
+        // moment our edit becomes the doc's latest. Client clock — close
+        // enough for a relative "just now".
+        this.opts.onLastEdited?.({
+          actor: this.selfActor,
+          at: new Date().toISOString(),
+        });
         if (this.view) {
           const tr = receiveTransaction(
             this.view.state,

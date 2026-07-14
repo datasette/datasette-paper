@@ -2151,6 +2151,46 @@
         }
       ],
       "result_class": "ProfileDoc"
+    },
+    {
+      "name": "latestEditorForDocs",
+      "result_type": "Rows",
+      "sql": "SELECT doc_id, actor_id, MAX(last_edited_at) AS last_edited_at\nFROM _datasette_paper_doc_activity\nWHERE doc_id IN (\n    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)\n  )\nGROUP BY doc_id;",
+      "parameters": [
+        {
+          "full_name": "$doc_ids_json::text",
+          "name": "doc_ids_json",
+          "annotated_type": "text",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "doc_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc_activity",
+          "origin_column": "doc_id",
+          "decltype": "INTEGER",
+          "nullable": false
+        },
+        {
+          "name": "actor_id",
+          "origin_database": "main",
+          "origin_table": "_datasette_paper_doc_activity",
+          "origin_column": "actor_id",
+          "decltype": "TEXT",
+          "nullable": false
+        },
+        {
+          "name": "last_edited_at",
+          "origin_database": null,
+          "origin_table": null,
+          "origin_column": null,
+          "decltype": null,
+          "nullable": null
+        }
+      ],
+      "result_class": "DocEditor"
     }
   ]
 }

@@ -442,6 +442,104 @@ describe("send() 200 response", () => {
   });
 });
 
+// ─── Test: onLastEdited attribution ──────────────────────────────────────────
+// @feat last-edited-indicator: onLastEdited fires from the SSE update
+// ride-along (lastActor/lastEditedAt) and from our own send confirm.
+
+describe("onLastEdited", () => {
+  it("fires from an SSE update's lastActor/lastEditedAt ride-along (null actor for anonymous)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const events: Array<{ actor: string | null; at: string }> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onLastEdited: (info) => events.push(info),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const es = MockEventSource.instances[0];
+    // Attribution is read ahead of step application, so an empty step
+    // batch still carries it (and dodges building a schema-valid step).
+    es.dispatchEvent(
+      "update",
+      JSON.stringify({
+        version: BOOTSTRAP.version,
+        steps: [],
+        clientIDs: [],
+        users: 2,
+        lastActor: "bob",
+        lastEditedAt: "2026-07-13T10:00:00.000Z",
+      }),
+    );
+    expect(events).toEqual([
+      { actor: "bob", at: "2026-07-13T10:00:00.000Z" },
+    ]);
+
+    es.dispatchEvent(
+      "update",
+      JSON.stringify({
+        version: BOOTSTRAP.version,
+        steps: [],
+        clientIDs: [],
+        users: 2,
+        lastActor: null,
+        lastEditedAt: "2026-07-13T10:01:00.000Z",
+      }),
+    );
+    expect(events[1]).toEqual({ actor: null, at: "2026-07-13T10:01:00.000Z" });
+
+    // A payload without the ride-along (pre-upgrade server) fires nothing.
+    es.dispatchEvent(
+      "update",
+      JSON.stringify({ version: BOOTSTRAP.version, steps: [], clientIDs: [] }),
+    );
+    expect(events).toHaveLength(2);
+
+    conn.close();
+  });
+
+  it("fires with selfActor + client clock when our own POST confirms", async () => {
+    const el = makeEl();
+    const fetchMock = vi
+      .fn()
+      .mockImplementation((url: string, opts?: RequestInit) => {
+        if (opts?.method === "POST" && (url as string).endsWith("/events")) {
+          return Promise.resolve({
+            ok: true,
+            status: 200,
+            json: async () => ({ version: BOOTSTRAP.version + 1 }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ ...BOOTSTRAP, selfActor: "alice" }),
+        });
+      });
+    (globalThis as Record<string, unknown>).fetch = fetchMock;
+
+    const events: Array<{ actor: string | null; at: string }> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onLastEdited: (info) => events.push(info),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.insertText("X", 1));
+
+    await waitFor(() => expect(events).toHaveLength(1));
+    expect(events[0].actor).toBe("alice");
+    // Client-clock ISO stamp, parseable and recent.
+    expect(Number.isNaN(new Date(events[0].at).getTime())).toBe(false);
+
+    conn.close();
+  });
+});
+
 describe("pagehide keepalive flush", () => {
   it("re-POSTs unconfirmed steps with keepalive when the page is torn down", async () => {
     const el = makeEl();

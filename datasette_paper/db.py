@@ -200,6 +200,22 @@ class PaperDB:
 
         return await self.database.execute_write_fn(read)
 
+    async def latest_editor_for_docs(
+        self, *, doc_ids: list[int]
+    ) -> dict[int, _queries.DocEditor]:
+        """Latest attributed editor per doc from the activity rollup, keyed
+        by doc id. Docs with no rollup rows (anonymous-only edits, or
+        pre-m008 docs whose history didn't survive) are simply absent.
+        Pure read — goes through ``execute_fn``, not the write queue
+        (per open ticket si4oztnq the write-queue reads are legacy)."""
+        doc_ids_json = json.dumps(doc_ids)
+
+        def read(conn):
+            return _queries.latest_editor_for_docs(conn, doc_ids_json=doc_ids_json)
+
+        rows = await self.database.execute_fn(read)
+        return {r.doc_id: r for r in rows}
+
     # ------------------------------------------------------------------
     # Links
     # ------------------------------------------------------------------

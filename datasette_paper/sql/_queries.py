@@ -110,6 +110,13 @@ class ProfileDoc:
     last_edited_at: str
 
 
+@dataclass
+class DocEditor:
+    doc_id: int
+    actor_id: str
+    last_edited_at: Any
+
+
 def insert_doc(
     conn: sqlite3.Connection,
     name: str,
@@ -727,3 +734,19 @@ LIMIT $limit::integer;
     }
     cursor = conn.execute(sql, params)
     return [ProfileDoc(*row) for row in cursor.fetchall()]
+
+
+def latest_editor_for_docs(
+    conn: sqlite3.Connection, doc_ids_json: str
+) -> list[DocEditor]:
+    sql = """\
+SELECT doc_id, actor_id, MAX(last_edited_at) AS last_edited_at
+FROM _datasette_paper_doc_activity
+WHERE doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+  )
+GROUP BY doc_id;
+"""
+    params = {"doc_ids_json::text": doc_ids_json}
+    cursor = conn.execute(sql, params)
+    return [DocEditor(*row) for row in cursor.fetchall()]

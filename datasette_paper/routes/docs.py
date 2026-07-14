@@ -231,14 +231,32 @@ async def list_docs(datasette, request):
     # rows are already acl-filtered to docs this actor can view, so a denied
     # actor still learns nothing new: created_by_name just degrades to the raw
     # id (already in the payload) and created_by_avatar to None.
+    # @feat last-edited-indicator: latest attributed editor per doc from the
+    # doc-activity rollup — one batched query over the already-acl-filtered
+    # id set. Docs absent from the map (anonymous-only edits, pre-m008
+    # history) just omit the editor; `updated_at` still covers the "when".
+    editors = await db.latest_editor_for_docs(doc_ids=[r.id for r in rows])
     may_resolve = await datasette.allowed(action="profile_access", actor=request.actor)
+    # One resolution batch for creators + last editors (dict lookups below
+    # pick out whichever ids each row needs).
+    resolve_ids = {r.created_by for r in rows} | {e.actor_id for e in editors.values()}
     profiles = (
-        await resolve_actor_profiles(datasette, (r.created_by for r in rows))
-        if may_resolve
-        else {}
+        await resolve_actor_profiles(datasette, resolve_ids) if may_resolve else {}
     )
     # Tags for every returned doc in one query (chips on the list page).
     tags_by_doc = await db.list_tags_for_docs(doc_ids=[r.id for r in rows])
+
+    def _editor_fields(doc_id):
+        e = editors.get(doc_id)
+        if e is None:
+            return {"last_edited_by": None, "last_edited_by_name": None}
+        return {
+            "last_edited_by": e.actor_id,
+            "last_edited_by_name": (
+                (profiles.get(e.actor_id) or {}).get("name") or e.actor_id
+            ),
+        }
+
     return Response.json(
         [
             {
@@ -259,6 +277,7 @@ async def list_docs(datasette, request):
                 ),
                 "is_owner": r.created_by is not None and r.created_by == me,
                 "tags": tags_by_doc.get(r.id, []),
+                **_editor_fields(r.id),
                 **_doc_state_payload(r),
                 **_doc_flags_payload(r),
             }

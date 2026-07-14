@@ -7,6 +7,7 @@
   import type {
     BootstrapPermissions,
     DocStatePayload,
+    LastEditedInfo,
     StepApplyError,
   } from "./collab";
   import { Reporter } from "./reporter";
@@ -87,6 +88,10 @@
   let kind = $state<"doc" | "template">("doc");
   // Current actor id from the bootstrap, forwarded to the share dialog.
   let selfActor = $state<string | null>(null);
+  // Live last-edited attribution (SSE ride-along / own-send confirm),
+  // forwarded to the header. Null until the first edit this session —
+  // the header falls back to the fetched doc row.
+  let lastEdited = $state<LastEditedInfo | null>(null);
 
   let conn: EditorConnection | undefined;
   let unsub: (() => void) | undefined;
@@ -128,6 +133,9 @@
         },
         onSelfActor: (a) => {
           selfActor = a;
+        },
+        onLastEdited: (info) => {
+          lastEdited = info;
         },
         onStepError: (e) => {
           // Keep the first error — subsequent ones don't add information
@@ -291,6 +299,7 @@
     {locked}
     {kind}
     {selfActor}
+    {lastEdited}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />
