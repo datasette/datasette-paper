@@ -27,6 +27,15 @@ from . import routes  # noqa: F401 — triggers decorator registration
 from .routes.events import sse_events
 import logging
 
+# The jump menu (``/-/jump.json`` + the ``jump_items_sql`` hook) is on
+# Datasette main but not in any released alpha yet; guard the import so the
+# plugin still loads on the released ``>=1.0a30`` pin (the hookimpl below is
+# only defined when the feature exists).
+try:
+    from datasette.jump import JumpSQL
+except ImportError:
+    JumpSQL = None
+
 # Expose paper's own plugin hooks on Datasette's plugin manager so sibling
 # plugins (e.g. datasette-places) can implement ``paper_embed_provider``.
 pm.add_hookspecs(_hookspecs)
@@ -241,6 +250,41 @@ def menu_links(datasette):
             "label": "Papers",
         }
     ]
+
+
+if JumpSQL is not None:
+
+    @hookimpl
+    # @feat jump-menu: contribute viewable active docs to Datasette's jump menu
+    def jump_items_sql(datasette, actor):
+        async def inner():
+            allowed_sql, allowed_params = await datasette.allowed_resources_sql(
+                action=PAPER_VIEW, actor=actor
+            )
+            # JumpSQL's default database=None targets the internal database,
+            # which is where both _datasette_paper_doc and the acl tables the
+            # allowed-resources SQL reads live. The url is a datasette.urls
+            # method descriptor (not a bare path) so base_url is applied.
+            return JumpSQL(
+                sql=f"""
+                WITH allowed_docs AS (
+                    {allowed_sql}
+                )
+                SELECT
+                    'paper' AS type,
+                    d.name AS label,
+                    NULL AS description,
+                    json_object('method', 'path', 'path', '/-/paper/doc/' || d.id) AS url,
+                    d.name AS search_text,
+                    NULL AS display_name
+                FROM _datasette_paper_doc d
+                JOIN allowed_docs ON allowed_docs.child = CAST(d.id AS TEXT)
+                WHERE d.state = 'active' AND d.kind = 'doc'
+                """,
+                params=allowed_params,
+            )
+
+        return inner
 
 
 @hookimpl

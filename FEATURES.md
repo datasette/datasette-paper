@@ -36,6 +36,7 @@ this table and the markers in sync.
 | `task-list` | Checkbox lists (task_list / task_item) — GFM `- [ ]` round-trip, a live checkbox NodeView, and a `/tasks` extractor | `frontend/src/lib/taskItemView.ts` |
 | `collab-sse` | Realtime collaboration protocol — client EditorConnection state machine + server SSE stream, step submission with 409/410/400 version semantics and broadcast | `frontend/src/lib/collab.ts` |
 | `presence` | Live cursors / presence riding the same SSE channel — selection reporting, remote-cursor decorations, self-filtered by clientID+actorID | `frontend/src/lib/cursors.ts` |
+| `jump-menu` | Paper docs appear in Datasette's navigation jump menu (`/-/jump.json`, `jump_items_sql` hook) — filtered to docs the actor can `paper-view`, active non-template only; no-op on Datasette versions without the jump menu | `datasette_paper/__init__.py` |
 | `permissions` | Per-doc access model — five actions resolved via datasette-acl, the bespoke `locked` read-only edit-deny, owner=Manager seeding, route gating (see docs/PERMISSIONS.md) | `datasette_paper/permissions.py` |
 | `snapshot-log` | Storage model — append-only step log + periodic snapshots; the live doc is materialized by replaying the steps_tail over the latest snapshot, with compaction | `datasette_paper/instance.py` |
 | `line-boundary` | Cmd/Home + Left/Right move the caret to the *visual* line start/end ourselves, so a line that begins with a link mark can't leak the keystroke to Chromium's Back shortcut | `frontend/src/lib/lineBoundary.ts` |
