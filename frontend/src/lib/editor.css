@@ -484,6 +484,13 @@
   flex: 1;
   min-width: 0;
 }
+/* A nested task list already starts after the parent's checkbox + gap
+ * (it lives inside .task-item-content), so the 1.5em list pad on top of
+ * that nearly doubles the indent per level. Drop it; the child checkbox
+ * then sits directly under the parent's text. */
+.editor-host li[data-task-item] > .task-item-content > ul[data-task-list] {
+  padding-left: 0;
+}
 .editor-host li[data-task-item][data-checked="true"] > .task-item-content {
   text-decoration: line-through;
   color: var(--pp-fg-subtle);
