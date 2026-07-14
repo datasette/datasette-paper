@@ -35,6 +35,13 @@ ResourceResolver = Callable[[str, str], Optional[Tuple[Optional[str], Optional[s
 RESERVED_FENCE_TOKENS = {"source", "paper-embed", "paper-toc", "paper-table"}
 _SAFE_LANG_RE = re.compile(r"^[^\s`=]+$")
 
+# The five GitHub-style admonition kinds — mirrors CALLOUT_KINDS in
+# frontend/src/lib/schema.ts and _CALLOUT_KINDS in datasette_paper/pm_schema.py.
+# An unrecognized kind (a hand-edited doc, a step that slipped past the
+# clamp in pm_schema.py) clamps to "note" here too — the serializer must
+# never emit an invalid `[!KIND]` marker.
+_CALLOUT_KINDS = {"note", "tip", "important", "warning", "caution"}
+
 # Optional {actor_id: display_name} map consulted by the `mention` inline
 # renderer, scoped to a single ``doc_to_markdown`` call. A ContextVar avoids
 # threading the map through every recursive `_render_*` helper. Absent a name
@@ -123,6 +130,14 @@ def _ref_link(label: str, canonical: str, url: Optional[str]) -> str:
     return f"[{safe_label}]({canonical})"
 
 
+def _prefix_quote_lines(text: str) -> str:
+    """Prefix each line of ``text`` with ``"> "`` (a bare ``">"`` for a blank
+    line) — the blockquote line-quoting convention shared by ``blockquote``
+    and ``callout`` (a callout's body is quoted the same way, just with an
+    extra `[!KIND]` marker line prepended by the caller)."""
+    return "\n".join("> " + line if line else ">" for line in text.split("\n"))
+
+
 def _render_block(node: dict) -> str:
     t = node.get("type")
     content = node.get("content") or []
@@ -181,9 +196,37 @@ def _render_block(node: dict) -> str:
                 inner_parts.append("\n")
             inner_parts.append(_render_block(child))
         inner = "".join(inner_parts).rstrip("\n")
-        return (
-            "\n".join("> " + line if line else ">" for line in inner.split("\n")) + "\n"
-        )
+        return _prefix_quote_lines(inner) + "\n"
+    if (
+        t == "callout"
+    ):  # @feat callout: serialize to a `> [!KIND] Title` marker + `> `-prefixed body
+        # `> [!KIND] Title` (title omitted when empty) followed by the body
+        # blocks (skipping the `callout_title` child), quoted with the same
+        # `> `-per-line convention as a plain blockquote. Kind is serialized
+        # UPPERCASE (matching GitHub docs style) and clamped defensively so a
+        # bad attr can never produce an unparseable marker.
+        attrs = node.get("attrs") or {}
+        kind = attrs.get("kind")
+        kind = kind if kind in _CALLOUT_KINDS else "note"
+        title_node = content[0] if content else None
+        title = ""
+        if title_node is not None and title_node.get("type") == "callout_title":
+            title = _flatten_text(title_node.get("content") or []).strip()
+        marker = f"[!{kind.upper()}]"
+        # @feat callout: a collapsed callout gets the Obsidian `-` fold suffix
+        if attrs.get("collapsed"):
+            marker += "-"
+        if title:
+            marker += f" {title}"
+        body_children = content[1:] if content else []
+        body_parts: List[str] = []
+        for i, child in enumerate(body_children):
+            if i:
+                body_parts.append("\n")
+            body_parts.append(_render_block(child))
+        body = "".join(body_parts).rstrip("\n")
+        lines = marker if not body else marker + "\n" + body
+        return _prefix_quote_lines(lines) + "\n"
     if t == "bullet_list":
         return _render_list(node, ordered=False)
     if t == "ordered_list":
@@ -386,6 +429,7 @@ def extract_tasks(doc: dict) -> List[dict]:
         "ordered_list",
         "list_item",
         "blockquote",
+        "callout",  # @feat callout: task_items inside a callout body get correct nesting depth
         "table",
         "table_row",
         "table_cell",

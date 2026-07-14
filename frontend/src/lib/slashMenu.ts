@@ -29,6 +29,7 @@ import { TOOLBAR_ICONS } from "./icons";
 import { insertTable } from "./tables";
 import { insertToc } from "./tocView";
 import { insertSqlBlock, insertSource } from "./sqlQuery";
+import { insertCallout } from "./callout";
 import { embedInsertSources, type EmbedInsertSource } from "./embedProviders";
 
 /**
@@ -507,6 +508,27 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "quote",
       group: "styling",
       run: runCommand(wrapIn(blockquote)),
+    },
+    {
+      // @feat callout: slash entry inserts a note-kind callout (styling group)
+      id: "callout",
+      label: "Callout",
+      keywords: [
+        "callout",
+        "admonition",
+        "note",
+        "tip",
+        "important",
+        "warning",
+        "caution",
+        "info",
+        "error",
+        "danger",
+        "alert",
+      ],
+      icon: "infoCircle",
+      group: "styling",
+      run: runCommand(insertCallout("note")),
     },
     {
       id: "code_block",

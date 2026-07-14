@@ -222,6 +222,171 @@
   font-size: 13px;
   color: var(--pp-fg-subtle);
 }
+/* Callout (admonition) — a GitHub-style left-border-accented block with a
+ * colored kind icon + header title line and no background. Rendered by
+ * calloutView.ts: `.pm-callout` is the NodeView `dom`, the kind icon button
+ * sits in the left gutter beside the title's first line, and the
+ * `.pm-callout-content` div is the contentDOM (title + body). The per-kind
+ * `--callout-accent` var flips light↔dark in one token (app.css
+ * `--pp-callout-*`). The empty-title placeholder is pure CSS: each kind class
+ * also sets `--callout-label`, and the ::before below renders it — the NodeView
+ * must never write attributes into PM-managed DOM (see calloutView.ts). PM
+ * leaves a `ProseMirror-trailingBreak` <br> in an empty textblock, so the
+ * placeholder matches both the `:empty` and only-a-break case.
+ * @feat callout: bordered admonition CSS + kind-picker popup chrome */
+.editor-host .pm-callout {
+  position: relative;
+  margin: 0 0 0.75em;
+  padding: 6px 12px 6px 40px;
+  border-left: 3px solid var(--callout-accent);
+}
+.editor-host .pm-callout--note {
+  --callout-accent: var(--pp-callout-note);
+  --callout-label: "Note";
+}
+.editor-host .pm-callout--tip {
+  --callout-accent: var(--pp-callout-tip);
+  --callout-label: "Tip";
+}
+.editor-host .pm-callout--important {
+  --callout-accent: var(--pp-callout-important);
+  --callout-label: "Important";
+}
+.editor-host .pm-callout--warning {
+  --callout-accent: var(--pp-callout-warning);
+  --callout-label: "Warning";
+}
+.editor-host .pm-callout--caution {
+  --callout-accent: var(--pp-callout-caution);
+  --callout-label: "Caution";
+}
+/* Kind icon button — in the left gutter, aligned with the title's first line.
+ * Edit-mode reveals a hover background; view mode leaves it as a static
+ * indicator (calloutView gates the picker on view.editable). */
+.editor-host .pm-callout-kind {
+  position: absolute;
+  left: 12px;
+  top: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--callout-accent);
+  cursor: pointer;
+}
+.editor-host .pm-callout-kind:hover {
+  background: var(--pp-surface-2);
+}
+/* Title = the header line: accent-colored, semibold. */
+.editor-host .pm-callout-title {
+  font-weight: 600;
+  color: var(--callout-accent);
+  margin: 0 0 0.25em;
+  min-height: 1.4em;
+}
+.editor-host .pm-callout-title:empty::before,
+.editor-host .pm-callout-title:has(> br.ProseMirror-trailingBreak:only-child)::before {
+  content: var(--callout-label);
+  color: var(--callout-accent);
+  opacity: 0.55;
+  pointer-events: none;
+}
+/* Even out the block's bottom padding by dropping the last body block's margin. */
+.editor-host .pm-callout-content > :last-child {
+  margin-bottom: 0;
+}
+/* Fold chevron — top-right chrome. Subtle by default, emphasized on hover;
+ * stays functional in view mode (read-only viewers fold locally). Padding-right
+ * on the wrapper keeps the title clear of it. @feat callout: fold chrome + collapsed body hide */
+.editor-host .pm-callout {
+  padding-right: 32px;
+}
+.editor-host .pm-callout-fold {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--pp-fg-subtle);
+  opacity: 0.6;
+  cursor: pointer;
+}
+.editor-host .pm-callout-fold:hover {
+  background: var(--pp-surface-2);
+  opacity: 1;
+}
+/* Collapsed: show only the title line, hide every body block. The body stays
+ * in the PM-managed contentDOM — this is display-only. */
+.editor-host .pm-callout--collapsed .pm-callout-content > :not(.pm-callout-title) {
+  display: none;
+}
+.editor-host .pm-callout--collapsed .pm-callout-title {
+  margin-bottom: 0;
+}
+/* Kind picker popup — cloned from `.pm-code-block-lang-popup` chrome. */
+.editor-host .pm-callout-kind-popup {
+  display: none;
+  position: absolute;
+  left: 12px;
+  top: 32px;
+  z-index: 12;
+  min-width: 180px;
+  padding: 4px;
+  background: var(--pp-bg);
+  border: 1px solid var(--pp-border);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px var(--pp-shadow);
+}
+.editor-host .pm-callout-kind-popup--open {
+  display: block;
+}
+.editor-host .pm-callout-kind-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  color: var(--pp-fg);
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+.editor-host .pm-callout-kind-item:hover {
+  background: var(--pp-code-bg);
+  color: var(--pp-link);
+}
+.editor-host .pm-callout-kind-item-icon {
+  display: inline-flex;
+  color: var(--pp-fg-subtle);
+}
+.editor-host .pm-callout-kind-item-label {
+  flex: 1;
+}
+.editor-host .pm-callout-kind-item-check {
+  display: inline-flex;
+  color: var(--pp-accent);
+}
+.editor-host .pm-callout-kind-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--pp-border);
+}
 /* Heading-fold chevron (rendered as a Decoration.widget by foldHeadings.ts).
  * Sits in the heading's left gutter via a negative absolute offset; the
  * heading itself is the positioning ancestor. Hidden until hover for

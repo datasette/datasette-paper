@@ -542,8 +542,75 @@ _source_spec = {
     ],
 }
 
+# The five GitHub-style admonition kinds — mirrors CALLOUT_KINDS in
+# frontend/src/lib/schema.ts and _CALLOUT_KINDS in datasette_paper/markdown.py.
+_CALLOUT_KINDS = frozenset({"note", "tip", "important", "warning", "caution"})
+
+
+def _clamp_callout_kind(kind) -> str:
+    """Clamp an arbitrary attr value to a valid callout kind, defaulting to
+    "note". Never raises — a hand-crafted step or a stale snapshot carrying an
+    unrecognized kind must not blow up ``Step.apply`` (the materializer's
+    "never raises" contract; see datasette_paper/CLAUDE.md)."""
+    return kind if isinstance(kind, str) and kind in _CALLOUT_KINDS else "note"
+
+
+# Block node for a GitHub-style admonition — mirrors the JS schema in
+# frontend/src/lib/schema.ts. Deliberately NOT in the `block` group;
+# `_doc_spec` below overrides `doc`'s content to `(block | callout)+`, making
+# a callout reachable only at the document's top level (no nesting — every
+# other container stays `block+`). markdown round-trips it as
+# `> [!KIND] Title` + `> `-prefixed body via datasette_paper/markdown.py.
+# toDOM is never rendered server-side but must be structurally valid for
+# node_from_json/Step.apply.
+# @feat callout: server node spec for the callout block (mirrors schema.ts)
+_callout_spec = {
+    "content": "callout_title block+",
+    "defining": True,
+    # @feat callout: `collapsed` attr mirrors schema.ts — shared fold state
+    "attrs": {"kind": {"default": "note"}, "collapsed": {"default": False}},
+    "parseDOM": [{"tag": "div[data-callout]"}],
+    "toDOM": lambda node: [
+        "div",
+        {
+            "data-callout": _clamp_callout_kind(node.attrs.get("kind")),
+            "class": f"pm-callout pm-callout--{_clamp_callout_kind(node.attrs.get('kind'))}",
+            # Mirror schema.ts: emit data-collapsed only when folded.
+            **({"data-collapsed": "true"} if node.attrs.get("collapsed") else {}),
+        },
+        0,
+    ],
+}
+
+# Plain-text title child of `callout` — mirrors the JS schema. Only reachable
+# as a callout's first child (no `group`); `marks: ""` keeps it plain text
+# (it's flattened onto the markdown marker line, not rendered as prose).
+# @feat callout: server node spec for the callout title child (mirrors schema.ts)
+_callout_title_spec = {
+    "content": "text*",
+    "marks": "",
+    "parseDOM": [{"tag": "div[data-callout-title]"}],
+    # data-callout-title must round-trip through parseDOM (mirrors schema.ts —
+    # a toDOM its own parse rule can't match breaks the client's DOM re-parse).
+    "toDOM": lambda _node: [
+        "div",
+        {"data-callout-title": "", "class": "pm-callout-title"},
+        0,
+    ],
+}
+
+# Doc content override enabling callout's top-level-only nesting — mirrors
+# the JS schema's `.update("doc", {content: "(block | callout)+"})`. Since
+# `callout` isn't in the `block` group, this override is the only path a
+# callout can reach the tree.
+# @feat callout: doc content override — the no-nesting mechanism (mirrors schema.ts)
+_doc_spec = {**_list_nodes["doc"], "content": "(block | callout)+"}
+
 _nodes = {
     **_list_nodes,
+    "doc": _doc_spec,
+    "callout": _callout_spec,
+    "callout_title": _callout_title_spec,
     "image": _image_spec,
     "code_block": _code_block_spec,
     "placeholder": _placeholder_spec,

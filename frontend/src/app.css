@@ -77,6 +77,16 @@
   --pp-table-header-bg: #f4f6f8;
   /* Selected table cell background (prosemirror-tables CellSelection). */
   --pp-selected-cell: rgba(11, 92, 173, 0.08);
+  /* Callout (admonition) per-kind accent — the left border + kind icon +
+   * header color for each of the five GitHub-style kinds (calloutView.ts /
+   * editor.css `.pm-callout--{kind}`). Non-text UI accents (not body text), so
+   * they're outside the themeContrast pairing table. GitHub-light-adjacent:
+   * blue / green / purple / amber / red. */
+  --pp-callout-note: #0969da;
+  --pp-callout-tip: #1a7f37;
+  --pp-callout-important: #8250df;
+  --pp-callout-warning: #9a6700;
+  --pp-callout-caution: #cf222e;
 }
 
 /* Dark theme. Values serve the SAME roles as the light block above (read
@@ -134,6 +144,12 @@
   --pp-focus-ring: #6cb0ff;
   --pp-table-header-bg: #1a2029;
   --pp-selected-cell: rgba(74, 158, 255, 0.22);
+  /* Callout per-kind accent (see light role) — GitHub-dark-adjacent. */
+  --pp-callout-note: #4493f8;
+  --pp-callout-tip: #3fb950;
+  --pp-callout-important: #ab7df8;
+  --pp-callout-warning: #d29922;
+  --pp-callout-caution: #f85149;
 }
 
 /* "System" = the explicit data-theme="system" opt-in: follow the OS. An unset
@@ -176,6 +192,11 @@
     --pp-focus-ring: #6cb0ff;
     --pp-table-header-bg: #1a2029;
     --pp-selected-cell: rgba(74, 158, 255, 0.22);
+    --pp-callout-note: #4493f8;
+    --pp-callout-tip: #3fb950;
+    --pp-callout-important: #ab7df8;
+    --pp-callout-warning: #d29922;
+    --pp-callout-caution: #f85149;
   }
 }
 

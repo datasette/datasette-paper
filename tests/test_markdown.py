@@ -114,6 +114,115 @@ def test_blockquote_prefixes_each_line():
     assert "> second" in md
 
 
+def _callout(kind, title_text, *body_blocks):
+    title_content = [_text(title_text)] if title_text else []
+    return {
+        "type": "callout",
+        "attrs": {"kind": kind},
+        "content": [
+            {"type": "callout_title", "content": title_content},
+            *body_blocks,
+        ],
+    }
+
+
+# --- callout (ticket 01 — schema + markdown round-trip) ---
+
+
+# @feat callout: serialize a titled callout to a `> [!KIND] Title` marker line
+def test_callout_with_title_emits_marker_line():
+    md = doc_to_markdown(
+        _doc(_callout("warning", "Deployment gotcha", _para(_text("Body"))))
+    )
+    assert md.splitlines()[0] == "> [!WARNING] Deployment gotcha"
+    assert "> Body" in md
+
+
+def test_callout_without_title_emits_bare_marker_line():
+    md = doc_to_markdown(_doc(_callout("note", "", _para(_text("Body")))))
+    assert md.splitlines()[0] == "> [!NOTE]"
+
+
+# @feat callout: a collapsed callout serializes the Obsidian `-` fold suffix
+def test_callout_collapsed_emits_fold_suffix():
+    callout = _callout("note", "Heads up", _para(_text("Body")))
+    callout["attrs"]["collapsed"] = True
+    md = doc_to_markdown(_doc(callout))
+    assert md.splitlines()[0] == "> [!NOTE]- Heads up"
+
+
+def test_callout_expanded_omits_fold_suffix():
+    callout = _callout("note", "Heads up", _para(_text("Body")))
+    callout["attrs"]["collapsed"] = False
+    md = doc_to_markdown(_doc(callout))
+    assert md.splitlines()[0] == "> [!NOTE] Heads up"
+
+
+def test_callout_kind_serializes_uppercase():
+    for kind in ("note", "tip", "important", "warning", "caution"):
+        md = doc_to_markdown(_doc(_callout(kind, "", _para())))
+        assert md.startswith(f"> [!{kind.upper()}]")
+
+
+def test_callout_unknown_kind_clamps_to_note():
+    # Defensive clamp — the serializer must never emit an invalid marker even
+    # if a bad attr somehow reaches it (see pm_schema.py's "never raises"
+    # materializer contract).
+    md = doc_to_markdown(_doc(_callout("bogus", "", _para())))
+    assert md.startswith("> [!NOTE]")
+
+
+def test_callout_blank_body_line_is_bare_gt():
+    # A blank line inside the body is a bare ">", not "> " with trailing
+    # whitespace — same convention as a plain blockquote.
+    md = doc_to_markdown(
+        _doc(_callout("note", "", _para(_text("first")), _para(_text("second"))))
+    )
+    lines = md.splitlines()
+    assert ">" in lines
+
+
+def test_callout_body_uses_blockquote_line_prefixing():
+    # Multi-line body (a bullet list) gets the same "> "-per-line convention
+    # as a plain blockquote's line-prefixing helper.
+    md = doc_to_markdown(
+        _doc(
+            _callout(
+                "tip",
+                "",
+                {
+                    "type": "bullet_list",
+                    "content": [
+                        {"type": "list_item", "content": [_para(_text("item 1"))]},
+                        {"type": "list_item", "content": [_para(_text("item 2"))]},
+                    ],
+                },
+            )
+        )
+    )
+    assert "> - item 1" in md
+    assert "> - item 2" in md
+
+
+def test_extract_tasks_finds_task_items_inside_callout():
+    from datasette_paper.markdown import extract_tasks
+
+    doc = _doc(
+        _callout(
+            "note",
+            "",
+            {
+                "type": "task_list",
+                "content": [_task_item("inside callout")],
+            },
+        )
+    )
+    tasks = extract_tasks(doc)
+    assert len(tasks) == 1
+    assert tasks[0]["text"] == "inside callout"
+    assert tasks[0]["depth"] > 0
+
+
 def test_code_block_fenced():
     md = doc_to_markdown(
         _doc(

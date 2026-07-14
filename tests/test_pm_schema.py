@@ -122,6 +122,112 @@ def test_code_block_language_step_applies_over_snapshot():
 
 
 # ---------------------------------------------------------------------------
+# callout (ticket 01 — schema + markdown round-trip)
+# ---------------------------------------------------------------------------
+
+
+# @feat callout: a callout(title + body) materializes over a snapshot
+def test_callout_with_title_and_body_materializes():
+    doc = _materialize(
+        {
+            "type": "callout",
+            "attrs": {"kind": "warning"},
+            "content": [
+                {
+                    "type": "callout_title",
+                    "content": [{"type": "text", "text": "Deployment gotcha"}],
+                },
+                {
+                    "type": "paragraph",
+                    "content": [{"type": "text", "text": "Body text"}],
+                },
+            ],
+        }
+    )
+    callout = doc.content.child(0)
+    assert callout.type.name == "callout"
+    assert callout.attrs["kind"] == "warning"
+    title = callout.content.child(0)
+    assert title.type.name == "callout_title"
+    assert title.text_content == "Deployment gotcha"
+    assert callout.content.child(1).text_content == "Body text"
+
+
+def test_callout_without_kind_applies_default():
+    # A snapshot predating the `kind` attr (or one omitting it) has no `kind`
+    # key — ProseMirror fills the "note" default (no migration needed).
+    doc = _materialize(
+        {
+            "type": "callout",
+            "content": [
+                {"type": "callout_title", "content": []},
+                {"type": "paragraph"},
+            ],
+        }
+    )
+    child = doc.content.child(0)
+    assert child.attrs["kind"] == "note"
+    # A snapshot predating the fold attr fills the "expanded" default.
+    assert child.attrs["collapsed"] is False
+
+
+# @feat callout: the `collapsed` attr materializes over a snapshot
+def test_callout_collapsed_attr_materializes():
+    doc = _materialize(
+        {
+            "type": "callout",
+            "attrs": {"kind": "warning", "collapsed": True},
+            "content": [
+                {"type": "callout_title", "content": []},
+                {"type": "paragraph"},
+            ],
+        }
+    )
+    assert doc.content.child(0).attrs["collapsed"] is True
+
+
+def test_callout_kind_flip_step_applies_over_snapshot():
+    # Lock-step regression guard mirroring
+    # test_code_block_language_step_applies_over_snapshot: a ReplaceStep
+    # splices a callout into a snapshot, then an AttrStep (the server-side
+    # equivalent of the client's `setNodeMarkup` kind-flip command from
+    # ticket 03) flips its `kind` in place.
+    from prosemirror.model import Fragment, Node, Slice
+    from prosemirror.transform import AttrStep, ReplaceStep
+
+    start_doc = Node.from_json(
+        schema, {"type": "doc", "content": [{"type": "paragraph"}]}
+    )
+    callout = Node.from_json(
+        schema,
+        {
+            "type": "callout",
+            "attrs": {"kind": "note"},
+            "content": [
+                {"type": "callout_title", "content": []},
+                {"type": "paragraph", "content": [{"type": "text", "text": "hi"}]},
+            ],
+        },
+    )
+    step = ReplaceStep(
+        start_doc.content.size,
+        start_doc.content.size,
+        Slice(Fragment.from_array([callout]), 0, 0),
+    )
+    result = step.apply(start_doc)
+    assert not result.failed
+    result.doc.check()
+
+    # Position right before the spliced-in callout node.
+    pos = result.doc.content.size - callout.node_size
+    flip = AttrStep(pos, "kind", "warning")
+    result2 = flip.apply(result.doc)
+    assert not result2.failed
+    result2.doc.check()
+    assert result2.doc.content.child(1).attrs["kind"] == "warning"
+
+
+# ---------------------------------------------------------------------------
 # Link / image href sanitization (stored-XSS fix, blockers-0629/01).
 # Mirrors frontend/src/lib/__tests__/safeHref.test.ts — keep the allowlist in
 # lock-step with frontend/src/lib/safeHref.ts.

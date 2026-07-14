@@ -80,6 +80,8 @@ _BLOCK_TYPES = {
     "paragraph",
     "heading",
     "blockquote",
+    "callout",
+    "callout_title",
     "bullet_list",
     "ordered_list",
     "task_list",
@@ -89,6 +91,19 @@ _BLOCK_TYPES = {
     "horizontal_rule",
     "table",
 }
+
+# The five GitHub-style admonition kinds a `[!KIND]` marker line can name —
+# mirrors CALLOUT_KINDS in frontend/src/lib/schema.ts and _CALLOUT_KINDS in
+# datasette_paper/pm_schema.py / datasette_paper/markdown.py. An unrecognized
+# `[!FOO]` simply doesn't match — the blockquote is left untouched (lossless).
+# @feat callout: optional `[+-]` fold suffix — `-` collapses (Obsidian-compatible)
+# The optional `[+-]` after `]` is Obsidian's fold marker: `-` → collapsed,
+# `+` or bare → expanded. We render only two states (every callout folds), so
+# `+` normalizes to expanded on re-serialize; GitHub docs (no suffix) import
+# as expanded.
+_CALLOUT_MARKER_RE = re.compile(
+    r"^\[!(note|tip|important|warning|caution)\]([+-]?)", re.IGNORECASE
+)
 
 
 def _build_md() -> MarkdownIt:
@@ -185,8 +200,26 @@ def _tokens_to_doc(tokens) -> dict:
         elif t == "blockquote_close":
             # blockquote content spec is `block+` — synthesise an empty
             # paragraph for the rare `>` (no content) edge case.
-            if not stack[-1].get("content"):
-                stack[-1]["content"] = [{"type": "paragraph"}]
+            node = stack[-1]
+            if not node.get("content"):
+                node["content"] = [{"type": "paragraph"}]
+            # @feat callout: promote a top-level `> [!KIND] Title` blockquote to a callout node
+            # `_match_callout_marker` (fired from the `inline` case below) may
+            # have stashed marker info on this blockquote's first paragraph —
+            # pop it off either way so the private key never leaks into the
+            # final PM JSON, and only act on it when this blockquote sits at
+            # doc top level (callout is legal nowhere else: a nested
+            # `> > [!TIP]` or a quote inside a list stays a plain blockquote).
+            children = node.get("content") or []
+            first_child = children[0] if children else None
+            marker = (
+                first_child.pop("_callout_marker", None)
+                if isinstance(first_child, dict)
+                else None
+            )
+            if marker is not None and stack[-2] is root:
+                node.clear()
+                node.update(_callout_from_blockquote_children(children, marker))
             pop()
 
         elif t == "bullet_list_open":
@@ -243,6 +276,21 @@ def _tokens_to_doc(tokens) -> dict:
             inline_nodes = _inline_to_pm(tok)
             if inline_nodes:
                 current.setdefault("content", []).extend(inline_nodes)
+            # @feat callout: stash marker info on a blockquote's first paragraph
+            # for `blockquote_close` to consume. Detected here (not after the
+            # fact) because it needs the raw pre-conversion children to find
+            # the marker line's break — see `_match_callout_marker`. Doesn't
+            # touch `current["content"]` above: the plain-blockquote fallback
+            # (no marker, or not top-level) needs that unsplit content intact.
+            if (
+                current.get("type") == "paragraph"
+                and len(stack) >= 2
+                and stack[-2].get("type") == "blockquote"
+                and stack[-2]["content"][0] is current
+            ):
+                marker = _match_callout_marker(tok)
+                if marker is not None:
+                    current["_callout_marker"] = marker
 
         elif t == "hr":
             append({"type": "horizontal_rule"})
@@ -464,6 +512,16 @@ def _image_alt_text(image_token) -> str:
 
 def _inline_to_pm(inline_token) -> list[dict]:
     """Convert an ``inline`` token's children into a list of PM inline nodes."""
+    return _children_to_pm(inline_token.children or [])
+
+
+def _children_to_pm(children) -> list[dict]:
+    """Convert a list of markdown-it inline child tokens into PM inline nodes.
+
+    Factored out of :func:`_inline_to_pm` so the callout marker-line
+    detection (below) can convert just the slice of children *after* the
+    marker's line break, independent of the whole paragraph's tokens.
+    """
     raw: list[dict] = []
     # Marks open/close via paired tokens. We keep a stack so the topmost open
     # mark is the first one in `node.marks`. A `{"_drop": True}` entry is a
@@ -483,7 +541,7 @@ def _inline_to_pm(inline_token) -> list[dict]:
             node["marks"] = marks
         raw.append(node)
 
-    for c in inline_token.children or []:
+    for c in children:
         t = c.type
 
         if t == "text":
@@ -820,6 +878,92 @@ def _split_sql_values(nodes: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _flatten_children_text(children) -> str:
+    """Concatenate the literal text of a raw markdown-it inline child list,
+    ignoring mark-open/close tokens and rendering a soft/hard break as a
+    space. Mirrors ``_image_alt_text``'s reconstruction, used here to test the
+    `[!KIND]` marker regex against the *plain* text of a blockquote's first
+    line even when the marker line carries inline marks."""
+    parts: list[str] = []
+    for c in children:
+        if c.type in ("text", "text_special", "code_inline"):
+            parts.append(c.content)
+        elif c.type in ("softbreak", "hardbreak"):
+            parts.append(" ")
+    return "".join(parts)
+
+
+# @feat callout: detect a `[!KIND]` marker at the start of a blockquote's first paragraph
+def _match_callout_marker(inline_token) -> dict | None:
+    """Detect a GitHub-style `[!KIND]` admonition marker at the very start of
+    an ``inline`` token's raw children, or ``None`` if it isn't present.
+
+    Splits at the first softbreak/hardbreak so the marker line's title
+    (everything after the `]`, on the same source line) and the body's
+    continuation (everything after the break) stay distinct — a softbreak
+    collapses to a literal space once run through the normal
+    ``_children_to_pm`` conversion, which would otherwise make the title and
+    the first body line indistinguishable.
+
+    Returns ``{"kind", "title", "body_nodes"}`` on a match. The caller (the
+    ``inline`` case in ``_tokens_to_doc``) stashes this on the paragraph node
+    alongside its normal (unsplit) content; ``_callout_from_blockquote_children``
+    consumes it at ``blockquote_close`` time, once the blockquote's full child
+    list — and whether it's a top-level blockquote — is known.
+    """
+    children = list(inline_token.children or [])
+    if not children:
+        return None
+    break_idx = len(children)
+    for i, c in enumerate(children):
+        if c.type in ("softbreak", "hardbreak"):
+            break_idx = i
+            break
+    marker_text = _flatten_children_text(children[:break_idx])
+    m = _CALLOUT_MARKER_RE.match(marker_text)
+    if m is None:
+        return None
+    kind = m.group(1).lower()
+    collapsed = m.group(2) == "-"  # `+` / bare → expanded
+    title = marker_text[m.end() :].strip()
+    body_children = children[break_idx + 1 :] if break_idx < len(children) else []
+    body_nodes = _children_to_pm(body_children) if body_children else []
+    return {
+        "kind": kind,
+        "collapsed": collapsed,
+        "title": title,
+        "body_nodes": body_nodes,
+    }
+
+
+def _callout_from_blockquote_children(children: list[dict], marker: dict) -> dict:
+    """Build a `callout` node from a top-level blockquote's already-parsed
+    children plus the marker info ``_match_callout_marker`` stashed on its
+    first paragraph.
+
+    The marker's ``body_nodes`` (the paragraph's own continuation, split at
+    the first break) becomes the callout's first body paragraph; the
+    blockquote's remaining children (a list, a code fence, another
+    paragraph, ...) become the rest of the body untouched. An empty body
+    synthesizes one empty paragraph, mirroring the bare-`>` handling for a
+    plain blockquote.
+    """
+    title_content: list[dict] = []
+    if marker["title"]:
+        title_content = [{"type": "text", "text": marker["title"]}]
+    body: list[dict] = []
+    if marker["body_nodes"]:
+        body.append({"type": "paragraph", "content": marker["body_nodes"]})
+    body.extend(children[1:])
+    if not body:
+        body = [{"type": "paragraph"}]
+    return {
+        "type": "callout",
+        "attrs": {"kind": marker["kind"], "collapsed": marker["collapsed"]},
+        "content": [{"type": "callout_title", "content": title_content}, *body],
+    }
 
 
 def _has_class(tok, cls_name: str) -> bool:

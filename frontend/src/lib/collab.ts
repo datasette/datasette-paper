@@ -63,6 +63,7 @@ import type { Command } from "prosemirror-state";
 import type { MarkType } from "prosemirror-model";
 
 import { schema } from "./schema";
+import { buildMarkdownSerializer, serializeDoc } from "./markdownSerializer";
 import { isSafeHref } from "./safeHref";
 import { foldHeadingsPlugin } from "./foldHeadings";
 import { codeHighlightPlugin } from "./codeHighlight";
@@ -71,6 +72,13 @@ import { TocView, tocPlugin } from "./tocView";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
 import { CodeBlockView } from "./codeBlockView";
+import { CalloutView } from "./calloutView";
+import {
+  upgradeBlockquoteInTr,
+  enterInCalloutTitle,
+  backspaceEmptyCalloutTitle,
+} from "./callout";
+import { clampCalloutKind } from "./schema";
 import { LinkResolver } from "./linkResolver";
 import { AccessChecker } from "./linkAccessCheck";
 import { PaperLinkView } from "./paperLinkView";
@@ -314,11 +322,33 @@ function normalizeLanguageToken(raw: string): string | null {
  * `horizontal_rule` is wired by `horizontalRuleInputRule` instead of
  * coming from example-setup (which has no HR rule at all).
  */
-function buildPaperStructuralRules(): InputRule[] {
+export function buildPaperStructuralRules(): InputRule[] {
   // Every node here is unconditionally present in the static schema, so no
   // per-node existence guard is needed.
   return [
     wrappingInputRule(/^\s*>\s$/, schema.nodes.blockquote),
+    // `[!kind] ` at the start of a top-level blockquote's first paragraph
+    // upgrades the quote to a callout in place. Typing the literal GitHub
+    // syntax `> [!warning] ` chains the two rules (the `> ` rule above makes
+    // the quote, this one converts it). One transaction (delete + upgrade) so
+    // `undoInputRule` (Cmd-Z) reverts it back to the plain typed text.
+    // @feat callout: `[!kind] ` input rule upgrades a blockquote to a callout
+    new InputRule(
+      /^\[!(note|tip|important|warning|caution)\]\s$/i,
+      (state, match, start, end) => {
+        const kind = clampCalloutKind(match[1].toLowerCase());
+        const $start = state.doc.resolve(start);
+        // Must be the first paragraph (index 0) of a depth-1 blockquote:
+        // doc(0) > blockquote(1) > paragraph(2). The `> ` rule must already
+        // have created the quote; a bare top-level paragraph is depth 1.
+        if ($start.depth !== 2) return null;
+        if ($start.node(1).type !== schema.nodes.blockquote) return null;
+        if ($start.index(1) !== 0) return null;
+        const tr = state.tr.delete(start, end);
+        if (!upgradeBlockquoteInTr(tr, tr.doc.resolve(start), kind)) return null;
+        return tr;
+      },
+    ),
     wrappingInputRule(
       /^(\d+)\.\s$/,
       schema.nodes.ordered_list,
@@ -814,9 +844,12 @@ function linkifyPastedSlice(slice: Slice): Slice {
 // markdown-it ~50k gzipped). Cmd+V parses pasted text as markdown when this
 // module is ready; first paste before the chunk lands falls through to
 // ProseMirror's default plain-text behavior. Cmd+Shift+V (`plain=true`)
-// always falls through.
+// always falls through. The same load also builds the markdown *serializer*
+// used by the copy path below (clipboardMarkdownSerializer).
 type MarkdownParser = import("prosemirror-markdown").MarkdownParser;
+type MarkdownSerializer = import("prosemirror-markdown").MarkdownSerializer;
 let mdParser: MarkdownParser | null = null;
+let mdSerializer: MarkdownSerializer | null = null;
 let mdParserLoading: Promise<void> | null = null;
 
 export function preloadMarkdownParser(): Promise<void> {
@@ -825,6 +858,7 @@ export function preloadMarkdownParser(): Promise<void> {
     mdParserLoading = import("prosemirror-markdown").then(
       (m) => {
         mdParser = m.defaultMarkdownParser;
+        mdSerializer = buildMarkdownSerializer(m);
       },
       () => {
         mdParserLoading = null;
@@ -883,6 +917,35 @@ function clipboardMarkdownParser(
     return null;
   }
   return Slice.maxOpen(ourDoc.content);
+}
+
+// ─── Markdown clipboard serializer ───────────────────────────────────────────
+
+// Copy path (`clipboardTextSerializer`): when the copied slice contains a
+// callout, put the selection's *markdown* on the clipboard as text/plain —
+// the default `textBetween` flattens the callout to bare text, losing the
+// `> [!KIND] Title` structure. Scoped to callout-bearing slices on purpose:
+// everything else keeps ProseMirror's default text (including `leafText`
+// behaviors like embed-copy-url). Returning "" falls through to that default,
+// which also covers the not-yet-loaded serializer and any node the client
+// serializer has no rule for (tables) — `serialize` throws and we fall back.
+// @feat callout: copying a selection with a callout puts its markdown on the clipboard
+function clipboardMarkdownSerializer(content: Slice): string {
+  if (!mdSerializer) return "";
+  let hasCallout = false;
+  content.content.descendants((node) => {
+    if (node.type === schema.nodes.callout) hasCallout = true;
+    return !hasCallout;
+  });
+  if (!hasCallout) return "";
+  try {
+    // Wrap the slice fragment in a doc node so the serializer can walk it.
+    // Unvalidated `create` on purpose — a slice's boundary nodes may be
+    // "open" (e.g. a callout cut mid-body) and fail a strict content check.
+    return serializeDoc(mdSerializer, schema.nodes.doc.create(null, content.content));
+  } catch {
+    return "";
+  }
 }
 
 // ─── EditorConnection ────────────────────────────────────────────────────────
@@ -1294,16 +1357,23 @@ export class EditorConnection {
           "Alt-ArrowUp": moveListItemCommand(-1),
           "Alt-ArrowDown": moveListItemCommand(1),
           // Enter handlers, tried in order:
-          //   1. Escape a code_block at the end of the doc on the second Enter.
-          //   2. Turn a ` ```lang ` marker line into an empty tagged code_block.
-          //   3. Inside a task_item, split into a fresh unchecked item.
+          //   1. Inside a callout_title, jump to the body instead of splitting.
+          //   2. Escape a code_block at the end of the doc on the second Enter.
+          //   3. Turn a ` ```lang ` marker line into an empty tagged code_block.
+          //   4. Inside a task_item, split into a fresh unchecked item.
           // All return false outside their target context, so buildKeymap's
           // generic list_item / paragraph Enter handlers still get a turn.
+          // @feat callout: Enter in the title moves to the body (never splits)
           Enter: chainCommands(
+            enterInCalloutTitle,
             exitCodeBlockAtDocEnd(),
             createCodeBlockOnEnter(),
             splitListItem(schema.nodes.task_item, { checked: false }),
           ),
+          // Backspace at the start of an empty callout title unwraps the
+          // callout; returns false elsewhere so normal deletion is unaffected.
+          // @feat callout: Backspace at an empty title unwraps the callout
+          Backspace: backspaceEmptyCalloutTitle,
           // Tab / Shift-Tab indent / outdent the current list item. Wrapped
           // in `consumeTabInList` so the key is always swallowed inside a
           // list — even when sink / lift can't make progress — and falls
@@ -1443,6 +1513,9 @@ export class EditorConnection {
           new TaskItemView(node, view, getPos as () => number | undefined),
         code_block: (node, view, getPos) =>
           new CodeBlockView(node, view, getPos as () => number | undefined),
+        // @feat callout: NodeView registration — bordered admonition + kind picker
+        callout: (node, view, getPos) =>
+          new CalloutView(node, view, getPos as () => number | undefined),
         paper_link: (node, view, getPos) =>
           new PaperLinkView(
             node,
@@ -1496,6 +1569,9 @@ export class EditorConnection {
         plain: boolean,
         view: EditorView,
       ) => Slice,
+      // Copy counterpart: markdown text/plain for callout-bearing selections;
+      // "" falls through to the default textBetween (see the function).
+      clipboardTextSerializer: clipboardMarkdownSerializer,
       // Mirror the autoLink input rule: any bare http(s) URL in a paste
       // becomes a link, regardless of whether the source was plain text,
       // a markdown round-trip, or rich HTML. Runs after clipboardTextParser
