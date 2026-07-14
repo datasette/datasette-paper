@@ -165,7 +165,25 @@ def test_callout_without_kind_applies_default():
             ],
         }
     )
-    assert doc.content.child(0).attrs["kind"] == "note"
+    child = doc.content.child(0)
+    assert child.attrs["kind"] == "note"
+    # A snapshot predating the fold attr fills the "expanded" default.
+    assert child.attrs["collapsed"] is False
+
+
+# @feat callout: the `collapsed` attr materializes over a snapshot
+def test_callout_collapsed_attr_materializes():
+    doc = _materialize(
+        {
+            "type": "callout",
+            "attrs": {"kind": "warning", "collapsed": True},
+            "content": [
+                {"type": "callout_title", "content": []},
+                {"type": "paragraph"},
+            ],
+        }
+    )
+    assert doc.content.child(0).attrs["collapsed"] is True
 
 
 def test_callout_kind_flip_step_applies_over_snapshot():

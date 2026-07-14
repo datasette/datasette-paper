@@ -45,6 +45,15 @@ describe("callout markdown serialization", () => {
     expect(md(callout)).toBe("> [!NOTE]\n> x");
   });
 
+  // @feat callout: a collapsed callout copies with the Obsidian `-` suffix
+  it("emits the `-` fold suffix for a collapsed callout", () => {
+    const callout = n.callout.create({ kind: "note", collapsed: true }, [
+      title("Heads up"),
+      p("body"),
+    ]);
+    expect(md(callout)).toBe("> [!NOTE]- Heads up\n> body");
+  });
+
   it("separates multiple body blocks with a quoted blank line", () => {
     const callout = n.callout.create({ kind: "note" }, [title("T"), p("one"), p("two")]);
     expect(md(callout)).toBe("> [!NOTE] T\n> one\n>\n> two");

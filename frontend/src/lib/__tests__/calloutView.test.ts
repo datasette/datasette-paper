@@ -146,3 +146,63 @@ describe("CalloutView kind picker", () => {
     expect(isOpen(view)).toBe(false);
   });
 });
+
+const foldBtn = (view: EditorView) =>
+  view.dom.querySelector(".pm-callout-fold") as HTMLButtonElement;
+const wrap = (view: EditorView) => view.dom.querySelector(".pm-callout") as HTMLElement;
+
+// @feat callout: NodeView fold tests — shared toggle in edit mode,
+// per-viewer local toggle in view mode, and --collapsed surviving a kind flip.
+describe("CalloutView fold", () => {
+  afterEach(() => {
+    for (const v of mounted.splice(0)) v.destroy();
+  });
+
+  it("renders a fold chevron, expanded by default", () => {
+    const view = mount("note");
+    expect(foldBtn(view).querySelector("svg")).not.toBeNull();
+    expect(foldBtn(view).getAttribute("aria-expanded")).toBe("true");
+    expect(wrap(view).classList.contains("pm-callout--collapsed")).toBe(false);
+  });
+
+  it("editable toggle dispatches the shared collapsed attr and restyles", () => {
+    const view = mount("note");
+    foldBtn(view).click();
+    expect(view.state.doc.firstChild!.attrs.collapsed).toBe(true);
+    expect(wrap(view).classList.contains("pm-callout--collapsed")).toBe(true);
+    expect(wrap(view).getAttribute("data-collapsed")).toBe("true");
+    expect(foldBtn(view).getAttribute("aria-expanded")).toBe("false");
+    // Toggling back expands (shared attr false again).
+    foldBtn(view).click();
+    expect(view.state.doc.firstChild!.attrs.collapsed).toBe(false);
+    expect(wrap(view).classList.contains("pm-callout--collapsed")).toBe(false);
+  });
+
+  it("view-mode toggle folds locally without dispatching a step", () => {
+    const view = mount("note");
+    view.setProps({ editable: () => false });
+    const before = view.state;
+    foldBtn(view).click();
+    // No transaction: the doc attr stays false, but the view folds locally.
+    expect(view.state).toBe(before);
+    expect(view.state.doc.firstChild!.attrs.collapsed).toBe(false);
+    expect(wrap(view).classList.contains("pm-callout--collapsed")).toBe(true);
+  });
+
+  it("keeps --collapsed across a remote kind change", () => {
+    const view = mount("note");
+    foldBtn(view).click(); // collapse (shared)
+    expect(wrap(view).classList.contains("pm-callout--collapsed")).toBe(true);
+    // A remote kind flip runs update() → applyClasses(); the fold must persist
+    // (the old wholesale className reset would have dropped it).
+    const pos = 0;
+    view.dispatch(
+      view.state.tr.setNodeMarkup(pos, undefined, {
+        ...view.state.doc.firstChild!.attrs,
+        kind: "caution",
+      }),
+    );
+    expect(wrap(view).classList.contains("pm-callout--caution")).toBe(true);
+    expect(wrap(view).classList.contains("pm-callout--collapsed")).toBe(true);
+  });
+});

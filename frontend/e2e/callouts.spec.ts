@@ -13,6 +13,8 @@
  *   - Kind flip via the header icon button's picker (doc attr + CSS class).
  *   - The picker's "Quote" and "Remove callout" rows.
  *   - Backspace at the start of an empty title unwraps the callout.
+ *   - Fold: a seeded collapsed callout renders folded; the chevron toggles
+ *     the shared `collapsed` attr and round-trips the `[!KIND]-` suffix.
  *   - Markdown round-trip through the `/document` endpoint.
  *
  * @feat callout: e2e proof of slash insert, the two-rule typed-marker
@@ -179,6 +181,65 @@ test.describe("callout: backspace unwrap", () => {
     expect(top).toHaveLength(1);
     expect(top[0].type).toBe("paragraph");
     expect(textOf(top[0])).toBe("Body");
+  });
+});
+
+test.describe("callout: fold", () => {
+  // @feat callout: e2e proof of the seeded-collapsed render + chevron
+  // toggle (shared attr) + the `[!KIND]-` markdown round-trip.
+  test("a seeded collapsed callout renders folded; the chevron expands it (shared attr)", async ({
+    page,
+  }) => {
+    const host = await createSeededPaper(page, "> [!NOTE]- Title\n> Body\n");
+    await gotoPaper(page, host.url);
+
+    const app = page.locator("#app-root");
+    const callout = app.locator(".pm-callout");
+    await expect(callout).toBeVisible({ timeout: 10000 });
+    await expect(callout).toHaveClass(/pm-callout--collapsed/);
+    // The title stays visible when folded.
+    await expect(app.locator(".pm-callout-title")).toBeVisible();
+
+    const before = await readEditorState(page);
+    expect(
+      (before.doc as { content: Array<{ attrs: { collapsed: boolean } }> }).content[0].attrs
+        .collapsed,
+    ).toBe(true);
+
+    // The chevron expands it; the shared attr flips to false.
+    await callout.locator("button.pm-callout-fold").click();
+    await expect(callout).not.toHaveClass(/pm-callout--collapsed/);
+    const after = await readEditorState(page);
+    expect(
+      (after.doc as { content: Array<{ attrs: { collapsed: boolean } }> }).content[0].attrs
+        .collapsed,
+    ).toBe(false);
+  });
+
+  test("collapsing via the chevron round-trips the `[!NOTE]-` fold suffix through /document", async ({
+    page,
+  }) => {
+    const host = await createSeededPaper(page, "> [!NOTE] Title\n> Body\n");
+    await gotoPaper(page, host.url);
+
+    const app = page.locator("#app-root");
+    const callout = app.locator(".pm-callout");
+    await expect(callout).toBeVisible({ timeout: 10000 });
+    await expect(callout).not.toHaveClass(/pm-callout--collapsed/);
+
+    await callout.locator("button.pm-callout-fold").click();
+    await expect(callout).toHaveClass(/pm-callout--collapsed/);
+
+    await expect
+      .poll(
+        async () => {
+          const r = await page.request.get(`${BASE}/api/docs/${host.id}/document`);
+          if (!r.ok()) return "";
+          return (await r.json()).content_markdown as string;
+        },
+        { timeout: 10000, message: "collapsed callout markdown never persisted" },
+      )
+      .toContain("> [!NOTE]- Title");
   });
 });
 

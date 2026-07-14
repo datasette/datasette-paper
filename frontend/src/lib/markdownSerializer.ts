@@ -107,11 +107,13 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
       // @feat callout: client markdown serialization — `> [!KIND] Title` + quoted body
       callout(state, node) {
         const kind = clampCalloutKind(node.attrs.kind).toUpperCase();
+        // @feat callout: client copy emits the `-` suffix for a collapsed callout
+        const fold = node.attrs.collapsed === true ? "-" : "";
         const first = node.firstChild;
         const title =
           first && first.type.name === "callout_title" ? first.textContent.trim() : "";
         state.wrapBlock("> ", null, node, () => {
-          state.write(`[!${kind}]${title ? ` ${title}` : ""}`);
+          state.write(`[!${kind}]${fold}${title ? ` ${title}` : ""}`);
           state.ensureNewLine();
           node.forEach((child, _offset, index) => {
             // The title child is flattened onto the marker line above.

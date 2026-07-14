@@ -375,7 +375,7 @@ class TestCallouts:
         doc = parse_and_validate(md)
         callout = doc["content"][0]
         assert callout["type"] == "callout"
-        assert callout["attrs"] == {"kind": kind}
+        assert callout["attrs"] == {"kind": kind, "collapsed": False}
         assert doc_to_markdown(doc) == md
 
     def test_title_present(self):
@@ -435,8 +435,33 @@ class TestCallouts:
         doc = parse_and_validate("> [!note] lower\n")
         callout = doc["content"][0]
         assert callout["type"] == "callout"
-        assert callout["attrs"] == {"kind": "note"}
+        assert callout["attrs"] == {"kind": "note", "collapsed": False}
         assert doc_to_markdown(doc) == "> [!NOTE] lower\n"
+
+    # @feat callout: a `-` fold suffix parses to collapsed and round-trips
+    def test_collapsed_fold_suffix_round_trips(self):
+        md = "> [!NOTE]- Deployment gotcha\n> Body\n"
+        doc = parse_and_validate(md)
+        callout = doc["content"][0]
+        assert callout["type"] == "callout"
+        assert callout["attrs"] == {"kind": "note", "collapsed": True}
+        # Title survives the suffix (the `-` is stripped before the title).
+        assert callout["content"][0]["content"] == [
+            {"type": "text", "text": "Deployment gotcha"}
+        ]
+        assert doc_to_markdown(doc) == md
+
+    def test_expanded_plus_suffix_normalizes_to_bare(self):
+        # Obsidian's `+` (foldable-but-open) collapses to our single expanded
+        # state; re-serialize drops the suffix.
+        doc = parse_and_validate("> [!TIP]+ Heads up\n> Body\n")
+        callout = doc["content"][0]
+        assert callout["attrs"] == {"kind": "tip", "collapsed": False}
+        assert doc_to_markdown(doc) == "> [!TIP] Heads up\n> Body\n"
+
+    def test_bare_marker_is_expanded(self):
+        doc = parse_and_validate("> [!WARNING] Careful\n> Body\n")
+        assert doc["content"][0]["attrs"]["collapsed"] is False
 
     def test_nested_quote_stays_plain_nested_blockquote(self):
         # callout is legal only at doc top level — `> > [!TIP]` stays a

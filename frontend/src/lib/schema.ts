@@ -558,18 +558,26 @@ export function clampCalloutKind(kind: unknown): CalloutKind {
 const calloutNode: NodeSpec = {
   content: "callout_title block+",
   defining: true,
-  attrs: { kind: { default: "note" } },
+  // @feat callout: `collapsed` attr — shared fold state, round-trips as the `[!KIND]-` marker
+  attrs: { kind: { default: "note" }, collapsed: { default: false } },
   parseDOM: [
     {
       tag: "div[data-callout]",
       getAttrs: (el) => ({
         kind: clampCalloutKind((el as HTMLElement).getAttribute("data-callout")),
+        collapsed: (el as HTMLElement).getAttribute("data-collapsed") === "true",
       }),
     },
   ],
   toDOM: (node) => {
     const kind = clampCalloutKind(node.attrs.kind);
-    return ["div", { "data-callout": kind, class: `pm-callout pm-callout--${kind}` }, 0];
+    const attrs: Record<string, string> = {
+      "data-callout": kind,
+      class: `pm-callout pm-callout--${kind}`,
+    };
+    // Round-trip the fold state through the DOM so paste preserves it.
+    if (node.attrs.collapsed) attrs["data-collapsed"] = "true";
+    return ["div", attrs, 0];
   },
 };
 

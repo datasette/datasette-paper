@@ -96,8 +96,13 @@ _BLOCK_TYPES = {
 # mirrors CALLOUT_KINDS in frontend/src/lib/schema.ts and _CALLOUT_KINDS in
 # datasette_paper/pm_schema.py / datasette_paper/markdown.py. An unrecognized
 # `[!FOO]` simply doesn't match — the blockquote is left untouched (lossless).
+# @feat callout: optional `[+-]` fold suffix — `-` collapses (Obsidian-compatible)
+# The optional `[+-]` after `]` is Obsidian's fold marker: `-` → collapsed,
+# `+` or bare → expanded. We render only two states (every callout folds), so
+# `+` normalizes to expanded on re-serialize; GitHub docs (no suffix) import
+# as expanded.
 _CALLOUT_MARKER_RE = re.compile(
-    r"^\[!(note|tip|important|warning|caution)\]", re.IGNORECASE
+    r"^\[!(note|tip|important|warning|caution)\]([+-]?)", re.IGNORECASE
 )
 
 
@@ -921,10 +926,16 @@ def _match_callout_marker(inline_token) -> dict | None:
     if m is None:
         return None
     kind = m.group(1).lower()
+    collapsed = m.group(2) == "-"  # `+` / bare → expanded
     title = marker_text[m.end() :].strip()
     body_children = children[break_idx + 1 :] if break_idx < len(children) else []
     body_nodes = _children_to_pm(body_children) if body_children else []
-    return {"kind": kind, "title": title, "body_nodes": body_nodes}
+    return {
+        "kind": kind,
+        "collapsed": collapsed,
+        "title": title,
+        "body_nodes": body_nodes,
+    }
 
 
 def _callout_from_blockquote_children(children: list[dict], marker: dict) -> dict:
@@ -950,7 +961,7 @@ def _callout_from_blockquote_children(children: list[dict], marker: dict) -> dic
         body = [{"type": "paragraph"}]
     return {
         "type": "callout",
-        "attrs": {"kind": marker["kind"]},
+        "attrs": {"kind": marker["kind"], "collapsed": marker["collapsed"]},
         "content": [{"type": "callout_title", "content": title_content}, *body],
     }
 

@@ -567,13 +567,16 @@ def _clamp_callout_kind(kind) -> str:
 _callout_spec = {
     "content": "callout_title block+",
     "defining": True,
-    "attrs": {"kind": {"default": "note"}},
+    # @feat callout: `collapsed` attr mirrors schema.ts — shared fold state
+    "attrs": {"kind": {"default": "note"}, "collapsed": {"default": False}},
     "parseDOM": [{"tag": "div[data-callout]"}],
     "toDOM": lambda node: [
         "div",
         {
             "data-callout": _clamp_callout_kind(node.attrs.get("kind")),
             "class": f"pm-callout pm-callout--{_clamp_callout_kind(node.attrs.get('kind'))}",
+            # Mirror schema.ts: emit data-collapsed only when folded.
+            **({"data-collapsed": "true"} if node.attrs.get("collapsed") else {}),
         },
         0,
     ],

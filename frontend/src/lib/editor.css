@@ -300,6 +300,41 @@
 .editor-host .pm-callout-content > :last-child {
   margin-bottom: 0;
 }
+/* Fold chevron — top-right chrome. Subtle by default, emphasized on hover;
+ * stays functional in view mode (read-only viewers fold locally). Padding-right
+ * on the wrapper keeps the title clear of it. @feat callout: fold chrome + collapsed body hide */
+.editor-host .pm-callout {
+  padding-right: 32px;
+}
+.editor-host .pm-callout-fold {
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--pp-fg-subtle);
+  opacity: 0.6;
+  cursor: pointer;
+}
+.editor-host .pm-callout-fold:hover {
+  background: var(--pp-surface-2);
+  opacity: 1;
+}
+/* Collapsed: show only the title line, hide every body block. The body stays
+ * in the PM-managed contentDOM — this is display-only. */
+.editor-host .pm-callout--collapsed .pm-callout-content > :not(.pm-callout-title) {
+  display: none;
+}
+.editor-host .pm-callout--collapsed .pm-callout-title {
+  margin-bottom: 0;
+}
 /* Kind picker popup — cloned from `.pm-code-block-lang-popup` chrome. */
 .editor-host .pm-callout-kind-popup {
   display: none;

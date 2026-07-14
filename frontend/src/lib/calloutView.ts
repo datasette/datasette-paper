@@ -2,9 +2,12 @@
  * NodeView for `callout` (GitHub-style admonition).
  *
  * Structure follows the taskItemView/codeBlockView precedent: `dom` is the
- * `.pm-callout` wrapper holding two pieces of chrome (an icon button that opens
- * the kind picker, and the picker popup) plus a separate `contentDOM` that PM
- * fills with the `callout_title` child and the body blocks. Keeping the chrome
+ * `.pm-callout` wrapper holding three pieces of chrome (an icon button that
+ * opens the kind picker, the picker popup, and a fold chevron) plus a separate
+ * `contentDOM` that PM fills with the `callout_title` child and the body
+ * blocks. Collapsing hides every body block via CSS (`.pm-callout--collapsed`
+ * → `display:none` on `.pm-callout-content > :not(.pm-callout-title)`) — the
+ * body stays in `contentDOM` (PM-managed, never detached). Keeping the chrome
  * OUT of `contentDOM` (rather than injecting it into a `dom === contentDOM`
  * outer div) means PM's child reconciliation never trips over DOM it doesn't
  * own — `ignoreMutation` / `stopEvent` fence the chrome off.
@@ -66,6 +69,15 @@ export class CalloutView implements NodeView {
   private popupEl: HTMLDivElement;
   private popupOpen = false;
 
+  private foldBtn: HTMLButtonElement;
+  // Per-viewer fold override. `null` = follow the shared `collapsed` attr;
+  // a boolean wins over it. Read-only viewers (who receive the shared state
+  // over SSE but can't dispatch a step to change it) toggle this instead, so
+  // they can still expand a callout an editor collapsed. Editors clear it on
+  // every toggle so they converge on the shared attr. See plans/callout/
+  // 03-collapse-fold.md.
+  private localCollapsed: boolean | null = null;
+
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.view = view;
     this.getPos = getPos;
@@ -92,24 +104,95 @@ export class CalloutView implements NodeView {
     this.popupEl.className = "pm-callout-kind-popup";
     this.popupEl.setAttribute("contenteditable", "false");
 
+    // Fold toggle — top-right chrome. Hides the body (all but the title) when
+    // collapsed. Same non-editable-chrome pattern as the icon button.
+    this.foldBtn = document.createElement("button");
+    this.foldBtn.type = "button";
+    this.foldBtn.className = "pm-callout-fold";
+    this.foldBtn.setAttribute("contenteditable", "false");
+    this.foldBtn.addEventListener("mousedown", (e) => e.preventDefault());
+    this.foldBtn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      this.toggleCollapsed();
+    });
+
     this.contentDOM = document.createElement("div");
     this.contentDOM.className = "pm-callout-content";
 
     this.dom.appendChild(this.iconBtn);
     this.dom.appendChild(this.popupEl);
+    this.dom.appendChild(this.foldBtn);
     this.dom.appendChild(this.contentDOM);
 
-    this.applyKind();
+    this.applyClasses();
   }
 
   // ── Styling ───────────────────────────────────────────────────────────────
 
-  /** Reflect `this.kind` onto the wrapper class + data attr + icon. */
-  private applyKind(): void {
-    this.dom.className = `pm-callout pm-callout--${this.kind}`;
+  /** Effective fold state — the local override if set, else the shared attr. */
+  private isCollapsed(): boolean {
+    return this.localCollapsed ?? this.node.attrs.collapsed === true;
+  }
+
+  /**
+   * Rebuild the wrapper's classes + attrs + chrome from the current kind and
+   * fold state. Wholesale so a `kind` change and a `collapsed` change share one
+   * path — the old `applyKind()` reset `className` and would have dropped the
+   * `--collapsed` / `--picker-open` classes on any restyle.
+   */
+  private applyClasses(): void {
+    const collapsed = this.isCollapsed();
+    this.dom.className =
+      `pm-callout pm-callout--${this.kind}` +
+      (collapsed ? " pm-callout--collapsed" : "") +
+      (this.popupOpen ? " pm-callout--picker-open" : "");
     this.dom.setAttribute("data-callout", this.kind);
+    if (collapsed) this.dom.setAttribute("data-collapsed", "true");
+    else this.dom.removeAttribute("data-collapsed");
     this.iconBtn.innerHTML = iconMarkup(KIND_ICON[this.kind]); // trusted constant SVG
     this.iconBtn.setAttribute("aria-label", `Callout kind: ${KIND_LABEL[this.kind]}`);
+    // @feat callout: chevron reflects (and toggles) the fold state
+    this.foldBtn.innerHTML = iconMarkup(collapsed ? "chevronRight" : "chevronDown");
+    this.foldBtn.setAttribute("aria-label", collapsed ? "Expand callout" : "Collapse callout");
+    this.foldBtn.setAttribute("aria-expanded", String(!collapsed));
+  }
+
+  // ── Fold toggle ─────────────────────────────────────────────────────────────
+
+  /**
+   * Flip the fold state. Editable viewers dispatch a collab `setNodeMarkup` so
+   * the fold is shared + round-trips to markdown; read-only viewers (who can't
+   * dispatch) flip a per-viewer local override instead.
+   */
+  private toggleCollapsed(): void {
+    const next = !this.isCollapsed();
+    if (!this.view.editable) {
+      // Read-only: local-only fold, no step.
+      this.localCollapsed = next;
+      this.applyClasses();
+      return;
+    }
+    const pos = this.getPos();
+    if (pos == null) return;
+    // Editors converge on the shared attr — drop any stale local override.
+    this.localCollapsed = null;
+    let tr = this.view.state.tr.setNodeMarkup(pos, undefined, {
+      ...this.node.attrs,
+      collapsed: next,
+    });
+    // Collapsing hides the body; if the caret is inside it, move it onto the
+    // (still-visible) title so it doesn't vanish into display:none content.
+    if (next) {
+      const { from } = this.view.state.selection;
+      const end = pos + this.node.nodeSize;
+      if (from > pos && from < end) {
+        const titleContentEnd = pos + 2 + this.node.child(0).content.size;
+        tr = tr.setSelection(Selection.near(tr.doc.resolve(titleContentEnd), -1));
+      }
+    }
+    this.view.dispatch(tr);
+    this.view.focus();
   }
 
   // ── Kind picker ─────────────────────────────────────────────────────────────
@@ -246,12 +329,11 @@ export class CalloutView implements NodeView {
   update(node: PMNode): boolean {
     if (node.type.name !== "callout") return false;
     this.node = node;
-    const kind = clampCalloutKind(node.attrs.kind);
-    if (kind !== this.kind) {
-      this.kind = kind;
-      this.applyKind();
-      if (this.popupOpen) this.renderRows();
-    }
+    this.kind = clampCalloutKind(node.attrs.kind);
+    // Restyle unconditionally — cheap, and covers both a remote `kind` flip and
+    // a remote `collapsed` flip in one path.
+    this.applyClasses();
+    if (this.popupOpen) this.renderRows();
     return true;
   }
 
@@ -278,6 +360,10 @@ export class CalloutView implements NodeView {
 
   stopEvent(event: Event): boolean {
     const target = event.target as Node | null;
-    return this.iconBtn.contains(target) || this.popupEl.contains(target);
+    return (
+      this.iconBtn.contains(target) ||
+      this.popupEl.contains(target) ||
+      this.foldBtn.contains(target)
+    );
   }
 }

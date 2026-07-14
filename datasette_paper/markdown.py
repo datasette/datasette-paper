@@ -213,6 +213,9 @@ def _render_block(node: dict) -> str:
         if title_node is not None and title_node.get("type") == "callout_title":
             title = _flatten_text(title_node.get("content") or []).strip()
         marker = f"[!{kind.upper()}]"
+        # @feat callout: a collapsed callout gets the Obsidian `-` fold suffix
+        if attrs.get("collapsed"):
+            marker += "-"
         if title:
             marker += f" {title}"
         body_children = content[1:] if content else []

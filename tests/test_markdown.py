@@ -143,6 +143,21 @@ def test_callout_without_title_emits_bare_marker_line():
     assert md.splitlines()[0] == "> [!NOTE]"
 
 
+# @feat callout: a collapsed callout serializes the Obsidian `-` fold suffix
+def test_callout_collapsed_emits_fold_suffix():
+    callout = _callout("note", "Heads up", _para(_text("Body")))
+    callout["attrs"]["collapsed"] = True
+    md = doc_to_markdown(_doc(callout))
+    assert md.splitlines()[0] == "> [!NOTE]- Heads up"
+
+
+def test_callout_expanded_omits_fold_suffix():
+    callout = _callout("note", "Heads up", _para(_text("Body")))
+    callout["attrs"]["collapsed"] = False
+    md = doc_to_markdown(_doc(callout))
+    assert md.splitlines()[0] == "> [!NOTE] Heads up"
+
+
 def test_callout_kind_serializes_uppercase():
     for kind in ("note", "tip", "important", "warning", "caution"):
         md = doc_to_markdown(_doc(_callout(kind, "", _para())))
