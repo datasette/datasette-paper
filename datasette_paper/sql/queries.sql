@@ -500,3 +500,32 @@ VALUES
 -- restore needs no reindex.
 -- name: selectAllDocIds :rows -> DocId
 SELECT id FROM _datasette_paper_doc;
+
+-- @feat task-assign: one profile actor $actor's assigned tasks across every
+-- active (non-archived/trashed) doc the *viewer* can see — the viewable set is
+-- passed as $doc_ids_json (same IN-list shape + acl-filter role as
+-- listProfileDocs), so visibility is enforced at query time, not at index
+-- time. Templates (kind != 'doc') are excluded. ``all_assignees`` is the full
+-- co-assignee set for the task (the index is one row per assignee, so a
+-- correlated group_concat re-gathers the others for the UI's chips). Status
+-- (open/done/all) is filtered in Python on ``checked``, matching the per-doc
+-- /tasks endpoint. Order: dated tasks first (undated sink to the end),
+-- ascending by due, then doc + ordinal for a stable, deterministic list.
+-- name: listProfileTodos :rows -> ProfileTodo
+SELECT t.doc_id, d.name AS doc_name, t.ordinal, t.text, t.checked,
+       t.section, t.inherited AS assignee_inherited,
+       t.due_date, t.due_time, t.due_tz, t.due_inherited,
+       (
+         SELECT group_concat(a2.assignee, ',')
+         FROM _datasette_paper_task_assignment a2
+         WHERE a2.doc_id = t.doc_id AND a2.ordinal = t.ordinal
+       ) AS all_assignees
+FROM _datasette_paper_task_assignment t
+JOIN _datasette_paper_doc d ON d.id = t.doc_id
+WHERE t.assignee = $actor::text
+  AND d.state = 'active'
+  AND d.kind = 'doc'
+  AND t.doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+  )
+ORDER BY (t.due_date IS NULL), t.due_date, t.doc_id, t.ordinal;

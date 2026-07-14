@@ -122,6 +122,22 @@ class DocId:
     id: int
 
 
+@dataclass
+class ProfileTodo:
+    doc_id: int
+    doc_name: str
+    ordinal: int
+    text: str
+    checked: int
+    section: str
+    assignee_inherited: int
+    due_date: str | None
+    due_time: str | None
+    due_tz: str | None
+    due_inherited: int
+    all_assignees: Any
+
+
 def insert_doc(
     conn: sqlite3.Connection,
     name: str,
@@ -814,3 +830,30 @@ def select_all_doc_ids(conn: sqlite3.Connection) -> list[DocId]:
     params: dict[str, Any] = {}
     cursor = conn.execute(sql, params)
     return [DocId(*row) for row in cursor.fetchall()]
+
+
+def list_profile_todos(
+    conn: sqlite3.Connection, actor: str, doc_ids_json: str
+) -> list[ProfileTodo]:
+    sql = """\
+SELECT t.doc_id, d.name AS doc_name, t.ordinal, t.text, t.checked,
+       t.section, t.inherited AS assignee_inherited,
+       t.due_date, t.due_time, t.due_tz, t.due_inherited,
+       (
+         SELECT group_concat(a2.assignee, ',')
+         FROM _datasette_paper_task_assignment a2
+         WHERE a2.doc_id = t.doc_id AND a2.ordinal = t.ordinal
+       ) AS all_assignees
+FROM _datasette_paper_task_assignment t
+JOIN _datasette_paper_doc d ON d.id = t.doc_id
+WHERE t.assignee = $actor::text
+  AND d.state = 'active'
+  AND d.kind = 'doc'
+  AND t.doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+  )
+ORDER BY (t.due_date IS NULL), t.due_date, t.doc_id, t.ordinal;
+"""
+    params = {"actor::text": actor, "doc_ids_json::text": doc_ids_json}
+    cursor = conn.execute(sql, params)
+    return [ProfileTodo(*row) for row in cursor.fetchall()]

@@ -163,6 +163,73 @@ async def profile_docs(datasette, request, profile_actor_id: str):
     )
 
 
+# @feat task-assign: cross-doc TODO listing — a profile actor's assigned tasks
+# across every active doc the *viewer* can see. Both TODO surfaces (the profile
+# section and the /-/paper/todos page) consume this one endpoint.
+@router.GET(r"^/-/paper/api/profile/(?P<profile_actor_id>[^/]+)/todos$")
+async def profile_todos(datasette, request, profile_actor_id: str):
+    """A profile actor's assigned tasks, viewer-acl-filtered.
+
+    Same "listing is ungated, results are acl-filtered" rule as profile_docs
+    (docs/PERMISSIONS.md): anyone may ask about anyone's TODOs, but only tasks
+    from docs the *viewer* holds ``paper-view`` on come back. Assignment is
+    pure interpretation of doc content (the m009 index is a derived cache), so
+    a row here is a task whose effective assignee — named on the item or
+    inherited down the task subtree — is ``profile_actor_id``.
+
+    ``status=open|done|all`` (default ``open``; 400 otherwise), same vocabulary
+    as the per-doc ``/tasks`` endpoint. Buckets are the client's job (they need
+    the viewer's timezone), so no bucketing here — just the flat, ordered list.
+    """
+    profile_actor_id = unquote(profile_actor_id)
+
+    status = (request.args.get("status") or "open").lower()
+    if status not in ("open", "done", "all"):
+        return Response.json(
+            {"error": "status must be one of: open, done, all"}, status=400
+        )
+
+    # Viewer's visible set (same 1000-doc precedent + child-is-doc-id shape as
+    # profile_docs). Empty → nothing to intersect (also anonymous viewers).
+    page = await datasette.allowed_resources(
+        action=PAPER_VIEW, actor=request.actor, limit=1000
+    )
+    viewer_ids = [int(r.child) for r in page.resources]
+    if not viewer_ids:
+        return Response.json({"actor_id": profile_actor_id, "todos": []})
+
+    db = paper_db(datasette)
+    rows = await db.list_profile_todos(doc_ids=viewer_ids, actor=profile_actor_id)
+    if status == "open":
+        rows = [r for r in rows if not r.checked]
+    elif status == "done":
+        rows = [r for r in rows if r.checked]
+
+    todos = []
+    for r in rows:
+        due = (
+            {"date": r.due_date, "time": r.due_time, "tz": r.due_tz}
+            if r.due_date
+            else None
+        )
+        todos.append(
+            {
+                "doc_id": r.doc_id,
+                "doc_name": r.doc_name,
+                "doc_url": f"/-/paper/doc/{r.doc_id}",
+                "ordinal": r.ordinal,
+                "text": r.text,
+                "checked": bool(r.checked),
+                "section": json.loads(r.section) if r.section else [],
+                "assignees": r.all_assignees.split(",") if r.all_assignees else [],
+                "assignee_inherited": bool(r.assignee_inherited),
+                "due": due,
+                "due_inherited": bool(r.due_inherited),
+            }
+        )
+    return Response.json({"actor_id": profile_actor_id, "todos": todos})
+
+
 @router.GET(r"^/-/paper/api/docs$")
 async def list_docs(datasette, request):
     # No global gate — the results are acl-filtered below, so an actor with no

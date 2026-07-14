@@ -202,6 +202,17 @@ class PaperDB:
             limit=limit,
         )
 
+    async def list_profile_todos(
+        self, *, doc_ids: list[int], actor: str
+    ) -> list[_queries.ProfileTodo]:
+        """A profile actor's assigned tasks across active docs the viewer can
+        see (``doc_ids``), dated-first then by due/doc/ordinal. Status is
+        filtered by the caller on ``checked``. Backs both TODO surfaces."""
+        doc_ids_json = json.dumps(doc_ids)
+        return await self._read(
+            _queries.list_profile_todos, actor=actor, doc_ids_json=doc_ids_json
+        )
+
     async def latest_editor_for_docs(
         self, *, doc_ids: list[int]
     ) -> dict[int, _queries.DocEditor]:
