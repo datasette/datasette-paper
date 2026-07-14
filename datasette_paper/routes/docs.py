@@ -571,6 +571,7 @@ async def link_access_check(datasette, request, doc_id: int):
     return Response.json({"links": out})
 
 
+# @feat link-graph: viewable link subgraph + per-node metadata for the graph view
 @router.GET(r"^/-/paper/api/links/graph$")
 async def links_graph(datasette, request):
     # Ungated — the graph is built only from viewable_doc_ids (acl-filtered).
@@ -579,10 +580,18 @@ async def links_graph(datasette, request):
     edges = await db.edges_within(viewable_ids=viewable)
     node_ids = sorted({e.src_doc_id for e in edges} | {e.dst_doc_id for e in edges})
     rows = {r.id: r for r in await db.list_docs_by_ids(doc_ids=node_ids)}
+    tags = await db.list_tags_for_docs(doc_ids=node_ids)
     return Response.json(
         {
             "nodes": [
-                {"id": i, "title": rows[i].name, "state": rows[i].state}
+                {
+                    "id": i,
+                    "title": rows[i].name,
+                    "state": rows[i].state,
+                    "kind": rows[i].kind,
+                    "updated_at": rows[i].updated_at,
+                    "tags": tags.get(i, []),
+                }
                 for i in node_ids
                 if i in rows
             ],

@@ -20,26 +20,49 @@
     }
     return deg;
   }
+
+  /**
+   * Pure gate for the animated render path. Live if the platform can drive
+   * rAF ticks and the viewer hasn't asked to reduce motion. Callers pass
+   * `reduceMotion = true` when the preference can't be read (no `matchMedia`,
+   * e.g. jsdom) so we fall back to the synchronous settle — the honest
+   * reduced-motion behaviour and what the non-ticking render test depends on.
+   */
+  export function shouldAnimate(hasRaf: boolean, reduceMotion: boolean): boolean {
+    return hasRaf && !reduceMotion;
+  }
 </script>
 
 <script lang="ts">
   /**
-   * Force-directed visualization of the viewable link graph. Fetches
-   * `/-/paper/api/links/graph` (already permission-scoped server-side),
-   * lays the nodes out with a d3-force simulation, and renders plain SVG —
-   * one <line> per edge, one <circle>+<text> per node.
+   * @feat link-graph: force-directed view of the viewable link graph.
+   *
+   * Fetches `/-/paper/api/links/graph` (already permission-scoped
+   * server-side), lays the nodes out with a d3-force simulation, and renders
+   * plain SVG — one <line> per edge, one <circle>+<text> per node.
    *
    * d3-force is DYNAMICALLY imported (never top-level) — it only loads once
    * this component mounts, mirroring PaperApp's lazy prosemirror-markdown
-   * import. We run a fixed number of simulation ticks then stop and render
-   * once: simpler and far friendlier to the jsdom test than an animated
-   * on("tick") loop.
+   * import.
+   *
+   * Two layout paths (see `shouldAnimate`): a live `on("tick")` loop that
+   * writes coordinates into `$state` each frame (d3 never touches the DOM),
+   * or — under reduced motion / no rAF / the non-ticking jsdom test — a
+   * synchronous fixed-tick settle that assigns once. The viewport tracks the
+   * container size (ResizeObserver), so `viewBox`/`forceCenter` are live.
    */
+
+  // Type-only import: erased at build, so it does NOT pull d3-force onto the
+  // top-level bundle — the runtime import stays dynamic inside build().
+  import type { Simulation, ForceCenter } from "d3-force";
 
   type GraphNode = {
     id: number;
     title: string;
     state: string;
+    kind: string;
+    updated_at: string;
+    tags: string[];
   };
 
   type GraphEdge = {
@@ -57,14 +80,26 @@
     occurrences: number;
   };
 
-  const WIDTH = 640;
-  const HEIGHT = 480;
+  // Fallback dims when the container has no measured size yet (jsdom / pre-
+  // layout). Real dimensions come from the ResizeObserver below.
+  const DEFAULT_WIDTH = 640;
+  const DEFAULT_HEIGHT = 480;
   const TICKS = 300;
 
   let loading = $state(true);
   let error = $state<string | null>(null);
   let nodes = $state<SimNode[]>([]);
   let edges = $state<SimEdge[]>([]);
+  let w = $state(DEFAULT_WIDTH);
+  let h = $state(DEFAULT_HEIGHT);
+
+  let container: HTMLDivElement;
+  // Hoisted so the resize handler + effect teardown can reach the live sim.
+  let sim: Simulation<SimNode, undefined> | null = null;
+  let centerForce: ForceCenter<SimNode> | null = null;
+  let animated = false;
+  let resizeTimer: ReturnType<typeof setTimeout> | undefined;
+  let destroyed = false;
   // Plain (non-reactive) Map: it is always assigned before `nodes` (the
   // reactive trigger for a render), so the render reads the current value.
   // Kept out of `$state` to avoid the SvelteMap reactivity lint while still
@@ -110,7 +145,13 @@
       const { forceSimulation, forceManyBody, forceLink, forceCenter, forceCollide } =
         await import("d3-force");
 
-      const sim = forceSimulation(simNodes)
+      animated = shouldAnimate(
+        typeof requestAnimationFrame === "function",
+        prefersReducedMotion(),
+      );
+
+      centerForce = forceCenter<SimNode>(w / 2, h / 2);
+      sim = forceSimulation(simNodes)
         .force(
           "link",
           forceLink(simEdges)
@@ -118,15 +159,32 @@
             .distance(80),
         )
         .force("charge", forceManyBody().strength(-220))
-        .force("center", forceCenter(WIDTH / 2, HEIGHT / 2))
+        .force("center", centerForce)
         .force("collide", forceCollide(24))
         .stop();
 
-      for (let i = 0; i < TICKS; i++) sim.tick();
-      sim.stop();
+      // Modal closed before d3 finished loading — don't start ticking.
+      if (destroyed) {
+        sim.stop();
+        return;
+      }
 
-      nodes = simNodes;
-      edges = simEdges;
+      if (animated) {
+        sim.on("tick", () => {
+          nodes = [...simNodes];
+          edges = [...simEdges];
+        });
+        // Paint the initial layout now — restart()'s first tick lands a frame
+        // later, and `loading` flips false before it, flashing the empty state.
+        nodes = [...simNodes];
+        edges = [...simEdges];
+        sim.alpha(1).restart();
+      } else {
+        for (let i = 0; i < TICKS; i++) sim.tick();
+        sim.stop();
+        nodes = simNodes;
+        edges = simEdges;
+      }
     } catch {
       error = "Could not load the link graph.";
     } finally {
@@ -134,13 +192,53 @@
     }
   }
 
-  // Build once on mount. Reading nothing reactive here keeps it to one run.
+  function prefersReducedMotion(): boolean {
+    // No matchMedia (jsdom) → assume reduced motion so we take the settle path.
+    if (typeof window.matchMedia !== "function") return true;
+    return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  }
+
+  function measure(): void {
+    if (!container) return;
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
+    if (cw > 0) w = cw;
+    if (ch > 0) h = ch;
+  }
+
+  function onResize(): void {
+    measure();
+    // Keep the layout centred in the new box; only reheat when animated.
+    if (centerForce && typeof centerForce.x === "function") {
+      centerForce.x(w / 2).y(h / 2);
+    }
+    if (!animated || !sim) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      sim?.alpha(0.3).restart();
+    }, 150);
+  }
+
+  // Build once on mount. Reading nothing reactive here keeps it to one run —
+  // build()'s later reads of w/h happen after `await`, so they aren't tracked.
   $effect(() => {
+    measure();
+    let ro: ResizeObserver | undefined;
+    if (typeof ResizeObserver === "function" && container) {
+      ro = new ResizeObserver(() => onResize());
+      ro.observe(container);
+    }
     void build();
+    return () => {
+      destroyed = true;
+      ro?.disconnect();
+      clearTimeout(resizeTimer);
+      sim?.stop();
+    };
   });
 </script>
 
-<div class="link-graph">
+<div class="link-graph" bind:this={container}>
   {#if loading}
     <div class="link-graph-state">Loading…</div>
   {:else if error}
@@ -150,9 +248,9 @@
   {:else}
     <svg
       class="link-graph-svg"
-      viewBox="0 0 {WIDTH} {HEIGHT}"
-      width={WIDTH}
-      height={HEIGHT}
+      viewBox="0 0 {w} {h}"
+      width={w}
+      height={h}
       role="img"
       aria-label="Link graph"
     >

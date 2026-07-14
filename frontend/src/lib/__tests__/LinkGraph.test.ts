@@ -71,7 +71,7 @@ vi.mock("d3-force", () => {
   };
 });
 
-import LinkGraph, { computeDegree } from "../LinkGraph.svelte";
+import LinkGraph, { computeDegree, shouldAnimate } from "../LinkGraph.svelte";
 
 type Graph = {
   nodes: { id: number; title: string; state: string }[];
@@ -163,5 +163,59 @@ describe("LinkGraph render", () => {
     );
     expect(anchors).toContain("/-/paper/doc/1");
     expect(anchors).toContain("/-/paper/doc/3");
+  });
+
+  it("sizes the viewBox to the container (ResizeObserver)", async () => {
+    let roCb: (() => void) | null = null;
+    let observed: Element | null = null;
+    class FakeResizeObserver {
+      constructor(cb: () => void) {
+        roCb = cb;
+      }
+      observe(el: Element): void {
+        observed = el;
+      }
+      unobserve(): void {}
+      disconnect(): void {}
+    }
+    vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+
+    graphPayload = {
+      nodes: [{ id: 1, title: "Alpha", state: "active" }],
+      edges: [],
+    };
+    const { container } = render(LinkGraph);
+    await waitForGraph();
+
+    // Report a stubbed container size, then fire the observer.
+    Object.defineProperty(observed!, "clientWidth", {
+      value: 800,
+      configurable: true,
+    });
+    Object.defineProperty(observed!, "clientHeight", {
+      value: 600,
+      configurable: true,
+    });
+    roCb!();
+
+    await vi.waitFor(() =>
+      expect(
+        container.querySelector("svg.link-graph-svg")?.getAttribute("viewBox"),
+      ).toBe("0 0 800 600"),
+    );
+  });
+});
+
+describe("shouldAnimate", () => {
+  it("is false under reduced motion even with rAF", () => {
+    expect(shouldAnimate(true, true)).toBe(false);
+  });
+
+  it("is false without rAF", () => {
+    expect(shouldAnimate(false, false)).toBe(false);
+  });
+
+  it("is true with rAF and no motion preference", () => {
+    expect(shouldAnimate(true, false)).toBe(true);
   });
 });
