@@ -22,11 +22,16 @@
     docId,
     sourceStore = null,
     showSources = false,
+    onOpenGraph,
   }: {
     view: EditorView | null;
     docId: string;
     sourceStore?: SourceStore | null;
     showSources?: boolean;
+    // Opens the doc-centred link graph (a modal owned by the doc shell). The
+    // rail hosts the trigger because it owns docId + the icon vocabulary; unlike
+    // Sources/Links it opens an overlay, not a flyout section.
+    onOpenGraph?: () => void;
   } = $props();
 
   type SectionId = "sources" | "links";
@@ -131,6 +136,23 @@
               <span>{s.label}</span>
             </button>
           {/each}
+          {#if onOpenGraph}
+            <button
+              type="button"
+              role="menuitem"
+              class="paper-rail-mi"
+              onclick={() => {
+                menuOpen = false;
+                onOpenGraph?.();
+              }}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+                <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+                {@html TOOLBAR_ICONS["diagram3"]}
+              </svg>
+              <span>View in graph</span>
+            </button>
+          {/if}
         </div>
       {/if}
     </div>
@@ -159,6 +181,28 @@
           </svg>
         </button>
       {/each}
+      {#if onOpenGraph}
+        <!-- Not a flyout section: opens the doc-centred link graph modal. -->
+        <button
+          type="button"
+          class="paper-rail-btn"
+          aria-label="View in graph"
+          title="View in graph"
+          onclick={onOpenGraph}
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 16 16"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+            {@html TOOLBAR_ICONS["diagram3"]}
+          </svg>
+        </button>
+      {/if}
     </nav>
   {/if}
 

@@ -15,6 +15,7 @@
   import Toolbar from "./Toolbar.svelte";
   import DocHeader from "./DocHeader.svelte";
   import Sidebar from "./Sidebar.svelte";
+  import GraphModal from "./GraphModal.svelte";
   import type { SourceStore } from "./sourceStore";
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
@@ -48,6 +49,10 @@
   let createResolver: ((id: number | null) => void) | null = null;
 
   let editorEl: HTMLDivElement | undefined = $state(undefined);
+
+  // Doc-centred link graph, opened from the Sidebar rail. Lazy-mounted (the
+  // modal renders <LinkGraph> only while open) so d3-force loads on first open.
+  let graphOpen = $state(false);
 
   // Floating scroll-to-top affordance for long docs (mobile-primary, but shown
   // at every width and in view mode too). The page scrolls on the window — the
@@ -340,8 +345,15 @@
     onresult={onCreateResult}
   />
     </div>
-    <Sidebar {view} {docId} {sourceStore} showSources={canEdit && mode === "edit"} />
+    <Sidebar
+      {view}
+      {docId}
+      {sourceStore}
+      showSources={canEdit && mode === "edit"}
+      onOpenGraph={() => (graphOpen = true)}
+    />
   </div>
+  <GraphModal open={graphOpen} onClose={() => (graphOpen = false)} focusId={Number(docId)} />
   {#if showScrollTop}
     <button
       type="button"
