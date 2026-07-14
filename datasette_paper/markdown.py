@@ -130,6 +130,45 @@ def _ref_link(label: str, canonical: str, url: Optional[str]) -> str:
     return f"[{safe_label}]({canonical})"
 
 
+_DATE_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+
+def format_date_label(attrs: dict) -> str:
+    """Deterministic label for a `date` atom — the markdown link text.
+
+    Always includes the year ("Jul 20, 2026") so serialization never depends on
+    when it runs (the chip's "omit current year" nicety stays client-side). A
+    timed atom appends the wall time in the *stored* zone as 12-hour "3:00 PM";
+    ``attrs.time`` already carries the author's wall clock, so no zone
+    conversion happens here. Keep byte-identical with the TS twin
+    ``formatDateLabel`` in frontend/src/lib/dateFormat.ts (shared fixtures).
+    """
+    # @feat date: deterministic markdown-label render (twin of dateFormat.ts)
+    year_s, month_s, day_s = (attrs.get("date") or "").split("-")
+    label = f"{_DATE_MONTHS[int(month_s) - 1]} {int(day_s)}, {int(year_s)}"
+    time = attrs.get("time")
+    if time:
+        hh, mm = time.split(":")
+        hour = int(hh)
+        h12 = hour % 12 or 12
+        ampm = "AM" if hour < 12 else "PM"
+        label += f" {h12}:{mm} {ampm}"
+    return label
+
+
 def _prefix_quote_lines(text: str) -> str:
     """Prefix each line of ``text`` with ``"> "`` (a bare ``">"`` for a blank
     line) — the blockquote line-quoting convention shared by ``blockquote``
@@ -758,6 +797,29 @@ def _render_inlines(nodes: list) -> str:
             canonical = f"paper:/tag/{quote(tag, safe='')}"
             _kind, url = _resolve_resource("tag", tag)
             out.append(_ref_link("#" + tag, canonical, url))
+        elif (
+            t == "date"
+        ):  # @feat date: serialize atom to a [<label>](paper:/date/<uri>) link
+            # The URI is the source of truth (path `YYYY-MM-DD` or
+            # `YYYY-MM-DDT<HH:MM>`, with the IANA `tz` riding as a URL-encoded
+            # query param because zone names contain `/`). The visible label is
+            # a deterministic render of the attrs — always with the year and
+            # the wall time in the *stored* zone — so a serialize never depends
+            # on when it runs; the parser ignores the label and reads the URI.
+            attrs = n.get("attrs") or {}
+            date = str(attrs.get("date") or "")
+            time = attrs.get("time")
+            tz = attrs.get("tz")
+            if time:
+                path = f"{date}T{time}"
+                # tz is only meaningful with a time (a calendar date is the
+                # same for everyone); a stray tz on a date-only atom is dropped.
+                canonical = f"paper:/date/{path}"
+                if tz:
+                    canonical += f"?tz={quote(str(tz), safe='')}"
+            else:
+                canonical = f"paper:/date/{date}"
+            out.append(_ref_link(format_date_label(attrs), canonical, None))
         elif (
             t == "inline_embed"
         ):  # @feat inline-embed: serialize atom to a paper:/embed/<kind>/<ref> link

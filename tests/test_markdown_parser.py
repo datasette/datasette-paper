@@ -704,6 +704,109 @@ class TestInlineNodes:
 
 
 # ---------------------------------------------------------------------------
+# date atom
+# ---------------------------------------------------------------------------
+
+
+class TestDate:
+    # @feat date: parse paper:/date/ refs; the URI is the source of truth
+    def test_date_only_from_paper_date_scheme_link(self):
+        doc = parse_and_validate("due [Jul 20, 2026](paper:/date/2026-07-20) ok\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["text", "date", "text"]
+        assert content[0]["text"] == "due "
+        assert content[1]["attrs"] == {"date": "2026-07-20", "time": None, "tz": None}
+        assert "marks" not in content[1]
+        assert content[2]["text"] == " ok"
+
+    def test_timed_date_reads_tz_from_query(self):
+        doc = parse_and_validate(
+            "[x](paper:/date/2026-07-20T15:00?tz=America%2FLos_Angeles)\n"
+        )
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["date"]
+        assert content[0]["attrs"] == {
+            "date": "2026-07-20",
+            "time": "15:00",
+            "tz": "America/Los_Angeles",
+        }
+
+    def test_timed_date_without_tz_query(self):
+        doc = parse_and_validate("[x](paper:/date/2026-07-20T09:05)\n")
+        content = doc["content"][0]["content"]
+        assert content[0]["attrs"] == {
+            "date": "2026-07-20",
+            "time": "09:05",
+            "tz": None,
+        }
+
+    def test_date_only_with_stray_tz_query_drops_tz(self):
+        # A calendar date is the same for everyone; tz is meaningful only with a
+        # time. A hand-authored date-only ref carrying a stray tz query still
+        # parses (the date survives), but the tz is dropped — never authored.
+        doc = parse_and_validate("[x](paper:/date/2026-07-20?tz=UTC)\n")
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["date"]
+        assert content[0]["attrs"] == {"date": "2026-07-20", "time": None, "tz": None}
+
+    def test_date_reads_canonical_from_link_title(self):
+        # Real href + canonical paper: ref in the title — parser reads title.
+        doc = parse_and_validate('[Jul 20, 2026](/whatever "paper:/date/2026-07-20")\n')
+        content = doc["content"][0]["content"]
+        assert [n["type"] for n in content] == ["date"]
+        assert content[0]["attrs"]["date"] == "2026-07-20"
+
+    def test_impossible_calendar_date_degrades_to_text(self):
+        # Feb 30 is shape-valid but not a real date → label survives as text.
+        doc = parse_and_validate("[Feb 30](paper:/date/2026-02-30)\n")
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "date" for n in content)
+        assert content[0]["text"] == "Feb 30"
+        assert "marks" not in content[0]
+
+    def test_bad_time_degrades_to_text(self):
+        doc = parse_and_validate("[bad](paper:/date/2026-07-20T25:00)\n")
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "date" for n in content)
+        assert content[0]["text"] == "bad"
+
+    def test_junk_path_degrades_to_text(self):
+        doc = parse_and_validate("[whenever](paper:/date/soon)\n")
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "date" for n in content)
+        assert content[0]["text"] == "whenever"
+
+    def test_ordinary_link_is_not_a_date(self):
+        doc = parse_and_validate("see [docs](https://example.com/2026-07-20)\n")
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "date" for n in content)
+        assert (
+            content[-1]["marks"][0]["attrs"]["href"] == "https://example.com/2026-07-20"
+        )
+
+    @pytest.mark.parametrize(
+        "attrs",
+        [
+            {"date": "2026-07-20", "time": None, "tz": None},
+            {"date": "2026-07-20", "time": "15:00", "tz": "America/Los_Angeles"},
+            {"date": "1999-11-02", "time": "00:00", "tz": "UTC"},
+            {"date": "2026-12-31", "time": "23:59", "tz": "Asia/Tokyo"},
+        ],
+    )
+    def test_roundtrips_through_markdown(self, attrs):
+        # @feat date: serialize → parse reproduces identical attrs (URI is truth)
+        doc = {
+            "type": "doc",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "date", "attrs": attrs}]}
+            ],
+        }
+        md = doc_to_markdown(doc)
+        back = markdown_to_doc(md)
+        assert back == doc
+
+
+# ---------------------------------------------------------------------------
 # Inline + block embeds
 # ---------------------------------------------------------------------------
 

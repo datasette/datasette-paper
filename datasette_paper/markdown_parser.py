@@ -22,7 +22,8 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import unquote
+from datetime import datetime
+from urllib.parse import parse_qs, unquote
 
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
@@ -714,6 +715,57 @@ def _paper_ref_to_node(kind: str, value: str) -> dict | None:
         # and the leading slash stripped during serialize is restored.
         _provider_kind, _, ref = value.partition("/")
         return {"type": "inline_embed", "attrs": {"ref": "/" + unquote(ref)}}
+    # @feat date: parse a paper:/date/ ref (path + tz query) into a date atom
+    if kind == "date":
+        return _date_ref_to_node(value)
+    return None
+
+
+_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_DATE_TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$")
+
+
+def _valid_calendar_date(s: str) -> bool:
+    """True iff ``s`` is a real ``YYYY-MM-DD`` calendar date (no Feb 30)."""
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return True
+    except ValueError:
+        return False
+
+
+def _date_ref_to_node(value: str) -> dict | None:
+    """Build a `date` atom from a `paper:/date/` ref value, or None to degrade.
+
+    ``value`` is the ref after the `paper:/date/` prefix: a `YYYY-MM-DD` or
+    `YYYY-MM-DDTHH:MM` path, optionally followed by a `?tz=<IANA>` query. The
+    URI is the source of truth (the visible label is ignored). Any validation
+    failure returns None; the caller then keeps the label as plain text (the
+    date feature's lossy contract). Any non-empty ``tz`` string is accepted —
+    an unresolvable zone degrades to naive wall-clock rendering client-side, so
+    shipping an IANA allow-list here would only reject harmless input.
+    """
+    path, _, query = value.partition("?")
+    m = _DATE_TIME_RE.match(path)
+    if m:
+        date_s, time_s = m.group(1), m.group(2)
+        # `HH:MM` matched the shape; strptime rejects 25:00 / 12:60 etc.
+        try:
+            datetime.strptime(time_s, "%H:%M")
+        except ValueError:
+            return None
+        if not _valid_calendar_date(date_s):
+            return None
+        tz = None
+        if query:
+            tz_vals = parse_qs(query).get("tz")  # parse_qs percent-decodes
+            if tz_vals and tz_vals[0]:
+                tz = tz_vals[0]
+        return {"type": "date", "attrs": {"date": date_s, "time": time_s, "tz": tz}}
+    if _DATE_ONLY_RE.match(path) and _valid_calendar_date(path):
+        # A stray `tz` on a date-only ref is dropped: a calendar date is the
+        # same for everyone, so only timed atoms carry a zone.
+        return {"type": "date", "attrs": {"date": path, "time": None, "tz": None}}
     return None
 
 
@@ -742,9 +794,38 @@ def _convert_paper_refs(nodes: list[dict]) -> list[dict]:
         atom = _paper_ref_to_node(kind, value)
         if atom is not None:
             out.append(atom)
+        elif kind == "date":
+            # @feat date: an unparseable paper:/date/ ref degrades to its
+            # visible label as plain text (the date feature's lossy contract),
+            # instead of dropping like an un-normalizable tag / unknown kind.
+            out.append(_strip_paper_ref_marks(node))
         # Advance prev_ref even when the atom dropped (un-normalizable tag) so
         # trailing fragments of the link still fold away.
         prev_ref = canonical
+    return out
+
+
+def _strip_paper_ref_marks(node: dict) -> dict:
+    """Copy a text node with its `paper:/`-scheme link mark removed.
+
+    Used when a paper ref is recognized by scheme but can't be converted to an
+    atom and should survive as plain text (the label). Non-link marks (bold,
+    …) are preserved; the link mark that carried the `paper:/` ref is dropped
+    so the leftover text is an ordinary run, not a dangling link.
+    """
+    kept = []
+    for m in node.get("marks") or []:
+        attrs = m.get("attrs") or {}
+        title = attrs.get("title") or ""
+        href = attrs.get("href") or ""
+        is_paper_link = m.get("type") == "link" and (
+            title.startswith(_PAPER_SCHEME) or href.startswith(_PAPER_SCHEME)
+        )
+        if not is_paper_link:
+            kept.append(m)
+    out = {"type": "text", "text": node.get("text", "")}
+    if kept:
+        out["marks"] = kept
     return out
 
 

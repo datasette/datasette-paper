@@ -337,6 +337,35 @@ _tag_spec = {
     ],
 }
 
+# Inline atom for a calendar date (+ optional time / IANA zone) — mirrors the
+# JS schema in frontend/src/lib/schema.ts. `date` is required (a date atom is
+# never empty); `time` (24h `HH:MM`) and `tz` (IANA name) default null.
+# markdown round-trips as `[<label>](paper:/date/<date>[T<time>][?tz=<zone>])`
+# via datasette_paper/markdown.py. toDOM is a static fallback (the real chip is
+# the NodeView) but must be structurally valid for node_from_json/Step.apply.
+# @feat date: server node spec (mirrors schema.ts) for node_from_json / Step.apply
+_date_spec = {
+    "group": "inline",
+    "inline": True,
+    "atom": True,
+    "selectable": True,
+    "draggable": False,
+    "attrs": {"date": {}, "time": {"default": None}, "tz": {"default": None}},
+    "parseDOM": [{"tag": "span[data-date]"}],
+    "toDOM": lambda node: [
+        "span",
+        {
+            "data-date": str(node.attrs.get("date") or ""),
+            "data-date-time": str(node.attrs.get("time") or ""),
+            "data-date-tz": str(node.attrs.get("tz") or ""),
+            "class": "pm-date",
+        },
+        # Static fallback only (the real chip is the NodeView); never rendered
+        # server-side, so a raw echo of the date is enough to stay valid.
+        str(node.attrs.get("date") or ""),
+    ],
+}
+
 # Inline atom for a single computed SQL value — mirrors the JS schema in
 # frontend/src/lib/schema.ts. A reference (`source` name + `column`) plus an
 # optional `format` config; the value is fetched live per-viewer by the
@@ -617,6 +646,7 @@ _nodes = {
     "paper_link": _paper_link_spec,
     "mention": _mention_spec,
     "tag": _tag_spec,
+    "date": _date_spec,
     "value": _value_spec,
     "inline_embed": _inline_embed_spec,
     "block_embed": _block_embed_spec,
