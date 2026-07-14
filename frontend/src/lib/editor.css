@@ -1410,6 +1410,36 @@
   outline-offset: 1px;
 }
 
+/* Caret guard (block NodeViews). These cards render chrome — headers, footers,
+   menus, status/probe text, result tables, the value popover — inside PM's
+   contenteditable root, so a click on a label, on padding, on a result cell, or
+   beside a <select> drops a stray native caret into the card. Marking each card
+   user-select:none stops that; only the genuinely editable/selectable surfaces
+   opt back in.
+
+   `block_embed` is an atom (PM makes the whole node contenteditable=false), so
+   selecting its result-cell text never shows a caret — its scroll/fields opt in
+   for copy. `sql_block`/`source` are EDITABLE nodes (the query is text
+   content), so their result table must NOT opt in — a click there would caret;
+   result data is copied via the ⋮ menu (Copy as CSV/JSON) instead. Only the
+   query code (the real editable content) and text inputs opt in. PM's own
+   node-selection (mousedown on the frame) doesn't go through user-select. */
+.editor-host .pm-block-embed,
+.editor-host .pm-sql-block,
+.editor-host .pm-source-card,
+.editor-host .pm-value-popover {
+  user-select: none;
+}
+.editor-host .pm-block-embed-scroll,
+.editor-host .pm-block-embed-fields,
+.editor-host .pm-block-embed input,
+.editor-host .pm-sql-block-code,
+.editor-host .pm-source-card-code,
+.editor-host .pm-source-card input,
+.editor-host .pm-value-popover input {
+  user-select: text;
+}
+
 /* "Lite" YouTube embed: a thumbnail facade that swaps to the real iframe on
    click (videoEmbedView.ts, modelled on paulirish/lite-youtube-embed).
    deliberate literal: this block's black letterbox and play-button chrome
@@ -1554,14 +1584,6 @@
   border: 1px solid var(--pp-border);
   border-radius: 6px;
   box-shadow: 0 4px 12px var(--pp-shadow);
-  /* The menu/panel text (item labels, FILTER/SORT subheads, the shared-view
-     notice) lives inside PM's contenteditable root; without this a click on
-     that text or the panel padding drops a native caret into it. The value
-     input opts back in so its contents stay selectable. */
-  user-select: none;
-}
-.editor-host .pm-block-embed-menu input {
-  user-select: text;
 }
 .editor-host .pm-block-embed-menu--open {
   display: block;
