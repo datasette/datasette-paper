@@ -1412,32 +1412,51 @@
 
 /* Caret guard (block NodeViews). These cards render chrome — headers, footers,
    menus, status/probe text, result tables, the value popover — inside PM's
-   contenteditable root, so a click on a label, on padding, on a result cell, or
-   beside a <select> drops a stray native caret into the card. Marking each card
-   user-select:none stops that; only the genuinely editable/selectable surfaces
-   opt back in.
+   contenteditable root. Two mechanisms work together (see caretGuard.ts):
 
-   `block_embed` is an atom (PM makes the whole node contenteditable=false), so
-   selecting its result-cell text never shows a caret — its scroll/fields opt in
-   for copy. `sql_block`/`source` are EDITABLE nodes (the query is text
-   content), so their result table must NOT opt in — a click there would caret;
-   result data is copied via the ⋮ menu (Copy as CSV/JSON) instead. Only the
-   query code (the real editable content) and text inputs opt in. PM's own
-   node-selection (mousedown on the frame) doesn't go through user-select. */
+   - Chrome is `user-select: none` AND its mousedown is preventDefault-ed
+     (guardChromeMousedown). The CSS alone is NOT enough: Chromium answers a
+     click on unselectable chrome by anchoring the caret at the nearest
+     editable text instead (the SQL code, or a paragraph outside the card).
+   - Content — result tables, row-card fields, the db table listing, the
+     query code — opts back into `user-select: text` below and is exempt from
+     the guard, so it behaves like a normal page: drag/double-click selects,
+     a plain click anchors invisibly inside the contenteditable=false region
+     (no blinking caret — carets only render in editable hosts).
+
+   The opt-in list below and each NodeView's guard `allow` selector are in
+   lock-step: an allowed region left `user-select: none` reintroduces the
+   nearest-editable caret. PM's own node-selection (mousedown on the embed's
+   header/footer frame) doesn't go through user-select and stays as is. */
 .editor-host .pm-block-embed,
 .editor-host .pm-sql-block,
 .editor-host .pm-source-card,
 .editor-host .pm-value-popover {
   user-select: none;
+  /* Some engines paint a blinking caret for a collapsed selection even in
+     contenteditable=false content (a plain click on a result cell), so hide
+     the native caret across the card; only surfaces that really take typed
+     input restore it below. Selection HIGHLIGHT paint is unaffected. */
+  caret-color: transparent;
 }
 .editor-host .pm-block-embed-scroll,
 .editor-host .pm-block-embed-fields,
+.editor-host .pm-block-embed-tables,
+.editor-host .pm-block-embed input,
+.editor-host .pm-sql-block-code,
+.editor-host .pm-sql-block-scroll,
+.editor-host .pm-sql-block-status,
+.editor-host .pm-source-card-code,
+.editor-host .pm-source-card input,
+.editor-host .pm-value-popover input {
+  user-select: text;
+}
 .editor-host .pm-block-embed input,
 .editor-host .pm-sql-block-code,
 .editor-host .pm-source-card-code,
 .editor-host .pm-source-card input,
 .editor-host .pm-value-popover input {
-  user-select: text;
+  caret-color: auto;
 }
 
 /* "Lite" YouTube embed: a thumbnail facade that swaps to the real iframe on

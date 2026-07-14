@@ -26,6 +26,7 @@ import type { SourceStore, SourceState } from "./sourceStore";
 import { codeFocusKey } from "./codeFocusPlugin";
 import { CmTextSurface } from "./cmTextSurface";
 import { type CmCore, type LanguageSupport } from "./cmCore";
+import { guardChromeMousedown } from "./caretGuard";
 
 /** Light normalization so a name is referenceable as `${{name.col}}`:
  *  lowercase, non-word chars → `_`. The Sources panel does the canonical
@@ -87,6 +88,11 @@ export class SourceBlockView implements NodeView {
     this.probeEl.className = "pm-source-card-probe";
     this.probeEl.setAttribute("contenteditable", "false");
     this.dom.appendChild(this.probeEl);
+
+    // Chrome clicks (header padding, sigils, the probe line) must be a true
+    // no-op — without this the browser drops a caret into the query code
+    // (see caretGuard.ts). Only the query surface stays clickable/editable.
+    guardChromeMousedown(this.dom, ".pm-source-card-code");
 
     void this.populateDatabases();
     this.subscribeProbe();

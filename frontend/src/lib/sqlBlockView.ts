@@ -35,6 +35,7 @@ import { rowsToCsv, rowsToJson } from "./tableExport";
 import { codeFocusKey } from "./codeFocusPlugin";
 import { CmTextSurface } from "./cmTextSurface";
 import { type CmCore, type LanguageSupport } from "./cmCore";
+import { guardChromeMousedown } from "./caretGuard";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 100];
 const DEFAULT_PAGE_SIZE = 10;
@@ -131,6 +132,13 @@ export class SqlBlockView implements NodeView {
     this.resultsEl.className = "pm-sql-block-results";
     this.resultsEl.setAttribute("contenteditable", "false");
     this.dom.appendChild(this.resultsEl);
+
+    // Chrome clicks (header/footer padding, the status line, menu padding)
+    // must be a true no-op — without this the browser drops a caret into the
+    // query code (see caretGuard.ts). The query surface stays editable and
+    // the results table stays natively selectable (both `user-select: text`
+    // in editor.css, in lock-step with this allow list).
+    guardChromeMousedown(this.dom, ".pm-sql-block-code, .pm-sql-block-scroll, .pm-sql-block-status");
 
     this.applyHidden();
     void this.populateDatabases();

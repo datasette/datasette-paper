@@ -28,6 +28,7 @@ import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView, NodeView } from "prosemirror-view";
 import { cellFor, type SourceStore, type SourceState } from "./sourceStore";
 import { formatValue, type ValueFormat, type ValueFormatKind } from "./formatValue";
+import { guardChromeMousedown } from "./caretGuard";
 
 // @feat value: NodeView — subscribe to SourceStore, render live value/states
 export class ValueView implements NodeView {
@@ -144,6 +145,10 @@ export class ValueView implements NodeView {
   private openPopover(): void {
     const pop = document.createElement("div");
     pop.className = "pm-value-popover";
+    // Padding/label clicks inside the popover must be a true no-op — without
+    // this the browser moves the doc selection to the nearest editable text
+    // outside the atom (see caretGuard.ts). Its controls stay interactive.
+    guardChromeMousedown(pop);
 
     // Source <select> — every known source, plus the current one if absent.
     const srcRow = this.field("Source");

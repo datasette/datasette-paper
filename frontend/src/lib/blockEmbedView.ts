@@ -48,6 +48,16 @@ import {
 import { embedRegistry, type PaperEmbedProvider } from "./embedRegistry";
 import { ensureProviderForRef, manifestKindForRef } from "./embedProviders";
 import type { DatasetteStatus } from "./datasetteResolver";
+import { guardChromeMousedown } from "./caretGuard";
+
+// The embed's "content" regions — the result table, the row card's fields,
+// and the database table listing. Clicks/drags/copies there behave like a
+// normal web page (native text selection, no PM node-selection); everything
+// else (header, footer, summary — the container chrome) still falls through
+// to PM so clicking the frame selects the node. Shared by stopEvent, the
+// mousedown guard, and the copy guard so the three can't drift.
+const CONTENT_SELECTOR =
+  ".pm-block-embed-scroll, .pm-block-embed-fields, .pm-block-embed-tables";
 
 const ROW_LIMIT_OPTIONS = [10, 25, 100];
 const DEFAULT_ROW_LIMIT = 10;
@@ -142,7 +152,7 @@ export class BlockEmbedView implements NodeView {
 
   private onContentMouseDown = (e: MouseEvent): void => {
     const target = e.target as HTMLElement | null;
-    if (!target?.closest(".pm-block-embed-scroll, .pm-block-embed-fields")) return;
+    if (!target?.closest(CONTENT_SELECTOR)) return;
     const pos = this.getPos();
     if (pos == null) return;
     const { state } = this.view;
@@ -176,7 +186,7 @@ export class BlockEmbedView implements NodeView {
     if (!sel || sel.isCollapsed || !sel.toString()) return;
     const inContent = (n: Node | null): boolean => {
       const el = n?.nodeType === Node.TEXT_NODE ? n.parentElement : (n as Element | null);
-      return !!el?.closest(".pm-block-embed-scroll, .pm-block-embed-fields");
+      return !!el?.closest(CONTENT_SELECTOR);
     };
     if (inContent(sel.anchorNode) && inContent(sel.focusNode)) e.stopPropagation();
   };
@@ -534,11 +544,13 @@ export class BlockEmbedView implements NodeView {
 
     const menu = document.createElement("div");
     menu.className = "pm-block-embed-menu";
-    // A non-editable island inside PM's contenteditable root — belt to the CSS
-    // `user-select: none` braces (which is what actually stops a click on the
-    // menu's label text from dropping a native caret; stopEvent separately
-    // blocks PM's node-selection).
+    // A non-editable island inside PM's contenteditable root; the mousedown
+    // guard makes clicks on the panel's labels/padding a true no-op (without
+    // it the browser moves the doc selection to the nearest editable text
+    // outside the card — see caretGuard.ts). stopEvent separately blocks PM's
+    // node-selection.
     menu.contentEditable = "false";
+    guardChromeMousedown(menu);
     // Cleared here so a render that produces no menu body (returns null below)
     // doesn't leave the badge pointing at a stale, detached menu element.
     this.overflowMenuEl = null;
@@ -1203,6 +1215,7 @@ export class BlockEmbedView implements NodeView {
     const menu = document.createElement("div");
     menu.className = "pm-block-embed-menu pm-block-embed-col-menu";
     menu.contentEditable = "false"; // non-editable island — see overflowMenu()
+    guardChromeMousedown(menu); // padding clicks are a no-op — see overflowMenu()
 
     // menuButton closes the menu before running the action; prepending the
     // icon keeps the button's textContent equal to the plain label.
@@ -1820,11 +1833,12 @@ export class BlockEmbedView implements NodeView {
     // selection (which flashes the embed selected while the dialog is open).
     if (target.closest(".pm-block-embed-menu")) return true;
     // Let the browser natively select (double-click a word, drag a range) and
-    // copy text out of the result table / row-card values — PM must not hijack
-    // those into a whole-node selection. Same region the mousedown/copy guards
-    // use. Chrome outside it (the header bar, footer) still falls through so
-    // clicking there selects the node.
-    if (target.closest(".pm-block-embed-scroll, .pm-block-embed-fields")) return true;
+    // copy text out of the embed's content — the result table, row-card
+    // values, and the database table listing. PM must not hijack those into a
+    // whole-node selection. Same region the mousedown/copy guards use. Chrome
+    // outside it (the header bar, footer) still falls through so clicking the
+    // container selects the node.
+    if (target.closest(CONTENT_SELECTOR)) return true;
     return false;
   }
 }
