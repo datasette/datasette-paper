@@ -1,4 +1,9 @@
 <script lang="ts" module>
+  import {
+    assignCategoryColors,
+    GRAPH_OVERFLOW_COLOR,
+  } from "./graphPalette";
+
   /**
    * Pure, DOM/d3-free degree helper. Counts incident edges per node id,
    * treating the graph as directionless (each edge bumps both endpoints).
@@ -126,6 +131,211 @@
     const years = Math.round(days / 365);
     return `${years} year${years === 1 ? "" : "s"} ago`;
   }
+
+  // --- Facets: colour-by, size-by, filters (T06 / T07) -----------------------
+
+  /** State-driven colour mode names; `state` keeps today's accent/muted look. */
+  export type ColorMode = "state" | "tag" | "kind";
+  /** Size-driven radius mode names. `degree` reproduces the legacy `radius()`. */
+  export type SizeMode = "degree" | "backlinks" | "recency";
+
+  // Radius envelope. `R_MAX` (24) matches the legacy degree cap
+  // `6 + min(deg,12)*1.5`, so every mode shares one size range.
+  const R_MIN = 6;
+  const R_MAX = 24;
+
+  type FacetNode = {
+    id: number;
+    state?: string;
+    kind?: string;
+    tags?: string[];
+    updated_at?: string;
+    title?: string;
+  };
+
+  /** The two states the doc list buckets as "muted" — hidden by default. */
+  export function isMutedState(state: string | undefined): boolean {
+    return state === "archived" || state === "trashed";
+  }
+
+  /**
+   * The single category a node belongs to under a colour mode — the seam
+   * shared by colouring, the legend, and the legend-as-filter so a swatch
+   * toggles exactly the nodes wearing its colour.
+   *
+   * v1 multi-tag simplification: a node with several tags is bucketed by its
+   * FIRST tag in sorted (lexicographic) order; segmented/pie nodes are a
+   * follow-up (design §7). An untagged (or state-/kind-less) node returns the
+   * empty string, which maps to the neutral overflow grey.
+   */
+  export function nodeCategory(node: FacetNode, mode: ColorMode): string {
+    if (mode === "state") return node.state ?? "";
+    if (mode === "kind") return node.kind ?? "";
+    const tags = node.tags ?? [];
+    if (tags.length === 0) return "";
+    return [...tags].sort()[0];
+  }
+
+  /**
+   * Fill colour for a node under a colour mode. `state` mode is unchanged from
+   * today — live nodes take the accent token, muted (archived/trashed) nodes
+   * the grey literal — so the caller can keep driving state-mode fills from CSS
+   * and only apply this inline for `tag`/`kind`. `tag`/`kind` look the node's
+   * category up in a precomputed `assignment` (see `assignCategoryColors`),
+   * falling back to the overflow grey for unknown/untagged categories.
+   */
+  export function colorFor(
+    node: FacetNode,
+    mode: ColorMode,
+    assignment: Map<string, string>,
+  ): string {
+    if (mode === "state") {
+      // Matches the CSS: `var(--pp-accent)` live, `#cbd2da` muted.
+      return isMutedState(node.state) ? "#cbd2da" : "var(--pp-accent)";
+    }
+    const key = nodeCategory(node, mode);
+    if (key === "") return GRAPH_OVERFLOW_COLOR;
+    return assignment.get(key) ?? GRAPH_OVERFLOW_COLOR;
+  }
+
+  function legendLabel(key: string, mode: ColorMode): string {
+    if (key !== "") return key;
+    return mode === "tag" ? "Untagged" : "—";
+  }
+
+  function legendColor(
+    key: string,
+    mode: ColorMode,
+    assignment: Map<string, string>,
+  ): string {
+    if (mode === "state") {
+      return isMutedState(key) ? "#cbd2da" : "var(--pp-accent)";
+    }
+    if (key === "") return GRAPH_OVERFLOW_COLOR;
+    return assignment.get(key) ?? GRAPH_OVERFLOW_COLOR;
+  }
+
+  /**
+   * Build the legend rows for a colour mode: one entry per distinct category
+   * with its swatch colour and node count, ordered by count desc then key.
+   * Drives both the swatch strip and the category→colour assignment consumed
+   * by `colorFor` (build it once, pass the same map to both, and colours stay
+   * in lock-step). Colours come from a stable sort of the category keys, so the
+   * display order (count desc) never perturbs which hue a category gets.
+   */
+  export function buildLegend(
+    nodes: FacetNode[],
+    mode: ColorMode,
+  ): { key: string; label: string; color: string; count: number }[] {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const counts = new Map<string, number>();
+    for (const n of nodes) {
+      const key = nodeCategory(n, mode);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    const assignment = assignCategoryColors(
+      [...counts.keys()].filter((k) => k !== ""),
+    );
+    const entries = [...counts.entries()].map(([key, count]) => ({
+      key,
+      label: legendLabel(key, mode),
+      color: legendColor(key, mode, assignment),
+      count,
+    }));
+    entries.sort(
+      (a, b) => b.count - a.count || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0),
+    );
+    return entries;
+  }
+
+  /** Precomputed inputs for `sizeScale`, built once per fetch. */
+  export type SizeStats = {
+    degree: Map<number, number>;
+    directed: Map<number, { out: number; in: number }>;
+    // Age envelope (ms since epoch) across all parseable `updated_at`s.
+    minTime: number;
+    maxTime: number;
+  };
+
+  /**
+   * Radius for a node under a size mode. Pure; all data-dependent inputs come
+   * through `stats` so the scale is stable frame-to-frame.
+   *
+   * - `degree`   — byte-identical to the legacy `radius()`:
+   *                `6 + min(undirectedDegree, 12) * 1.5`.
+   * - `backlinks`— same clamp on the directed `in` (backlink) count.
+   * - `recency`  — maps `updated_at` age onto `[R_MIN, R_MAX]`, newest largest;
+   *                a missing / unparseable date (or a single-timestamp graph
+   *                where the range collapses) falls back to `R_MIN`.
+   */
+  export function sizeScale(node: FacetNode, mode: SizeMode, stats: SizeStats): number {
+    if (mode === "degree") {
+      const d = stats.degree.get(node.id) ?? 0;
+      return 6 + Math.min(d, 12) * 1.5;
+    }
+    if (mode === "backlinks") {
+      const back = stats.directed.get(node.id)?.in ?? 0;
+      return 6 + Math.min(back, 12) * 1.5;
+    }
+    // recency
+    const t = node.updated_at ? Date.parse(node.updated_at) : NaN;
+    if (Number.isNaN(t) || !(stats.maxTime > stats.minTime)) return R_MIN;
+    const frac = (t - stats.minTime) / (stats.maxTime - stats.minTime);
+    return R_MIN + frac * (R_MAX - R_MIN);
+  }
+
+  /**
+   * Pure title-substring match for the search box. Empty query matches
+   * everything. Search DIMS non-matches (design §4 / T07) rather than dropping
+   * them, so this feeds a render class, not `applyFilters`.
+   */
+  export function matchesQuery(title: string | undefined, query: string): boolean {
+    const q = query.trim().toLowerCase();
+    if (q === "") return true;
+    return (title ?? "").toLowerCase().includes(q);
+  }
+
+  // Endpoint id whether the edge still holds raw ids or d3-resolved node refs.
+  function endpointId(x: number | { id: number }): number {
+    return typeof x === "number" ? x : x.id;
+  }
+
+  /** Options funnelled through `applyFilters`. */
+  export type FilterOpts = {
+    // Categories the viewer has toggled OFF (hidden) via the legend; a node
+    // whose `nodeCategory(mode)` is in this set drops. Empty = show all.
+    activeCategories: { has(key: string): boolean };
+    mode: ColorMode;
+    // Present for a single call-site funnel, but search DIMS (does not drop),
+    // so `query` deliberately never removes a node here.
+    query?: string;
+    showArchived: boolean;
+  };
+
+  /**
+   * The one filter funnel (T07): combine the legend's category exclusions and
+   * the show-archived toggle into the visible `{ nodes, edges }`. An edge drops
+   * when either endpoint dropped. `query` is accepted but intentionally inert —
+   * search is a dim, not a drop (see `matchesQuery`).
+   *
+   * Pure and endpoint-shape-agnostic (raw ids or d3 node refs), so it covers
+   * both the unit fixtures and the live, d3-mutated edge list.
+   */
+  export function applyFilters<
+    N extends FacetNode,
+    E extends { source: number | { id: number }; target: number | { id: number } },
+  >(nodes: N[], edges: E[], opts: FilterOpts): { nodes: N[]; edges: E[] } {
+    const visible = nodes.filter((n) => {
+      if (!opts.showArchived && isMutedState(n.state)) return false;
+      if (opts.activeCategories.has(nodeCategory(n, opts.mode))) return false;
+      return true;
+    });
+    const ids = new Set(visible.map((n) => n.id));
+    const visibleEdges = edges.filter(
+      (e) => ids.has(endpointId(e.source)) && ids.has(endpointId(e.target)),
+    );
+    return { nodes: visible, edges: visibleEdges };
+  }
 </script>
 
 <script lang="ts">
@@ -156,7 +366,9 @@
 
   // Type-only import: erased at build, so it does NOT pull d3-force onto the
   // top-level bundle — the runtime import stays dynamic inside build().
-  import type { Simulation, ForceCenter } from "d3-force";
+  import type { Simulation, ForceCenter, ForceLink } from "d3-force";
+  import { SvelteSet } from "svelte/reactivity";
+  import { TOOLBAR_ICONS } from "./icons";
 
   type GraphNode = {
     id: number;
@@ -200,6 +412,7 @@
 
   let loading = $state(true);
   let error = $state<string | null>(null);
+  // The VISIBLE (post-`applyFilters`) sets that actually render + feed the sim.
   let nodes = $state<SimNode[]>([]);
   let edges = $state<SimEdge[]>([]);
   let w = $state(DEFAULT_WIDTH);
@@ -209,10 +422,20 @@
   let selectedId = $state<number | null>(null);
   let transform = $state<Transform>({ k: 1, x: 0, y: 0 });
 
+  // --- Facet controls (T06 / T07) --------------------------------------------
+  let colorMode = $state<ColorMode>("state");
+  let sizeMode = $state<SizeMode>("degree");
+  let query = $state("");
+  let showArchived = $state(false);
+  // Categories toggled OFF (hidden) via the legend. SvelteSet so add/delete/has
+  // stay reactive without the plain-Set reactivity lint. Empty = show all.
+  let activeCategories = new SvelteSet<string>();
+
   let container: HTMLDivElement;
   // Hoisted so the resize handler + effect teardown can reach the live sim.
   let sim: Simulation<SimNode, undefined> | null = null;
   let centerForce: ForceCenter<SimNode> | null = null;
+  let linkForce: ForceLink<SimNode, SimEdge> | null = null;
   let animated = false;
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   let destroyed = false;
@@ -223,6 +446,28 @@
   let degree = new Map<number, number>();
   let dirDegree = new Map<number, { out: number; in: number }>();
   let rawEdges: GraphEdge[] = [];
+  // Size-by inputs, rebuilt once per fetch (degree/backlinks maps + age range).
+  let sizeStats: SizeStats = {
+    degree,
+    directed: dirDegree,
+    minTime: Infinity,
+    maxTime: -Infinity,
+  };
+  // The MASTER sets (all fetched nodes/edges, d3-mutated in place). `nodes`/
+  // `edges` are the currently-visible SUBSET; filtering never mutates these.
+  // `$state` so the legend derivation recomputes once build() assigns them.
+  let masterNodes = $state<SimNode[]>([]);
+  let masterEdges: SimEdge[] = [];
+  // The current visible subset fed to the sim (and mirrored into `nodes`/
+  // `edges` for render). Reassigned on every filter change; the sim ticks
+  // these same objects so positions carry over between filter states.
+  let simNodes: SimNode[] = [];
+  let simEdges: SimEdge[] = [];
+
+  // Legend rows + the category→colour assignment, derived over the MASTER set
+  // (not the filtered one) so colours never reshuffle as categories hide/show.
+  let legend = $derived(masterNodes.length ? buildLegend(masterNodes, colorMode) : []);
+  let colorAssignment = $derived(new Map(legend.map((e) => [e.key, e.color])));
 
   // Non-reactive gesture bookkeeping. Reassigning `nodes`/`transform` after a
   // mutation is what actually repaints; these just hold the in-flight gesture.
@@ -271,13 +516,66 @@
     return s;
   });
 
-  function radius(id: number): number {
-    const d = degree.get(id) ?? 0;
-    return 6 + Math.min(d, 12) * 1.5;
+  // Per-node radius under the active size mode (T07). Replaces the old
+  // `radius(id)` — `degree` mode is byte-identical to it.
+  function nodeRadius(n: SimNode): number {
+    return sizeScale(n, sizeMode, sizeStats);
   }
 
   function isMuted(state: string): boolean {
-    return state === "archived" || state === "trashed";
+    return isMutedState(state);
+  }
+
+  // Give any node without a finite position a starting point (viewport centre
+  // + jitter) so a newly-revealed node has coordinates before the sim runs —
+  // and so the reduced-motion / mocked path never renders NaN geometry.
+  // Already-positioned nodes are left put, which is what keeps a filter toggle
+  // feeling continuous.
+  function seedPositions(ns: SimNode[]): void {
+    for (const n of ns) {
+      if (!Number.isFinite(n.x) || !Number.isFinite(n.y)) {
+        n.x = w / 2 + (Math.random() - 0.5) * 40;
+        n.y = h / 2 + (Math.random() - 0.5) * 40;
+      }
+    }
+  }
+
+  function currentFilterOpts(): FilterOpts {
+    return { activeCategories, mode: colorMode, query, showArchived };
+  }
+
+  // Recompute the visible subset and re-point the sim at it. Node objects are
+  // shared with the master set, so survivors keep their x/y (continuous layout)
+  // while dropped nodes simply stop being simulated. Reheats gently rather than
+  // restarting from scratch. Sim reconfiguration is guarded on the real d3 API
+  // (`sim.nodes`) so the non-ticking test mock — which lacks it — just takes
+  // the reassigned arrays.
+  function refreshFilters(reheat = true): void {
+    if (masterNodes.length === 0) return;
+    const vis = applyFilters(masterNodes, masterEdges, currentFilterOpts());
+    // A filtered-out selection would keep dimming the survivors invisibly.
+    if (selectedId != null && !vis.nodes.some((n) => n.id === selectedId)) {
+      selectedId = null;
+    }
+    seedPositions(vis.nodes);
+    simNodes = vis.nodes;
+    simEdges = vis.edges;
+    nodes = simNodes;
+    edges = simEdges;
+    if (sim && typeof sim.nodes === "function") {
+      sim.nodes(simNodes);
+      linkForce?.links(simEdges);
+      if (reheat) {
+        if (animated) {
+          sim.alpha(0.3).restart();
+        } else {
+          for (let i = 0; i < TICKS; i++) sim.tick();
+          sim.stop();
+          nodes = [...simNodes];
+          edges = [...simEdges];
+        }
+      }
+    }
   }
 
   async function build(): Promise<void> {
@@ -296,8 +594,21 @@
       // Degrees from the RAW edges (ids stable) before d3 mutates copies.
       degree = computeDegree(rawNodes, rawEdges);
       dirDegree = directedDegree(rawNodes, rawEdges);
+      // Age envelope for recency sizing, over every parseable timestamp.
+      let minTime = Infinity;
+      let maxTime = -Infinity;
+      for (const n of rawNodes) {
+        const t = n.updated_at ? Date.parse(n.updated_at) : NaN;
+        if (!Number.isNaN(t)) {
+          if (t < minTime) minTime = t;
+          if (t > maxTime) maxTime = t;
+        }
+      }
+      sizeStats = { degree, directed: dirDegree, minTime, maxTime };
 
       if (rawNodes.length === 0) {
+        masterNodes = [];
+        masterEdges = [];
         nodes = [];
         edges = [];
         return;
@@ -305,8 +616,27 @@
 
       // d3 mutates the objects it's handed (adds x/y/vx/vy on nodes,
       // swaps source/target ids for node refs on links), so feed it copies.
-      const simNodes = rawNodes.map((n) => ({ ...n })) as SimNode[];
-      const simEdges = rawEdges.map((e) => ({ ...e })) as unknown as SimEdge[];
+      // These are the MASTER sets; the sim only ever gets the visible subset.
+      masterNodes = rawNodes.map((n) => ({ ...n })) as SimNode[];
+      masterEdges = rawEdges.map((e) => ({ ...e })) as unknown as SimEdge[];
+
+      // Resolve EVERY edge's source/target to its node ref up front — d3 only
+      // resolves the links it's handed (the visible subset), so an edge first
+      // revealed by a later filter toggle would otherwise still hold raw ids
+      // and render as NaN geometry. d3/mock link forces leave already-resolved
+      // refs untouched, so this is safe to do ahead of them.
+      const nodeById = new Map(masterNodes.map((n) => [n.id, n]));
+      for (const e of masterEdges) {
+        const s = e.source as unknown as number;
+        const t = e.target as unknown as number;
+        e.source = nodeById.get(s) ?? e.source;
+        e.target = nodeById.get(t) ?? e.target;
+      }
+
+      // Initial visible set (default: archived hidden, nothing legend-excluded).
+      const vis = applyFilters(masterNodes, masterEdges, currentFilterOpts());
+      simNodes = vis.nodes;
+      simEdges = vis.edges;
 
       const { forceSimulation, forceManyBody, forceLink, forceCenter, forceCollide } =
         await import("d3-force");
@@ -317,13 +647,11 @@
       );
 
       centerForce = forceCenter<SimNode>(w / 2, h / 2);
+      linkForce = forceLink<SimNode, SimEdge>(simEdges)
+        .id((d) => (d as SimNode).id)
+        .distance(80);
       sim = forceSimulation(simNodes)
-        .force(
-          "link",
-          forceLink(simEdges)
-            .id((d) => (d as SimNode).id)
-            .distance(80),
-        )
+        .force("link", linkForce)
         .force("charge", forceManyBody().strength(-220))
         .force("center", centerForce)
         .force("collide", forceCollide(24))
@@ -509,6 +837,48 @@
     edges = [...edges];
   }
 
+  // --- Facet handlers (T06 / T07) --------------------------------------------
+
+  // Categories are mode-specific, so a stale hide-filter from the previous mode
+  // would be meaningless — clear it whenever the colour mode changes.
+  function onColorModeChange(e: Event): void {
+    colorMode = (e.currentTarget as HTMLSelectElement).value as ColorMode;
+    activeCategories.clear();
+    refreshFilters();
+  }
+
+  function onSizeModeChange(e: Event): void {
+    // Size-by only changes radii (a pure render read of `sizeMode`); no
+    // membership change, so the layout is left where it is.
+    sizeMode = (e.currentTarget as HTMLSelectElement).value as SizeMode;
+  }
+
+  function onShowArchivedChange(e: Event): void {
+    showArchived = (e.currentTarget as HTMLInputElement).checked;
+    refreshFilters();
+  }
+
+  // Legend swatch = filter: toggle this category's membership in the hidden set.
+  function toggleCategory(key: string): void {
+    if (activeCategories.has(key)) activeCategories.delete(key);
+    else activeCategories.add(key);
+    refreshFilters();
+  }
+
+  function nodeFillStyle(n: SimNode): string | undefined {
+    // State mode is driven entirely by CSS (accent / muted / hover), so leave
+    // the fill unset; tag/kind paint an inline literal that wins over the CSS
+    // default (a presentation attribute would lose to the stylesheet).
+    if (colorMode === "state") return undefined;
+    return `fill: ${colorFor(n, colorMode, colorAssignment)}`;
+  }
+
+  // Dim on either the selection neighbourhood (T05) or a search miss (T07);
+  // both reuse the same `.dimmed` treatment.
+  function nodeDimmed(n: SimNode): boolean {
+    return isDimmed(n.id, selectedId, neighborIds) || !matchesQuery(n.title, query);
+  }
+
   // --- Zoom + pan (T04) ------------------------------------------------------
 
   function onWheel(e: WheelEvent): void {
@@ -571,7 +941,7 @@
     const dx = e.target.x - e.source.x;
     const dy = e.target.y - e.source.y;
     const len = Math.hypot(dx, dy) || 1;
-    const off = radius(e.target.id) + 6;
+    const off = nodeRadius(e.target) + 6;
     return { x: e.target.x - (dx / len) * off, y: e.target.y - (dy / len) * off };
   }
 
@@ -613,13 +983,78 @@
 </script>
 
 <div class="link-graph-root">
-  <div class="link-graph" bind:this={container}>
+  <!-- Gate the toolbar/legend on the MASTER set: filters can empty the visible
+       set, and the controls to undo that must not vanish with it. -->
+  {#if !loading && !error && masterNodes.length > 0}
+    <div class="link-graph-toolbar">
+      <label class="link-graph-field">
+        <span>Color by</span>
+        <select value={colorMode} onchange={onColorModeChange} aria-label="Color nodes by">
+          <option value="state">State</option>
+          <option value="tag">Tag</option>
+          <option value="kind">Kind</option>
+        </select>
+      </label>
+      <label class="link-graph-field">
+        <span>Size by</span>
+        <select value={sizeMode} onchange={onSizeModeChange} aria-label="Size nodes by">
+          <option value="degree">Degree</option>
+          <option value="backlinks">Backlinks</option>
+          <option value="recency">Recency</option>
+        </select>
+      </label>
+      <span class="link-graph-search">
+        <svg class="link-graph-search-icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+          <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+          {@html TOOLBAR_ICONS.funnel}
+        </svg>
+        <input
+          type="search"
+          placeholder="Search titles…"
+          bind:value={query}
+          aria-label="Search paper titles"
+        />
+      </span>
+      <label class="link-graph-check">
+        <input type="checkbox" checked={showArchived} onchange={onShowArchivedChange} />
+        Show archived
+      </label>
+      <button
+        type="button"
+        class="link-graph-reheat"
+        onclick={reheat}
+        title="Release pinned nodes and re-run the layout">Reheat</button
+      >
+    </div>
+    {#if legend.length > 0}
+      <div class="link-graph-legend" role="group" aria-label="Legend and category filter">
+        {#each legend as item (item.key)}
+          <button
+            type="button"
+            class="link-graph-swatch"
+            class:off={activeCategories.has(item.key)}
+            aria-pressed={!activeCategories.has(item.key)}
+            onclick={() => toggleCategory(item.key)}
+            title={activeCategories.has(item.key) ? `Show ${item.label}` : `Hide ${item.label}`}
+          >
+            <span class="link-graph-swatch-dot" style="background: {item.color}"></span>
+            <span class="link-graph-swatch-label">{item.label}</span>
+            <span class="link-graph-swatch-count">{item.count}</span>
+          </button>
+        {/each}
+      </div>
+    {/if}
+  {/if}
+  <div class="link-graph-body">
+    <div class="link-graph" bind:this={container}>
     {#if loading}
       <div class="link-graph-state">Loading…</div>
     {:else if error}
       <div class="link-graph-state link-graph-error">{error}</div>
     {:else if nodes.length === 0}
-      <div class="link-graph-state link-graph-empty">No links yet.</div>
+      <div class="link-graph-state link-graph-empty">
+        {masterNodes.length === 0 ? "No links yet." : "Every paper is filtered out."}
+      </div>
     {:else}
       <svg
         class="link-graph-svg"
@@ -678,7 +1113,7 @@
                 href="/-/paper/doc/{n.id}"
                 class:muted={isMuted(n.state)}
                 class:selected={n.id === selectedId}
-                class:dimmed={isDimmed(n.id, selectedId, neighborIds)}
+                class:dimmed={nodeDimmed(n)}
                 onpointerdown={(e) => onNodePointerDown(e, n)}
                 onpointermove={(e) => onNodePointerMove(e, n)}
                 onpointerup={(e) => onNodePointerUp(e, n)}
@@ -686,12 +1121,12 @@
                 ondblclick={(e) => onNodeDblClick(e, n)}
               >
                 {#if n.pinned}
-                  <circle class="pin-ring" cx={n.x} cy={n.y} r={radius(n.id) + 3} />
+                  <circle class="pin-ring" cx={n.x} cy={n.y} r={nodeRadius(n) + 3} />
                 {/if}
-                <circle cx={n.x} cy={n.y} r={radius(n.id)}>
+                <circle cx={n.x} cy={n.y} r={nodeRadius(n)} style={nodeFillStyle(n)}>
                   <title>{n.title}</title>
                 </circle>
-                <text x={n.x} y={n.y - radius(n.id) - 4} text-anchor="middle">
+                <text x={n.x} y={n.y - nodeRadius(n) - 4} text-anchor="middle">
                   {n.title}
                 </text>
               </a>
@@ -699,12 +1134,6 @@
           </g>
         </g>
       </svg>
-
-      <div class="link-graph-controls">
-        <button type="button" onclick={reheat} title="Release pinned nodes and re-run the layout"
-          >Reheat</button
-        >
-      </div>
 
       <div class="link-graph-zoom" role="group" aria-label="Zoom">
         <button type="button" aria-label="Zoom in" onclick={() => zoomAboutCenter(1.2)}>+</button>
@@ -714,9 +1143,9 @@
         <button type="button" onclick={resetView}>Reset</button>
       </div>
     {/if}
-  </div>
+    </div>
 
-  {#if !loading && !error && nodes.length > 0}
+    {#if !loading && !error && nodes.length > 0}
     <aside class="link-graph-panel" aria-label="Selected paper">
       {#if selectedNode}
         <h3 class="link-graph-panel-title">{selectedNode.title}</h3>
@@ -758,15 +1187,21 @@
         <p class="link-graph-panel-empty">Select a node to see its details.</p>
       {/if}
     </aside>
-  {/if}
+    {/if}
+  </div>
 </div>
 
 <style>
   .link-graph-root {
     display: flex;
+    flex-direction: column;
+    gap: 10px;
+    font-family: inherit;
+  }
+  .link-graph-body {
+    display: flex;
     gap: 12px;
     align-items: stretch;
-    font-family: inherit;
   }
   .link-graph {
     position: relative;
@@ -774,6 +1209,107 @@
     min-width: 0;
     min-height: 360px;
     touch-action: none;
+  }
+  /* --- Toolbar + legend (T06 / T07) chrome: all themed via --pp-* tokens
+       so it reads on both the light and dark canvas; the Okabe–Ito fills sit
+       only on the SVG nodes/swatch dots. --- */
+  .link-graph-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    font-size: 13px;
+    color: var(--pp-fg);
+  }
+  .link-graph-field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .link-graph-field > span {
+    color: var(--pp-fg-subtle);
+  }
+  .link-graph-field select,
+  .link-graph-search input {
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
+    color: var(--pp-fg);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .link-graph-search {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+  }
+  .link-graph-search-icon {
+    position: absolute;
+    left: 7px;
+    fill: var(--pp-fg-subtle);
+    pointer-events: none;
+  }
+  .link-graph-search input {
+    padding-left: 26px;
+  }
+  .link-graph-check {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--pp-fg);
+  }
+  .link-graph-reheat {
+    margin-left: auto;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-bg);
+    color: var(--pp-fg);
+    border-radius: 4px;
+    padding: 3px 10px;
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .link-graph-reheat:hover {
+    background: var(--pp-surface-2);
+  }
+  .link-graph-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .link-graph-swatch {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 1px solid var(--pp-border);
+    background: var(--pp-surface);
+    color: var(--pp-fg);
+    border-radius: 12px;
+    padding: 2px 9px;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .link-graph-swatch:hover {
+    background: var(--pp-surface-2);
+  }
+  /* Toggled-off category: greyed + struck so the hidden state reads clearly. */
+  .link-graph-swatch.off {
+    opacity: 0.45;
+  }
+  .link-graph-swatch.off .link-graph-swatch-label {
+    text-decoration: line-through;
+  }
+  .link-graph-swatch-dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 3px;
+    flex: 0 0 auto;
+  }
+  .link-graph-swatch-count {
+    color: var(--pp-fg-subtle);
+    font-variant-numeric: tabular-nums;
   }
   .link-graph-panel {
     flex: 0 0 200px;
@@ -857,11 +1393,6 @@
     display: block;
     touch-action: none;
   }
-  .link-graph-controls {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-  }
   .link-graph-zoom {
     position: absolute;
     bottom: 8px;
@@ -869,7 +1400,6 @@
     display: flex;
     gap: 4px;
   }
-  .link-graph-controls button,
   .link-graph-zoom button {
     border: 1px solid var(--pp-border);
     background: var(--pp-bg);
@@ -880,7 +1410,6 @@
     line-height: 1.4;
     cursor: pointer;
   }
-  .link-graph-controls button:hover,
   .link-graph-zoom button:hover {
     background: var(--pp-surface-2);
   }
