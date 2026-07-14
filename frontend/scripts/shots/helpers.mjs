@@ -29,7 +29,24 @@ export async function freezeVolatile(page) {
     // <profile-papers> section: per-row relative edit/create time ("just now",
     // "5m ago", …), volatile because it's computed from now at capture.
     set(".paper-profile-time", "2 hours ago");
+    // Link-graph selection panel: the "Updated" relative time. The <dl> rows
+    // are Kind / State / Updated / Links in source order (LinkGraph.svelte).
+    set(".link-graph-meta div:nth-child(3) dd", "2 hours ago");
   });
+}
+
+// Replace Math.random with a fixed-seed LCG (numerical-recipes constants) so
+// code that scatters with randomness — LinkGraph's seedPositions jitter —
+// lands identically on every run. Call BEFORE the randomness runs (the graph
+// shots call it before opening the modal, which is what mounts <LinkGraph>).
+export async function stubRandom(page, seed = 42) {
+  await page.evaluate((s0) => {
+    let s = s0 >>> 0;
+    Math.random = () => {
+      s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+      return s / 4294967296;
+    };
+  }, seed);
 }
 
 export async function gotoEditor(page, id) {

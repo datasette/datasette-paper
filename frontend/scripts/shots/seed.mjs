@@ -238,6 +238,29 @@ rotation keeps rediscovering the hard way.
 > through the five critical flows before declaring victory.
 `;
 
+// Link-graph cluster (the link-graph / link-graph-ego shots): three docs whose
+// bodies carry `[[<id>]]` wiki links to the seeded docs above. The markdown
+// parser splits those into real `paper_link` atoms and the create API reindexes
+// links synchronously, so the graph endpoint sees the edges without driving the
+// editor. Built inside `seed()` — the templates need the target docs' ids.
+const teamWiki = (richId, roadmapId, designId, budgetId) => `# Team wiki
+
+The hub for everything the product team ships. Start with [[${richId}]] for
+this quarter's plan, then dig into [[${roadmapId}]] and [[${designId}]].
+
+Budgets and vendor spend live in [[${budgetId}]].
+`;
+const onboarding = (teamWikiId, designId) => `# Onboarding guide
+
+New teammates start at [[${teamWikiId}]]. Skim [[${designId}]] before your
+first review.
+`;
+const retro = (richId, roadmapId) => `# Retro — June
+
+What went well: [[${richId}]] landed on time. Carry-overs move to
+[[${roadmapId}]]; see [[${richId}]] for the revised checklist.
+`;
+
 export async function seed(ctx) {
   // Create as a specific author by sending that actor's signed cookie on the
   // request — varies the index "Created by" column across alice/bob/carol.
@@ -320,6 +343,20 @@ export async function seed(ctx) {
   const tocId = await create("Engineering handbook", ACTOR, TOC);
   const codeBlockId = await create("Language support", ACTOR, CODE_BLOCK);
   const calloutsId = await create("Deploy runbook", ACTOR, CALLOUTS);
+  // Link-graph cluster: docs whose `[[<id>]]` links give the graph shots real
+  // edges (double-linking richId in the retro gives one thicker ×2 edge).
+  // Owned by ACTOR (not bob — the profile-papers shot lists bob's docs) and
+  // tagged from the EXISTING vocabulary only, so the index filter bar gains no
+  // new chips; the tags feed the graph's "Color by: Tag" legend.
+  const teamWikiId = await create(
+    "Team wiki",
+    ACTOR,
+    teamWiki(richId, roadmapId, designId, budgetId),
+  );
+  await create("Onboarding guide", ACTOR, onboarding(teamWikiId, designId));
+  const retroId = await create("Retro — June", ACTOR, retro(richId, roadmapId));
+  await tagDoc(teamWikiId, ["q3"], ACTOR);
+  await tagDoc(retroId, ["roadmap"], ACTOR);
   return {
     // The actor whose user-profiles profile the profile-papers shot visits.
     profileActor: "bob",
@@ -344,5 +381,6 @@ export async function seed(ctx) {
     tocId,
     codeBlockId,
     calloutsId,
+    teamWikiId,
   };
 }
