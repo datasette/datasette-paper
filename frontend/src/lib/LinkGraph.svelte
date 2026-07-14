@@ -310,6 +310,11 @@
     // so `query` deliberately never removes a node here.
     query?: string;
     showArchived: boolean;
+    // The ego focus id (T08): exempt from every drop below. The doc-centred
+    // view must always render its own focus node, even when it's archived and
+    // show-archived is off — otherwise "View in graph" from an archived doc
+    // would open an empty modal.
+    exemptId?: number;
   };
 
   /**
@@ -326,6 +331,7 @@
     E extends { source: number | { id: number }; target: number | { id: number } },
   >(nodes: N[], edges: E[], opts: FilterOpts): { nodes: N[]; edges: E[] } {
     const visible = nodes.filter((n) => {
+      if (opts.exemptId != null && n.id === opts.exemptId) return true;
       if (!opts.showArchived && isMutedState(n.state)) return false;
       if (opts.activeCategories.has(nodeCategory(n, opts.mode))) return false;
       return true;
@@ -335,6 +341,71 @@
       (e) => ids.has(endpointId(e.source)) && ids.has(endpointId(e.target)),
     );
     return { nodes: visible, edges: visibleEdges };
+  }
+
+  /**
+   * @feat link-graph: doc-centred ego slice — undirected BFS from `focusId` out
+   * to `depth` hops; an edge is kept iff BOTH endpoints are kept.
+   *
+   * Pure and endpoint-shape-agnostic (raw ids or d3-resolved node refs), so it
+   * slots into the same funnel as `applyFilters` — the component runs it FIRST
+   * (narrow to the neighbourhood) then hands the result to `applyFilters`
+   * (legend/archived), so every existing facet keeps working in ego mode.
+   *
+   * If `focusId` isn't in `nodes`, returns `{nodes:[], edges:[]}`: a genuinely
+   * absent focus has nothing to show. The zero-links case is handled server-side
+   * — the `?focus=` echo seeds the fetched set with the lone focus node, so by
+   * the time this runs the focus is present and returns as a single node.
+   */
+  export function egoSubgraph<
+    N extends { id: number },
+    E extends { source: number | { id: number }; target: number | { id: number } },
+  >(nodes: N[], edges: E[], focusId: number, depth: number): { nodes: N[]; edges: E[] } {
+    const present = new Set(nodes.map((n) => n.id));
+    if (!present.has(focusId)) return { nodes: [], edges: [] };
+
+    // Undirected adjacency, tolerant of both edge endpoint shapes. Plain
+    // Map/Sets — pure locals, never stored in reactive state.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const adj = new Map<number, Set<number>>();
+    const neighbours = (id: number): Set<number> => {
+      let s = adj.get(id);
+      if (!s) {
+        s = new Set<number>();
+        adj.set(id, s);
+      }
+      return s;
+    };
+    for (const e of edges) {
+      const s = endpointId(e.source);
+      const t = endpointId(e.target);
+      neighbours(s).add(t);
+      neighbours(t).add(s);
+    }
+
+    // BFS out to `depth` hops from the focus.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const kept = new Set<number>([focusId]);
+    let frontier = [focusId];
+    for (let d = 0; d < depth; d++) {
+      const next: number[] = [];
+      for (const id of frontier) {
+        for (const nb of adj.get(id) ?? []) {
+          if (!kept.has(nb)) {
+            kept.add(nb);
+            next.push(nb);
+          }
+        }
+      }
+      frontier = next;
+    }
+
+    return {
+      nodes: nodes.filter((n) => kept.has(n.id)),
+      edges: edges.filter(
+        (e) => kept.has(endpointId(e.source)) && kept.has(endpointId(e.target)),
+      ),
+    };
   }
 </script>
 
@@ -369,6 +440,17 @@
   import type { Simulation, ForceCenter, ForceLink } from "d3-force";
   import { SvelteSet } from "svelte/reactivity";
   import { TOOLBAR_ICONS } from "./icons";
+
+  // `focusId` switches the component into the doc-centred EGO view: the fetch
+  // adds `?focus=` (so a zero-link focus doc is echoed by the backend), the
+  // graph is sliced to `focusId`'s neighbourhood via `egoSubgraph`, and the
+  // focus node is pinned to the viewport centre + ringed. Absent (index modal)
+  // → the full graph, unchanged.
+  let { focusId }: { focusId?: number } = $props();
+
+  // Ego neighbourhood radius (hops), 1–3, shown only in focus mode. Re-slices
+  // client-side on change — no refetch.
+  let depth = $state(1);
 
   type GraphNode = {
     id: number;
@@ -464,9 +546,15 @@
   let simNodes: SimNode[] = [];
   let simEdges: SimEdge[] = [];
 
-  // Legend rows + the category→colour assignment, derived over the MASTER set
-  // (not the filtered one) so colours never reshuffle as categories hide/show.
-  let legend = $derived(masterNodes.length ? buildLegend(masterNodes, colorMode) : []);
+  // The set the legend + colour assignment derive from: the MASTER set in the
+  // index view, or the ego neighbourhood (focus + depth) in the doc-centred
+  // view — so the legend lists only categories actually present in the slice.
+  // NOT the post-filter set, so colours never reshuffle as categories hide/show.
+  let legendBase = $derived.by(() => {
+    if (focusId == null) return masterNodes;
+    return egoSubgraph(masterNodes, masterEdges, focusId, depth).nodes;
+  });
+  let legend = $derived(legendBase.length ? buildLegend(legendBase, colorMode) : []);
   let colorAssignment = $derived(new Map(legend.map((e) => [e.key, e.color])));
 
   // Non-reactive gesture bookkeeping. Reassigning `nodes`/`transform` after a
@@ -541,7 +629,30 @@
   }
 
   function currentFilterOpts(): FilterOpts {
-    return { activeCategories, mode: colorMode, query, showArchived };
+    return { activeCategories, mode: colorMode, query, showArchived, exemptId: focusId };
+  }
+
+  // The visible subset: in the index view the whole (filtered) master set; in
+  // the doc-centred view the ego slice FIRST (egoSubgraph), then the same
+  // legend/archived funnel — so facets keep working inside the neighbourhood.
+  function computeVisible(): { nodes: SimNode[]; edges: SimEdge[] } {
+    const opts = currentFilterOpts();
+    if (focusId == null) return applyFilters(masterNodes, masterEdges, opts);
+    const ego = egoSubgraph(masterNodes, masterEdges, focusId, depth);
+    return applyFilters(ego.nodes, ego.edges, opts);
+  }
+
+  // Pin the ego focus node to the viewport centre. Sets fx/fy (so the live sim
+  // holds it there) AND x/y (so the reduced-motion / mocked static path — which
+  // never ticks — renders it centred immediately). No-op outside focus mode.
+  function pinFocus(): void {
+    if (focusId == null) return;
+    const f = simNodes.find((n) => n.id === focusId);
+    if (!f) return;
+    f.fx = w / 2;
+    f.fy = h / 2;
+    f.x = w / 2;
+    f.y = h / 2;
   }
 
   // Recompute the visible subset and re-point the sim at it. Node objects are
@@ -552,7 +663,7 @@
   // the reassigned arrays.
   function refreshFilters(reheat = true): void {
     if (masterNodes.length === 0) return;
-    const vis = applyFilters(masterNodes, masterEdges, currentFilterOpts());
+    const vis = computeVisible();
     // A filtered-out selection would keep dimming the survivors invisibly.
     if (selectedId != null && !vis.nodes.some((n) => n.id === selectedId)) {
       selectedId = null;
@@ -560,6 +671,7 @@
     seedPositions(vis.nodes);
     simNodes = vis.nodes;
     simEdges = vis.edges;
+    pinFocus();
     nodes = simNodes;
     edges = simEdges;
     if (sim && typeof sim.nodes === "function") {
@@ -571,6 +683,7 @@
         } else {
           for (let i = 0; i < TICKS; i++) sim.tick();
           sim.stop();
+          pinFocus();
           nodes = [...simNodes];
           edges = [...simEdges];
         }
@@ -582,7 +695,13 @@
     loading = true;
     error = null;
     try {
-      const resp = await fetch("/-/paper/api/links/graph");
+      // Focus mode adds `?focus=` so the backend echoes the focus doc even when
+      // it has no links (otherwise a link-less doc would open an empty modal).
+      const url =
+        focusId == null
+          ? "/-/paper/api/links/graph"
+          : `/-/paper/api/links/graph?focus=${focusId}`;
+      const resp = await fetch(url);
       if (!resp.ok) throw new Error("Failed to load graph");
       const data = (await resp.json()) as {
         nodes: GraphNode[];
@@ -633,10 +752,14 @@
         e.target = nodeById.get(t) ?? e.target;
       }
 
-      // Initial visible set (default: archived hidden, nothing legend-excluded).
-      const vis = applyFilters(masterNodes, masterEdges, currentFilterOpts());
+      // Initial visible set: the full (filtered) graph, or the ego slice in
+      // focus mode. seeded + focus-pinned before the sim so the first paint is
+      // centred.
+      const vis = computeVisible();
       simNodes = vis.nodes;
       simEdges = vis.edges;
+      seedPositions(simNodes);
+      pinFocus();
 
       const { forceSimulation, forceManyBody, forceLink, forceCenter, forceCollide } =
         await import("d3-force");
@@ -670,12 +793,16 @@
         });
         // Paint the initial layout now — restart()'s first tick lands a frame
         // later, and `loading` flips false before it, flashing the empty state.
+        pinFocus();
         nodes = [...simNodes];
         edges = [...simEdges];
         sim.alpha(1).restart();
       } else {
         for (let i = 0; i < TICKS; i++) sim.tick();
         sim.stop();
+        // Re-pin AFTER the settle: the static path never ticks again, and the
+        // test's mock sim ignores fx/fy, so this fixes the focus at centre.
+        pinFocus();
         nodes = simNodes;
         edges = simEdges;
       }
@@ -706,11 +833,23 @@
     if (centerForce && typeof centerForce.x === "function") {
       centerForce.x(w / 2).y(h / 2);
     }
-    if (!animated || !sim) return;
+    // Re-anchor the ego focus to the new centre.
+    pinFocus();
+    if (!animated || !sim) {
+      // Static path never ticks, so repaint the moved focus node directly.
+      if (focusId != null) nodes = [...nodes];
+      return;
+    }
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       sim?.alpha(0.3).restart();
     }, 150);
+  }
+
+  // Ego depth changed: re-slice the neighbourhood client-side (no refetch).
+  function onDepthChange(e: Event): void {
+    depth = Number((e.currentTarget as HTMLSelectElement).value);
+    refreshFilters();
   }
 
   // Viewport-local pixel for a pointer/wheel event, then through the current
@@ -987,6 +1126,21 @@
        set, and the controls to undo that must not vanish with it. -->
   {#if !loading && !error && masterNodes.length > 0}
     <div class="link-graph-toolbar">
+      {#if focusId != null}
+        <!-- Ego neighbourhood radius — only meaningful in the doc-centred view. -->
+        <label class="link-graph-field">
+          <span>Depth</span>
+          <select
+            value={String(depth)}
+            onchange={onDepthChange}
+            aria-label="Neighbourhood depth"
+          >
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+      {/if}
       <label class="link-graph-field">
         <span>Color by</span>
         <select value={colorMode} onchange={onColorModeChange} aria-label="Color nodes by">
@@ -1113,6 +1267,7 @@
                 href="/-/paper/doc/{n.id}"
                 class:muted={isMuted(n.state)}
                 class:selected={n.id === selectedId}
+                class:focus={n.id === focusId}
                 class:dimmed={nodeDimmed(n)}
                 onpointerdown={(e) => onNodePointerDown(e, n)}
                 onpointermove={(e) => onNodePointerMove(e, n)}
@@ -1120,6 +1275,11 @@
                 onclick={(e) => onNodeClick(e, n)}
                 ondblclick={(e) => onNodeDblClick(e, n)}
               >
+                {#if n.id === focusId}
+                  <!-- Ego focus emphasis: a wider ring, distinct from the pin
+                       (warm) and selection (blue) rings. -->
+                  <circle class="focus-ring" cx={n.x} cy={n.y} r={nodeRadius(n) + 6} />
+                {/if}
                 {#if n.pinned}
                   <circle class="pin-ring" cx={n.x} cy={n.y} r={nodeRadius(n) + 3} />
                 {/if}
@@ -1459,6 +1619,19 @@
     /* deliberate literal: pin-state ring, a warm accent distinct from the
        blue selection stroke so pinned + selected read differently. */
     stroke: #d08214;
+    stroke-width: 2;
+  }
+  .link-graph-nodes circle.focus-ring {
+    fill: none;
+    /* deliberate literal: ego-focus ring — a teal-green, distinct from the pin
+       (warm amber) and selection (blue) rings, so the doc-centred focus node is
+       unmistakable even when it's also selected or pinned. */
+    stroke: #1b9e77;
+    stroke-width: 3;
+  }
+  .link-graph-nodes a.focus circle {
+    /* Fatten the focus node's own outline to reinforce the ring. */
+    stroke: #1b9e77;
     stroke-width: 2;
   }
   .link-graph-nodes text {

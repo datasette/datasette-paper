@@ -83,6 +83,7 @@ import LinkGraph, {
   buildLegend,
   sizeScale,
   applyFilters,
+  egoSubgraph,
   nodeCategory,
   matchesQuery,
   type ColorMode,
@@ -618,6 +619,144 @@ describe("applyFilters", () => {
       showArchived: true,
     });
     expect(vn.map((n) => n.id)).toEqual([1, 2, 3]);
+  });
+});
+
+describe("egoSubgraph", () => {
+  // Chain 1—2—3—4 plus an unrelated pair 5—6, undirected.
+  const nodes = [{ id: 1 }, { id: 2 }, { id: 3 }, { id: 4 }, { id: 5 }, { id: 6 }];
+  const edges = [
+    { source: 1, target: 2, occurrences: 1 },
+    { source: 2, target: 3, occurrences: 1 },
+    { source: 3, target: 4, occurrences: 1 },
+    { source: 5, target: 6, occurrences: 1 },
+  ];
+
+  it("depth 1 keeps the focus + direct neighbours + edges between kept nodes", () => {
+    const { nodes: vn, edges: ve } = egoSubgraph(nodes, edges, 2, 1);
+    // 2's neighbours are 1 and 3.
+    expect(vn.map((n) => n.id).sort()).toEqual([1, 2, 3]);
+    // Only edges with both endpoints kept: 1—2 and 2—3 (not 3—4).
+    expect(ve).toHaveLength(2);
+    expect(ve.some((e) => e.source === 3 && e.target === 4)).toBe(false);
+  });
+
+  it("depth 2 expands one more hop", () => {
+    const { nodes: vn } = egoSubgraph(nodes, edges, 1, 2);
+    // 1 → {2} at hop 1 → {3} at hop 2.
+    expect(vn.map((n) => n.id).sort()).toEqual([1, 2, 3]);
+    // Deeper still reaches 4.
+    expect(egoSubgraph(nodes, edges, 1, 3).nodes.map((n) => n.id).sort()).toEqual([
+      1, 2, 3, 4,
+    ]);
+  });
+
+  it("is undirected — BFS crosses an edge regardless of source/target order", () => {
+    // Focus on 3: reaches 2 (via 2→3, focus is the target) and 4 (via 3→4).
+    const { nodes: vn } = egoSubgraph(nodes, edges, 3, 1);
+    expect(vn.map((n) => n.id).sort()).toEqual([2, 3, 4]);
+  });
+
+  it("returns empty when the focus id is absent (server echo handles zero-links)", () => {
+    expect(egoSubgraph(nodes, edges, 999, 2)).toEqual({ nodes: [], edges: [] });
+  });
+
+  it("returns just the focus for an isolated focus node (no incident edges)", () => {
+    const isolated = [...nodes, { id: 7 }];
+    const { nodes: vn, edges: ve } = egoSubgraph(isolated, edges, 7, 3);
+    expect(vn.map((n) => n.id)).toEqual([7]);
+    expect(ve).toHaveLength(0);
+  });
+
+  it("resolves endpoints whether edges hold ids or d3 node refs", () => {
+    const refEdges = [{ source: nodes[0], target: nodes[1], occurrences: 1 }];
+    const { nodes: vn } = egoSubgraph(nodes, refEdges, 1, 1);
+    expect(vn.map((n) => n.id).sort()).toEqual([1, 2]);
+  });
+});
+
+describe("LinkGraph ego (doc-centred) view", () => {
+  async function waitForGraph(): Promise<void> {
+    await vi.waitFor(() => expect(screen.queryByText("Loading…")).toBeNull());
+  }
+
+  // Chain 1—2—3—4 so depth slicing is observable from a focus at node 1.
+  const chain = {
+    nodes: [
+      { id: 1, title: "Focus", state: "active", kind: "note", updated_at: "2020-01-01T00:00:00Z", tags: [] },
+      { id: 2, title: "Near", state: "active", kind: "note", updated_at: "2020-01-01T00:00:00Z", tags: [] },
+      { id: 3, title: "Mid", state: "active", kind: "note", updated_at: "2020-01-01T00:00:00Z", tags: [] },
+      { id: 4, title: "Far", state: "active", kind: "note", updated_at: "2020-01-01T00:00:00Z", tags: [] },
+    ],
+    edges: [
+      { source: 1, target: 2, occurrences: 1 },
+      { source: 2, target: 3, occurrences: 1 },
+      { source: 3, target: 4, occurrences: 1 },
+    ],
+  };
+
+  const anchorIds = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll(".link-graph-nodes a"))
+      .map((a) => a.getAttribute("href"))
+      .sort();
+
+  it("renders only the depth-1 neighbourhood, focus centred + emphasized", async () => {
+    graphPayload = chain as unknown as Graph;
+    const { container } = render(LinkGraph, { props: { focusId: 1 } });
+    await waitForGraph();
+
+    // Only focus (1) + its direct neighbour (2) render at depth 1.
+    await vi.waitFor(() => expect(anchorIds(container)).toEqual(["/-/paper/doc/1", "/-/paper/doc/2"]));
+
+    // The focus anchor is emphasized (own class + a distinct ring circle).
+    const focusAnchor = Array.from(container.querySelectorAll(".link-graph-nodes a")).find(
+      (a) => a.getAttribute("href") === "/-/paper/doc/1",
+    )!;
+    expect(focusAnchor.classList.contains("focus")).toBe(true);
+    expect(focusAnchor.querySelector("circle.focus-ring")).toBeTruthy();
+
+    // Pinned to the viewport centre (default jsdom viewport 640×480).
+    const mainCircle = Array.from(focusAnchor.querySelectorAll("circle")).find(
+      (c) => !c.classList.contains("focus-ring") && !c.classList.contains("pin-ring"),
+    )!;
+    expect(mainCircle.getAttribute("cx")).toBe("320");
+    expect(mainCircle.getAttribute("cy")).toBe("240");
+  });
+
+  it("increasing depth reveals more of the neighbourhood", async () => {
+    graphPayload = chain as unknown as Graph;
+    const { container } = render(LinkGraph, { props: { focusId: 1 } });
+    await waitForGraph();
+    await vi.waitFor(() => expect(anchorIds(container).length).toBe(2));
+
+    const depthSelect = screen.getByLabelText("Neighbourhood depth") as HTMLSelectElement;
+    await fireEvent.change(depthSelect, { target: { value: "3" } });
+
+    // Depth 3 from node 1 reaches the whole chain.
+    await vi.waitFor(() =>
+      expect(anchorIds(container)).toEqual([
+        "/-/paper/doc/1",
+        "/-/paper/doc/2",
+        "/-/paper/doc/3",
+        "/-/paper/doc/4",
+      ]),
+    );
+  });
+
+  it("keeps an archived focus node visible in its own ego view", async () => {
+    graphPayload = {
+      nodes: [
+        { id: 1, title: "Archived focus", state: "archived", kind: "note", updated_at: "2020-01-01T00:00:00Z", tags: [] },
+        { id: 2, title: "Near", state: "active", kind: "note", updated_at: "2020-01-01T00:00:00Z", tags: [] },
+      ],
+      edges: [{ source: 1, target: 2, occurrences: 1 }],
+    } as unknown as Graph;
+    // show-archived defaults OFF; the focus must be exempt from that drop.
+    const { container } = render(LinkGraph, { props: { focusId: 1 } });
+    await waitForGraph();
+    await vi.waitFor(() =>
+      expect(anchorIds(container)).toContain("/-/paper/doc/1"),
+    );
   });
 });
 

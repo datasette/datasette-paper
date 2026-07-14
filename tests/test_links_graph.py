@@ -130,6 +130,83 @@ async def test_graph_tags_do_not_leak_non_viewable_docs():
 
 
 @pytest.mark.asyncio
+async def test_graph_focus_echoes_isolated_viewable_doc():
+    # @feat link-graph: ?focus= echoes an otherwise-isolated viewable doc
+    ds, _ = await setup_paper_datasette()
+    db = PaperDB(ds.get_internal_database())
+
+    a = await create_doc(ds, "Alice A", actor_id="alice")
+    b = await create_doc(ds, "Alice B", actor_id="alice")
+    lonely = await create_doc(ds, "Lonely", actor_id="alice")
+
+    await db.set_doc_tags(doc_id=lonely, tags=["solo"])
+    await db.replace_links(src_doc_id=a, src_version=1, edges={b: 1})
+
+    # Without ?focus=, the isolated doc is absent (it participates in no edge).
+    resp = await ds.client.get("/-/paper/api/links/graph")
+    assert lonely not in {n["id"] for n in resp.json()["nodes"]}
+
+    # With ?focus=, it's echoed as a lone node carrying the enriched keys.
+    resp = await ds.client.get(f"/-/paper/api/links/graph?focus={lonely}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    by_id = {n["id"]: n for n in data["nodes"]}
+    assert lonely in by_id
+    node = by_id[lonely]
+    assert node["title"] == "Lonely"
+    assert node["tags"] == ["solo"]
+    assert "state" in node and "kind" in node and "updated_at" in node
+
+    # The echo never widens the edge set — the isolated doc has no edges.
+    assert all(lonely not in (e["source"], e["target"]) for e in data["edges"])
+
+
+@pytest.mark.asyncio
+async def test_graph_focus_non_viewable_not_echoed():
+    # ACL: a focus id the actor can't view is silently ignored, never disclosed.
+    ds, _ = await setup_paper_datasette()
+    db = PaperDB(ds.get_internal_database())
+
+    a = await create_doc(ds, "Alice A", actor_id="alice")
+    b = await create_doc(ds, "Alice B", actor_id="alice")
+    secret = await create_doc(ds, "Carol Secret", actor_id="carol")
+
+    await db.replace_links(src_doc_id=a, src_version=1, edges={b: 1})
+
+    resp = await ds.client.get(f"/-/paper/api/links/graph?focus={secret}")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert secret not in {n["id"] for n in data["nodes"]}
+    assert "Carol Secret" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_graph_focus_absent_or_invalid_ignored():
+    # A focus id that doesn't exist, or isn't an integer, is ignored — no error,
+    # no change to the payload.
+    ds, _ = await setup_paper_datasette()
+    db = PaperDB(ds.get_internal_database())
+
+    a = await create_doc(ds, "Alice A", actor_id="alice")
+    b = await create_doc(ds, "Alice B", actor_id="alice")
+
+    await db.replace_links(src_doc_id=a, src_version=1, edges={b: 1})
+
+    baseline_ids = {
+        n["id"]
+        for n in (await ds.client.get("/-/paper/api/links/graph")).json()["nodes"]
+    }
+
+    resp = await ds.client.get("/-/paper/api/links/graph?focus=99999")
+    assert resp.status_code == 200
+    assert {n["id"] for n in resp.json()["nodes"]} == baseline_ids
+
+    resp = await ds.client.get("/-/paper/api/links/graph?focus=notanid")
+    assert resp.status_code == 200
+    assert {n["id"] for n in resp.json()["nodes"]} == baseline_ids
+
+
+@pytest.mark.asyncio
 async def test_graph_anonymous_ungated_but_empty():
     # Listing is ungated; an anonymous actor reaches the endpoint but the graph
     # is built from viewable_doc_ids only, so it's empty here.
