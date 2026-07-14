@@ -27,13 +27,19 @@ async def test_index_crumb_home_then_papers(ds):
 
 
 @pytest.mark.asyncio
-async def test_doc_crumb_shows_doc_name(ds):
+async def test_doc_crumb_links_doc_and_mounts_switcher(ds):
     doc_id = (
         await ds.client.post("/-/paper/api/docs", json={"name": "Quarterly Notes"})
     ).json()["id"]
     html = (await ds.client.get(f"/-/paper/doc/{doc_id}")).text
     assert 'class="crumbs paper-crumbs"' in html
-    assert '<span id="paper-crumb-current">Quarterly Notes</span>' in html
+    # The current segment self-links to the doc (GitHub-style) …
+    assert (
+        f'<a id="paper-crumb-current" href="/-/paper/doc/{doc_id}">Quarterly Notes</a>'
+        in html
+    )
+    # … and carries the switcher mount point pages/doc/main.ts hydrates.
+    assert f'<span id="paper-crumb-switcher" data-doc-id="{doc_id}">' in html
 
 
 @pytest.mark.asyncio
@@ -50,8 +56,10 @@ async def test_doc_crumb_escapes_name(ds):
 
 @pytest.mark.asyncio
 async def test_tag_crumb_shows_tag(ds):
+    """Tag pages get a plain-text current segment — no self-link, no switcher."""
     html = (await ds.client.get("/-/paper/tag/standup")).text
     assert '<span id="paper-crumb-current">#standup</span>' in html
+    assert "paper-crumb-switcher" not in html
 
 
 @pytest.mark.asyncio

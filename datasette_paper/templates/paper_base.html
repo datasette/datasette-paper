@@ -13,7 +13,15 @@
 <p class="crumbs paper-crumbs">
   {% if crumb_items is defined %}{% for item in crumb_items(request=request) %}<a href="{{ item.href }}">{{ item.label }}</a> / {% endfor %}{% endif %}
   <a href="{{ urls.path('/-/paper/') }}">{{ paper_icon_svg | safe }}<span>Papers</span></a>
-  {% if crumb_current %}/ <span id="paper-crumb-current">{{ crumb_current }}</span>{% endif %}
+  {% if crumb_current %}/
+    {% if crumb_doc_id %}
+      {# Doc pages: the segment self-links (GitHub-style) and gets the
+         paper-switcher mount point, hydrated by pages/doc/main.ts. #}
+      <a id="paper-crumb-current" href="{{ urls.path('/-/paper/doc/' ~ crumb_doc_id) }}">{{ crumb_current }}</a><span id="paper-crumb-switcher" data-doc-id="{{ crumb_doc_id }}"></span>
+    {% else %}
+      <span id="paper-crumb-current">{{ crumb_current }}</span>
+    {% endif %}
+  {% endif %}
 </p>
 {% endblock %}
 

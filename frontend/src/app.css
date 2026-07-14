@@ -275,14 +275,17 @@ body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page))
 /* Breadcrumb links + the nav-menu button-as-link controls (Jump to…, menu
  * links, Log out). Plain `a`/`button.button-as-link` here already out-specify
  * Datasette's `.hd a:link`/`.hd a:hover` chain thanks to the scope prefix, so
- * every link state resolves to accent without enumerating them. */
-:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a,
+ * every link state resolves to accent without enumerating them.
+ * `:not(.crumb-switcher *)` carves out the paper-switcher popup — it's a
+ * themed floating surface (CrumbSwitcher.svelte owns its row colors), not
+ * header chrome, even though it renders inside header.hd. */
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a:not(.crumb-switcher *),
 :root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd button.button-as-link,
 :root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft a,
 :root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft button.button-as-link {
   color: var(--pp-accent);
 }
-:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a:hover,
+:root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a:hover:not(.crumb-switcher *),
 :root[data-theme="dark"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft a:hover {
   color: var(--pp-focus-ring);
 }
@@ -325,13 +328,13 @@ body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page))
   :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft {
     border-top: 1px solid var(--pp-border);
   }
-  :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a,
+  :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a:not(.crumb-switcher *),
   :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd button.button-as-link,
   :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft a,
   :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft button.button-as-link {
     color: var(--pp-accent);
   }
-  :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a:hover,
+  :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) header.hd a:hover:not(.crumb-switcher *),
   :root[data-theme="system"] body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page)) footer.ft a:hover {
     color: var(--pp-focus-ring);
   }

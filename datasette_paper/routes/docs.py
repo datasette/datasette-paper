@@ -1460,7 +1460,10 @@ async def paper_doc_page(datasette, request, doc_id: int):
                 "page_title": doc.name or f"Paper {doc_id}",
                 # @feat breadcrumbs: current-page crumb in the header bar; the
                 # doc page keeps it fresh client-side on rename (crumbs.ts).
+                # crumb_doc_id upgrades the segment to a self-link and mounts
+                # the paper-switcher chevron (CrumbSwitcher.svelte).
                 "crumb_current": doc.name or f"Paper {doc_id}",
+                "crumb_doc_id": doc_id,
                 "body_class": "paper-fullscreen",
                 "entrypoint": "src/pages/doc/main.ts",
                 "page_data": {

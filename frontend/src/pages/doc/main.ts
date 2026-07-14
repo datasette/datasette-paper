@@ -1,5 +1,6 @@
 import { mount } from "svelte";
 import PaperApp from "../../lib/PaperApp.svelte";
+import CrumbSwitcher from "../../lib/CrumbSwitcher.svelte";
 import { loadPageData } from "../../lib/pageData";
 import {
   setProviderManifest,
@@ -21,3 +22,14 @@ mount(PaperApp, {
   target: document.getElementById("app-root")!,
   props: { docId: String(doc_id) },
 });
+
+// @feat breadcrumbs: hydrate the paper-switcher chevron into the
+// server-rendered crumb (paper_base.html) — it lives in Datasette's header
+// bar, outside #app-root, so it gets its own mount.
+const switcherTarget = document.getElementById("paper-crumb-switcher");
+if (switcherTarget) {
+  mount(CrumbSwitcher, {
+    target: switcherTarget,
+    props: { docId: String(doc_id) },
+  });
+}
