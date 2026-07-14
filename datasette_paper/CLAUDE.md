@@ -101,5 +101,5 @@ node's `name` attr after `.strip()` — empty strips → 400.
   it runs anonymously with no seeded grants.)
 - Don't extend the JS schema without mirroring `pm_schema.py`,
   `markdown.py`, and `markdown_parser.py` in the same commit.
-- Don't use `execute_write_fn` for read-only queries (open ticket
-  `si4oztnq`).
+- Don't use `execute_write_fn` for read-only queries — pure reads go
+  through `PaperDB._read` (`execute_fn`, pooled read connections).

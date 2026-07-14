@@ -113,7 +113,3 @@ If `format-backend` rewrites files, re-stage. Routes signature change
 `sql/queries.sql` or `migrations.py` → `just codegen-queries`
 (uses `uv run solite`; CI gate is `just check-queries-fresh`).
 
-## Open follow-ups
-
-- `si4oztnq` (p3) — stop routing read-only queries through Datasette's
-  write queue. Correctness-adjacent, no current-test failures.

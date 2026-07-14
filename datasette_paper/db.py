@@ -36,7 +36,8 @@ class PaperDB:
         self.database = database
 
     async def _exec(self, query_fn, **kwargs):
-        """Run a single generated query inside one ``execute_write_fn`` closure.
+        """Run a single generated write query inside one ``execute_write_fn``
+        closure.
 
         Collapses the boilerplate for the many single-statement passthroughs.
         Multi-statement operations (``insert_step``, ``replace_links``,
@@ -46,6 +47,18 @@ class PaperDB:
         return await self.database.execute_write_fn(
             lambda conn: query_fn(conn, **kwargs)
         )
+
+    async def _read(self, query_fn, **kwargs):
+        """Run a single generated read-only query via ``execute_fn``.
+
+        Pure reads go through Datasette's pooled read connections instead
+        of the serialized write queue — a read here never waits behind (or
+        holds up) collab step writes. Callers await their writes before
+        issuing dependent reads, and the collab protocol tolerates a
+        slightly stale version (that's the 409 catch-up path), so reads
+        need no write-queue serialization.
+        """
+        return await self.database.execute_fn(lambda conn: query_fn(conn, **kwargs))
 
     # ------------------------------------------------------------------
     # Doc
@@ -118,10 +131,10 @@ class PaperDB:
         return await self._exec(_queries.update_doc_name, doc_id=doc_id, name=name)
 
     async def select_doc_by_id(self, doc_id: int) -> Optional[_queries.Doc]:
-        return await self._exec(_queries.select_doc_by_id, doc_id=doc_id)
+        return await self._read(_queries.select_doc_by_id, doc_id=doc_id)
 
     async def list_docs(self) -> list[_queries.Doc]:
-        return await self._exec(_queries.list_docs)
+        return await self._read(_queries.list_docs)
 
     async def list_docs_by_ids_states_and_kinds(
         self,
@@ -136,15 +149,12 @@ class PaperDB:
         states_json = json.dumps(states)
         kinds_json = json.dumps(kinds)
 
-        def read(conn):
-            return _queries.list_docs_by_ids_states_and_kinds(
-                conn,
-                doc_ids_json=doc_ids_json,
-                states_json=states_json,
-                kinds_json=kinds_json,
-            )
-
-        return await self.database.execute_write_fn(read)
+        return await self._read(
+            _queries.list_docs_by_ids_states_and_kinds,
+            doc_ids_json=doc_ids_json,
+            states_json=states_json,
+            kinds_json=kinds_json,
+        )
 
     async def search_docs_by_title(
         self,
@@ -163,27 +173,20 @@ class PaperDB:
         like = f"%{q}%"
         prefix = f"{q}%"
 
-        def read(conn):
-            return _queries.search_docs_by_title(
-                conn,
-                doc_ids_json=doc_ids_json,
-                like=like,
-                prefix=prefix,
-                limit=limit,
-            )
-
-        return await self.database.execute_write_fn(read)
+        return await self._read(
+            _queries.search_docs_by_title,
+            doc_ids_json=doc_ids_json,
+            like=like,
+            prefix=prefix,
+            limit=limit,
+        )
 
     async def list_docs_by_ids(self, *, doc_ids: list[int]) -> list[_queries.Doc]:
         # Any state, any kind — the resolve endpoint needs trashed/archived
         # rows too (a row that exists is "ok"; only a missing row is
         # "not_found"). Variable-length IN via json_each, like the siblings.
         doc_ids_json = json.dumps(doc_ids)
-
-        def read(conn):
-            return _queries.list_docs_by_ids(conn, doc_ids_json=doc_ids_json)
-
-        return await self.database.execute_write_fn(read)
+        return await self._read(_queries.list_docs_by_ids, doc_ids_json=doc_ids_json)
 
     async def list_profile_docs(
         self, *, doc_ids: list[int], actor: str, limit: int
@@ -192,28 +195,23 @@ class PaperDB:
         viewer's visible ``doc_ids``, newest-activity first, capped at
         ``limit``. Backs the profile "Papers" section."""
         doc_ids_json = json.dumps(doc_ids)
-
-        def read(conn):
-            return _queries.list_profile_docs(
-                conn, actor=actor, doc_ids_json=doc_ids_json, limit=limit
-            )
-
-        return await self.database.execute_write_fn(read)
+        return await self._read(
+            _queries.list_profile_docs,
+            actor=actor,
+            doc_ids_json=doc_ids_json,
+            limit=limit,
+        )
 
     async def latest_editor_for_docs(
         self, *, doc_ids: list[int]
     ) -> dict[int, _queries.DocEditor]:
         """Latest attributed editor per doc from the activity rollup, keyed
         by doc id. Docs with no rollup rows (anonymous-only edits, or
-        pre-m008 docs whose history didn't survive) are simply absent.
-        Pure read — goes through ``execute_fn``, not the write queue
-        (per open ticket si4oztnq the write-queue reads are legacy)."""
+        pre-m008 docs whose history didn't survive) are simply absent."""
         doc_ids_json = json.dumps(doc_ids)
-
-        def read(conn):
-            return _queries.latest_editor_for_docs(conn, doc_ids_json=doc_ids_json)
-
-        rows = await self.database.execute_fn(read)
+        rows = await self._read(
+            _queries.latest_editor_for_docs, doc_ids_json=doc_ids_json
+        )
         return {r.doc_id: r for r in rows}
 
     # ------------------------------------------------------------------
@@ -244,7 +242,7 @@ class PaperDB:
         await self.database.execute_write_fn(write)
 
     async def links_by_src(self, *, src_doc_id: int) -> list[_queries.LinkEdge]:
-        return await self._exec(_queries.select_links_by_src, src_doc_id=src_doc_id)
+        return await self._read(_queries.select_links_by_src, src_doc_id=src_doc_id)
 
     async def backlinks_by_dst(
         self, *, dst_doc_id: int, viewable_ids: list[int]
@@ -252,24 +250,20 @@ class PaperDB:
         # Scoped to the requester's viewable set so private papers that link
         # this one aren't disclosed. JSON-encode the set for the IN clause.
         viewable_json = json.dumps(viewable_ids)
-
-        def read(conn):
-            return _queries.select_backlinks_by_dst_scoped(
-                conn, dst_doc_id=dst_doc_id, viewable_json=viewable_json
-            )
-
-        return await self.database.execute_write_fn(read)
+        return await self._read(
+            _queries.select_backlinks_by_dst_scoped,
+            dst_doc_id=dst_doc_id,
+            viewable_json=viewable_json,
+        )
 
     async def edges_within(
         self, *, viewable_ids: list[int]
     ) -> list[_queries.GraphEdge]:
         # Edges whose src AND dst are both viewable. JSON-encode the set.
         viewable_json = json.dumps(viewable_ids)
-
-        def read(conn):
-            return _queries.select_edges_within(conn, viewable_json=viewable_json)
-
-        return await self.database.execute_write_fn(read)
+        return await self._read(
+            _queries.select_edges_within, viewable_json=viewable_json
+        )
 
     # ------------------------------------------------------------------
     # Inline #tag index (derived from the materialized doc body)
@@ -306,13 +300,9 @@ class PaperDB:
         # step_json scan, no N+1 materialize loop): viewable docs that carry
         # inline ``#tag`` ``tag``, with the per-doc occurrence count.
         viewable_json = json.dumps(viewable_ids)
-
-        def read(conn):
-            return _queries.select_tag_refs_scoped(
-                conn, tag=tag, viewable_json=viewable_json
-            )
-
-        return await self.database.execute_write_fn(read)
+        return await self._read(
+            _queries.select_tag_refs_scoped, tag=tag, viewable_json=viewable_json
+        )
 
     # ------------------------------------------------------------------
     # Document tags
@@ -335,14 +325,14 @@ class PaperDB:
         await self.database.execute_write_fn(write)
 
     async def list_tags_for_doc(self, *, doc_id: int) -> list[str]:
-        rows = await self._exec(_queries.list_tags_for_doc, doc_id=doc_id)
+        rows = await self._read(_queries.list_tags_for_doc, doc_id=doc_id)
         return [r.tag for r in rows]
 
     async def list_tags_for_docs(self, *, doc_ids: list[int]) -> dict[int, list[str]]:
         # One query for the whole list page; fold (doc_id, tag) rows into a
         # per-doc map. Docs with no tags are simply absent.
         doc_ids_json = json.dumps(doc_ids)
-        rows = await self._exec(_queries.list_tags_for_docs, doc_ids_json=doc_ids_json)
+        rows = await self._read(_queries.list_tags_for_docs, doc_ids_json=doc_ids_json)
         out: dict[int, list[str]] = {}
         for r in rows:
             out.setdefault(r.doc_id, []).append(r.tag)
@@ -351,7 +341,7 @@ class PaperDB:
     async def list_all_tags(self, *, doc_ids: list[int]) -> list[tuple[str, int]]:
         # Distinct tags + counts over the given (ACL-visible) doc-id scope.
         doc_ids_json = json.dumps(doc_ids)
-        rows = await self._exec(_queries.list_all_tags, doc_ids_json=doc_ids_json)
+        rows = await self._read(_queries.list_all_tags, doc_ids_json=doc_ids_json)
         return [(r.tag, r.n) for r in rows]
 
     async def list_docs_by_ids_states_kinds_and_tags(
@@ -368,7 +358,7 @@ class PaperDB:
         # NULL (not "[]") signals "no tag filter" to the query — see
         # listDocsByIdsStatesKindsAndTags in queries.sql.
         tags_json = json.dumps(tags) if tags else None
-        return await self._exec(
+        return await self._read(
             _queries.list_docs_by_ids_states_kinds_and_tags,
             doc_ids_json=doc_ids_json,
             states_json=states_json,
@@ -401,7 +391,7 @@ class PaperDB:
         )
 
     async def list_trashed_to_delete(self, *, now: str) -> list[_queries.Doc]:
-        return await self._exec(_queries.list_trashed_to_delete, now=now)
+        return await self._read(_queries.list_trashed_to_delete, now=now)
 
     async def hard_delete_doc(self, *, doc_id: int) -> None:
         """Delete the doc and all its child rows in one transaction.
@@ -466,7 +456,7 @@ class PaperDB:
     async def select_steps_after(
         self, *, doc_id: int, after_version: int
     ) -> list[_queries.Step]:
-        return await self._exec(
+        return await self._read(
             _queries.select_steps_after, doc_id=doc_id, after_version=after_version
         )
 
@@ -493,7 +483,7 @@ class PaperDB:
     async def select_latest_snapshot(
         self, *, doc_id: int
     ) -> Optional[_queries.Snapshot]:
-        return await self._exec(_queries.select_latest_snapshot, doc_id=doc_id)
+        return await self._read(_queries.select_latest_snapshot, doc_id=doc_id)
 
     async def compact_doc(self, *, doc_id: int, version: int) -> None:
         """Prune steps + snapshots superseded by the snapshot at ``version``.
