@@ -1560,7 +1560,8 @@ export class EditorConnection {
         sql_block: (node, view, getPos) =>
           new SqlBlockView(node, view, getPos as () => number | undefined),
         tag: (node, view) => new TagView(node, view),
-        date: (node) => new DateView(node),
+        date: (node, view, getPos) =>
+          new DateView(node, view, getPos as () => number | undefined),
         value: (node, view, getPos) =>
           new ValueView(
             node,

@@ -30,6 +30,7 @@ import { insertTable } from "./tables";
 import { insertToc } from "./tocView";
 import { insertSqlBlock, insertSource } from "./sqlQuery";
 import { insertCallout } from "./callout";
+import { insertDateAndEdit } from "./dateView";
 import { embedInsertSources, type EmbedInsertSource } from "./embedProviders";
 
 /**
@@ -529,6 +530,15 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "infoCircle",
       group: "styling",
       run: runCommand(insertCallout("note")),
+    },
+    {
+      // @feat date: slash entry inserts today's date chip + opens its popup
+      id: "date",
+      label: "Date",
+      keywords: ["date", "day", "calendar", "due", "deadline", "when", "time"],
+      icon: "calendarEvent",
+      group: "styling",
+      run: (view) => insertDateAndEdit(view),
     },
     {
       id: "code_block",

@@ -6,10 +6,17 @@
  * that a *checked* task's date goes neutral even though the checkbox toggle
  * never fires the date NodeView's update.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import { EditorState } from "prosemirror-state";
+import { EditorView } from "prosemirror-view";
 
 import { schema } from "../schema";
-import { chipLabel, classifyDate, dateDecorationSpecs } from "../dateView";
+import {
+  DateView,
+  chipLabel,
+  classifyDate,
+  dateDecorationSpecs,
+} from "../dateView";
 import type { DateAttrs } from "../dateFormat";
 
 // A fixed "now": Tuesday 2026-07-14 10:00 local.
@@ -120,5 +127,100 @@ describe("dateDecorationSpecs", () => {
     const specs = dateDecorationSpecs(doc, NOW);
     expect(specs).toHaveLength(1);
     expect(specs[0].cls).toBe("pp-date-today");
+  });
+});
+
+// ── Popup editor (mounted NodeView) ────────────────────────────────────────
+
+const mounted: EditorView[] = [];
+afterEach(() => {
+  for (const v of mounted.splice(0)) v.destroy();
+});
+
+function mountDate(attrs: DateAttrs) {
+  const doc = schema.nodes.doc.create(null, [
+    schema.nodes.paragraph.create(null, [dateAtom(attrs)]),
+  ]);
+  const place = document.createElement("div");
+  place.className = "editor-host";
+  document.body.appendChild(place);
+  let editable = true;
+  const view = new EditorView(place, {
+    state: EditorState.create({ doc }),
+    editable: () => editable,
+    nodeViews: {
+      date: (node, v, getPos) =>
+        new DateView(node, v, getPos as () => number | undefined),
+    },
+  });
+  mounted.push(view);
+  const chip = place.querySelector(".pm-date") as HTMLElement;
+  const setEditable = (next: boolean) => {
+    editable = next;
+    view.setProps({ editable: () => editable });
+  };
+  return { view, chip, setEditable };
+}
+
+function typeAndEnter(chip: HTMLElement, text: string) {
+  const input = chip.querySelector(".pm-date-popup-input") as HTMLInputElement;
+  input.value = text;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(
+    new KeyboardEvent("keydown", { key: "Enter", bubbles: true }),
+  );
+}
+
+describe("DateView popup", () => {
+  it("opens on click in edit mode and commits a date-only parse (no tz)", () => {
+    const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(chip.querySelector(".pm-date-popup")).not.toBeNull();
+
+    typeAndEnter(chip, "2026-08-01");
+    const date = view.state.doc.firstChild!.firstChild!;
+    expect(date.attrs.date).toBe("2026-08-01");
+    expect(date.attrs.time).toBeNull();
+    expect(date.attrs.tz).toBeNull();
+    // popup closed after commit
+    expect(document.querySelector(".pm-date-popup")).toBeNull();
+  });
+
+  it("stamps the browser tz only when the parse has a time", () => {
+    const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    typeAndEnter(chip, "2026-08-01 3:30pm");
+    const date = view.state.doc.firstChild!.firstChild!;
+    expect(date.attrs.time).toBe("15:30");
+    expect(date.attrs.tz).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  it("does not commit or close on an unrecognized parse", () => {
+    const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    typeAndEnter(chip, "sometime soon");
+    // unchanged + still open
+    expect(view.state.doc.firstChild!.firstChild!.attrs.date).toBe("2026-07-20");
+    expect(chip.querySelector(".pm-date-popup")).not.toBeNull();
+    const preview = chip.querySelector(".pm-date-popup-preview");
+    expect(preview?.textContent).toBe("unrecognized");
+  });
+
+  it("is inert in read-only mode (no popup on click)", () => {
+    const { chip, setEditable } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    setEditable(false);
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(chip.querySelector(".pm-date-popup")).toBeNull();
+  });
+
+  it("Escape closes the popup without committing", () => {
+    const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const input = chip.querySelector(".pm-date-popup-input") as HTMLInputElement;
+    input.value = "2026-09-09";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(chip.querySelector(".pm-date-popup")).toBeNull();
+    expect(view.state.doc.firstChild!.firstChild!.attrs.date).toBe("2026-07-20");
   });
 });

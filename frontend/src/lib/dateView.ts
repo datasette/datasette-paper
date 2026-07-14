@@ -25,10 +25,11 @@ import type { Node as PMNode } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";
 import type { EditorState, Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
-import type { NodeView } from "prosemirror-view";
+import type { EditorView, NodeView } from "prosemirror-view";
 import { TOOLBAR_ICONS } from "./icons";
 import { guardChromeMousedown } from "./caretGuard";
-import type { DateAttrs } from "./dateFormat";
+import { formatDateLabel, type DateAttrs } from "./dateFormat";
+import { parseDateInput, type ParsedDate } from "./dateParse";
 
 const MONTHS = [
   "Jan",
@@ -147,19 +148,61 @@ export function chipLabel(
   return { text, title };
 }
 
+/** Event a fresh chip listens for so the slash-insert flow can pop its editor
+ *  open (dispatched by `insertDateAndEdit` after the surrounding focus settles). */
+const OPEN_POPUP_EVENT = "paper:open-date-popup";
+
+/** A friendly one-line preview of a parse result ("Mon, Jul 20, 2026 3:00 PM"). */
+function previewText(parsed: ParsedDate): string {
+  const [y, mo, d] = parsed.date.split("-").map(Number);
+  const weekday = new Date(y, mo - 1, d).toLocaleDateString(undefined, {
+    weekday: "short",
+  });
+  return `${weekday}, ${formatDateLabel({ date: parsed.date, time: parsed.time, tz: null })}`;
+}
+
 // @feat date: NodeView — compact viewer-facing chip (glyph + zone-aware label)
 export class DateView implements NodeView {
   dom: HTMLSpanElement;
   private attrs: DateAttrs;
+  private view: EditorView;
+  private getPos: () => number | undefined;
 
-  constructor(node: PMNode) {
+  private labelEl: HTMLSpanElement;
+  private popupEl: HTMLDivElement | null = null;
+  private inputEl: HTMLInputElement | null = null;
+  private previewEl: HTMLDivElement | null = null;
+
+  constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.attrs = attrsOf(node);
+    this.view = view;
+    this.getPos = getPos;
     this.dom = document.createElement("span");
     this.dom.className = "pm-date";
     // Caret guard: chip chrome is not editable text — a bare click must not
     // drop a caret inside it (see caretGuard.ts / commits a4abcf8, c5d50e2).
+    // The popup input is exempted so it stays focusable/typeable.
     this.dom.style.userSelect = "none";
-    guardChromeMousedown(this.dom);
+    guardChromeMousedown(this.dom, ".pm-date-popup");
+
+    const icon = document.createElement("span");
+    icon.className = "pm-date-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = CAL_ICON; // trusted constant (TOOLBAR_ICONS)
+    this.dom.appendChild(icon);
+    this.labelEl = document.createElement("span");
+    this.labelEl.className = "pm-date-label";
+    this.dom.appendChild(this.labelEl);
+
+    // Click opens the editor popup — edit mode only (read-only chips are inert).
+    this.dom.addEventListener("click", (e) => {
+      if (this.popupEl && this.popupEl.contains(e.target as Node)) return;
+      if (this.view.editable) this.openPopup();
+    });
+    this.dom.addEventListener(OPEN_POPUP_EVENT, () => {
+      if (this.view.editable) this.openPopup();
+    });
+
     this.render();
   }
 
@@ -168,12 +211,110 @@ export class DateView implements NodeView {
     this.dom.setAttribute("data-date-time", this.attrs.time ?? "");
     this.dom.setAttribute("data-date-tz", this.attrs.tz ?? "");
     const { text, title } = chipLabel(this.attrs, new Date());
-    // CAL_ICON is a trusted constant (TOOLBAR_ICONS); the label is set as a
-    // text node, never innerHTML.
-    this.dom.innerHTML = `<span class="pm-date-icon" aria-hidden="true">${CAL_ICON}</span>`;
-    this.dom.appendChild(document.createTextNode(text));
+    this.labelEl.textContent = text; // text node, never innerHTML
     if (title) this.dom.setAttribute("title", title);
     else this.dom.removeAttribute("title");
+  }
+
+  // ── Popup editor ─────────────────────────────────────────────────────────
+
+  private openPopup(): void {
+    if (this.popupEl) return;
+    const popup = document.createElement("div");
+    popup.className = "pm-date-popup";
+    popup.setAttribute("contenteditable", "false");
+
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = "pm-date-popup-input";
+    input.placeholder = "e.g. next fri 3pm";
+    // Prefill with a form parseDateInput round-trips (ISO date + 24h time),
+    // not the display label (its comma wouldn't re-parse).
+    input.value = this.attrs.time
+      ? `${this.attrs.date} ${this.attrs.time}`
+      : this.attrs.date;
+
+    const preview = document.createElement("div");
+    preview.className = "pm-date-popup-preview";
+
+    popup.appendChild(input);
+    popup.appendChild(preview);
+    this.dom.appendChild(popup);
+    this.popupEl = popup;
+    this.inputEl = input;
+    this.previewEl = preview;
+
+    input.addEventListener("input", () => this.refreshPreview());
+    input.addEventListener("keydown", (e) => this.onInputKeydown(e));
+    document.addEventListener("mousedown", this.onOutsideClick, true);
+
+    this.refreshPreview();
+    input.focus();
+    input.select();
+  }
+
+  private closePopup(refocus: boolean): void {
+    if (!this.popupEl) return;
+    document.removeEventListener("mousedown", this.onOutsideClick, true);
+    this.popupEl.remove();
+    this.popupEl = null;
+    this.inputEl = null;
+    this.previewEl = null;
+    if (refocus && !this.view.isDestroyed) this.view.focus();
+  }
+
+  private onOutsideClick = (e: MouseEvent): void => {
+    if (this.popupEl && !this.dom.contains(e.target as Node)) this.closePopup(false);
+  };
+
+  private refreshPreview(): ParsedDate | null {
+    if (!this.inputEl || !this.previewEl) return null;
+    const parsed = parseDateInput(this.inputEl.value, new Date());
+    if (parsed) {
+      this.previewEl.textContent = `→ ${previewText(parsed)}`;
+      this.previewEl.classList.remove("pm-date-popup-preview--bad");
+    } else {
+      this.previewEl.textContent = "unrecognized";
+      this.previewEl.classList.add("pm-date-popup-preview--bad");
+    }
+    return parsed;
+  }
+
+  private onInputKeydown(e: KeyboardEvent): void {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const parsed = this.refreshPreview();
+      if (parsed) this.commit(parsed);
+      else this.shake();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      this.closePopup(true);
+    }
+  }
+
+  private shake(): void {
+    if (!this.popupEl) return;
+    this.popupEl.classList.remove("pm-date-popup--shake");
+    // reflow so re-adding the class restarts the animation
+    void this.popupEl.offsetWidth;
+    this.popupEl.classList.add("pm-date-popup--shake");
+  }
+
+  private commit(parsed: ParsedDate): void {
+    const pos = this.getPos();
+    if (pos == null) {
+      this.closePopup(true);
+      return;
+    }
+    // Stamp the browser zone only when a time is present (a calendar date is
+    // zone-less). Goes through the normal collab dispatch so peers see it live.
+    const attrs: DateAttrs = {
+      date: parsed.date,
+      time: parsed.time,
+      tz: parsed.time ? Intl.DateTimeFormat().resolvedOptions().timeZone : null,
+    };
+    this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, attrs));
+    this.closePopup(true);
   }
 
   update(node: PMNode): boolean {
@@ -191,13 +332,40 @@ export class DateView implements NodeView {
   }
 
   // Leaf atom we fully own — keep PM out of its internals so it selects and
-  // deletes as a unit.
+  // deletes as a unit. Popup keystrokes must NOT reach PM's keymap, so route
+  // events originating inside the open popup away from the editor.
   ignoreMutation(): boolean {
     return true;
   }
-  stopEvent(): boolean {
-    return false;
+  stopEvent(event: Event): boolean {
+    return this.popupEl?.contains(event.target as Node) ?? false;
   }
+
+  destroy(): void {
+    this.closePopup(false);
+  }
+}
+
+/** Slash-menu action: insert a date atom for today at the caret, then open its
+ *  popup so "insert then adjust" is a single flow. */
+// @feat date: slash insert — drop today's chip and open its editor popup
+export function insertDateAndEdit(view: EditorView): void {
+  const now = new Date();
+  const todayIso = localYmd(now);
+  const node = view.state.schema.nodes.date.create({
+    date: todayIso,
+    time: null,
+    tz: null,
+  });
+  const from = view.state.selection.from;
+  view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+  // Defer so the slash machinery's trailing view.focus() runs first; then pop
+  // the fresh chip's editor open via a custom event on its NodeView dom.
+  requestAnimationFrame(() => {
+    if (view.isDestroyed) return;
+    const dom = view.nodeDOM(from);
+    if (dom instanceof HTMLElement) dom.dispatchEvent(new CustomEvent(OPEN_POPUP_EVENT));
+  });
 }
 
 // --- overdue / today decoration plugin --------------------------------------
