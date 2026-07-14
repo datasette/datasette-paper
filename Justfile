@@ -142,7 +142,11 @@ check-features:
     uv run --prerelease=allow python tools/features_check.py \
         --scan datasette_paper --scan frontend/src --scan tests \
         --ext .sql \
-        --lockstep frontend/src/lib/schema.ts,datasette_paper/pm_schema.py,datasette_paper/markdown.py,datasette_paper/markdown_parser.py
+        --lockstep frontend/src/lib/schema.ts,datasette_paper/pm_schema.py,datasette_paper/markdown.py,datasette_paper/markdown_parser.py \
+        --lockstep-exempt task-assign
+# task-assign is not a schema feature (adds no nodes/marks) but reads the
+# `date`/`mention` atoms in markdown.py's extract_tasks, so it touches one
+# lock-step file without needing the other three. Exempt, not fake markers.
 
 # --- Tests ---
 
