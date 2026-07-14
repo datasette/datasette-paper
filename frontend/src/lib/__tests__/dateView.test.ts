@@ -227,12 +227,13 @@ describe("DateView popup", () => {
   it("picking a format preset commits it as the node's format attr", () => {
     const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
     chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    // The ISO preset button is labelled with its rendered example.
-    const isoBtn = Array.from(
-      chip.querySelectorAll<HTMLButtonElement>(".pm-date-format"),
-    ).find((b) => b.dataset.format === "%Y-%m-%d")!;
-    expect(isoBtn.textContent).toBe("2026-07-20");
-    isoBtn.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // The ISO preset row shows a description + its own rendered example.
+    const isoRow = chip.querySelector<HTMLElement>('.pm-date-format[data-format="%Y-%m-%d"]')!;
+    expect(isoRow.querySelector(".pm-date-format-desc")?.textContent).toBe("ISO");
+    expect(isoRow.querySelector(".pm-date-format-example")?.textContent).toBe("2026-07-20");
+    const radio = isoRow.querySelector<HTMLInputElement>(".pm-date-format-radio")!;
+    radio.checked = true;
+    radio.dispatchEvent(new Event("change", { bubbles: true }));
     expect(chip.querySelector(".pm-date-popup-preview")?.textContent).toBe(
       "→ 2026-07-20",
     );

@@ -663,46 +663,68 @@
 .editor-host .pm-date-popup-preview--bad {
   color: var(--pp-danger);
 }
-/* Format picker: preset buttons (each labelled with its own rendered example)
- * + a custom strftime field. */
+/* Format picker: a "Format" subtitle over one radio row per preset
+ * (description + its own rendered example), then a Custom strftime row. */
 .editor-host .pm-date-popup-formats {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  flex-direction: column;
+  gap: 2px;
   margin-top: 2px;
   padding-top: 6px;
   border-top: 1px solid var(--pp-border);
 }
+.editor-host .pm-date-popup-formats-title {
+  font-size: 0.72em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pp-fg-subtle);
+  margin-bottom: 2px;
+}
 .editor-host .pm-date-format {
-  padding: 2px 6px;
-  border: 1px solid var(--pp-border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
   border-radius: 4px;
-  background: var(--pp-surface-2);
-  color: var(--pp-fg);
-  font: inherit;
-  font-size: 0.8em;
-  font-weight: 400;
   cursor: pointer;
-  white-space: nowrap;
+  font-size: 0.82em;
+  font-weight: 400;
 }
 .editor-host .pm-date-format:hover {
-  border-color: var(--pp-accent);
+  background: var(--pp-surface-2);
 }
-.editor-host .pm-date-format--active {
-  border-color: var(--pp-accent);
-  background: var(--pp-accent-bg);
-  color: var(--pp-accent);
+.editor-host .pm-date-format-radio {
+  margin: 0;
+  flex: none;
+}
+.editor-host .pm-date-format-desc {
+  flex: none;
+  min-width: 68px;
+  color: var(--pp-fg-muted);
+}
+.editor-host .pm-date-format-example {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .editor-host .pm-date-popup-custom {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   box-sizing: border-box;
-  padding: 3px 6px;
+  padding: 2px 5px;
   border: 1px solid var(--pp-border);
-  border-radius: 4px;
+  border-radius: 3px;
   background: var(--pp-bg);
   color: var(--pp-fg);
   font: inherit;
-  font-size: 0.8em;
+  font-size: 1em;
   font-weight: 400;
 }
 .editor-host .pm-date-popup-custom:focus {

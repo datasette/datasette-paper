@@ -62,16 +62,21 @@ function attrsOf(node: PMNode): DateAttrs {
  *  that fills one in; `null` clears back to the smart default. */
 export interface FormatPreset {
   key: string;
+  desc: string;
   format: string | null;
 }
 export const FORMAT_PRESETS: FormatPreset[] = [
-  { key: "default", format: null },
-  { key: "iso", format: "%Y-%m-%d" },
-  { key: "medium", format: "%b %-d, %Y" },
-  { key: "long", format: "%B %-d, %Y" },
-  { key: "weekday", format: "%A, %B %o" },
-  { key: "short", format: "%b %-d" },
+  { key: "default", desc: "Default", format: null },
+  { key: "iso", desc: "ISO", format: "%Y-%m-%d" },
+  { key: "medium", desc: "Medium", format: "%b %-d, %Y" },
+  { key: "long", desc: "Long", format: "%B %-d, %Y" },
+  { key: "weekday", desc: "Weekday", format: "%A, %B %o" },
+  { key: "short", desc: "Short", format: "%b %-d" },
 ];
+
+// Distinct radio-group name per popup instance so two open date popups (or an
+// old one mid-teardown) never share a group. Module counter — no clock/random.
+let popupSeq = 0;
 
 // --- zone-aware time helpers (pure; jsdom's Intl is enough for tests) -------
 
@@ -139,6 +144,14 @@ function timeInZone(instant: Date, zone: string | undefined, withName = false): 
   return dtf.format(instant);
 }
 
+/** The default (no-format) chip date portion: "Jul 20", with the year appended
+ *  only when it isn't the viewer's current year. */
+function defaultChipDate(y: number, mo: number, d: number, now: Date): string {
+  let s = `${MONTHS[mo - 1]} ${d}`;
+  if (y !== now.getFullYear()) s += `, ${y}`;
+  return s;
+}
+
 /** Compact chip label + optional cross-zone tooltip. `now` supplies the
  *  current year (so the year is omitted only for the viewer's current year). */
 export function chipLabel(
@@ -148,13 +161,9 @@ export function chipLabel(
   const [y, mo, d] = attrs.date.split("-").map(Number);
   // A custom format renders the date portion verbatim; the default omits the
   // year when it's the viewer's current year (a client-only nicety).
-  let dateText: string;
-  if (attrs.format) {
-    dateText = strftimeDate(attrs.format, y, mo, d);
-  } else {
-    dateText = `${MONTHS[mo - 1]} ${d}`;
-    if (y !== now.getFullYear()) dateText += `, ${y}`;
-  }
+  const dateText = attrs.format
+    ? strftimeDate(attrs.format, y, mo, d)
+    : defaultChipDate(y, mo, d, now);
 
   if (!attrs.time) return { text: dateText, title: null };
 
@@ -194,7 +203,8 @@ export class DateView implements NodeView {
   private inputEl: HTMLInputElement | null = null;
   private previewEl: HTMLDivElement | null = null;
   private customEl: HTMLInputElement | null = null;
-  private presetButtons: HTMLButtonElement[] = [];
+  private customRadio: HTMLInputElement | null = null;
+  private presetRows: HTMLElement[] = [];
   private selectedFormat: string | null = null;
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
@@ -272,7 +282,9 @@ export class DateView implements NodeView {
     this.previewEl = preview;
 
     input.addEventListener("input", () => this.refreshPreview());
-    input.addEventListener("keydown", (e) => this.onInputKeydown(e));
+    // Enter/Escape handled at the container so they work wherever focus sits
+    // inside the popup (the date field, the custom field, or a format radio).
+    popup.addEventListener("keydown", (e) => this.onInputKeydown(e));
     document.addEventListener("mousedown", this.onOutsideClick, true);
 
     this.refreshPreview();
@@ -280,41 +292,72 @@ export class DateView implements NodeView {
     input.select();
   }
 
-  /** The format picker: a row of preset buttons (each labelled with its own
-   *  rendered example) plus a custom strftime field. */
+  /** The format picker: a "Format" subtitle over one radio row per preset
+   *  (description + its own rendered example), with a Custom strftime row at
+   *  the bottom. */
   private buildFormatSection(): HTMLElement {
+    const groupName = `pm-date-fmt-${popupSeq++}`;
     const wrap = document.createElement("div");
     wrap.className = "pm-date-popup-formats";
 
-    this.presetButtons = [];
+    const title = document.createElement("div");
+    title.className = "pm-date-popup-formats-title";
+    title.textContent = "Format";
+    wrap.appendChild(title);
+
+    this.presetRows = [];
     for (const preset of FORMAT_PRESETS) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "pm-date-format";
-      btn.dataset.format = preset.format ?? "";
-      btn.addEventListener("mousedown", (e) => e.preventDefault());
-      btn.addEventListener("click", (e) => {
-        e.preventDefault();
+      const row = document.createElement("label");
+      row.className = "pm-date-format";
+      row.dataset.format = preset.format ?? "";
+
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = groupName;
+      radio.className = "pm-date-format-radio";
+      radio.addEventListener("change", () => {
         this.selectedFormat = preset.format;
-        if (this.customEl) this.customEl.value = preset.format ?? "";
         this.refreshPreview();
       });
-      this.presetButtons.push(btn);
-      wrap.appendChild(btn);
+
+      const desc = document.createElement("span");
+      desc.className = "pm-date-format-desc";
+      desc.textContent = preset.desc;
+
+      const example = document.createElement("span");
+      example.className = "pm-date-format-example";
+
+      row.append(radio, desc, example);
+      this.presetRows.push(row);
+      wrap.appendChild(row);
     }
 
+    // Custom row — a radio whose selection is driven by the strftime field.
+    const customRow = document.createElement("label");
+    customRow.className = "pm-date-format pm-date-format--custom";
+    const customRadio = document.createElement("input");
+    customRadio.type = "radio";
+    customRadio.name = groupName;
+    customRadio.className = "pm-date-format-radio";
+    const customDesc = document.createElement("span");
+    customDesc.className = "pm-date-format-desc";
+    customDesc.textContent = "Custom";
     const custom = document.createElement("input");
     custom.type = "text";
     custom.className = "pm-date-popup-custom";
-    custom.placeholder = "custom strftime, e.g. %A %-d";
-    custom.value = this.selectedFormat ?? "";
-    custom.addEventListener("input", () => {
+    custom.placeholder = "strftime, e.g. %A %-d";
+    custom.value = this.attrs.format ?? "";
+    const selectCustom = () => {
       this.selectedFormat = custom.value.trim() ? custom.value : null;
       this.refreshPreview();
-    });
-    custom.addEventListener("keydown", (e) => this.onInputKeydown(e));
+    };
+    custom.addEventListener("input", selectCustom);
+    custom.addEventListener("focus", selectCustom);
+    customRadio.addEventListener("change", () => custom.focus());
+    customRow.append(customRadio, customDesc, custom);
     this.customEl = custom;
-    wrap.appendChild(custom);
+    this.customRadio = customRadio;
+    wrap.appendChild(customRow);
 
     return wrap;
   }
@@ -327,7 +370,8 @@ export class DateView implements NodeView {
     this.inputEl = null;
     this.previewEl = null;
     this.customEl = null;
-    this.presetButtons = [];
+    this.customRadio = null;
+    this.presetRows = [];
     if (refocus && !this.view.isDestroyed) this.view.focus();
   }
 
@@ -345,18 +389,27 @@ export class DateView implements NodeView {
       this.previewEl.textContent = "unrecognized";
       this.previewEl.classList.add("pm-date-popup-preview--bad");
     }
-    // Label each preset button with its own rendered example for the current
-    // (parsed, else stored) date, and mark the active one.
+    // Render each preset's own example for the current (parsed, else stored)
+    // date, and check the radio matching the selected format — falling back to
+    // the Custom row when the format isn't one of the presets.
     const [y, mo, d] = (parsed?.date ?? this.attrs.date).split("-").map(Number);
+    const now = new Date();
+    let matched = false;
     FORMAT_PRESETS.forEach((preset, i) => {
-      const btn = this.presetButtons[i];
-      if (!btn) return;
-      btn.textContent = preset.format ? strftimeDate(preset.format, y, mo, d) : "Default";
-      btn.classList.toggle(
-        "pm-date-format--active",
-        (preset.format ?? null) === (this.selectedFormat ?? null),
-      );
+      const row = this.presetRows[i];
+      if (!row) return;
+      const example = row.querySelector(".pm-date-format-example");
+      if (example) {
+        example.textContent = preset.format
+          ? strftimeDate(preset.format, y, mo, d)
+          : defaultChipDate(y, mo, d, now);
+      }
+      const radio = row.querySelector<HTMLInputElement>(".pm-date-format-radio");
+      const isMatch = !matched && (preset.format ?? null) === (this.selectedFormat ?? null);
+      if (radio) radio.checked = isMatch;
+      if (isMatch) matched = true;
     });
+    if (this.customRadio) this.customRadio.checked = !matched;
     return parsed;
   }
 
