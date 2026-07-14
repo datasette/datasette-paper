@@ -17,7 +17,12 @@
   let failed = $state(false);
   let active = $state(0);
   let root = $state<HTMLElement | null>(null);
+  let btnEl = $state<HTMLButtonElement | null>(null);
   let searchEl = $state<HTMLInputElement | null>(null);
+  // Document-coord left edge for the popup, measured from the chevron at
+  // open time (the popup positions against the document, not the wrapper —
+  // see the .crumb-switcher style comment), clamped to the viewport.
+  let popupLeft = $state(8);
 
   let filtered = $derived.by(() => {
     if (!docs) return [];
@@ -38,9 +43,19 @@
     docs = data as unknown as Row[];
   }
 
+  const POPUP_WIDTH = 280;
+
   function toggle() {
     open = !open;
     if (open) {
+      // Align the popup's left edge with the chevron (GitHub-style), but
+      // keep it on-screen when a long doc name pushes the chevron right.
+      const r = btnEl?.getBoundingClientRect();
+      const left = (r?.left ?? 0) + window.scrollX;
+      popupLeft = Math.max(
+        8,
+        Math.min(left, window.scrollX + window.innerWidth - POPUP_WIDTH - 8),
+      );
       query = "";
       active = 0;
       docs = null;
@@ -88,6 +103,7 @@
 
 <span class="crumb-switcher" bind:this={root}>
   <button
+    bind:this={btnEl}
     type="button"
     class="chevron"
     aria-label="Switch paper"
@@ -100,7 +116,7 @@
     </svg>
   </button>
   {#if open}
-    <div class="popup" aria-label="Switch paper">
+    <div class="popup" style="left: {popupLeft}px" aria-label="Switch paper">
       <div class="popup-title">Switch paper</div>
       <input
         bind:this={searchEl}
@@ -174,12 +190,13 @@
     background: rgba(255, 255, 255, 0.15);
   }
   .popup {
-    /* Anchored under the header's left edge (the crumb always sits there),
-     * not under the chevron — keeps it clear of the overflow clip and stable
-     * regardless of doc-name length. z matches Datasette's nav menu (1000). */
+    /* Anchored under the chevron: `left` is set inline, measured from the
+     * button at open time in document coords (the containing block is the
+     * document, not the wrapper — see above). z matches Datasette's nav
+     * menu (1000). Width is mirrored by POPUP_WIDTH in the script for the
+     * viewport clamp. */
     position: absolute;
     top: 2.8rem;
-    left: 0.6rem;
     z-index: 1000;
     width: 280px;
     padding: 6px;
