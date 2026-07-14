@@ -206,6 +206,14 @@ export interface ConnectionOpts {
    */
   onDocState?: (payload: DocStatePayload) => void;
   /**
+   * Called when a collaborator renames the doc (``renamed`` SSE event —
+   * the rename route broadcasts after the write commits; our own renames
+   * go through DocHeader's commit path instead, since the originator gets
+   * the response body). Drives the header title, the breadcrumb, and
+   * document.title. @feat breadcrumbs: client listener for live renames.
+   */
+  onRenamed?: (name: string, updatedAt: string) => void;
+  /**
    * Called once at bootstrap with the paper's ``kind``. Templates and
    * docs share the editor surface but the UI differs: templates show a
    * badge, surface the placeholder-insert affordance (slice 4), and
@@ -1774,6 +1782,23 @@ export class EditorConnection {
       }
     };
     es.addEventListener("state-changed", handleStateChanged as EventListener);
+
+    const handleRenamed = (evt: MessageEvent) => {
+      try {
+        const data = JSON.parse(evt.data) as {
+          name?: unknown;
+          updated_at?: unknown;
+        };
+        if (typeof data.name !== "string" || !data.name) return;
+        this.opts.onRenamed?.(
+          data.name,
+          typeof data.updated_at === "string" ? data.updated_at : "",
+        );
+      } catch {
+        // ignore malformed
+      }
+    };
+    es.addEventListener("renamed", handleRenamed as EventListener);
 
     const handlePermissionsChanged = (evt: MessageEvent) => {
       // Server pushes ``{canEdit, locked}`` after a lock/unlock; merge

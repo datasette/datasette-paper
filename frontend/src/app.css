@@ -220,6 +220,22 @@ body:is(.paper-fullscreen, :has(.paper-index), :has(.tag-page))
   background: transparent;
 }
 
+/* @feat breadcrumbs: header-bar crumb ("[icon] Papers / <name>"), rendered by
+ * paper_base.html's crumbs block into Datasette's header. Reuses Datasette's
+ * `.crumbs` class for placement (float: left in header.hd); these rules only
+ * align the inline SVG with the link text. Colors come from Datasette's
+ * `.hd a` chain (light) / the dark chrome overrides below — both key off
+ * currentColor, which the SVG inherits. */
+.paper-crumbs a {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  vertical-align: bottom;
+}
+.paper-crumbs svg {
+  display: block;
+}
+
 /* ── Datasette chrome overrides (DARK ONLY) ─────────────────────────────────
  * Datasette's own header (`header.hd`) and footer (`footer.ft`) are a fixed
  * blue gradient with near-white text — correct on Datasette's light pages, but

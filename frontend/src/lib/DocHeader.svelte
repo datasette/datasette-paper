@@ -8,6 +8,7 @@
   // <datasette-acl-share-dialog> custom element before this component mounts.
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { getStoredTheme, setTheme, type Theme } from "./theme";
+  import { setCrumbName } from "./crumbs";
 
   // acl resource identity for a paper doc: type "paper-doc", a fixed parent
   // sentinel ("_paper", == PAPER_DOCS_PARENT in permissions.py), child = doc id.
@@ -25,6 +26,7 @@
     kind = "doc",
     selfActor = null,
     lastEdited = null,
+    remoteRename = null,
     copyMarkdown,
   }: {
     docId: string;
@@ -37,6 +39,7 @@
     kind?: "doc" | "template";
     selfActor?: string | null;
     lastEdited?: LastEditedInfo | null;
+    remoteRename?: { name: string; updated_at: string } | null;
     copyMarkdown?: () => Promise<boolean>;
   } = $props();
 
@@ -212,6 +215,26 @@
   let saving = $state(false);
   let savedRecently = $state(false);
 
+  // @feat breadcrumbs: a collaborator's rename arriving over SSE (PaperApp's
+  // onRenamed). Sync it into the header — but never clobber the title input
+  // while the user is mid-edit; commit-on-blur wins, same as two concurrent
+  // local renames (last writer takes the name).
+  let titleEl = $state<HTMLInputElement | null>(null);
+  $effect(() => {
+    const r = remoteRename;
+    if (!r) return;
+    untrack(() => {
+      if (meta) {
+        meta = {
+          ...meta,
+          name: r.name,
+          updated_at: r.updated_at || meta.updated_at,
+        };
+      }
+      if (document.activeElement !== titleEl) titleInput = r.name;
+    });
+  });
+
   async function load() {
     // The bootstrap envelope returns doc state; the doc row's metadata
     // (name, created_by, updated_at) lives on the per-doc API. We fetch
@@ -254,6 +277,9 @@
     }
     const updated = data as { name: string; updated_at: string };
     meta = { ...meta, name: updated.name, updated_at: updated.updated_at };
+    // @feat breadcrumbs: our own rename — update the crumb + document.title
+    // right away (the SSE echo arrives too, but it's idempotent).
+    setCrumbName(updated.name);
     savedRecently = true;
     setTimeout(() => (savedRecently = false), 1500);
   }
@@ -340,6 +366,7 @@
       <input
         class="title"
         type="text"
+        bind:this={titleEl}
         bind:value={titleInput}
         onblur={commitTitle}
         onkeydown={(e) => {

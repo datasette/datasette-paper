@@ -24,6 +24,7 @@
   import { buildMarkdownSerializer, serializeDoc } from "./markdownSerializer";
   import { insertDatasetteEmbed } from "./datasetteEmbed";
   import { TOOLBAR_ICONS } from "./icons";
+  import { setCrumbName } from "./crumbs";
 
   let { docId }: { docId: string } = $props();
 
@@ -92,6 +93,10 @@
   // forwarded to the header. Null until the first edit this session —
   // the header falls back to the fetched doc row.
   let lastEdited = $state<LastEditedInfo | null>(null);
+  // A collaborator's rename (``renamed`` SSE), forwarded to the header so
+  // its title input follows along. The crumb + document.title are updated
+  // here directly — they live outside #app-root (see crumbs.ts).
+  let remoteRename = $state<{ name: string; updated_at: string } | null>(null);
 
   let conn: EditorConnection | undefined;
   let unsub: (() => void) | undefined;
@@ -136,6 +141,11 @@
         },
         onLastEdited: (info) => {
           lastEdited = info;
+        },
+        // @feat breadcrumbs: live rename — crumb + tab title + header input.
+        onRenamed: (name, updatedAt) => {
+          setCrumbName(name);
+          remoteRename = { name, updated_at: updatedAt };
         },
         onStepError: (e) => {
           // Keep the first error — subsequent ones don't add information
@@ -276,6 +286,7 @@
     {kind}
     {selfActor}
     {lastEdited}
+    {remoteRename}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
   />

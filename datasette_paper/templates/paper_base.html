@@ -4,6 +4,17 @@
 
 {% block body_class %}{{ body_class or "" }}{% endblock %}
 
+{# @feat breadcrumbs: replace Datasette's "home" crumb with "[icon] Papers"
+   (linking to the index) plus an optional "/ <current page>" segment. Routes
+   pass `crumb_current` (doc name / #tag); the doc page updates the span text
+   live on rename via frontend/src/lib/crumbs.ts, keyed off its id. #}
+{% block crumbs %}
+<p class="crumbs paper-crumbs">
+  <a href="{{ urls.path('/-/paper/') }}">{{ paper_icon_svg | safe }}<span>Papers</span></a>
+  {% if crumb_current %}/ <span id="paper-crumb-current">{{ crumb_current }}</span>{% endif %}
+</p>
+{% endblock %}
+
 {% block extra_head %}
 {# @feat pwa: the <head> tags (manifest link, apple + theme-color meta) that
    make every paper page installable/standalone. theme-color is a single meta

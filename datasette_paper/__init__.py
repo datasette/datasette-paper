@@ -115,6 +115,11 @@ def extra_template_vars(datasette):
             datasette=datasette,
             plugin_package="datasette_paper",
         ),
+        # @feat breadcrumbs: the header-crumb icon. Injected via template var
+        # (not imported by routes/docs.py) because PAPER_ICON_SVG is defined
+        # below the `from . import routes` line — a module-level import from
+        # routes would hit the partially-initialized package.
+        "paper_icon_svg": PAPER_ICON_SVG,
     }
 
 
@@ -312,7 +317,8 @@ async def startup(datasette):
 
 # bootstrap-icons / file-text-fill — kept in sync with the icon used in
 # DocHeader.svelte to the left of the doc title. If you swap the icon,
-# update both sites.
+# update both sites. Also rendered in the header breadcrumb via the
+# `paper_icon_svg` template var (extra_template_vars above).
 PAPER_ICON_SVG = (
     '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" '
     'fill="currentColor" class="bi bi-file-text-fill" viewBox="0 0 16 16">'

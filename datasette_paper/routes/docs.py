@@ -1003,6 +1003,12 @@ async def rename_doc(
     doc = await db.update_doc_name(doc_id=doc_id, name=new_name)
     if doc is None:
         return Response.json({"error": "Document not found"}, status=404)
+    # @feat breadcrumbs: tell live collaborators about the new name (header
+    # title + crumb + document.title). No hot Instance → nobody is connected,
+    # and later bootstraps pick the name up from the page render.
+    instance = get_registry(datasette)._instances.get(doc_id)
+    if instance is not None:
+        instance.broadcast_renamed(doc.name, doc.updated_at)
     return Response.json(
         {
             "id": doc.id,
@@ -1425,6 +1431,7 @@ async def paper_tag_page(datasette, request, tag: str):
             "paper_base.html",
             {
                 "page_title": f"#{slug}",
+                "crumb_current": f"#{slug}",
                 "entrypoint": "src/pages/tag/main.ts",
                 "page_data": {"tag": slug},
             },
@@ -1451,6 +1458,9 @@ async def paper_doc_page(datasette, request, doc_id: int):
             "paper_base.html",
             {
                 "page_title": doc.name or f"Paper {doc_id}",
+                # @feat breadcrumbs: current-page crumb in the header bar; the
+                # doc page keeps it fresh client-side on rename (crumbs.ts).
+                "crumb_current": doc.name or f"Paper {doc_id}",
                 "body_class": "paper-fullscreen",
                 "entrypoint": "src/pages/doc/main.ts",
                 "page_data": {

@@ -3761,3 +3761,54 @@ describe("auto-snapshot", () => {
     conn.close();
   });
 });
+
+// ─── Test: renamed events ────────────────────────────────────────────────────
+
+// @feat breadcrumbs: the `renamed` SSE event reaches onRenamed so the header
+// title, crumb, and document.title can follow a collaborator's rename.
+describe("renamed", () => {
+  it("calls onRenamed with the new name from a `renamed` SSE event", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const renames: Array<{ name: string; at: string }> = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onRenamed: (name, updatedAt) => renames.push({ name, at: updatedAt }),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const es = MockEventSource.instances[0];
+    es.dispatchEvent(
+      "renamed",
+      JSON.stringify({ name: "New Title", updated_at: "2026-07-14T12:00:00Z" }),
+    );
+
+    expect(renames).toEqual([{ name: "New Title", at: "2026-07-14T12:00:00Z" }]);
+
+    conn.close();
+  });
+
+  it("ignores malformed `renamed` payloads without throwing", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const renames: string[] = [];
+    const conn = new EditorConnection({
+      docId: "test-doc",
+      place: el,
+      onRenamed: (name) => renames.push(name),
+    });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const es = MockEventSource.instances[0];
+    es.dispatchEvent("renamed", "not-json");
+    es.dispatchEvent("renamed", JSON.stringify({ name: 42 }));
+    es.dispatchEvent("renamed", JSON.stringify({ name: "" }));
+
+    expect(renames).toEqual([]);
+
+    conn.close();
+  });
+});

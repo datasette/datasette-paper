@@ -764,6 +764,20 @@ class Instance:
         for q in list(self.subscribers):
             q.put_nowait(msg)
 
+    def broadcast_renamed(self, name: str, updated_at: str) -> None:
+        """Push a ``renamed`` event to every subscriber.
+
+        Fired by the rename route after the write commits so live
+        collaborators see the new title (header input, breadcrumb,
+        document.title) without a reload. Kept separate from
+        ``state-changed`` — the client's state handler filters on
+        lifecycle values and stays narrow.
+        @feat breadcrumbs: server half of the live crumb rename.
+        """
+        msg = {"kind": "renamed", "name": name, "updated_at": updated_at}
+        for q in list(self.subscribers):
+            q.put_nowait(msg)
+
     async def broadcast_permissions_changed(self, datasette, locked: bool) -> None:
         """Push a per-subscriber ``permissions-changed`` event after a lock flip.
 
