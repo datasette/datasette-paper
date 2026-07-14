@@ -23,7 +23,8 @@
  */
 import type { Node as PMNode } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";
-import type { EditorState, Transaction } from "prosemirror-state";
+import type { Command, EditorState, Transaction } from "prosemirror-state";
+import type { NodeType, Schema } from "prosemirror-model";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import type { EditorView, NodeView } from "prosemirror-view";
 import { TOOLBAR_ICONS } from "./icons";
@@ -503,24 +504,56 @@ export function insertDateAndEdit(view: EditorView): void {
   });
 }
 
-/** Slash-menu action: insert a date atom resolved to `now + offsetDays` at the
- *  caret, WITHOUT opening the popup — the quick `/today` / `/tomorrow` /
- *  `/yesterday` path. */
-// @feat date: slash quick-insert — a resolved date chip, no popup
-export function insertRelativeDate(view: EditorView, offsetDays: number): void {
+/** A `date` atom resolved to `now + offsetDays`, date-only (no time/tz/format). */
+function relativeDateNode(schema: Schema, offsetDays: number) {
   const now = new Date();
   const target = new Date(
     now.getFullYear(),
     now.getMonth(),
     now.getDate() + offsetDays,
   );
-  const node = view.state.schema.nodes.date.create({
+  return schema.nodes.date.create({
     date: localYmd(target),
     time: null,
     tz: null,
     format: null,
   });
+}
+
+/** True iff an inline node of `nodeType` can be inserted at the selection
+ *  (false in a code block and other inline-hostile contexts). */
+function canInsertInline(state: EditorState, nodeType: NodeType): boolean {
+  const { $from } = state.selection;
+  for (let d = $from.depth; d >= 0; d--) {
+    const index = $from.index(d);
+    if ($from.node(d).canReplaceWith(index, index, nodeType)) return true;
+  }
+  return false;
+}
+
+/** Slash-menu action: insert a date atom resolved to `now + offsetDays` at the
+ *  caret, WITHOUT opening the popup — the quick `/today` / `/tomorrow` /
+ *  `/yesterday` path. */
+// @feat date: slash quick-insert — a resolved date chip, no popup
+export function insertRelativeDate(view: EditorView, offsetDays: number): void {
+  const node = relativeDateNode(view.state.schema, offsetDays);
   view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+}
+
+/** Keymap command inserting a `now + offsetDays` date chip at the cursor —
+ *  bound to `Mod-;` (today) / `Mod-Shift-;` (tomorrow). No-ops (falls through)
+ *  where an inline atom can't go, e.g. inside a code block. */
+// @feat date: keyboard quick-insert — Mod-; today / Mod-Shift-; tomorrow
+export function insertRelativeDateCommand(offsetDays: number): Command {
+  return (state, dispatch) => {
+    const dateType = state.schema.nodes.date;
+    if (!canInsertInline(state, dateType)) return false;
+    if (dispatch) {
+      const node = relativeDateNode(state.schema, offsetDays);
+      dispatch(state.tr.replaceSelectionWith(node).scrollIntoView());
+    }
+    return true;
+  };
 }
 
 // --- overdue / today decoration plugin --------------------------------------

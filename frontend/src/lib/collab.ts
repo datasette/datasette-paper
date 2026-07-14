@@ -84,7 +84,11 @@ import { AccessChecker } from "./linkAccessCheck";
 import { PaperLinkView } from "./paperLinkView";
 import { ActorResolver } from "./actorResolver";
 import { MentionView } from "./mentionView";
-import { DateView, dateDecorationPlugin } from "./dateView";
+import {
+  DateView,
+  dateDecorationPlugin,
+  insertRelativeDateCommand,
+} from "./dateView";
 import { DatasetteResolver } from "./datasetteResolver";
 import { InlineEmbedView } from "./inlineEmbedView";
 import { BlockEmbedView } from "./blockEmbedView";
@@ -1360,6 +1364,10 @@ export class EditorConnection {
         keymap({
           "Mod-k": toggleLinkCommand(),
           "Mod-Shift-7": wrapInList(schema.nodes.task_list),
+          // @feat date: Cmd/Ctrl-; inserts today's date chip, Cmd/Ctrl-Shift-;
+          // tomorrow's — no popup (falls through in code blocks).
+          "Mod-;": insertRelativeDateCommand(0),
+          "Mod-Shift-;": insertRelativeDateCommand(1),
           // Move the cursor's enclosing list_item / task_item up or
           // down within its parent list. Falls through at boundaries
           // so Opt+Arrow still moves the caret out of the list.

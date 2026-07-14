@@ -135,6 +135,38 @@ test.describe("date atom", () => {
       .toContain("fmt=%25Y-%25m-%25d");
   });
 
+  test("Cmd/Ctrl-; and Cmd/Ctrl-Shift-; insert today/tomorrow at the cursor", async ({
+    page,
+  }) => {
+    const resp = await page.request.post(`${BASE}/api/docs`, {
+      data: { name: "Date Keyboard Host" },
+    });
+    expect(resp.status()).toBe(201);
+    const { id } = await resp.json();
+    await gotoPaper(page, `${BASE}/doc/${id}`);
+
+    const app = page.locator("#app-root");
+    await app.locator(".ProseMirror").click();
+    // "Mod" resolves to Meta/Control exactly as prosemirror-keymap decides it
+    // (from navigator.platform in THIS browser, which may differ from the host).
+    const isMac = await page.evaluate(() => /Mac/.test(navigator.platform));
+    const mod = isMac ? "Meta" : "Control";
+
+    await page.keyboard.press(`${mod}+Semicolon`);
+    await page.keyboard.press(`${mod}+Shift+Semicolon`);
+
+    const chips = app.locator(".pm-date");
+    await expect(chips).toHaveCount(2, { timeout: 10000 });
+    // Two real ISO dates, no popup opened.
+    await expect(app.locator(".pm-date-popup")).toHaveCount(0);
+    const first = await chips.nth(0).getAttribute("data-date");
+    const second = await chips.nth(1).getAttribute("data-date");
+    expect(first).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(second).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    // Tomorrow is strictly after today.
+    expect(second! > first!).toBe(true);
+  });
+
   test("a seeded timed+tz date renders a chip", async ({ page }) => {
     const id = await seed(
       page,

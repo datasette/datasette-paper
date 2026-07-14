@@ -7,8 +7,9 @@
  * never fires the date NodeView's update.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { EditorState } from "prosemirror-state";
+import { EditorState, TextSelection } from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
+import type { Node as PMNode } from "prosemirror-model";
 
 import { schema } from "../schema";
 import {
@@ -16,8 +17,26 @@ import {
   chipLabel,
   classifyDate,
   dateDecorationSpecs,
+  insertRelativeDateCommand,
 } from "../dateView";
 import type { DateAttrs } from "../dateFormat";
+
+function isoOffset(days: number): string {
+  const n = new Date();
+  const t = new Date(n.getFullYear(), n.getMonth(), n.getDate() + days);
+  const m = String(t.getMonth() + 1).padStart(2, "0");
+  const d = String(t.getDate()).padStart(2, "0");
+  return `${t.getFullYear()}-${m}-${d}`;
+}
+
+function firstDate(doc: PMNode): PMNode | null {
+  let found: PMNode | null = null;
+  doc.descendants((n) => {
+    if (!found && n.type.name === "date") found = n;
+    return !found;
+  });
+  return found;
+}
 
 // A fixed "now": Tuesday 2026-07-14 10:00 local.
 const NOW = new Date(2026, 6, 14, 10, 0, 0);
@@ -127,6 +146,53 @@ describe("dateDecorationSpecs", () => {
     const specs = dateDecorationSpecs(doc, NOW);
     expect(specs).toHaveLength(1);
     expect(specs[0].cls).toBe("pp-date-today");
+  });
+});
+
+describe("insertRelativeDateCommand", () => {
+  it("Mod-; inserts today's date-only chip at the cursor", () => {
+    const state = EditorState.create({
+      doc: schema.nodes.doc.create(null, [schema.nodes.paragraph.create()]),
+      schema,
+    });
+    let next = state;
+    const handled = insertRelativeDateCommand(0)(state, (tr) => {
+      next = state.apply(tr);
+    });
+    expect(handled).toBe(true);
+    const date = firstDate(next.doc)!;
+    expect(date.attrs).toEqual({
+      date: isoOffset(0),
+      time: null,
+      tz: null,
+      format: null,
+    });
+  });
+
+  it("Mod-Shift-; inserts tomorrow's date", () => {
+    const state = EditorState.create({
+      doc: schema.nodes.doc.create(null, [schema.nodes.paragraph.create()]),
+      schema,
+    });
+    let next = state;
+    insertRelativeDateCommand(1)(state, (tr) => {
+      next = state.apply(tr);
+    });
+    expect(firstDate(next.doc)!.attrs.date).toBe(isoOffset(1));
+  });
+
+  it("falls through (returns false) inside a code block", () => {
+    const doc = schema.nodes.doc.create(null, [
+      schema.nodes.code_block.create(null, schema.text("select 1")),
+    ]);
+    let state = EditorState.create({ doc, schema });
+    state = state.apply(
+      state.tr.setSelection(TextSelection.create(doc, 3)), // inside the code
+    );
+    const handled = insertRelativeDateCommand(0)(state, () => {
+      throw new Error("should not dispatch");
+    });
+    expect(handled).toBe(false);
   });
 });
 
