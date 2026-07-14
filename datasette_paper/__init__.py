@@ -358,32 +358,60 @@ PAPERS_SECTION_ICON = (
 )
 
 
+# Icon next to the "TODOs" heading (host sizes it). bootstrap-icons /
+# check2-square — a checked box, same intent as the row checkbox affordance.
+# fill="currentColor", viewBox, NO fixed width/height so the host can size it.
+TODOS_SECTION_ICON = (
+    '<svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" '
+    'class="bi bi-check2-square" viewBox="0 0 16 16">'
+    '<path d="M3 14.5A1.5 1.5 0 0 1 1.5 13V3A1.5 1.5 0 0 1 3 1.5h8a.5.5 0 0 1 '
+    "0 1H3a.5.5 0 0 0-.5.5v10a.5.5 0 0 0 .5.5h10a.5.5 0 0 0 .5-.5V8a.5.5 0 0 "
+    '1 1 0v5a1.5 1.5 0 0 1-1.5 1.5z"/>'
+    '<path d="m8.354 10.354 7-7a.5.5 0 0 0-.708-.708L8 9.293 5.354 6.646a.5.5 '
+    '0 1 0-.708.708l3 3a.5.5 0 0 0 .708 0"/></svg>'
+)
+
+
 @hookimpl
 def datasette_user_profile_sections(datasette):
     # @feat profile-papers: registers the "Papers" section on user-profiles
     # profile pages — loads the profile_section Vite bundle so the host page
     # renders <profile-papers>, which fetches the actor's created/edited docs.
+    # @feat task-assign: the same bundle also registers <profile-todos>; a
+    # second section here renders the actor's open TODOs (both custom elements
+    # ship in one Vite entry, so this reuses PROFILE_SECTION_ENTRYPOINT).
+    js_urls = [
+        u["url"]
+        for u in vite_js_urls(
+            datasette,
+            entrypoint=PROFILE_SECTION_ENTRYPOINT,
+            plugin_package="datasette_paper",
+        )
+    ]
+    css_urls = vite_css_urls(
+        datasette,
+        entrypoint=PROFILE_SECTION_ENTRYPOINT,
+        plugin_package="datasette_paper",
+    )
     return [
         ProfileSection(
             id="papers",
             label="Papers",
             tag_name="profile-papers",
-            js_urls=[
-                u["url"]
-                for u in vite_js_urls(
-                    datasette,
-                    entrypoint=PROFILE_SECTION_ENTRYPOINT,
-                    plugin_package="datasette_paper",
-                )
-            ],
-            css_urls=vite_css_urls(
-                datasette,
-                entrypoint=PROFILE_SECTION_ENTRYPOINT,
-                plugin_package="datasette_paper",
-            ),
+            js_urls=js_urls,
+            css_urls=css_urls,
             sort_order=40,
             icon=PAPERS_SECTION_ICON,  # raw SVG, fill="currentColor"
-        )
+        ),
+        ProfileSection(
+            id="todos",
+            label="TODOs",
+            tag_name="profile-todos",
+            js_urls=js_urls,
+            css_urls=css_urls,
+            sort_order=45,
+            icon=TODOS_SECTION_ICON,
+        ),
     ]
 
 
