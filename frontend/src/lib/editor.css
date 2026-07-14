@@ -589,6 +589,36 @@
   margin-right: 0.25em;
 }
 
+/* date inline atom — rendered by DateView. A neutral compact chip (calendar
+ * glyph + label) everywhere; the overdue/today tints are applied ONLY inside
+ * an unchecked task_item, by dateDecorationPlugin's node decorations. */
+.editor-host .pm-date {
+  display: inline;
+  white-space: nowrap;
+  color: var(--pp-fg-muted);
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--pp-surface-2);
+  font-weight: 500;
+  user-select: none;
+  cursor: pointer;
+}
+.editor-host .pm-date .pm-date-icon {
+  margin-right: 0.25em;
+}
+.editor-host .pm-date .pm-date-icon svg {
+  vertical-align: -0.1em;
+}
+/* Tints — decoration classes on the chip, so they win over the neutral base. */
+.editor-host .pm-date.pp-date-overdue {
+  color: var(--pp-danger);
+  background: var(--pp-danger-bg);
+}
+.editor-host .pm-date.pp-date-today {
+  color: var(--pp-warn);
+  background: var(--pp-warn-bg);
+}
+
 /* Tables — prosemirror-tables ships layout but no cell borders. We
  * draw a light grid + a header background. `--default-cell-min-width`
  * stops empty cells from collapsing to 0px wide. */

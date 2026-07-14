@@ -84,6 +84,7 @@ import { AccessChecker } from "./linkAccessCheck";
 import { PaperLinkView } from "./paperLinkView";
 import { ActorResolver } from "./actorResolver";
 import { MentionView } from "./mentionView";
+import { DateView, dateDecorationPlugin } from "./dateView";
 import { DatasetteResolver } from "./datasetteResolver";
 import { InlineEmbedView } from "./inlineEmbedView";
 import { BlockEmbedView } from "./blockEmbedView";
@@ -1440,6 +1441,11 @@ export class EditorConnection {
         // sql_block / source text with `tok-*` classes via lazily-loaded lezer
         // grammars. Read-path only; no @codemirror/* is pulled in here.
         codeHighlightPlugin(),
+        // Tints `date` atoms overdue (red) / today (amber) — but only inside an
+        // unchecked task_item. A decoration plugin (not NodeView state) because
+        // checking the box is a setNodeMarkup on the ancestor, which the date
+        // view's update never sees; decorations recompute every transaction.
+        dateDecorationPlugin(),
         foldHeadingsPlugin,
         // Re-renders every mounted table-of-contents block when the doc's
         // top-level heading signature changes (a TocView's own update() only
@@ -1554,6 +1560,7 @@ export class EditorConnection {
         sql_block: (node, view, getPos) =>
           new SqlBlockView(node, view, getPos as () => number | undefined),
         tag: (node, view) => new TagView(node, view),
+        date: (node) => new DateView(node),
         value: (node, view, getPos) =>
           new ValueView(
             node,
