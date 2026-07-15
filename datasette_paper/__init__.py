@@ -189,6 +189,42 @@ def register_routes():
 
 
 @hookimpl
+# @feat tui: register the `datasette paper tui` CLI command (textual-free import)
+def register_commands(cli):
+    """Add a ``paper`` click group with a ``tui`` subcommand.
+
+    Group leaves room for future non-TUI subcommands. This hookimpl imports
+    nothing from textual so the plugin loads without the ``[tui]`` extra; the
+    command body late-imports ``datasette_paper.tui.app`` and exits with an
+    install hint if textual is missing.
+    """
+    import click
+
+    @cli.group()
+    def paper():
+        "Commands for datasette-paper"
+
+    @paper.command()
+    @click.argument("url", default="http://localhost:8001")
+    @click.option(
+        "--token",
+        envvar="DATASETTE_PAPER_TOKEN",
+        help="Bearer token (from `datasette create-token`); also DATASETTE_PAPER_TOKEN",
+    )
+    @click.option("--doc", help="Doc id to open on launch")
+    def tui(url, token, doc):
+        "Browse and edit paper docs against a running Datasette over HTTP + SSE"
+        try:
+            from datasette_paper.tui.app import run
+        except ImportError:
+            raise click.ClickException(
+                "The paper TUI needs the [tui] extra. Install it with:\n"
+                "    pip install 'datasette-paper[tui]'"
+            )
+        run(url, token=token, doc=doc)
+
+
+@hookimpl
 def register_actions(datasette):
     return [
         # --- Global action --------------------------------------------------

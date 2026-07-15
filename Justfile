@@ -170,6 +170,14 @@ test-all *flags:
     just test-frontend
     just test-e2e
 
+# --- TUI ---
+
+# Launch the terminal client against a running Datasette. Pass args through,
+# e.g. `just tui http://localhost:8001 --doc 3`. `--with textual` pulls the
+# [tui] extra's UI dep without needing it installed in the base env.
+tui *args:
+    uv run --prerelease=allow --with textual datasette paper tui {{args}}
+
 # --- Dev server ---
 
 # Run datasette with the local plugin loaded, plus optional sibling
