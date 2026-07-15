@@ -23,6 +23,16 @@ dependencies = [
     "sqlite-utils>=3.38",
 ]
 
+[project.optional-dependencies]
+# The terminal client (`datasette paper tui`). httpx ships with Datasette but
+# is listed here because tui/client.py imports it directly. All textual imports
+# live under datasette_paper/tui/ and are loaded late by the CLI command, so the
+# base plugin never requires this extra.
+tui = [
+    "textual>=1.0",
+    "httpx",
+]
+
 [dependency-groups]
 dev = [
     "datasette-agent",
@@ -31,6 +41,7 @@ dev = [
     "pytest-asyncio",
     "ruff>=0.15.12",
     "solite>=0.0.1a36",
+    "textual>=1.0",
 ]
 
 [build-system]

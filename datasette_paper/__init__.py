@@ -189,6 +189,78 @@ def register_routes():
 
 
 @hookimpl
+# @feat tui: register the `datasette paper tui` CLI command (textual-free import)
+def register_commands(cli):
+    """Add a ``paper`` click group with a ``tui`` subcommand.
+
+    Group leaves room for future non-TUI subcommands. This hookimpl imports
+    nothing from textual so the plugin loads without the ``[tui]`` extra; the
+    command body late-imports ``datasette_paper.tui.app`` and exits with an
+    install hint if textual is missing.
+    """
+    import click
+
+    @cli.group()
+    def paper():
+        "Commands for datasette-paper"
+
+    @paper.command()
+    @click.argument("target", default="http://localhost:8001", metavar="TARGET")
+    @click.option(
+        "--token",
+        envvar="DATASETTE_PAPER_TOKEN",
+        help="Bearer token (from `datasette create-token`); also DATASETTE_PAPER_TOKEN. URL mode only",
+    )
+    @click.option("--doc", help="Doc id to open on launch")
+    @click.option(
+        "--internal",
+        is_flag=True,
+        help="Force TARGET to be read as an internal.db path (standalone mode)",
+    )
+    @click.option(
+        "--db",
+        "dbs",
+        multiple=True,
+        help="Attach a content SQLite file to query (repeatable; internal mode only)",
+    )
+    def tui(target, token, doc, internal, dbs):
+        """Browse and edit paper docs, in one of two modes.
+
+        URL mode (default): TARGET is the URL of a running Datasette; the TUI is
+        an HTTP + SSE client of it (use --token for a bearer token). Standalone
+        mode: TARGET is a path to a Datasette internal.db (any non-URL TARGET, or
+        force it with --internal) — the TUI boots an in-process Datasette on that
+        file, no server or token needed, and --db attaches content databases.
+
+        Single-writer caveat: only one process may serve a given internal.db at a
+        time. Do not point standalone mode at an internal.db a live Datasette is
+        already serving — two writers corrupt the paper step log (the command
+        refuses if it detects the file is locked).
+        """
+        # Sniff + validate before touching textual, so bad flag combos report a
+        # UsageError whether or not the [tui] extra is installed. standalone
+        # imports no textual.
+        from datasette_paper.tui.standalone import resolve_tui_target
+
+        resolved = resolve_tui_target(target, internal=internal, token=token, dbs=dbs)
+        try:
+            from datasette_paper.tui.app import run
+        except ImportError:
+            raise click.ClickException(
+                "The paper TUI needs the [tui] extra. Install it with:\n"
+                "    pip install 'datasette-paper[tui]'"
+            )
+        if resolved["mode"] == "internal":
+            run(
+                doc=doc,
+                internal_path=resolved["internal_path"],
+                content_dbs=resolved["content_dbs"],
+            )
+        else:
+            run(resolved["url"], token=resolved["token"], doc=doc)
+
+
+@hookimpl
 def register_actions(datasette):
     return [
         # --- Global action --------------------------------------------------
