@@ -4,7 +4,8 @@ Columns: Name / Updated (relative) / Tags. A tab row switches the
 ``state`` / ``kind`` params (Active / Archived / Templates). ``/`` reveals a
 client-side substring filter (the listing is server-capped at 1000 rows). Enter
 opens the doc; ``n`` creates one (name prompt → ``create`` → open); ``r``
-renames the selected doc; ``b`` is the ticket-03 browse stub.
+renames the selected doc; ``b`` opens ``BrowseScreen`` (``screens/browse.py``),
+a read-only Datasette database/table browser.
 
 @feat tui: doc browser screen (list / filter / open / create / rename)
 """
@@ -20,6 +21,7 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen, Screen
 from textual.widgets import DataTable, Footer, Input, Label, Tabs, Tab
 
+from .browse import BrowseScreen
 from .doc_view import DocScreen
 
 # Tab id → (state, kind) query params for GET /api/docs.
@@ -230,5 +232,6 @@ class DocListScreen(Screen):
         await self.client.rename(doc_id, new_name)
         await self.reload()
 
+    # @feat tui: BrowseScreen — database/table/row browsing over the Datasette JSON API
     def action_browse(self) -> None:
-        self.notify("browse: ticket 03")
+        self.app.push_screen(BrowseScreen(self.client))

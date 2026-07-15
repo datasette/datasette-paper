@@ -9,25 +9,74 @@ robust (Textual pilots can be finicky about the event loop).
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 
 import httpx
 import pytest
+from datasette.app import Datasette
 
 pytest.importorskip("textual")
 
-from textual.widgets import Markdown  # noqa: E402
+from textual.widgets import DataTable, Markdown  # noqa: E402
 
 from conftest import create_doc  # noqa: E402
 
-from datasette_paper.instance import get_registry  # noqa: E402
+from datasette_paper.instance import MAX_STEP_BYTES, get_registry  # noqa: E402
 from datasette_paper.markdown_parser import markdown_to_fragment  # noqa: E402
 from datasette_paper.tui.app import PaperApp  # noqa: E402
 from datasette_paper.tui.client import PaperClient, SSEEvent  # noqa: E402
 from datasette_paper.tui.prettify import prettify_markdown  # noqa: E402
+from datasette_paper.tui.screens.browse import (  # noqa: E402
+    BrowseRowsScreen,
+    BrowseScreen,
+)
 from datasette_paper.tui.screens.doc_list import DocListScreen  # noqa: E402
 from datasette_paper.tui.screens.doc_view import DocScreen  # noqa: E402
 from datasette_paper.tui.widgets.blocks import Callout  # noqa: E402
 from datasette_paper.util import paper_db  # noqa: E402
+
+
+CONTENT_DB = "content"
+
+
+def _build_content_db(path, n_rows: int = 5) -> None:
+    conn = sqlite3.connect(path)
+    conn.execute("create table widgets (id integer primary key, name text)")
+    for i in range(n_rows):
+        conn.execute("insert into widgets (name) values (?)", (f"widget{i}",))
+    conn.commit()
+    conn.close()
+
+
+async def _build_content_ds(tmp_path, n_rows: int = 5) -> Datasette:
+    """A Datasette with paper's usual routes *and* a real ``content`` db
+    attached — the shared ``ds`` fixture is internal-db-only, so the live
+    sql_block/block_embed/BrowseScreen tests below build their own."""
+    db_path = tmp_path / f"{CONTENT_DB}.db"
+    _build_content_db(db_path, n_rows)
+    ds = Datasette(
+        files=[str(db_path)],
+        memory=True,
+        config={"permissions": {"datasette-paper-create": True}},
+        settings={"max_post_body_bytes": MAX_STEP_BYTES + 1024 * 1024},
+    )
+    await ds.invoke_startup()
+    return ds
+
+
+class _CountingTransport(httpx.ASGITransport):
+    """An ASGITransport that counts requests whose path matches ``prefix`` —
+    used to prove a cached sql_block run makes no second HTTP call."""
+
+    def __init__(self, *args, prefix: str, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.prefix = prefix
+        self.calls: list = []
+
+    async def handle_async_request(self, request):
+        if request.url.path.startswith(self.prefix):
+            self.calls.append(str(request.url))
+        return await super().handle_async_request(request)
 
 
 FIXTURE_MD = """# Heading
@@ -197,3 +246,112 @@ async def test_doc_screen_wikilink_shows_title(ds):
             md_widget = screen.blocks[0].query_one(Markdown)
             assert "Target Doc" in md_widget.source
             assert f"[[{target}]]" not in md_widget.source
+
+
+async def _seed_content_doc(ds: Datasette, content: str, name: str = "Fixture") -> int:
+    """Like ``_seed_doc``, but for a locally-built ``ds`` (``_build_content_ds``)
+    that isn't wired through the shared fixture's default-actor monkeypatch —
+    sign alice's cookie explicitly so she owns the doc (and can reopen it)."""
+    cookie = ds.sign({"a": {"id": "alice"}}, "actor")
+    resp = await ds.client.post(
+        "/-/paper/api/docs",
+        json={"name": name, "content": content},
+        cookies={"ds_actor": cookie},
+    )
+    assert resp.status_code == 201, resp.text
+    return resp.json()["id"]
+
+
+@pytest.mark.asyncio
+# @feat tui: test — sql_block Enter/ctrl+r runs the query; a second run hits the cache
+async def test_sql_block_run_and_cache(tmp_path):
+    ds = await _build_content_ds(tmp_path, n_rows=5)
+    doc_id = await _seed_content_doc(
+        ds, f"```sql db={CONTENT_DB}\nselect * from widgets order by id\n```\n"
+    )
+
+    transport = _CountingTransport(app=ds.app(), prefix=f"/{CONTENT_DB}/")
+    cookie = ds.sign({"a": {"id": "alice"}}, "actor")
+    client = PaperClient(
+        base_url="http://testserver", transport=transport, cookies={"ds_actor": cookie}
+    )
+    async with client:
+        app = PaperApp(client, doc_id=doc_id)
+        async with app.run_test() as pilot:
+            await _wait_until(
+                lambda: isinstance(app.screen, DocScreen) and app.screen.blocks, pilot
+            )
+            screen = app.screen
+            idx = [b.node_type for b in screen.blocks].index("sql_block")
+            screen._cursor = idx
+
+            await screen._run_current_block()
+            await pilot.pause()
+            table = screen.blocks[idx].query_one(DataTable)
+            assert table.row_count == 5
+            assert list(table.get_row_at(0)) == ["1", "widget0"]
+            assert len(transport.calls) == 1
+
+            # A second run of the identical (db, sql) pair hits the cache —
+            # no additional HTTP call.
+            await screen._run_current_block()
+            await pilot.pause()
+            assert len(transport.calls) == 1
+
+
+@pytest.mark.asyncio
+# @feat tui: test — block_embed's stored filter/sort config maps to Datasette query params
+async def test_block_embed_filters_map_to_query_params(tmp_path):
+    ds = await _build_content_ds(tmp_path, n_rows=5)
+    fence = (
+        "```paper-embed\n"
+        '{"config": {"filters": [{"column": "name", "op": "contains", "value": "widget1"}], '
+        '"sort": {"column": "id", "desc": true}}, "mode": "table", "ref": "/'
+        + CONTENT_DB
+        + '/widgets"}\n'
+        "```\n"
+    )
+    doc_id = await _seed_content_doc(ds, fence)
+
+    transport = _CountingTransport(app=ds.app(), prefix=f"/{CONTENT_DB}/widgets")
+    cookie = ds.sign({"a": {"id": "alice"}}, "actor")
+    client = PaperClient(
+        base_url="http://testserver", transport=transport, cookies={"ds_actor": cookie}
+    )
+    async with client:
+        app = PaperApp(client, doc_id=doc_id)
+        async with app.run_test() as pilot:
+            await _wait_until(
+                lambda: isinstance(app.screen, DocScreen) and app.screen.blocks, pilot
+            )
+            await _wait_until(lambda: len(transport.calls) > 0, pilot)
+
+    assert len(transport.calls) == 1
+    assert "name__contains=widget1" in transport.calls[0]
+    assert "_sort_desc=id" in transport.calls[0]
+
+
+@pytest.mark.asyncio
+# @feat tui: test — BrowseScreen lists the content db; BrowseRowsScreen paginates via _next
+async def test_browse_screen_lists_db_and_rows_screen_paginates(tmp_path):
+    ds = await _build_content_ds(tmp_path, n_rows=60)
+    async with _client_for(ds) as client:
+        app = PaperApp(client)
+        async with app.run_test() as pilot:
+            await _wait_until(lambda: isinstance(app.screen, DocListScreen), pilot)
+            app.screen.action_browse()
+            await _wait_until(lambda: isinstance(app.screen, BrowseScreen), pilot)
+            await _wait_until(lambda: app.screen._names, pilot)
+            assert CONTENT_DB in app.screen._names
+
+            rows_screen = BrowseRowsScreen(client, CONTENT_DB, "widgets")
+            await app.push_screen(rows_screen)
+            await _wait_until(lambda: rows_screen._loaded_count > 0, pilot)
+            assert rows_screen._loaded_count == 50
+            assert rows_screen._exhausted is False
+            assert rows_screen._next_token is not None
+
+            await rows_screen.action_load_more()
+            await pilot.pause()
+            assert rows_screen._loaded_count == 60
+            assert rows_screen._exhausted is True

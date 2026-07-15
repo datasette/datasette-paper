@@ -15,6 +15,12 @@ touched everything). ``renamed`` / ``state-changed`` / ``permissions-changed``
 refresh the header; ``closed`` pops back to the list; a ``GoneError`` from the
 event iterator re-bootstraps the doc.
 
+``_sql_cache`` (``{(db, sql): SqlResult}``) is owned here, not by any one
+block widget, and threaded through every ``make_block`` call — it survives
+block rebuilds (an SSE re-render constructs fresh widget instances), so a
+``sql_block``/``source`` that was already run shows its cached result again
+without a second network call (see ``widgets/sql_block.py``).
+
 @feat tui: live read-only doc view (per-block widgets + SSE re-render)
 """
 
@@ -43,6 +49,8 @@ class DocScreen(Screen):
         ("k", "cursor_up", "Up"),
         ("up", "cursor_up", "Up"),
         ("space", "toggle_callout", "Toggle callout"),
+        ("enter", "run_block", "Run"),
+        ("ctrl+r", "run_block", "Run"),
         ("o", "open_browser", "Open in browser"),
         ("y", "yank", "Copy markdown"),
         ("escape", "back", "Back"),
@@ -77,18 +85,32 @@ class DocScreen(Screen):
     Callout.callout--important { border: round #a371f7; }
     Callout.callout--warning { border: round #d9a441; }
     Callout.callout--caution { border: round #e5534b; }
-    .sql-placeholder {
+    SqlRunnerBlock {
         border: round $primary-darken-1;
         padding: 0 1;
         height: auto;
-        color: $text-muted;
     }
+    .sql-block-header { text-style: bold; color: $text-muted; }
+    .sql-block-body { height: auto; }
+    .sql-block-status { color: $text-muted; height: auto; }
+    #sql-results { height: auto; max-height: 16; }
+    BlockEmbedBlock {
+        border: round $primary-darken-1;
+        padding: 0 1;
+        height: auto;
+    }
+    .embed-header { text-style: bold; color: $text-muted; }
+    .embed-status { color: $text-muted; height: auto; }
+    #embed-body { height: auto; max-height: 16; }
     """
 
     def __init__(self, client, session, name: Optional[str] = None) -> None:
         super().__init__()
         self.client = client
         self.session = session
+        # (db, sql) -> SqlResult, shared across block rebuilds — see the
+        # module docstring and widgets/sql_block.py.
+        self._sql_cache: dict = {}
         self.doc_id = session.doc_id
         self.doc_name = name or f"Document {session.doc_id}"
         self.blocks: list[Block] = []
@@ -159,7 +181,14 @@ class DocScreen(Screen):
         await self._resolve_refs()
         await self.container.remove_children()
         self.blocks = [
-            make_block(self.session, i, self._links, self._actors)
+            make_block(
+                self.session,
+                i,
+                self._links,
+                self._actors,
+                client=self.client,
+                sql_cache=self._sql_cache,
+            )
             for i in range(self.session.block_count())
         ]
         if self.blocks:
@@ -178,7 +207,14 @@ class DocScreen(Screen):
         await self._resolve_refs()
         for i in sorted(touched):
             old = self.blocks[i]
-            new = make_block(self.session, i, self._links, self._actors)
+            new = make_block(
+                self.session,
+                i,
+                self._links,
+                self._actors,
+                client=self.client,
+                sql_cache=self._sql_cache,
+            )
             await self.container.mount(new, before=old)
             await old.remove()
             self.blocks[i] = new
@@ -260,9 +296,21 @@ class DocScreen(Screen):
         if self.blocks:
             self.blocks[self._cursor].toggle_collapsed()
 
+    # @feat tui: sql_block/source live widget — Enter/ctrl+r runs, cached by (db, sql)
+    @work
+    async def action_run_block(self) -> None:
+        await self._run_current_block()
+
+    async def _run_current_block(self) -> None:
+        if self.blocks:
+            await self.blocks[self._cursor].run_query()
+
     def action_open_browser(self) -> None:
         base = str(self.client._http.base_url).rstrip("/")
-        webbrowser.open(f"{base}/-/paper/doc/{self.doc_id}")
+        url = None
+        if self.blocks:
+            url = self.blocks[self._cursor].browser_url(base)
+        webbrowser.open(url or f"{base}/-/paper/doc/{self.doc_id}")
 
     @work
     async def action_yank(self) -> None:
