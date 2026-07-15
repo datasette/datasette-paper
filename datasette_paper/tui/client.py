@@ -204,6 +204,9 @@ class DocSession:
         self.lock = asyncio.Lock()
         self.permissions: dict = bootstrap.get("permissions") or {}
         self.version: int = bootstrap["version"]
+        # Live subscriber count from the bootstrap envelope; the reader header
+        # shows it and refreshes it from update/presence batches.
+        self.users: int = bootstrap.get("users") or 0
 
         doc = schema.node_from_json(bootstrap["doc"])
         # Mirror the server materializer: apply steps in order, stop on the
