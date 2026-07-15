@@ -531,6 +531,12 @@ function canInsertInline(state: EditorState, nodeType: NodeType): boolean {
   return false;
 }
 
+/** True iff a `date` atom can be inserted at the selection — the toolbar
+ *  button's disabled gate (same check the `Mod-;` command falls through on). */
+export function canInsertDate(state: EditorState): boolean {
+  return canInsertInline(state, state.schema.nodes.date);
+}
+
 /** Slash-menu action: insert a date atom resolved to `now + offsetDays` at the
  *  caret, WITHOUT opening the popup — the quick `/today` / `/tomorrow` /
  *  `/yesterday` path. */

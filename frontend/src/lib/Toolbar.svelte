@@ -9,6 +9,7 @@
   import { wrapSelectionInCallout, unwrapCallout } from "./callout";
   import { canInsertTable, insertTable } from "./tables";
   import { insertToc } from "./tocView";
+  import { canInsertDate, insertDateAndEdit } from "./dateView";
   import { embedInsertSources } from "./embedProviders";
   // The in-table action bar (add/delete row/col, name input) is owned
   // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). Only the
@@ -314,6 +315,10 @@
     void tick;
     return view ? canInsertTable(view.state) : false;
   });
+  const canDate = $derived.by(() => {
+    void tick;
+    return view ? canInsertDate(view.state) : false;
+  });
 
   // ─── mobile layout ──────────────────────────────────────────────────────────
   // On phones the toolbar becomes a bottom-pinned, horizontally-scrolling strip
@@ -413,6 +418,15 @@
   {@render btn("hr", "Horizontal rule", insertHorizontalRule)}
   {@render btn("listNested", "Insert table of contents", () => run(insertToc))}
   {@render btn("image", "Insert image", () => onInsertImage?.())}
+  <!-- @feat date: toolbar button — insert today's chip + open its editor popup
+       (same flow as the /date slash entry) -->
+  {@render btn(
+    "calendarEvent",
+    "Insert date",
+    () => view && insertDateAndEdit(view),
+    undefined,
+    !canDate,
+  )}
   {@render btn(
     "table",
     "Insert table (empty paragraphs only)",
