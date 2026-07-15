@@ -6,15 +6,17 @@
  * compact viewer-facing label (leading calendar glyph + text):
  *
  *   date-only   → "Jul 20"          (current year) / "Jul 20, 2026" (other)
- *   timed       → "Jul 20, 3:00 PM" (the time converted to the VIEWER's zone
- *                 when `attrs.tz` differs; a `title` tooltip then shows the
- *                 authored wall time + zone. Unresolvable/absent zone → the
- *                 naive stored wall-clock, no conversion.)
+ *   timed       → "Jul 20, 3:00 PM" — date AND time rendered from the atom's
+ *                 instant in the VIEWER's zone when `attrs.tz` resolves, so a
+ *                 PST evening reads as the next calendar day in Europe/Asia.
+ *                 When the stored zone differs from the viewer's, a `title`
+ *                 tooltip shows the authored date + wall time + zone.
+ *                 Unresolvable/absent zone → the naive stored wall-clock, no
+ *                 conversion.
  *
- * NOTE (deliberate, per plans/date-node): only the *time* is zone-converted;
- * the displayed calendar date is always the authored `attrs.date`. For a timed
- * atom near midnight in a distant zone the pair can read a day "off" — the
- * tooltip carries the authoritative authored instant. Revisit if this bites.
+ * Only the *display* converts — `attrs.date`/`attrs.time` stay the author's
+ * wall clock (the model, the markdown round-trip, and the `data-date-*` DOM
+ * attributes are all authored values).
  *
  * Overdue/today tinting is NOT the NodeView's job — it lives in
  * `dateDecorationPlugin` (below), because toggling a task checkbox is a
@@ -48,6 +50,8 @@ const MONTHS = [
 ];
 
 const CAL_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS.calendarEvent}</svg>`;
+
+const pad2 = (n: number): string => String(n).padStart(2, "0");
 
 function attrsOf(node: PMNode): DateAttrs {
   return {
@@ -145,6 +149,21 @@ function timeInZone(instant: Date, zone: string | undefined, withName = false): 
   return dtf.format(instant);
 }
 
+/** Full "Jul 25, 2026, 4:00 PM PDT" render of `instant` in `zone` — the
+ *  cross-zone tooltip body. The date is included because the chip's displayed
+ *  calendar day (viewer zone) can differ from the author's. */
+function dateTimeInZone(instant: Date, zone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: zone,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(instant);
+}
+
 /** The default (no-format) chip date portion: "Jul 20", with the year appended
  *  only when it isn't the viewer's current year. */
 function defaultChipDate(y: number, mo: number, d: number, now: Date): string {
@@ -162,22 +181,29 @@ export function chipLabel(
   const [y, mo, d] = attrs.date.split("-").map(Number);
   // A custom format renders the date portion verbatim; the default omits the
   // year when it's the viewer's current year (a client-only nicety).
-  const dateText = attrs.format
-    ? strftimeDate(attrs.format, y, mo, d)
-    : defaultChipDate(y, mo, d, now);
+  const renderDate = (yy: number, mm: number, dd: number) =>
+    attrs.format ? strftimeDate(attrs.format, yy, mm, dd) : defaultChipDate(yy, mm, dd, now);
 
-  if (!attrs.time) return { text: dateText, title: null };
+  if (!attrs.time) return { text: renderDate(y, mo, d), title: null };
 
   const instant = resolveInstant(attrs);
   if (!instant) {
     // No zone / unresolvable → show the naive stored wall clock, no tooltip.
-    return { text: `${dateText}, ${naiveTime(attrs.time)}`, title: null };
+    return { text: `${renderDate(y, mo, d)}, ${naiveTime(attrs.time)}`, title: null };
   }
   const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const text = `${dateText}, ${timeInZone(instant, viewerZone)}`;
+  // Date AND time both come from the instant in the viewer's zone, so the
+  // displayed calendar day is the day the event happens for THIS viewer —
+  // rendering the authored `attrs.date` here reads a day "off" whenever the
+  // conversion crosses midnight (a PST afternoon is the next day in Europe).
+  const text = `${renderDate(
+    instant.getFullYear(),
+    instant.getMonth() + 1,
+    instant.getDate(),
+  )}, ${timeInZone(instant, viewerZone)}`;
   const title =
     attrs.tz && attrs.tz !== viewerZone
-      ? `${timeInZone(instant, attrs.tz, true)} — author's time`
+      ? `${dateTimeInZone(instant, attrs.tz)} — author's time`
       : null;
   return { text, title };
 }
@@ -266,10 +292,18 @@ export class DateView implements NodeView {
     input.className = "pm-date-popup-input";
     input.placeholder = "e.g. next fri 3pm";
     // Prefill with a form parseDateInput round-trips (ISO date + 24h time),
-    // not the display label (its comma wouldn't re-parse).
-    input.value = this.attrs.time
-      ? `${this.attrs.date} ${this.attrs.time}`
-      : this.attrs.date;
+    // not the display label (its comma wouldn't re-parse). A timed atom
+    // prefills the instant in the VIEWER's zone: commit() stamps the viewer's
+    // zone, so an untouched Enter (e.g. only switching the format) must
+    // describe the same instant — prefilling the author's wall clock would
+    // silently shift the event by the zone difference. Unresolvable zone →
+    // fall back to the stored (naive) wall clock.
+    const instant = this.attrs.time ? resolveInstant(this.attrs) : null;
+    input.value = instant
+      ? `${localYmd(instant)} ${pad2(instant.getHours())}:${pad2(instant.getMinutes())}`
+      : this.attrs.time
+        ? `${this.attrs.date} ${this.attrs.time}`
+        : this.attrs.date;
 
     const preview = document.createElement("div");
     preview.className = "pm-date-popup-preview";
@@ -566,16 +600,17 @@ export function insertRelativeDateCommand(offsetDays: number): Command {
 
 /** The tint class for a date atom evaluated against `now`, or null (neutral).
  *  Overdue = the instant/day has passed; today = it is the viewer's current
- *  calendar day and not yet passed. Timed atoms compare by instant; date-only
- *  (and timed-without-zone) atoms compare by calendar day. */
+ *  calendar day and not yet passed. Timed atoms classify purely by instant —
+ *  passed → overdue, else by the instant's calendar day in the VIEWER's zone
+ *  (comparing the authored `attrs.date` string here marks a future instant
+ *  overdue for any viewer whose local date is already past the author's).
+ *  Date-only (and timed-without-zone) atoms compare by calendar day. */
 export function classifyDate(attrs: DateAttrs, now: Date): "overdue" | "today" | null {
   const todayStr = localYmd(now);
   const instant = resolveInstant(attrs);
   if (instant) {
     if (instant.getTime() < now.getTime()) return "overdue";
-    if (attrs.date < todayStr) return "overdue";
-    if (attrs.date === todayStr) return "today";
-    return null;
+    return localYmd(instant) === todayStr ? "today" : null;
   }
   if (attrs.date < todayStr) return "overdue";
   if (attrs.date === todayStr) return "today";

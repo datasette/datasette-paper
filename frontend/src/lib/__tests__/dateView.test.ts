@@ -18,6 +18,7 @@ import {
   classifyDate,
   dateDecorationSpecs,
   insertRelativeDateCommand,
+  resolveInstant,
 } from "../dateView";
 import type { DateAttrs } from "../dateFormat";
 
@@ -40,6 +41,16 @@ function firstDate(doc: PMNode): PMNode | null {
 
 // A fixed "now": Tuesday 2026-07-14 10:00 local.
 const NOW = new Date(2026, 6, 14, 10, 0, 0);
+
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const MONTHS_ABBR = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split(" ");
+
+/** `instant` re-expressed as a timed atom authored in UTC — lets a test pin an
+ *  exact instant without depending on the host zone. */
+function utcAttrs(instant: Date): DateAttrs {
+  const date = `${instant.getUTCFullYear()}-${pad2(instant.getUTCMonth() + 1)}-${pad2(instant.getUTCDate())}`;
+  return { date, time: `${pad2(instant.getUTCHours())}:${pad2(instant.getUTCMinutes())}`, tz: "UTC" };
+}
 
 function dateAtom(attrs: DateAttrs) {
   return schema.nodes.date.create(attrs);
@@ -75,17 +86,28 @@ describe("chipLabel", () => {
   });
 
   it("converts a timed atom into the viewer's zone with a cross-zone tooltip", () => {
-    // 9:00 AM in Tokyo is 5:00 PM the previous day in LA. The chip keeps the
-    // authored calendar date and converts only the time; the tooltip carries
-    // the authoritative authored wall time + zone.
+    // The chip renders the whole authored instant (date AND time) in the
+    // viewer's zone; the tooltip carries the authored wall date/time + zone.
     const attrs: DateAttrs = { date: "2026-07-20", time: "09:00", tz: "Asia/Tokyo" };
-    // Force a viewer zone by checking against LA via a manual expectation:
     // vitest runs in the host zone, so assert the invariant instead — a
     // tooltip appears iff the stored zone differs from the viewer's.
     const viewerZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const { title } = chipLabel(attrs, NOW);
     if (viewerZone === "Asia/Tokyo") expect(title).toBeNull();
     else expect(title).toContain("author's time");
+  });
+
+  it("derives the displayed calendar day from the instant in the viewer's zone", () => {
+    // 4:00 PM PDT on Jul 25 = 2026-07-25T23:00Z — already Jul 26 for any
+    // viewer east of UTC-1ish. The displayed day must be the instant's local
+    // day, not the authored `attrs.date` (the pre-fix render read a day "off"
+    // whenever the conversion crossed midnight).
+    const attrs: DateAttrs = { date: "2026-07-25", time: "16:00", tz: "America/Los_Angeles" };
+    const instant = resolveInstant(attrs)!;
+    expect(instant.toISOString()).toBe("2026-07-25T23:00:00.000Z");
+    const localDay = `${MONTHS_ABBR[instant.getMonth()]} ${instant.getDate()}`;
+    const { text } = chipLabel(attrs, NOW);
+    expect(text.startsWith(`${localDay},`)).toBe(true);
   });
 });
 
@@ -104,11 +126,42 @@ describe("classifyDate", () => {
     expect(classifyDate({ date: "2026-07-20", time: null, tz: null }, NOW)).toBeNull();
   });
   it("tints a passed instant overdue even when it is today", () => {
-    // 08:00 UTC on 2026-07-14 is before NOW (10:00 local, in most host zones
-    // this instant has passed). Assert against the actual comparison.
-    const attrs: DateAttrs = { date: "2026-07-14", time: "00:01", tz: "UTC" };
-    const result = classifyDate(attrs, NOW);
-    expect(["overdue", "today"]).toContain(result);
+    // NOW − 2h: same viewer-local day, but the instant has passed.
+    const attrs = utcAttrs(new Date(NOW.getTime() - 2 * 60 * 60 * 1000));
+    expect(classifyDate(attrs, NOW)).toBe("overdue");
+  });
+  it("leaves a future instant on a later viewer-local day neutral", () => {
+    // NOW + 26h lands on the viewer's tomorrow (10:00 → 12:00 next day).
+    const attrs = utcAttrs(new Date(NOW.getTime() + 26 * 60 * 60 * 1000));
+    expect(classifyDate(attrs, NOW)).toBeNull();
+  });
+  it("classifies a timed atom by its instant, not the authored date string", () => {
+    // NOW + 2h authored in UTC+14 (Kiritimati): the author's wall date can sit
+    // a day AHEAD of the viewer's today, and vice versa a zone behind can sit
+    // a day BEHIND. Either way the instant is 2h away on the viewer's current
+    // day → "today", never "overdue"/null (the pre-fix string comparison
+    // against the viewer's today misclassified both directions).
+    const instant = new Date(NOW.getTime() + 2 * 60 * 60 * 1000);
+    for (const tz of ["Pacific/Kiritimati", "Etc/GMT+12"]) {
+      const dtf = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      });
+      const p: Record<string, string> = {};
+      for (const part of dtf.formatToParts(instant)) p[part.type] = part.value;
+      const attrs: DateAttrs = {
+        date: `${p.year}-${p.month}-${p.day}`,
+        time: `${p.hour}:${p.minute}`,
+        tz,
+      };
+      expect(resolveInstant(attrs)!.getTime()).toBe(instant.getTime());
+      expect(classifyDate(attrs, NOW)).toBe("today");
+    }
   });
 });
 
@@ -259,6 +312,29 @@ describe("DateView popup", () => {
     const date = view.state.doc.firstChild!.firstChild!;
     expect(date.attrs.time).toBe("15:30");
     expect(date.attrs.tz).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  });
+
+  it("prefills a timed atom in the viewer's zone; an untouched Enter keeps the instant", () => {
+    // Authored 4:00 PM PDT. The popup must prefill the equivalent viewer-local
+    // wall time — commit() stamps the VIEWER's zone, so prefilling the
+    // author's literal "16:00" would silently shift the event by the zone
+    // difference for any collaborator who re-commits (e.g. only to switch the
+    // display format).
+    const attrs: DateAttrs = { date: "2026-07-25", time: "16:00", tz: "America/Los_Angeles" };
+    const before = resolveInstant(attrs)!.getTime();
+    const { view, chip } = mountDate(attrs);
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    const input = chip.querySelector(".pm-date-popup-input") as HTMLInputElement;
+    const local = new Date(before);
+    const ymd = `${local.getFullYear()}-${pad2(local.getMonth() + 1)}-${pad2(local.getDate())}`;
+    expect(input.value).toBe(`${ymd} ${pad2(local.getHours())}:${pad2(local.getMinutes())}`);
+
+    // Enter without editing anything.
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    const date = view.state.doc.firstChild!.firstChild!;
+    expect(date.attrs.tz).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    expect(resolveInstant(date.attrs as DateAttrs)!.getTime()).toBe(before);
   });
 
   it("does not commit or close on an unrecognized parse", () => {
