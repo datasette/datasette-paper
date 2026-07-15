@@ -126,7 +126,12 @@ class PaperClient:
         *,
         transport: Optional[httpx.BaseTransport] = None,
         cookies: Optional[dict] = None,
+        server_url: Optional[str] = None,
     ) -> None:
+        # The real, browser-reachable origin — used only by "open in browser"
+        # actions. None in standalone (internal.db) mode, where there is no
+        # server: those actions degrade to a notification instead.
+        self.server_url = server_url
         headers = {}
         if token:
             headers["Authorization"] = f"Bearer {token}"

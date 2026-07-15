@@ -97,8 +97,11 @@ class BrowseScreen(_BrowseLevel):
             await self.app.push_screen(BrowseTablesScreen(self.client, name))
 
     def action_open_browser(self) -> None:
-        base = str(self.client._http.base_url).rstrip("/")
-        webbrowser.open(f"{base}/")
+        base = self.client.server_url
+        if not base:
+            self.notify("No server URL in internal mode")
+            return
+        webbrowser.open(f"{base.rstrip('/')}/")
 
 
 class BrowseTablesScreen(_BrowseLevel):
@@ -142,8 +145,11 @@ class BrowseTablesScreen(_BrowseLevel):
             await self.app.push_screen(BrowseRowsScreen(self.client, self.db, name))
 
     def action_open_browser(self) -> None:
-        base = str(self.client._http.base_url).rstrip("/")
-        webbrowser.open(_page_url(base, self.db))
+        base = self.client.server_url
+        if not base:
+            self.notify("No server URL in internal mode")
+            return
+        webbrowser.open(_page_url(base.rstrip("/"), self.db))
 
 
 class BrowseRowsScreen(_BrowseLevel):
@@ -209,5 +215,8 @@ class BrowseRowsScreen(_BrowseLevel):
             await self._load_page()
 
     def action_open_browser(self) -> None:
-        base = str(self.client._http.base_url).rstrip("/")
-        webbrowser.open(_page_url(base, self.db, self.table_name))
+        base = self.client.server_url
+        if not base:
+            self.notify("No server URL in internal mode")
+            return
+        webbrowser.open(_page_url(base.rstrip("/"), self.db, self.table_name))

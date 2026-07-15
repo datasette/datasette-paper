@@ -467,7 +467,11 @@ class DocScreen(Screen):
         self._update_header()
 
     def action_open_browser(self) -> None:
-        base = str(self.client._http.base_url).rstrip("/")
+        base = self.client.server_url
+        if not base:
+            self.notify("No server URL in internal mode")
+            return
+        base = base.rstrip("/")
         url = None
         if self.blocks:
             url = self.blocks[self._cursor].browser_url(base)

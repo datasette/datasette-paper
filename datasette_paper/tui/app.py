@@ -67,10 +67,28 @@ class PaperApp(App):
             self.notify("Keys: j/k move, Enter open, o browser, y copy, q quit")
 
 
-def run(url: str, token: Optional[str] = None, doc: Optional[str] = None) -> None:
-    """Launch the TUI against ``url`` (the CLI ``run`` entry point)."""
-    client = PaperClient(base_url=url, token=token)
+def run(
+    url: Optional[str] = None,
+    token: Optional[str] = None,
+    doc: Optional[str] = None,
+    *,
+    internal_path: Optional[str] = None,
+    content_dbs: Optional[list] = None,
+    actor_id: Optional[str] = None,
+) -> None:
+    """Launch the TUI (the CLI ``run`` entry point) in one of two modes.
+
+    URL mode (default): talk to a running Datasette at ``url`` over HTTP + SSE,
+    optionally with a bearer ``token``. Standalone mode (``internal_path`` set):
+    boot an in-process Datasette on that internal.db and drive it over
+    ASGITransport — no server, no token; ``content_dbs`` attaches data files and
+    ``actor_id`` attributes edits.
+    """
     doc_id = int(doc) if doc else None
+    if internal_path is not None:
+        asyncio.run(_run_standalone(internal_path, content_dbs or [], actor_id, doc_id))
+        return
+    client = PaperClient(base_url=url, token=token, server_url=url)
     app = PaperApp(client, doc_id=doc_id)
     try:
         app.run()
@@ -80,3 +98,26 @@ def run(url: str, token: Optional[str] = None, doc: Optional[str] = None) -> Non
             asyncio.run(client.close())
         except Exception:  # pragma: no cover - best-effort cleanup
             pass
+
+
+async def _run_standalone(
+    internal_path: str,
+    content_dbs: list,
+    actor_id: Optional[str],
+    doc_id: Optional[int],
+) -> None:
+    """Bootstrap the in-process client and drive the app in one event loop.
+
+    Building the client (which runs ``invoke_startup``) and serving the app in
+    the *same* loop via ``run_async`` avoids the cross-loop breakage that
+    ``asyncio.run`` + a fresh textual loop would risk (the in-process app and
+    its transport stay bound to a single loop). The client is closed on exit.
+    """
+    from .standalone import standalone_client
+
+    client = await standalone_client(internal_path, content_dbs, actor_id)
+    app = PaperApp(client, doc_id=doc_id)
+    try:
+        await app.run_async()
+    finally:
+        await client.close()
