@@ -9,6 +9,7 @@ gates pass without a real token. No textual anywhere in this module.
 from __future__ import annotations
 
 import asyncio
+import copy
 import sys
 
 import httpx
@@ -21,7 +22,11 @@ from conftest import create_doc
 from datasette_paper.instance import get_registry
 from datasette_paper.markdown import doc_to_markdown
 from datasette_paper.markdown_parser import markdown_to_fragment
-from datasette_paper.tui.client import ConflictError, PaperClient
+from datasette_paper.tui.client import (
+    ConflictError,
+    PaperClient,
+    ReadOnlyError,
+)
 from datasette_paper.util import paper_db
 
 
@@ -158,6 +163,160 @@ async def test_submit_replace_happy_and_stale(ds):
             await s2.submit_replace(
                 0, s2.doc.child(0).node_size, markdown_to_fragment("replaced two\n")
             )
+
+
+async def _catch_up_from(instance, session):
+    """Return a ``catch_up`` hook that feeds ``session`` the steps it's missing
+    from ``instance`` (the server-side Instance) and applies them under the
+    session lock — stands in for the live SSE worker in a headless test."""
+
+    async def catch_up():
+        batch = instance.get_events(session.version)
+        if batch is not None:
+            async with session.lock:
+                session.apply_update(batch)
+
+    return catch_up
+
+
+@pytest.mark.asyncio
+# @feat tui: test — save_block edits a block, server reflects it, actor attributed
+async def test_save_block_happy_and_attribution(ds):
+    doc_id = await _seed_doc(ds, "alpha block\n\nbeta block\n")
+    async with _client_for(ds) as client:
+        session = await client.open_doc(doc_id)
+        assert session.block_count() == 2
+        old_json = session.doc.child(1).to_json()
+        result = await session.save_block(1, old_json, "beta edited\n")
+        assert result.kind == "saved"
+        assert result.version == 1
+        assert session.version == 1
+        server_md = await client.get_document_markdown(doc_id)
+
+    assert "beta edited" in server_md
+    assert "alpha block" in server_md
+    assert "beta block" not in server_md
+
+    # The accepted step attributes the acting actor in the durable rollup.
+    rows = await paper_db(ds).database.execute(
+        "SELECT actor_id FROM _datasette_paper_doc_activity WHERE doc_id = ?",
+        [doc_id],
+    )
+    assert [r["actor_id"] for r in rows] == ["alice"]
+
+
+@pytest.mark.asyncio
+# @feat tui: test — empty text needs delete-confirm; deletion + blank-line split
+async def test_save_block_delete_and_split(ds):
+    doc_id = await _seed_doc(ds, "one\n\ntwo\n\nthree\n")
+    async with _client_for(ds) as client:
+        session = await client.open_doc(doc_id)
+        assert session.block_count() == 3
+
+        # Whitespace-only text is an implicit deletion: flagged, not written.
+        old1 = session.doc.child(1).to_json()
+        pending = await session.save_block(1, old1, "   ")
+        assert pending.kind == "needs_delete_confirm"
+        assert session.version == 0
+
+        # Confirmed deletion removes exactly the target block.
+        deleted = await session.save_block(1, old1, "", confirmed_delete=True)
+        assert deleted.kind == "saved"
+        assert session.block_count() == 2
+        md = await client.get_document_markdown(doc_id)
+        assert "two" not in md
+        assert "one" in md and "three" in md
+
+        # A blank line typed into one block splits it into two nodes.
+        old0 = session.doc.child(0).to_json()
+        split = await session.save_block(0, old0, "first\n\nsecond\n")
+        assert split.kind == "saved"
+        assert session.block_count() == 3
+
+
+@pytest.mark.asyncio
+# @feat tui: test — save_block_json flips a task item's checked in the live doc
+async def test_save_block_json_task_toggle(ds):
+    doc_id = await _seed_doc(ds, "- [ ] wash\n- [ ] cook\n")
+    async with _client_for(ds) as client:
+        session = await client.open_doc(doc_id)
+        node = session.doc.child(0).to_json()
+        assert node["type"] == "task_list"
+        new = copy.deepcopy(node)
+        new["content"][0].setdefault("attrs", {})["checked"] = True
+        result = await session.save_block_json(0, node, [new])
+        assert result.kind == "saved"
+        md = await client.get_document_markdown(doc_id)
+
+    assert "[x] wash" in md
+    assert "[ ] cook" in md
+
+
+@pytest.mark.asyncio
+# @feat tui: test — a remote edit to a DIFFERENT block: 409 → catch-up → relocate
+async def test_save_block_relocate_after_conflict(ds):
+    doc_id = await _seed_doc(ds, "aaa\n\nbbb\n\nccc\n")
+    async with _client_for(ds) as client:
+        session = await client.open_doc(doc_id)
+        assert session.block_count() == 3
+        old_ccc = session.doc.child(2).to_json()
+
+        instance = await get_registry(ds).get(paper_db(ds), doc_id)
+        # Remote deletes the FIRST block → ccc shifts from index 2 to index 1.
+        await instance.apply_markdown_edit(
+            lambda md: md.replace("aaa\n\n", "", 1), actor_id="bob"
+        )
+
+        result = await session.save_block(
+            2, old_ccc, "ccc edited\n", catch_up=await _catch_up_from(instance, session)
+        )
+        assert result.kind == "saved"
+        server_md = await client.get_document_markdown(doc_id)
+
+    assert "aaa" not in server_md
+    assert "bbb" in server_md
+    assert server_md.count("ccc edited") == 1
+
+
+@pytest.mark.asyncio
+# @feat tui: test — a remote edit to the SAME block: changed_remotely, no write
+async def test_save_block_same_block_conflict(ds):
+    doc_id = await _seed_doc(ds, "keep me\n\ntarget block\n")
+    async with _client_for(ds) as client:
+        session = await client.open_doc(doc_id)
+        old_json = session.doc.child(1).to_json()
+
+        instance = await get_registry(ds).get(paper_db(ds), doc_id)
+        await instance.apply_markdown_edit(
+            lambda md: md.replace("target block", "remote wins"), actor_id="bob"
+        )
+
+        result = await session.save_block(
+            1, old_json, "mine wins\n", catch_up=await _catch_up_from(instance, session)
+        )
+        assert result.kind == "changed_remotely"
+        assert "remote wins" in (result.their_markdown or "")
+        server_md = await client.get_document_markdown(doc_id)
+
+    assert "remote wins" in server_md
+    assert "mine wins" not in server_md
+
+
+@pytest.mark.asyncio
+# @feat tui: test — a locked doc refuses the save client-side (ReadOnlyError)
+async def test_save_block_locked_refused(ds):
+    doc_id = await _seed_doc(ds, "hello world\n")
+    await paper_db(ds).set_doc_locked(doc_id=doc_id, locked=True)
+    async with _client_for(ds) as client:
+        session = await client.open_doc(doc_id)
+        assert session.can_edit is False
+        old_json = session.doc.child(0).to_json()
+        with pytest.raises(ReadOnlyError):
+            await session.save_block(0, old_json, "changed text\n")
+        md = await client.get_document_markdown(doc_id)
+
+    assert "changed text" not in md
+    assert "hello world" in md
 
 
 def test_cli_tui_help():

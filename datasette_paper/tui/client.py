@@ -51,6 +51,54 @@ class BadVersionError(PaperError):
     """400 — the version is out of range for this doc."""
 
 
+class ForbiddenError(PaperError):
+    """403 — the server refused the write (no edit permission / doc locked)."""
+
+
+class ReadOnlyError(PaperError):
+    """Local refusal — the session has no edit permission, so nothing is sent.
+
+    Distinct from :class:`ForbiddenError` (a server 403): this is the
+    client-side gate that spares a doomed round-trip when ``can_edit`` is
+    False (a locked or view-only doc)."""
+
+
+class _ChangedRemotely:
+    """Result sentinel for :meth:`DocSession.locate_block`: the target block
+    was edited or deleted by someone else, so no unique range matches its
+    ``old_json`` and nothing can be safely replaced. Not an error — it's the
+    expected outcome of a concurrent same-block edit, handled by the UI's
+    keep-mine / take-theirs prompt."""
+
+    __slots__ = ()
+
+
+CHANGED_REMOTELY = _ChangedRemotely()
+
+
+@dataclass
+class SaveResult:
+    """Outcome of a :meth:`DocSession.save_block` / ``save_block_json`` attempt.
+
+    ``kind`` is one of:
+
+    - ``"saved"`` — the step landed; ``version`` is the new doc version.
+    - ``"needs_delete_confirm"`` — the text parsed to nothing (an implicit
+      block deletion); the UI must confirm, then call again with
+      ``confirmed_delete=True``.
+    - ``"changed_remotely"`` — the block was edited/deleted concurrently and
+      can't be located (even after one catch-up + retry); ``their_markdown``
+      is the block's current text (``""`` if it was removed) for the
+      keep-mine / take-theirs prompt. Nothing was written.
+    - ``"reload"`` — used by the modal to signal the screen to rebuild after a
+      take-theirs (no save happened, but the local doc advanced).
+    """
+
+    kind: str
+    version: Optional[int] = None
+    their_markdown: Optional[str] = None
+
+
 @dataclass
 class SSEEvent:
     """One framed SSE event: ``kind`` is the wire event name / payload kind
@@ -327,6 +375,14 @@ class DocSession:
         is applied locally and the version advanced (the server skips echoing our
         own step back over SSE). 409/410/422/400 map to the typed client errors.
         """
+        async with self.lock:
+            return await self._submit_replace_locked(start, end, nodes)
+
+    async def _submit_replace_locked(self, start: int, end: int, nodes: list) -> int:
+        """Core of :meth:`submit_replace` that assumes ``self.lock`` is already
+        held. Split out so the block-edit save path can hold the lock across
+        *both* the locate and the submit — an SSE batch landing between them
+        would shift positions and corrupt the range (locate-under-lock)."""
         from prosemirror.model import Fragment, Node, Slice
         from prosemirror.transform import ReplaceStep
 
@@ -335,35 +391,162 @@ class DocSession:
         pm_nodes = [
             n if isinstance(n, Node) else Node.from_json(schema, n) for n in nodes
         ]
-        async with self.lock:
-            step = ReplaceStep(start, end, Slice(Fragment.from_array(pm_nodes), 0, 0))
-            result = step.apply(self.doc)
-            if result.failed:
-                raise InvalidStepError(f"Step does not apply locally: {result.failed}")
+        step = ReplaceStep(start, end, Slice(Fragment.from_array(pm_nodes), 0, 0))
+        result = step.apply(self.doc)
+        if result.failed:
+            raise InvalidStepError(f"Step does not apply locally: {result.failed}")
 
-            resp = await self._client._http.post(
-                f"{API_ROOT}/docs/{self.doc_id}/events",
-                json={
-                    "version": self.version,
-                    "clientID": self.client_id,
-                    "steps": [step.to_json()],
-                },
-            )
-            if resp.status_code == 409:
-                raise ConflictError("Version not current")
-            if resp.status_code == 410:
-                raise GoneError("History gone")
-            if resp.status_code == 400:
-                raise BadVersionError("Invalid version")
-            if resp.status_code == 422:
-                body = resp.json()
-                raise InvalidStepError(body.get("message") or "Invalid step")
-            resp.raise_for_status()
+        resp = await self._client._http.post(
+            f"{API_ROOT}/docs/{self.doc_id}/events",
+            json={
+                "version": self.version,
+                "clientID": self.client_id,
+                "steps": [step.to_json()],
+            },
+        )
+        if resp.status_code == 409:
+            raise ConflictError("Version not current")
+        if resp.status_code == 410:
+            raise GoneError("History gone")
+        if resp.status_code == 400:
+            raise BadVersionError("Invalid version")
+        if resp.status_code == 403:
+            raise ForbiddenError("Edit refused (no permission or doc locked)")
+        if resp.status_code == 422:
+            body = resp.json()
+            raise InvalidStepError(body.get("message") or "Invalid step")
+        resp.raise_for_status()
 
-            new_version = resp.json()["version"]
-            self.doc = result.doc
-            self.version = new_version
-            return new_version
+        new_version = resp.json()["version"]
+        self.doc = result.doc
+        self.version = new_version
+        return new_version
+
+    # @feat tui: locate a top-level block by index / unique-JSON scan (relocation)
+    def locate_block(self, i: int, old_json: dict):
+        """Find the ``[start, end]`` position range of the block whose content
+        was ``old_json`` at edit-start, tolerating that concurrent edits may
+        have shifted it.
+
+        Resolution order (see plans/tui/03-editing.md):
+
+        1. If child ``i`` still serializes to ``old_json``, it's the target.
+        2. Else scan every child for a *unique* ``old_json`` match (the block
+           moved because earlier blocks were added/removed).
+        3. Otherwise return :data:`CHANGED_REMOTELY` — the block itself was
+           edited or deleted concurrently (no match, or ambiguous duplicates).
+
+        Positions are top-level offsets: ``start`` is the summed ``node_size``
+        of the children before the target, ``end`` is ``start`` plus the
+        target's ``node_size``."""
+        doc = self.doc
+        n = doc.child_count
+        if 0 <= i < n and doc.child(i).to_json() == old_json:
+            target = i
+        else:
+            matches = [k for k in range(n) if doc.child(k).to_json() == old_json]
+            if len(matches) != 1:
+                return CHANGED_REMOTELY
+            target = matches[0]
+        start = sum(doc.child(k).node_size for k in range(target))
+        end = start + doc.child(target).node_size
+        return (start, end)
+
+    def _current_block_md(self, i: int) -> str:
+        """Markdown of child ``i`` right now (for the conflict prompt's "theirs"
+        side), or ``""`` if that index no longer exists (removed remotely)."""
+        return self.block_markdown(i) if 0 <= i < self.doc.child_count else ""
+
+    async def _wait_for_catch_up(
+        self, prev_version: int, catch_up, timeout: float = 5.0
+    ) -> None:
+        """Bounded wait for the local version to advance past ``prev_version``
+        after a 409, so the retry relocates against the caught-up doc.
+
+        In the app the live SSE worker delivers the missed batch and bumps
+        ``self.version`` concurrently, so we just poll it. Tests (and any caller
+        without a running SSE loop) pass ``catch_up`` — an async hook that
+        fetches the missed steps and applies them — instead. Never hangs: the
+        poll is time-boxed and the retry proceeds regardless."""
+        if catch_up is not None:
+            await catch_up()
+            return
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while self.version <= prev_version and loop.time() < deadline:
+            await asyncio.sleep(0.05)
+
+    # @feat tui: block edit save path — locate under lock, submit, 409-retry once
+    async def _save_nodes(self, i: int, old_json: dict, nodes: list, *, catch_up=None):
+        """Shared locate + submit core for ``save_block`` / ``save_block_json``.
+
+        Holds ``self.lock`` across the locate *and* the submit (positions can't
+        shift under us). On a 409 it releases the lock, waits for catch-up, then
+        relocates and retries exactly once; a second 409 becomes a
+        ``changed_remotely`` result. A 410 (``GoneError``) propagates to the
+        screen, which owns re-bootstrap."""
+        if not self.can_edit:
+            raise ReadOnlyError("Document is read-only")
+        for attempt in range(2):  # initial try + one post-catch-up retry
+            prev_version = self.version
+            async with self.lock:
+                loc = self.locate_block(i, old_json)
+                if loc is CHANGED_REMOTELY:
+                    return SaveResult(
+                        "changed_remotely", their_markdown=self._current_block_md(i)
+                    )
+                start, end = loc
+                try:
+                    version = await self._submit_replace_locked(start, end, nodes)
+                    return SaveResult("saved", version=version)
+                except ConflictError:
+                    if attempt == 1:
+                        # One retry already spent — hand the conflict to the UI.
+                        return SaveResult(
+                            "changed_remotely",
+                            their_markdown=self._current_block_md(i),
+                        )
+            # Lock released: let the SSE stream (or the test hook) catch us up,
+            # then loop to relocate + retry.
+            await self._wait_for_catch_up(prev_version, catch_up)
+        # Defensive: the loop always returns inside the body.
+        return SaveResult("changed_remotely", their_markdown=self._current_block_md(i))
+
+    # @feat tui: block edit save path — markdown -> fragment -> locate + submit
+    async def save_block(
+        self,
+        i: int,
+        old_json: dict,
+        text: str,
+        *,
+        confirmed_delete: bool = False,
+        catch_up=None,
+    ) -> SaveResult:
+        """Replace block ``i`` (identified by ``old_json`` at edit-start) with
+        the blocks parsed from ``text``.
+
+        Empty / whitespace-only ``text`` parses to no nodes — a block deletion.
+        Unless ``confirmed_delete`` is set, that returns
+        ``SaveResult("needs_delete_confirm")`` so the UI can confirm first. A
+        single edit may legitimately parse to several blocks (the user typed a
+        blank line); the fragment replaces the range wholesale, which is fine."""
+        from ..markdown_parser import markdown_to_fragment
+
+        nodes = markdown_to_fragment(text)
+        if not nodes and not confirmed_delete:
+            return SaveResult("needs_delete_confirm")
+        return await self._save_nodes(i, old_json, nodes, catch_up=catch_up)
+
+    # @feat tui: block edit save path — programmatic variant (task toggle etc.)
+    async def save_block_json(
+        self, i: int, old_json: dict, new_json_nodes: list, *, catch_up=None
+    ) -> SaveResult:
+        """Like :meth:`save_block` but takes ready PM node JSON instead of
+        markdown — used by the task-checkbox toggle, which mutates ``checked``
+        in the block JSON and re-derives without a markdown round-trip."""
+        return await self._save_nodes(
+            i, old_json, list(new_json_nodes), catch_up=catch_up
+        )
 
 
 async def _read_sse(resp: httpx.Response) -> AsyncIterator[SSEEvent]:

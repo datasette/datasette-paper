@@ -17,7 +17,7 @@ from datasette.app import Datasette
 
 pytest.importorskip("textual")
 
-from textual.widgets import DataTable, Markdown  # noqa: E402
+from textual.widgets import DataTable, Markdown, TextArea  # noqa: E402
 
 from conftest import create_doc  # noqa: E402
 
@@ -32,6 +32,10 @@ from datasette_paper.tui.screens.browse import (  # noqa: E402
 )
 from datasette_paper.tui.screens.doc_list import DocListScreen  # noqa: E402
 from datasette_paper.tui.screens.doc_view import DocScreen  # noqa: E402
+from datasette_paper.tui.screens.edit_modal import (  # noqa: E402
+    ConfirmModal,
+    EditModal,
+)
 from datasette_paper.tui.widgets.blocks import Callout  # noqa: E402
 from datasette_paper.util import paper_db  # noqa: E402
 
@@ -246,6 +250,65 @@ async def test_doc_screen_wikilink_shows_title(ds):
             md_widget = screen.blocks[0].query_one(Markdown)
             assert "Target Doc" in md_widget.source
             assert f"[[{target}]]" not in md_widget.source
+
+
+@pytest.mark.asyncio
+# @feat tui: test — EditModal seeds RAW block markdown and saves a round-trip
+async def test_edit_modal_seeds_raw_markdown_and_saves(ds):
+    target = await _seed_doc(ds, "target body\n", name="Target Doc")
+    doc_id = await _seed_doc(ds, f"See [[{target}]] now.\n", name="Referrer")
+    async with _client_for(ds) as client:
+        app = PaperApp(client, doc_id=doc_id)
+        async with app.run_test() as pilot:
+            await _wait_until(
+                lambda: isinstance(app.screen, DocScreen) and app.screen.blocks, pilot
+            )
+            screen = app.screen
+            screen._cursor = 0
+            screen.action_edit_block()
+            await _wait_until(lambda: isinstance(app.screen, EditModal), pilot)
+            modal = app.screen
+            editor = modal.query_one("#editor", TextArea)
+            # Seeded with the canonical wikilink form, never the resolved title.
+            assert f"[[{target}]]" in editor.text
+            assert "Target Doc" not in editor.text
+
+            editor.load_text(f"See [[{target}]] later.\n")
+            modal.action_save()
+            await _wait_until(lambda: isinstance(app.screen, DocScreen), pilot)
+
+        md = await client.get_document_markdown(doc_id)
+    assert "later" in md
+    assert f"[[{target}]]" in md
+
+
+@pytest.mark.asyncio
+# @feat tui: test — a dirty EditModal Escape asks to confirm the discard
+async def test_edit_modal_dirty_escape_confirms(ds):
+    doc_id = await _seed_doc(ds, "hello world\n")
+    async with _client_for(ds) as client:
+        app = PaperApp(client, doc_id=doc_id)
+        async with app.run_test() as pilot:
+            await _wait_until(
+                lambda: isinstance(app.screen, DocScreen) and app.screen.blocks, pilot
+            )
+            screen = app.screen
+            screen._cursor = 0
+            screen.action_edit_block()
+            await _wait_until(lambda: isinstance(app.screen, EditModal), pilot)
+            modal = app.screen
+            modal.query_one("#editor", TextArea).load_text("dirty change\n")
+            modal._dirty = True
+
+            modal.action_cancel()
+            # A dirty Escape opens the discard confirmation rather than closing.
+            await _wait_until(lambda: isinstance(app.screen, ConfirmModal), pilot)
+            assert isinstance(app.screen, ConfirmModal)
+
+            # Declining keeps the editor open (nothing discarded).
+            app.screen.action_cancel()
+            await _wait_until(lambda: isinstance(app.screen, EditModal), pilot)
+            assert isinstance(app.screen, EditModal)
 
 
 async def _seed_content_doc(ds: Datasette, content: str, name: str = "Fixture") -> int:

@@ -26,6 +26,7 @@ without a second network call (see ``widgets/sql_block.py``).
 
 from __future__ import annotations
 
+import copy
 import webbrowser
 from typing import Optional
 
@@ -38,6 +39,26 @@ from textual.widgets import Footer, Static
 from ..client import GoneError
 from ..prettify import collect_ref_ids
 from ..widgets.blocks import Block, make_block
+from .edit_modal import ConfirmModal, EditModal, TaskPickerModal
+
+# The DocScreen actions that mutate the doc — hidden + refused when the doc is
+# read-only or locked (see check_action / _editing_enabled).
+_EDIT_ACTIONS = frozenset({"edit_block", "delete_block", "append_block", "rename_doc"})
+
+
+def _task_item_labels(node_json: dict) -> list:
+    """Short text labels for a task_list block's task items (for the picker)."""
+    labels = []
+    for child in node_json.get("content") or []:
+        if child.get("type") != "task_item":
+            continue
+        text = ""
+        for para in child.get("content") or []:
+            for inline in para.get("content") or []:
+                text += inline.get("text", "")
+        mark = "x" if (child.get("attrs") or {}).get("checked") else " "
+        labels.append(f"[{mark}] {text.strip()}"[:50])
+    return labels
 
 
 class DocScreen(Screen):
@@ -48,9 +69,15 @@ class DocScreen(Screen):
         ("down", "cursor_down", "Down"),
         ("k", "cursor_up", "Up"),
         ("up", "cursor_up", "Up"),
-        ("space", "toggle_callout", "Toggle callout"),
-        ("enter", "run_block", "Run"),
-        ("ctrl+r", "run_block", "Run"),
+        ("space", "toggle_callout", "Toggle / check"),
+        ("enter", "run_block", "Run SQL"),
+        ("ctrl+r", "run_block", "Run SQL"),
+        # `e` edits any block (including a sql_block/source's SQL); Enter is
+        # kept for running SQL blocks so the two never clash.
+        ("e", "edit_block", "Edit"),
+        ("d", "delete_block", "Delete"),
+        ("a", "append_block", "Append"),
+        ("r", "rename_doc", "Rename"),
         ("o", "open_browser", "Open in browser"),
         ("y", "yank", "Copy markdown"),
         ("escape", "back", "Back"),
@@ -275,6 +302,9 @@ class DocScreen(Screen):
             if "canEdit" in ev.data:
                 self.session.permissions["canEdit"] = ev.data["canEdit"]
             self._update_header()
+            # Edit bindings are gated on the freshest permissions — re-evaluate
+            # check_action so the footer shows/hides them after the change.
+            self.refresh_bindings()
         elif ev.kind == "closed":
             self.notify("Access to this document was revoked", severity="warning")
             if len(self.app.screen_stack) > 1:
@@ -293,8 +323,18 @@ class DocScreen(Screen):
             self._focus_cursor()
 
     def action_toggle_callout(self) -> None:
-        if self.blocks:
-            self.blocks[self._cursor].toggle_collapsed()
+        # Space is overloaded: it collapses a callout locally (no step), or —
+        # on a task_list block — toggles a checkbox (a real collab edit). The
+        # callout path stays synchronous; the task edit is offloaded to a
+        # worker so this handler never blocks.
+        if not self.blocks:
+            return
+        block = self.blocks[self._cursor]
+        if block.node_type == "task_list":
+            if self._editing_enabled():
+                self.run_worker(self._toggle_task(self._cursor), exclusive=False)
+            return
+        block.toggle_collapsed()
 
     # @feat tui: sql_block/source live widget — Enter/ctrl+r runs, cached by (db, sql)
     @work
@@ -304,6 +344,127 @@ class DocScreen(Screen):
     async def _run_current_block(self) -> None:
         if self.blocks:
             await self.blocks[self._cursor].run_query()
+
+    # --- editing ------------------------------------------------------------
+
+    def _editing_enabled(self) -> bool:
+        return self.session.can_edit and not self.session.permissions.get("locked")
+
+    def check_action(self, action: str, parameters):
+        """Hide (and disable) the doc-mutating bindings when the doc is
+        read-only or locked. Re-evaluated per keypress and refreshed by
+        ``refresh_bindings`` when a permissions-changed SSE event lands."""
+        if action in _EDIT_ACTIONS and not self._editing_enabled():
+            return False
+        return True
+
+    async def _rebootstrap(self) -> None:
+        """410 recovery for a write: re-open the doc and rebuild the view."""
+        self.session = await self.client.open_doc(self.doc_id)
+        await self._rebuild()
+        self._update_header()
+
+    # @feat tui: DocScreen edit binding — `e` opens the block editor modal
+    @work
+    async def action_edit_block(self) -> None:
+        if not self._editing_enabled() or not self.blocks:
+            return
+        i = self._cursor
+        old_json = self.session.doc.child(i).to_json()
+        raw = self.session.block_markdown(i)
+        result = await self.app.push_screen_wait(
+            EditModal(self.session, i, old_json, raw)
+        )
+        # "saved" and "reload" both mean the doc advanced — rebuild wholesale
+        # (a save may split one block into several or delete it). Cancel → None.
+        if result is not None:
+            await self._rebuild()
+            self._update_header()
+
+    @work
+    async def action_delete_block(self) -> None:
+        if not self._editing_enabled() or not self.blocks:
+            return
+        ok = await self.app.push_screen_wait(ConfirmModal("Delete this block?"))
+        if not ok:
+            return
+        i = self._cursor
+        old_json = self.session.doc.child(i).to_json()
+        try:
+            result = await self.session.save_block(
+                i, old_json, "", confirmed_delete=True
+            )
+        except GoneError:
+            await self._rebootstrap()
+            return
+        if result.kind == "changed_remotely":
+            self.notify("Block changed remotely; not deleted", severity="warning")
+        await self._rebuild()
+        self._update_header()
+
+    @work
+    async def action_append_block(self) -> None:
+        if not self._editing_enabled():
+            return
+        # Imported lazily to avoid a screens import cycle (doc_list imports us).
+        from .doc_list import PromptModal
+
+        md = await self.app.push_screen_wait(PromptModal("Append markdown"))
+        if not md:
+            return
+        # The server appends and broadcasts; the SSE worker lands the new block.
+        await self.client.append(self.doc_id, md)
+
+    @work
+    async def action_rename_doc(self) -> None:
+        if not self._editing_enabled():
+            return
+        from .doc_list import PromptModal
+
+        new_name = await self.app.push_screen_wait(
+            PromptModal("Rename document", initial=self.doc_name)
+        )
+        if not new_name:
+            return
+        await self.client.rename(self.doc_id, new_name)
+        self.doc_name = new_name
+        self._update_header()
+
+    async def _toggle_task(self, i: int) -> None:
+        """Flip a task_item's ``checked`` in block ``i`` and save it as a step,
+        reusing the same locate + submit path as a text edit (no markdown
+        round-trip). With one item it toggles that item; with several it opens a
+        numbered picker (cursor-within-block isn't tracked)."""
+        if i >= self.session.block_count():
+            return
+        node_json = self.session.doc.child(i).to_json()
+        items = node_json.get("content") or []
+        task_positions = [
+            k for k, c in enumerate(items) if c.get("type") == "task_item"
+        ]
+        if not task_positions:
+            return
+        if len(task_positions) == 1:
+            which = 0
+        else:
+            which = await self.app.push_screen_wait(
+                TaskPickerModal(_task_item_labels(node_json))
+            )
+            if which is None:
+                return
+        target = task_positions[which]
+        new_json = copy.deepcopy(node_json)
+        attrs = new_json["content"][target].setdefault("attrs", {})
+        attrs["checked"] = not bool(attrs.get("checked"))
+        try:
+            result = await self.session.save_block_json(i, node_json, [new_json])
+        except GoneError:
+            await self._rebootstrap()
+            return
+        if result.kind == "changed_remotely":
+            self.notify("Task list changed remotely", severity="warning")
+        await self._rebuild()
+        self._update_header()
 
     def action_open_browser(self) -> None:
         base = str(self.client._http.base_url).rstrip("/")
