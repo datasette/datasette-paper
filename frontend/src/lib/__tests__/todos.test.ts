@@ -22,7 +22,7 @@ function row(extra: Partial<TodoRow>): TodoRow {
     checked: false,
     section: [],
     assignees: ["pat"],
-    assignee_inherited: false,
+    assignees_inherited: false,
     due: null,
     due_inherited: false,
     ...extra,
@@ -106,6 +106,53 @@ describe("bucketTodos", () => {
     const byKey = Object.fromEntries(buckets.map((b) => [b.key, b.rows]));
     expect(byKey.week.map((r) => r.text)).toEqual(["edge7"]);
     expect(byKey.later.map((r) => r.text)).toEqual(["edge8"]);
+  });
+
+  it("buckets a timed due date by its viewer-local date across midnight", () => {
+    const viewerDate = "2026-07-14";
+    const instant = new Date(2026, 6, 14, 12);
+    const zone = ["Pacific/Kiritimati", "America/Adak"].find((candidate) => {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: candidate,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).formatToParts(instant);
+      const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+      return `${values.year}-${values.month}-${values.day}` !== viewerDate;
+    })!;
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: zone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(instant);
+    const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+    const rows = [
+      row({
+        text: "cross-zone",
+        due: {
+          date: `${values.year}-${values.month}-${values.day}`,
+          time: `${values.hour}:${values.minute}`,
+          tz: zone,
+        },
+      }),
+    ];
+    // The authored zone deliberately has a different calendar date, but the
+    // resolved instant is noon today for the viewer.
+    expect(bucketTodos(rows, instant)[0].key).toBe("today");
+  });
+
+  it("falls back to the stored date when the zone is invalid", () => {
+    const rows = [
+      row({
+        due: { date: "2026-07-15", time: "00:30", tz: "Not/A_Zone" },
+      }),
+    ];
+    expect(bucketTodos(rows, NOW)[0].key).toBe("week");
   });
 
   it("omits empty buckets entirely", () => {

@@ -10,7 +10,7 @@
  */
 import "./profile.css";
 import { ActorResolver } from "../../lib/actorResolver";
-import { iconMarkup } from "../../lib/datasetteEmbed";
+import { iconMarkup } from "../../lib/icons";
 import { dueChip } from "../../lib/todos";
 import type { TodoRow, TodosResponse } from "../../lib/todos";
 
@@ -182,6 +182,7 @@ class ProfileTodos extends HTMLElement {
     try {
       const resp = await fetch(
         `/-/paper/api/profile/${encodeURIComponent(actorId)}/todos?status=open`,
+        { headers: { "Content-Type": "application/json" } },
       );
       if (!resp.ok) {
         this.renderMessage("Could not load TODOs.");
@@ -233,6 +234,19 @@ class ProfileTodos extends HTMLElement {
   private makeRow(row: TodoRow, now: Date): HTMLLIElement {
     const li = document.createElement("li");
     li.className = "paper-profile-item paper-todos-item";
+    li.tabIndex = 0;
+    li.setAttribute("role", "link");
+    const navigate = () => window.location.assign(row.doc_url);
+    li.addEventListener("click", (event) => {
+      if ((event.target as Element).closest("a, input, button")) return;
+      if (window.getSelection()?.toString()) return;
+      navigate();
+    });
+    li.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      navigate();
+    });
 
     // Static checkbox affordance — a real but disabled checkbox (the same
     // control the editor uses), so checking off clearly happens in the doc.
@@ -242,6 +256,7 @@ class ProfileTodos extends HTMLElement {
     box.checked = row.checked;
     box.className = "paper-todos-check";
     box.setAttribute("aria-hidden", "true");
+    box.addEventListener("click", (event) => event.stopPropagation());
     li.appendChild(box);
 
     const link = document.createElement("a");
@@ -251,13 +266,12 @@ class ProfileTodos extends HTMLElement {
     if (row.checked) link.classList.add("paper-todos-done");
     li.appendChild(link);
 
-    // Assignee chips only add signal for multi-assignee rows on someone's own
-    // section (a solo assignee on your own profile is just you). On another
-    // person's profile the same rule keeps it terse — the section header
-    // already says whose TODOs these are.
-    if (row.assignees.length > 1) {
+    // On one's own profile a solo chip is redundant. On another person's
+    // profile, an inherited solo assignment is meaningful context and keeps
+    // its muted/tooltip treatment.
+    if (row.assignees.length > 1 || (!this.isOwnProfile && row.assignees_inherited)) {
       for (const id of row.assignees) {
-        li.appendChild(this.makeAssigneeChip(id, row.assignee_inherited));
+        li.appendChild(this.makeAssigneeChip(id, row.assignees_inherited));
       }
     }
 

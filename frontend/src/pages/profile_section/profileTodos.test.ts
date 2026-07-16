@@ -20,7 +20,7 @@ function todo(extra: Partial<TodoRow>): TodoRow {
     checked: false,
     section: [],
     assignees: ["pat"],
-    assignee_inherited: false,
+    assignees_inherited: false,
     due: null,
     due_inherited: false,
     ...extra,
@@ -120,13 +120,35 @@ describe("<profile-todos>", () => {
     });
   });
 
-  it("hides assignee chips for a single-assignee row", async () => {
+  it("hides a direct single-assignee chip on the actor's own profile", async () => {
     fetchMock = okTodos([todo({ assignees: ["pat"] })]);
     global.fetch = fetchMock as unknown as typeof fetch;
 
-    const el = await mount({ "actor-id": "pat" });
+    const el = await mount({ "actor-id": "pat", "is-own-profile": "true" });
     await vi.waitFor(() => expect(el.querySelector(".paper-todos-item")).not.toBeNull());
     expect(el.querySelector(".paper-todos-assignee")).toBeNull();
+  });
+
+  it("shows a muted inherited single-assignee chip on another profile", async () => {
+    fetchMock = okTodos(
+      [todo({ assignees: ["pat"], assignees_inherited: true })],
+      { pat: "Pat Smith" },
+    );
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const el = await mount({ "actor-id": "pat", "is-own-profile": "false" });
+    await vi.waitFor(() => expect(el.querySelector(".paper-todos-assignee")).not.toBeNull());
+    const chip = el.querySelector<HTMLElement>(".paper-todos-assignee")!;
+    expect(chip.classList.contains("paper-todos-assignee-inherited")).toBe(true);
+    expect(chip.title).toBe("Inherited from a parent task");
+  });
+
+  it("sends the required JSON content-type on the TODO request", async () => {
+    await mount({ "actor-id": "alice" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(fetchMock.mock.calls[0][1]).toEqual({
+      headers: { "Content-Type": "application/json" },
+    });
   });
 
   it("caps at 10 rows and labels the footer with the total", async () => {

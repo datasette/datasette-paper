@@ -59,6 +59,7 @@
     try {
       const resp = await fetch(
         `/-/paper/api/profile/${encodeURIComponent(targetActor)}/todos?status=${status}`,
+        { headers: { "Content-Type": "application/json" } },
       );
       if (!resp.ok) {
         error = "Could not load TODOs.";
@@ -67,10 +68,7 @@
       }
       const data = (await resp.json()) as TodosResponse;
       rows = data.todos ?? [];
-      // Resolve co-assignee names for the chips we'll show (multi-assignee).
-      for (const r of rows) {
-        if (r.assignees.length > 1) for (const a of r.assignees) resolveName(a);
-      }
+      for (const r of rows) for (const a of r.assignees) resolveName(a);
     } catch {
       error = "Could not load TODOs.";
       rows = [];
@@ -83,6 +81,17 @@
     if (s === status) return;
     status = s;
     void load();
+  }
+
+  function navigateRow(event: MouseEvent | KeyboardEvent, url: string): void {
+    if (event instanceof MouseEvent) {
+      if ((event.target as Element).closest("a, input, button")) return;
+      if (window.getSelection()?.toString()) return;
+    } else {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+    }
+    window.location.assign(url);
   }
 
   onMount(() => {
@@ -141,44 +150,54 @@
             {#each bucket.rows as row (`${row.doc_id}:${row.ordinal}`)}
               {@const chip = dueChip(row.due, now)}
               {@const crumb = sectionBreadcrumb(row.section)}
-              <li class="todos-row" class:is-done={row.checked}>
-                <input
-                  type="checkbox"
-                  class="todos-check"
-                  checked={row.checked}
-                  disabled
-                  aria-hidden="true"
-                />
-                <a class="todos-text" href={row.doc_url}>
-                  {row.text || "(untitled task)"}
-                </a>
-                {#if row.assignees.length > 1}
-                  <span class="todos-assignees">
-                    {#each row.assignees as a (a)}
-                      <span
-                        class="todos-assignee"
-                        class:is-inherited={row.assignee_inherited}
-                        title={row.assignee_inherited
-                          ? "Inherited from a parent task"
-                          : undefined}>@{names[a] ?? a}</span
-                      >
-                    {/each}
+              <li>
+                <div
+                  class="todos-row"
+                  class:is-done={row.checked}
+                  role="link"
+                  tabindex="0"
+                  onclick={(event) => navigateRow(event, row.doc_url)}
+                  onkeydown={(event) => navigateRow(event, row.doc_url)}
+                >
+                  <input
+                    type="checkbox"
+                    class="todos-check"
+                    checked={row.checked}
+                    disabled
+                    aria-hidden="true"
+                    onclick={(event) => event.stopPropagation()}
+                  />
+                  <a class="todos-text" href={row.doc_url}>
+                    {row.text || "(untitled task)"}
+                  </a>
+                  {#if row.assignees.length > 0}
+                    <span class="todos-assignees">
+                      {#each row.assignees as a (a)}
+                        <span
+                          class="todos-assignee"
+                          class:is-inherited={row.assignees_inherited}
+                          title={row.assignees_inherited
+                            ? "Inherited from a parent task"
+                            : undefined}>@{names[a] ?? a}</span
+                        >
+                      {/each}
+                    </span>
+                  {/if}
+                  {#if chip}
+                    <span
+                      class="todos-due"
+                      class:is-overdue={chip.tint === "overdue"}
+                      class:is-today={chip.tint === "today"}
+                    >
+                      <span class="todos-due-icon">{@render calendarIcon()}</span>
+                      {chip.label}
+                    </span>
+                  {/if}
+                  <span class="todos-meta">
+                    {#if crumb}<span class="todos-crumb">{crumb}</span>{/if}
+                    <span class="todos-doc">{row.doc_name}</span>
                   </span>
-                {/if}
-                {#if chip}
-                  <span
-                    class="todos-due"
-                    class:is-overdue={chip.tint === "overdue"}
-                    class:is-today={chip.tint === "today"}
-                  >
-                    <span class="todos-due-icon">{@render calendarIcon()}</span>
-                    {chip.label}
-                  </span>
-                {/if}
-                <span class="todos-meta">
-                  {#if crumb}<span class="todos-crumb">{crumb}</span>{/if}
-                  <span class="todos-doc">{row.doc_name}</span>
-                </span>
+                </div>
               </li>
             {/each}
           </ul>
@@ -295,8 +314,13 @@
     gap: 0.5rem;
     padding: 0.4rem 0;
     border-bottom: 1px solid var(--pp-border);
+    cursor: pointer;
   }
-  .todos-row:last-child {
+  .todos-row:focus-visible {
+    outline: 2px solid var(--pp-focus-ring);
+    outline-offset: 2px;
+  }
+  .todos-list > li:last-child .todos-row {
     border-bottom: none;
   }
 

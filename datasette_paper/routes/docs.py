@@ -222,7 +222,7 @@ async def profile_todos(datasette, request, profile_actor_id: str):
                 "checked": bool(r.checked),
                 "section": json.loads(r.section) if r.section else [],
                 "assignees": r.all_assignees.split(",") if r.all_assignees else [],
-                "assignee_inherited": bool(r.assignee_inherited),
+                "assignees_inherited": bool(r.assignees_inherited),
                 "due": due,
                 "due_inherited": bool(r.due_inherited),
             }

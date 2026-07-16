@@ -130,7 +130,7 @@ class ProfileTodo:
     text: str
     checked: int
     section: str
-    assignee_inherited: int
+    assignees_inherited: int
     due_date: str | None
     due_time: str | None
     due_tz: str | None
@@ -837,7 +837,7 @@ def list_profile_todos(
 ) -> list[ProfileTodo]:
     sql = """\
 SELECT t.doc_id, d.name AS doc_name, t.ordinal, t.text, t.checked,
-       t.section, t.inherited AS assignee_inherited,
+       t.section, t.inherited AS assignees_inherited,
        t.due_date, t.due_time, t.due_tz, t.due_inherited,
        (
          SELECT group_concat(a2.assignee, ',')

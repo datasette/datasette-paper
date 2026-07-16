@@ -193,7 +193,8 @@ async def test_row_shape_co_assignees_and_inherited_flags():
     _, body = await _todos(ds, "vic", "pat", "?status=all")
     (row,) = body["todos"]
     assert set(row["assignees"]) == {"pat", "dev"}
-    assert row["assignee_inherited"] is True
+    assert row["assignees_inherited"] is True
+    assert "assignee_inherited" not in row
     assert row["due"] == {
         "date": "2026-07-20",
         "time": "15:00",

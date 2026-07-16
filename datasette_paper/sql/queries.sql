@@ -513,7 +513,7 @@ SELECT id FROM _datasette_paper_doc;
 -- ascending by due, then doc + ordinal for a stable, deterministic list.
 -- name: listProfileTodos :rows -> ProfileTodo
 SELECT t.doc_id, d.name AS doc_name, t.ordinal, t.text, t.checked,
-       t.section, t.inherited AS assignee_inherited,
+       t.section, t.inherited AS assignees_inherited,
        t.due_date, t.due_time, t.due_tz, t.due_inherited,
        (
          SELECT group_concat(a2.assignee, ',')

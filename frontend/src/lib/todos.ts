@@ -8,7 +8,7 @@
 // Both are pure date math homed in the PM-free dateFormat.ts, so these TODO
 // surfaces get the exact same label + overdue/today tint the inline date chip
 // uses without pulling the NodeView + ProseMirror into their bundles.
-import { classifyDate, formatDateLabel } from "./dateFormat";
+import { classifyDate, formatDateLabel, localYmd, resolveInstant } from "./dateFormat";
 import type { DateAttrs } from "./dateFormat";
 
 export interface TodoDue {
@@ -27,7 +27,7 @@ export interface TodoRow {
   checked: boolean;
   section: Array<{ level: number; text: string }>;
   assignees: string[];
-  assignee_inherited: boolean;
+  assignees_inherited: boolean;
   due: TodoDue | null;
   due_inherited: boolean;
 }
@@ -82,25 +82,19 @@ const BUCKET_LABELS: Record<BucketKey, string> = {
   none: "No due date",
 };
 
-/** `YYYY-MM-DD` for `d` in the viewer's local zone (matches dateView's
- *  localYmd — buckets are computed against the viewer's calendar day). */
-function localYmd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /** Which bucket a due date lands in, evaluated against `now` in the viewer's
- *  tz. Date-only comparison keeps it dumb: "this week" = the next 7 calendar
- *  days after today, no locale week-start logic. */
+ *  tz. Timed zoned values use the resolved instant's viewer-local date so the
+ *  bucket agrees with the chip tint; missing/invalid zones fall back to the
+ *  stored calendar date. "This week" = the next 7 calendar days after today. */
 function bucketFor(due: TodoDue | null, now: Date): BucketKey {
   if (!due) return "none";
   const today = localYmd(now);
-  if (due.date < today) return "overdue";
-  if (due.date === today) return "today";
+  const instant = resolveInstant({ ...due, format: null });
+  const viewerDate = instant ? localYmd(instant) : due.date;
+  if (viewerDate < today) return "overdue";
+  if (viewerDate === today) return "today";
   const weekEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 7);
-  if (due.date <= localYmd(weekEnd)) return "week";
+  if (viewerDate <= localYmd(weekEnd)) return "week";
   return "later";
 }
 

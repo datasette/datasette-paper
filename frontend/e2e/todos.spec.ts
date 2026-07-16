@@ -49,7 +49,11 @@ test.describe("task-assign TODO surfaces", () => {
         "[due](paper:/date/2099-01-01)\n",
     );
 
+    const todosRequest = page.waitForRequest(
+      (request) => request.url().includes(`/api/profile/${ACTOR}/todos`),
+    );
     await page.goto(`${BASE}/todos?actor=${ACTOR}`);
+    expect((await todosRequest).headers()["content-type"]).toBe("application/json");
 
     // The row lands under the "Later" bucket (far-future due date).
     const bucket = page
@@ -64,10 +68,27 @@ test.describe("task-assign TODO surfaces", () => {
     // Section breadcrumb from the enclosing heading.
     await expect(row.locator(".todos-crumb")).toHaveText("Backend");
 
-    // Clicking the row navigates to the doc.
-    await row.locator(".todos-text").click();
+    // Clicking blank row space navigates to the doc (not just the text link).
+    await row.evaluate((el) => el.dispatchEvent(new MouseEvent("click", { bubbles: true })));
     await expect(page).toHaveURL(new RegExp(`${BASE}/doc/${id}`));
   });
+
+  for (const key of ["Enter", "Space"]) {
+    test(`a TODO row is keyboard navigable with ${key}`, async ({ page }) => {
+      const id = await seedDoc(
+        page,
+        `Keyboard TODO ${key} ${Date.now()}`,
+        `- [ ] [@${ACTOR}](paper:/actor/${ACTOR}) ${key} target\n`,
+      );
+      await page.goto(`${BASE}/todos?actor=${ACTOR}`);
+
+      const row = page.locator("#app-root .todos-row", { hasText: `${key} target` });
+      await expect(row).toBeVisible({ timeout: 10000 });
+      await row.focus();
+      await page.keyboard.press(key);
+      await expect(page).toHaveURL(new RegExp(`${BASE}/doc/${id}`));
+    });
+  }
 
   test("checking the box in the editor moves the task from Open to Done", async ({
     page,
@@ -133,6 +154,12 @@ test.describe("task-assign TODO surfaces", () => {
     await expect(
       page.locator("#app-root .todos-row", { hasText: "silent subtask" }),
     ).toBeVisible({ timeout: 10000 });
+    const inherited = page.locator("#app-root .todos-row", { hasText: "silent subtask" });
+    await expect(inherited.locator(".todos-assignee")).toHaveClass(/is-inherited/);
+    await expect(inherited.locator(".todos-assignee")).toHaveAttribute(
+      "title",
+      "Inherited from a parent task",
+    );
   });
 
   test("the profile page shows the TODOs section with a footer link", async ({
