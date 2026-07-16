@@ -229,13 +229,31 @@ def _prefix_quote_lines(text: str) -> str:
     return "\n".join("> " + line if line else ">" for line in text.split("\n"))
 
 
+def _int_attr(value, default, lo=None, hi=None):
+    """Coerce an untrusted attr to ``int``, falling back to ``default`` on a
+    non-numeric string / ``None`` / container (a crafted step can plant any
+    JSON value in any attr — see ``pm_schema.py`` attr specs, which carry no
+    type validation) and clamping the result to ``[lo, hi]``. ``bool``/``float``
+    still coerce as before (``int(True) == 1``, ``int(1.9) == 1``) — no
+    behaviour change for valid docs."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    if lo is not None:
+        n = max(lo, n)
+    if hi is not None:
+        n = min(hi, n)
+    return n
+
+
 def _render_block(node: dict) -> str:
     t = node.get("type")
     content = node.get("content") or []
     if t == "paragraph":
         return _render_inlines(content) + "\n"
     if t == "heading":
-        level = max(1, min(6, int(node.get("attrs", {}).get("level", 1))))
+        level = _int_attr((node.get("attrs") or {}).get("level"), 1, 1, 6)
         return "#" * level + " " + _render_inlines(content) + "\n"
     if t == "horizontal_rule":
         return "---\n"
@@ -489,7 +507,7 @@ def _render_task_list(node: dict) -> str:
 
 def _render_list(node: dict, ordered: bool) -> str:
     items = node.get("content") or []
-    start = int(node.get("attrs", {}).get("order", 1)) if ordered else 1
+    start = _int_attr((node.get("attrs") or {}).get("order"), 1, lo=1) if ordered else 1
     out: List[str] = []
     for i, item in enumerate(items):
         marker = f"{start + i}. " if ordered else "- "
@@ -546,7 +564,7 @@ def extract_tasks(doc: dict) -> List[dict]:
     def walk(node: dict, depth: int) -> None:
         t = node.get("type")
         if t == "heading":
-            level = max(1, min(6, int(node.get("attrs", {}).get("level", 1))))
+            level = _int_attr((node.get("attrs") or {}).get("level"), 1, 1, 6)
             text = _flatten_text(node.get("content") or []).strip()
             while section_stack and section_stack[-1]["level"] >= level:
                 section_stack.pop()
