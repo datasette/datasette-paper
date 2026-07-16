@@ -589,6 +589,169 @@
   margin-right: 0.25em;
 }
 
+/* date inline atom — rendered by DateView. A neutral compact chip (calendar
+ * glyph + label) everywhere; the overdue/today tints are applied ONLY inside
+ * an unchecked task_item, by dateDecorationPlugin's node decorations. */
+.editor-host .pm-date {
+  position: relative;
+  display: inline;
+  white-space: nowrap;
+  color: var(--pp-fg-muted);
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--pp-surface-2);
+  font-weight: 500;
+  user-select: none;
+  cursor: pointer;
+}
+.editor-host .pm-date .pm-date-icon {
+  margin-right: 0.25em;
+}
+/* Size the glyph in `em` so it tracks the surrounding font — the chip renders
+ * at H1 size inside a heading, not just body size. (The SVG carries a fixed
+ * 12px attr as a no-JS fallback; this overrides it.) */
+.editor-host .pm-date .pm-date-icon svg {
+  width: 0.9em;
+  height: 0.9em;
+  vertical-align: -0.1em;
+}
+/* Tints — decoration classes on the chip, so they win over the neutral base. */
+.editor-host .pm-date.pp-date-overdue {
+  color: var(--pp-danger);
+  background: var(--pp-danger-bg);
+}
+.editor-host .pm-date.pp-date-today {
+  color: var(--pp-warn);
+  background: var(--pp-warn-bg);
+}
+
+/* Click-to-edit popup — anchored below the chip. `contenteditable=false`, so
+ * its input is exempt from the caret guard (see DateView). */
+.editor-host .pm-date-popup {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 200px;
+  padding: 8px;
+  border: 1px solid var(--pp-border);
+  border-radius: 6px;
+  background: var(--pp-surface);
+  box-shadow: 0 4px 16px var(--pp-shadow);
+  white-space: normal;
+  cursor: auto;
+  user-select: text;
+}
+.editor-host .pm-date-popup-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 6px;
+  border: 1px solid var(--pp-border);
+  border-radius: 4px;
+  background: var(--pp-bg);
+  color: var(--pp-fg);
+  font: inherit;
+  font-weight: 400;
+}
+.editor-host .pm-date-popup-input:focus {
+  outline: none;
+  border-color: var(--pp-accent);
+}
+.editor-host .pm-date-popup-preview {
+  font-size: 0.85em;
+  font-weight: 400;
+  color: var(--pp-fg-muted);
+}
+.editor-host .pm-date-popup-preview--bad {
+  color: var(--pp-danger);
+}
+/* Format picker: a "Format" subtitle over one radio row per preset
+ * (description + its own rendered example), then a Custom strftime row. */
+.editor-host .pm-date-popup-formats {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+  padding-top: 6px;
+  border-top: 1px solid var(--pp-border);
+}
+.editor-host .pm-date-popup-formats-title {
+  font-size: 0.72em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--pp-fg-subtle);
+  margin-bottom: 2px;
+}
+.editor-host .pm-date-format {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.82em;
+  font-weight: 400;
+}
+.editor-host .pm-date-format:hover {
+  background: var(--pp-surface-2);
+}
+.editor-host .pm-date-format-radio {
+  margin: 0;
+  flex: none;
+}
+.editor-host .pm-date-format-desc {
+  flex: none;
+  min-width: 68px;
+  color: var(--pp-fg-muted);
+}
+.editor-host .pm-date-format-example {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.editor-host .pm-date-popup-custom {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 2px 5px;
+  border: 1px solid var(--pp-border);
+  border-radius: 3px;
+  background: var(--pp-bg);
+  color: var(--pp-fg);
+  font: inherit;
+  font-size: 1em;
+  font-weight: 400;
+}
+.editor-host .pm-date-popup-custom:focus {
+  outline: none;
+  border-color: var(--pp-accent);
+}
+.editor-host .pm-date-popup--shake {
+  animation: pm-date-shake 0.18s ease-in-out 0s 2;
+}
+@keyframes pm-date-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25% {
+    transform: translateX(-3px);
+  }
+  75% {
+    transform: translateX(3px);
+  }
+}
+
 /* Tables — prosemirror-tables ships layout but no cell borders. We
  * draw a light grid + a header background. `--default-cell-min-width`
  * stops empty cells from collapsing to 0px wide. */

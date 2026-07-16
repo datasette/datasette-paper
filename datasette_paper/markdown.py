@@ -13,6 +13,7 @@ import re
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
 
+from .date_atom import render_date_atom
 from .youtube import youtube_watch_url
 
 # A resource-URL resolver: given (ref_type, value) it returns
@@ -758,6 +759,22 @@ def _render_inlines(nodes: list) -> str:
             canonical = f"paper:/tag/{quote(tag, safe='')}"
             _kind, url = _resolve_resource("tag", tag)
             out.append(_ref_link("#" + tag, canonical, url))
+        elif (
+            t == "date"
+        ):  # @feat date: serialize atom to a [<label>](paper:/date/<uri>) link
+            # The URI is the source of truth (path `YYYY-MM-DD` or
+            # `YYYY-MM-DDT<HH:MM>`, with the IANA `tz` riding as a URL-encoded
+            # query param because zone names contain `/`). The visible label is
+            # a deterministic render of the attrs — always with the year and
+            # the wall time in the *stored* zone — so a serialize never depends
+            # on when it runs; the parser ignores the label and reads the URI.
+            # `render_date_atom` (date_atom.py) validates the untrusted attrs
+            # and returns None to drop a structurally-invalid atom rather than
+            # crash. All the date-shaped logic lives there; markdown.py just
+            # wires the atom into the inline stream.
+            rendered = render_date_atom(n.get("attrs") or {})
+            if rendered is not None:
+                out.append(rendered)
         elif (
             t == "inline_embed"
         ):  # @feat inline-embed: serialize atom to a paper:/embed/<kind>/<ref> link

@@ -84,6 +84,11 @@ import { AccessChecker } from "./linkAccessCheck";
 import { PaperLinkView } from "./paperLinkView";
 import { ActorResolver } from "./actorResolver";
 import { MentionView } from "./mentionView";
+import {
+  DateView,
+  dateDecorationPlugin,
+  insertRelativeDateCommand,
+} from "./dateView";
 import { DatasetteResolver } from "./datasetteResolver";
 import { InlineEmbedView } from "./inlineEmbedView";
 import { BlockEmbedView } from "./blockEmbedView";
@@ -1359,6 +1364,10 @@ export class EditorConnection {
         keymap({
           "Mod-k": toggleLinkCommand(),
           "Mod-Shift-7": wrapInList(schema.nodes.task_list),
+          // @feat date: Cmd/Ctrl-; inserts today's date chip, Cmd/Ctrl-Shift-;
+          // tomorrow's — no popup (falls through in code blocks).
+          "Mod-;": insertRelativeDateCommand(0),
+          "Mod-Shift-;": insertRelativeDateCommand(1),
           // Move the cursor's enclosing list_item / task_item up or
           // down within its parent list. Falls through at boundaries
           // so Opt+Arrow still moves the caret out of the list.
@@ -1440,6 +1449,11 @@ export class EditorConnection {
         // sql_block / source text with `tok-*` classes via lazily-loaded lezer
         // grammars. Read-path only; no @codemirror/* is pulled in here.
         codeHighlightPlugin(),
+        // Tints `date` atoms overdue (red) / today (amber) — but only inside an
+        // unchecked task_item. A decoration plugin (not NodeView state) because
+        // checking the box is a setNodeMarkup on the ancestor, which the date
+        // view's update never sees; decorations recompute every transaction.
+        dateDecorationPlugin(),
         foldHeadingsPlugin,
         // Re-renders every mounted table-of-contents block when the doc's
         // top-level heading signature changes (a TocView's own update() only
@@ -1554,6 +1568,8 @@ export class EditorConnection {
         sql_block: (node, view, getPos) =>
           new SqlBlockView(node, view, getPos as () => number | undefined),
         tag: (node, view) => new TagView(node, view),
+        date: (node, view, getPos) =>
+          new DateView(node, view, getPos as () => number | undefined),
         value: (node, view, getPos) =>
           new ValueView(
             node,

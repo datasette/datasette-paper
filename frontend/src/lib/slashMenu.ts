@@ -30,6 +30,7 @@ import { insertTable } from "./tables";
 import { insertToc } from "./tocView";
 import { insertSqlBlock, insertSource } from "./sqlQuery";
 import { insertCallout } from "./callout";
+import { insertDateAndEdit, insertRelativeDate } from "./dateView";
 import { embedInsertSources, type EmbedInsertSource } from "./embedProviders";
 
 /**
@@ -529,6 +530,40 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "infoCircle",
       group: "styling",
       run: runCommand(insertCallout("note")),
+    },
+    {
+      // @feat date: slash entry inserts today's date chip + opens its popup
+      id: "date",
+      label: "Date",
+      keywords: ["date", "day", "calendar", "due", "deadline", "when", "time"],
+      icon: "calendarEvent",
+      group: "styling",
+      run: (view) => insertDateAndEdit(view),
+    },
+    {
+      // @feat date: quick-insert entries resolve directly (no popup)
+      id: "date_today",
+      label: "Today",
+      keywords: ["today", "date", "now", "current"],
+      icon: "calendarEvent",
+      group: "styling",
+      run: (view) => insertRelativeDate(view, 0),
+    },
+    {
+      id: "date_tomorrow",
+      label: "Tomorrow",
+      keywords: ["tomorrow", "date", "next", "day"],
+      icon: "calendarEvent",
+      group: "styling",
+      run: (view) => insertRelativeDate(view, 1),
+    },
+    {
+      id: "date_yesterday",
+      label: "Yesterday",
+      keywords: ["yesterday", "date", "previous", "day"],
+      icon: "calendarEvent",
+      group: "styling",
+      run: (view) => insertRelativeDate(view, -1),
     },
     {
       id: "code_block",

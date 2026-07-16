@@ -747,6 +747,23 @@ def test_tag_percent_encodes_nested_slug():
     assert md == "[#inbox/to-read](paper:/tag/inbox%2Fto-read)\n"
 
 
+# ---------------------------------------------------------------------------
+# date atom — serialized via date_atom.render_date_atom (unit tests live in
+# tests/test_date_atom.py). One integration smoke test here proves the
+# markdown serializer wires the atom in and drops an invalid one.
+# ---------------------------------------------------------------------------
+
+
+def test_date_atom_serializes_and_drops_invalid_through_doc_to_markdown():
+    good = {"type": "date", "attrs": {"date": "2026-07-20"}}
+    bad = {"type": "date", "attrs": {"date": "2026-02-30"}}
+    assert doc_to_markdown(_doc(_para(_text("on "), good))) == (
+        "on [Jul 20, 2026](paper:/date/2026-07-20)\n"
+    )
+    # A structurally-invalid date is dropped; the surrounding text survives.
+    assert doc_to_markdown(_doc(_para(_text("x "), bad))) == "x\n"
+
+
 def test_inline_embed_serializes_as_paper_embed_scheme_link():
     md = doc_to_markdown(
         _doc(

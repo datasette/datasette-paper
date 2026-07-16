@@ -17,6 +17,7 @@ this table and the markers in sync.
 | `paper-link` | `[[wikilink]]` cross-document references: `[[`-autocomplete, an inline NodeView that resolves the id to a title, markdown round-trip, and a write-tail edge index | `datasette_paper/links.py` |
 | `mention` | `@user` mention inline atom — id-only (actorId), authored via `@`-autocomplete, name resolved live per-viewer | `frontend/src/lib/mentionView.ts` |
 | `tag` | `#tag` inline atom — the value is its own label, authored via `#`-autocomplete, links to the tag-search page | `frontend/src/lib/tagView.ts` |
+| `date` | Inline date atom — `{date, time?, tz?, format?}`, slash-menu insert (`/date` + quick `/today`,`/tomorrow`,`/yesterday`), keyboard quick-insert (`Mod-;` today / `Mod-Shift-;` tomorrow) + click-to-edit natural-language popup with a per-node format picker (strftime presets + custom); a neutral chip that tints overdue/today only inside an unchecked task; round-trips as a `paper:/date/` link | `frontend/src/lib/dateView.ts` |
 | `placeholder` | `{{key}}` template-placeholder inline atom — authored only in templates, substituted server-side at create time (write-only: never parsed back) | `datasette_paper/template_params.py` |
 | `inline-embed` | Inline atom referencing a Datasette resource by ref path, resolved to a live pill label per-viewer | `frontend/src/lib/inlineEmbedView.ts` |
 | `block-embed` | Block atom embedding a read-only live render of a Datasette table/row/db; round-trips as a `paper-embed` JSON fence | `frontend/src/lib/blockEmbedView.ts` |

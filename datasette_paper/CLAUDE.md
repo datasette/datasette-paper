@@ -48,6 +48,16 @@ won't find by reading any single file.
   iff every cell in the first row is a `table_header`. Anonymous
   tables (no `name` attr) appear in the listing endpoint with
   `name: null` but aren't addressable via `/tables/{name}`.
+- `date_atom.py` — everything the `date` inline atom needs at serialize
+  time: the deterministic label render (`format_date_label` /
+  `strftime_date`, byte-identical twin of
+  `frontend/src/lib/dateFormat.ts`), regex-free validation of the atom's
+  untrusted attrs (`parse_ymd` / `parse_hm` hand-scan the shape, then
+  `datetime` does the calendar/range check), and `render_date_atom`,
+  which `markdown.py` calls to emit `[label](paper:/date/<uri>)` or drop
+  a structurally-invalid atom. Split out of `markdown.py` to keep that
+  module about markdown; the `@feat date:` lock-step marker still lives
+  in `markdown.py`'s inline branch.
 - `migrations.py` — append-only schema; never edit a past step.
 
 ## Routing

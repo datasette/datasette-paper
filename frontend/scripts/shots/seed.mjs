@@ -238,6 +238,28 @@ rotation keeps rediscovering the hard way.
 > through the five critical flows before declaring victory.
 `;
 
+// Inline `date` atom fixture (the date / date-format-picker shots): a compact
+// calendar chip authored as a `[label](paper:/date/<iso>)` markdown link (the
+// label is ignored on parse — the URI is the source of truth). A date in prose
+// stays neutral; a date inside an UNCHECKED task tints overdue (red) / today
+// (amber), and a checked task's date goes neutral again. The shots freeze the
+// clock to 2026-07-15 (page.clock.setFixedTime), so the seeded dates around
+// that day give a deterministic overdue / today / done trio. Date-only (zone-
+// less) chips only — a timed chip converts to the viewer's timezone, which
+// would vary per machine and churn the committed PNG.
+const DATES = `# Sprint schedule
+
+The kickoff is on [Jul 20, 2026](paper:/date/2026-07-20). Type \`/date\` (or
+press Cmd-;) to drop a date anywhere — a compact chip that round-trips through
+markdown and reads in every collaborator's own calendar.
+
+## Deadlines
+
+- [ ] Book the venue [Jul 10, 2026](paper:/date/2026-07-10)
+- [ ] Send the invites [Jul 15, 2026](paper:/date/2026-07-15)
+- [x] Reserve the catering [Jul 5, 2026](paper:/date/2026-07-05)
+`;
+
 // Link-graph cluster (the link-graph / link-graph-ego shots): three docs whose
 // bodies carry `[[<id>]]` wiki links to the seeded docs above. The markdown
 // parser splits those into real `paper_link` atoms and the create API reindexes
@@ -343,6 +365,8 @@ export async function seed(ctx) {
   const tocId = await create("Engineering handbook", ACTOR, TOC);
   const codeBlockId = await create("Language support", ACTOR, CODE_BLOCK);
   const calloutsId = await create("Deploy runbook", ACTOR, CALLOUTS);
+  // Inline `date` atom fixture for the date / date-format-picker shots.
+  const dateId = await create("Sprint schedule", ACTOR, DATES);
   // Link-graph cluster: docs whose `[[<id>]]` links give the graph shots real
   // edges (double-linking richId in the retro gives one thicker ×2 edge).
   // Owned by ACTOR (not bob — the profile-papers shot lists bob's docs) and
@@ -382,5 +406,6 @@ export async function seed(ctx) {
     codeBlockId,
     calloutsId,
     teamWikiId,
+    dateId,
   };
 }

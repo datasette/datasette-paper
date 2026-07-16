@@ -22,11 +22,12 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
+from .date_atom import parse_hm, parse_ymd
 from .util import normalize_tag
 from .youtube import parse_youtube_url
 
@@ -714,6 +715,51 @@ def _paper_ref_to_node(kind: str, value: str) -> dict | None:
         # and the leading slash stripped during serialize is restored.
         _provider_kind, _, ref = value.partition("/")
         return {"type": "inline_embed", "attrs": {"ref": "/" + unquote(ref)}}
+    # @feat date: parse a paper:/date/ ref (path + tz query) into a date atom
+    if kind == "date":
+        return _date_ref_to_node(value)
+    return None
+
+
+def _date_ref_to_node(value: str) -> dict | None:
+    """Build a `date` atom from a `paper:/date/` ref value, or None to degrade.
+
+    ``value`` is the ref after the `paper:/date/` prefix: a `YYYY-MM-DD` or
+    `YYYY-MM-DDTHH:MM` path, optionally followed by a `?tz=<IANA>` query. The
+    URI is the source of truth (the visible label is ignored). Any validation
+    failure returns None; the caller then keeps the label as plain text (the
+    date feature's lossy contract). Any non-empty ``tz`` string is accepted —
+    an unresolvable zone degrades to naive wall-clock rendering client-side, so
+    shipping an IANA allow-list here would only reject harmless input.
+    """
+    path, _, query = value.partition("?")
+    params = parse_qs(query) if query else {}  # parse_qs percent-decodes
+
+    def _param(name):
+        vals = params.get(name)
+        return vals[0] if vals and vals[0] else None
+
+    fmt = _param("fmt")
+    if len(path) == 16 and path[10] == "T":
+        date_s, time_s = path[:10], path[11:]
+        if parse_ymd(date_s) is None or parse_hm(time_s) is None:
+            return None
+        return {
+            "type": "date",
+            "attrs": {
+                "date": date_s,
+                "time": time_s,
+                "tz": _param("tz"),
+                "format": fmt,
+            },
+        }
+    if parse_ymd(path) is not None:
+        # A stray `tz` on a date-only ref is dropped: a calendar date is the
+        # same for everyone, so only timed atoms carry a zone. A `fmt` is kept.
+        return {
+            "type": "date",
+            "attrs": {"date": path, "time": None, "tz": None, "format": fmt},
+        }
     return None
 
 
@@ -742,9 +788,38 @@ def _convert_paper_refs(nodes: list[dict]) -> list[dict]:
         atom = _paper_ref_to_node(kind, value)
         if atom is not None:
             out.append(atom)
+        elif kind == "date":
+            # @feat date: an unparseable paper:/date/ ref degrades to its
+            # visible label as plain text (the date feature's lossy contract),
+            # instead of dropping like an un-normalizable tag / unknown kind.
+            out.append(_strip_paper_ref_marks(node))
         # Advance prev_ref even when the atom dropped (un-normalizable tag) so
         # trailing fragments of the link still fold away.
         prev_ref = canonical
+    return out
+
+
+def _strip_paper_ref_marks(node: dict) -> dict:
+    """Copy a text node with its `paper:/`-scheme link mark removed.
+
+    Used when a paper ref is recognized by scheme but can't be converted to an
+    atom and should survive as plain text (the label). Non-link marks (bold,
+    …) are preserved; the link mark that carried the `paper:/` ref is dropped
+    so the leftover text is an ordinary run, not a dangling link.
+    """
+    kept = []
+    for m in node.get("marks") or []:
+        attrs = m.get("attrs") or {}
+        title = attrs.get("title") or ""
+        href = attrs.get("href") or ""
+        is_paper_link = m.get("type") == "link" and (
+            title.startswith(_PAPER_SCHEME) or href.startswith(_PAPER_SCHEME)
+        )
+        if not is_paper_link:
+            kept.append(m)
+    out = {"type": "text", "text": node.get("text", "")}
+    if kept:
+        out["marks"] = kept
     return out
 
 

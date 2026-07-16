@@ -4,6 +4,7 @@ import { addListNodes } from "prosemirror-schema-list";
 import { tableNodes } from "prosemirror-tables";
 import { safeHref, safeImageSrc } from "./safeHref";
 import { blockEmbedUrl } from "./embedFilters";
+import { formatDateLabel, type DateAttrs } from "./dateFormat";
 
 // The render sink for link/image URLs. `prosemirror-schema-basic` ships the
 // stock `link` mark and `image` node whose `toDOM` emit `href`/`src` verbatim,
@@ -217,6 +218,53 @@ const tagNode: NodeSpec = {
       class: "pm-tag",
     },
     `#${node.attrs.tag ?? "?"}`,
+  ],
+};
+
+// Inline atom for a calendar date (+ optional time / IANA zone) — authored via
+// the slash menu and edited by a click-to-open popup, rendered by a NodeView
+// (dateView.ts). The toDOM here is a static fallback (the canonical, year-
+// always label via formatDateLabel). `date` is required (a date atom is never
+// empty); `time`/`tz` default null. Mirrors datasette_paper/pm_schema.py;
+// datasette_paper/markdown.py round-trips it as
+// `[<label>](paper:/date/<date>[T<time>][?tz=<zone>])`.
+// @feat date: client NodeSpec inline atom (mirrors pm_schema.py)
+const dateNode: NodeSpec = {
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  draggable: false,
+  attrs: {
+    date: {},
+    time: { default: null },
+    tz: { default: null },
+    format: { default: null },
+  },
+  parseDOM: [
+    {
+      tag: "span[data-date]",
+      getAttrs: (el) => {
+        const e = el as HTMLElement;
+        return {
+          date: e.getAttribute("data-date") || "",
+          time: e.getAttribute("data-date-time") || null,
+          tz: e.getAttribute("data-date-tz") || null,
+          format: e.getAttribute("data-date-format") || null,
+        };
+      },
+    },
+  ],
+  toDOM: (node) => [
+    "span",
+    {
+      "data-date": String(node.attrs.date ?? ""),
+      "data-date-time": String(node.attrs.time ?? ""),
+      "data-date-tz": String(node.attrs.tz ?? ""),
+      "data-date-format": String(node.attrs.format ?? ""),
+      class: "pm-date",
+    },
+    formatDateLabel(node.attrs as DateAttrs),
   ],
 };
 
@@ -664,6 +712,7 @@ export const schema = new Schema({
     .append({ paper_link: paperLinkNode })
     .append({ mention: mentionNode })
     .append({ tag: tagNode })
+    .append({ date: dateNode })
     .append({ value: valueNode })
     .append({ inline_embed: inlineEmbedNode })
     .append({ block_embed: blockEmbedNode })
