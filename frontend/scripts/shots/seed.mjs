@@ -260,6 +260,30 @@ markdown and reads in every collaborator's own calendar.
 - [x] Reserve the catering [Jul 5, 2026](paper:/date/2026-07-05)
 `;
 
+// task-assign fixture (the todos / profile-todos shots): a launch checklist
+// whose task items carry @mention assignees and `date` due dates. Assignment is
+// pure interpretation of doc content, and the create-from-markdown path
+// reindexes it, so `/-/paper/todos` and the `<profile-todos>` profile section
+// see it with no edit. Dates are chosen relative to the clock the shots FREEZE
+// to 2026-07-15 (page.clock.setFixedTime), so the five buckets — Overdue /
+// Today / This week / Later / No due date — are deterministic across runs. Most
+// tasks are alice's (her /todos page shows all five buckets); two name bob (the
+// profile-todos shot visits bob's profile), and one names both (a multi-
+// assignee chip row). The date-atom labels are ignored on parse — the
+// `paper:/date/<iso>` URI is the source of truth.
+const TODOS = `## Backend
+
+- [ ] [@alice](paper:/actor/alice) Fix the login redirect [due](paper:/date/2026-07-11)
+- [ ] [@alice](paper:/actor/alice) [@bob](paper:/actor/bob) Ship the CSV importer [due](paper:/date/2026-07-15)
+
+## Frontend
+
+- [ ] [@alice](paper:/actor/alice) Polish the empty states [due](paper:/date/2026-07-19)
+- [ ] [@bob](paper:/actor/bob) Migrate the settings page [due](paper:/date/2026-07-16)
+- [ ] [@alice](paper:/actor/alice) Write the changelog [due](paper:/date/2026-08-06)
+- [ ] [@alice](paper:/actor/alice) Triage the launch backlog
+`;
+
 // Link-graph cluster (the link-graph / link-graph-ego shots): three docs whose
 // bodies carry `[[<id>]]` wiki links to the seeded docs above. The markdown
 // parser splits those into real `paper_link` atoms and the create API reindexes
@@ -367,6 +391,10 @@ export async function seed(ctx) {
   const calloutsId = await create("Deploy runbook", ACTOR, CALLOUTS);
   // Inline `date` atom fixture for the date / date-format-picker shots.
   const dateId = await create("Sprint schedule", ACTOR, DATES);
+  // Assigned/dated task fixture for the todos + profile-todos shots. Owned by
+  // ACTOR (alice) so the browsing viewer can see it; the create-path reindex
+  // fills the m009 assignment index synchronously.
+  const todosId = await create("Launch checklist", ACTOR, TODOS);
   // Link-graph cluster: docs whose `[[<id>]]` links give the graph shots real
   // edges (double-linking richId in the retro gives one thicker ×2 edge).
   // Owned by ACTOR (not bob — the profile-papers shot lists bob's docs) and
@@ -407,5 +435,6 @@ export async function seed(ctx) {
     calloutsId,
     teamWikiId,
     dateId,
+    todosId,
   };
 }

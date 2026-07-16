@@ -95,6 +95,36 @@ def _step_record(row) -> dict:
     }
 
 
+# @feat task-assign: turn extract_tasks output into _datasette_paper_task_assignment
+# rows — assigned tasks only, one row per (ordinal, effective assignee). The
+# task's position in the extract_tasks list IS its ordinal (0-based doc order),
+# the stable per-doc handle the /todos endpoint sorts by.
+def task_assignment_rows(tasks: list[dict]) -> list[dict]:
+    rows: list[dict] = []
+    for ordinal, task in enumerate(tasks):
+        assignees = task.get("assignees") or []
+        if not assignees:
+            continue  # unassigned tasks write no rows (index scope)
+        due = task.get("due")
+        section_json = json.dumps(task.get("section") or [])
+        for assignee in assignees:
+            rows.append(
+                {
+                    "ordinal": ordinal,
+                    "assignee": assignee,
+                    "inherited": 1 if task.get("assignees_inherited") else 0,
+                    "checked": 1 if task.get("checked") else 0,
+                    "text": task.get("text") or "",
+                    "section": section_json,
+                    "due_date": (due or {}).get("date"),
+                    "due_time": (due or {}).get("time"),
+                    "due_tz": (due or {}).get("tz"),
+                    "due_inherited": 1 if task.get("due_inherited") else 0,
+                }
+            )
+    return rows
+
+
 class Instance:
     """In-memory state for a single collaborative document."""
 
@@ -146,6 +176,9 @@ class Instance:
         # Doc version at which the inline-#tag index was last rebuilt. Same
         # in-memory guard idiom as ``_links_indexed_version``.
         self._tags_indexed_version: Optional[int] = None
+        # Doc version at which the task-assignment index was last rebuilt. Same
+        # in-memory guard idiom as ``_links_indexed_version``.
+        self._tasks_indexed_version: Optional[int] = None
         # Serializes ``add_events`` and the subscribe+backlog snapshot in
         # ``subscribe_with_backlog`` so the Python-level state transitions
         # (version check → validate → write → tail append → broadcast)
@@ -464,6 +497,7 @@ class Instance:
         await self._maybe_auto_snapshot(actor_id)
         await self.reindex_links()
         await self.reindex_tags()
+        await self.reindex_tasks()
         return self.version
 
     async def reindex_tags(self) -> None:
@@ -496,6 +530,39 @@ class Instance:
             self._tags_indexed_version = self.version
         except Exception:
             logger.exception("inline-tag reindex failed for doc %s", self.doc_id)
+
+    # @feat task-assign: write-tail reindex of the assigned-task index off the
+    # materialized doc — a third sibling beside reindex_links / reindex_tags.
+    async def reindex_tasks(self) -> None:
+        """Rebuild this doc's task-assignment rows from the live doc.
+
+        Called from the write tail. Same contract as the link/tag reindex:
+        skips a poisoned history and a redundant re-run, and never raises into
+        the write path (a derived-index failure must not fail the user's edit).
+        Assigned tasks only — a task with no effective assignee writes no rows —
+        with the per-(ordinal, assignee) fan-out that makes ``WHERE assignee =
+        ?`` an indexed equality. Keeps ``_datasette_paper_task_assignment``
+        current as of the latest write for the ``/todos`` endpoint.
+        """
+        if self._materialization_error is not None:
+            return
+        if self._tasks_indexed_version == self.version:
+            return
+        try:
+            live_json = self.materialize_live_doc()
+            if self._materialization_error is not None:
+                return
+            from .markdown import extract_tasks
+
+            rows = task_assignment_rows(extract_tasks(live_json))
+            await self.db.replace_task_assignments(
+                doc_id=self.doc_id,
+                src_version=self.version,
+                rows=rows,
+            )
+            self._tasks_indexed_version = self.version
+        except Exception:
+            logger.exception("task-assignment reindex failed for doc %s", self.doc_id)
 
     # @feat snapshot-log: write-tail reindex of derived rows off the materialized doc
     async def reindex_links(self) -> None:

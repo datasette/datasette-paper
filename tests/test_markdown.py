@@ -334,6 +334,23 @@ def _task_item(text, checked=False):
     }
 
 
+def _mention(actor_id):
+    return {"type": "mention", "attrs": {"actorId": actor_id}}
+
+
+def _date(date, time=None, tz=None):
+    return {"type": "date", "attrs": {"date": date, "time": time, "tz": tz}}
+
+
+def _task_item_nodes(*inlines, checked=False, extra_blocks=()):
+    """A task_item whose own paragraph carries the given inline nodes."""
+    return {
+        "type": "task_item",
+        "attrs": {"checked": checked},
+        "content": [_para(*inlines), *extra_blocks],
+    }
+
+
 # @feat task-list: tests task_list GFM checkbox rendering
 def test_task_list_renders_gfm_checkboxes():
     md = doc_to_markdown(
@@ -365,8 +382,26 @@ def test_extract_tasks_returns_text_and_state():
     )
     tasks = extract_tasks(doc)
     assert tasks == [
-        {"text": "first", "checked": False, "depth": 1, "section": []},
-        {"text": "second", "checked": True, "depth": 1, "section": []},
+        {
+            "text": "first",
+            "checked": False,
+            "depth": 1,
+            "section": [],
+            "assignees": [],
+            "assignees_inherited": False,
+            "due": None,
+            "due_inherited": False,
+        },
+        {
+            "text": "second",
+            "checked": True,
+            "depth": 1,
+            "section": [],
+            "assignees": [],
+            "assignees_inherited": False,
+            "due": None,
+            "due_inherited": False,
+        },
     ]
 
 
@@ -510,6 +545,201 @@ def test_group_tasks_by_section_repeated_heading_text_makes_two_groups():
         ["in B"],
         ["second A"],
     ]
+
+
+# ---------------------------------------------------------------------------
+# @feat task-assign: extract_tasks derives assignees (mention atoms) and a due
+# date (first date atom) per task, with own-overrides-inherited semantics down
+# the task_item subtree. "Yours unless you say otherwise."
+# ---------------------------------------------------------------------------
+
+
+def test_task_assign_own_mentions_and_due():
+    from datasette_paper.markdown import extract_tasks
+
+    doc = _doc(
+        {
+            "type": "task_list",
+            "content": [
+                _task_item_nodes(
+                    _text("ship it "),
+                    _mention("marta"),
+                    _text(" "),
+                    _mention("dev"),
+                    _text(" by "),
+                    _date("2026-07-20"),
+                )
+            ],
+        }
+    )
+    (t,) = extract_tasks(doc)
+    assert t["assignees"] == ["marta", "dev"]
+    assert t["assignees_inherited"] is False
+    assert t["due"] == {"date": "2026-07-20", "time": None, "tz": None}
+    assert t["due_inherited"] is False
+    # Flattened text drops atoms exactly as before.
+    assert t["text"] == "ship it   by"
+
+
+def test_task_assign_dedupes_and_takes_first_date():
+    from datasette_paper.markdown import extract_tasks
+
+    doc = _doc(
+        {
+            "type": "task_list",
+            "content": [
+                _task_item_nodes(
+                    _mention("marta"),
+                    _mention("marta"),  # duplicate → one assignee
+                    _date("2026-07-20", time="15:00", tz="America/New_York"),
+                    _date("2026-08-01"),  # second date ignored
+                )
+            ],
+        }
+    )
+    (t,) = extract_tasks(doc)
+    assert t["assignees"] == ["marta"]
+    assert t["due"] == {
+        "date": "2026-07-20",
+        "time": "15:00",
+        "tz": "America/New_York",
+    }
+
+
+def test_task_assign_no_atoms_is_empty_not_inherited():
+    from datasette_paper.markdown import extract_tasks
+
+    doc = _doc({"type": "task_list", "content": [_task_item("plain")]})
+    (t,) = extract_tasks(doc)
+    assert t["assignees"] == []
+    assert t["assignees_inherited"] is False
+    assert t["due"] is None
+    assert t["due_inherited"] is False
+
+
+def _nest(item, *children):
+    """Put a nested task_list of `children` inside task_item `item`."""
+    item = dict(item)
+    item["content"] = [
+        *item["content"],
+        {"type": "task_list", "content": list(children)},
+    ]
+    return item
+
+
+def test_task_assign_subtask_inherits_when_silent():
+    from datasette_paper.markdown import extract_tasks
+
+    parent = _nest(
+        _task_item_nodes(_mention("marta"), _date("2026-07-20")),
+        _task_item("silent subtask"),
+    )
+    doc = _doc({"type": "task_list", "content": [parent]})
+    tasks = extract_tasks(doc)
+    sub = tasks[1]
+    assert sub["text"] == "silent subtask"
+    assert sub["assignees"] == ["marta"]
+    assert sub["assignees_inherited"] is True
+    assert sub["due"] == {"date": "2026-07-20", "time": None, "tz": None}
+    assert sub["due_inherited"] is True
+
+
+def test_task_assign_own_mention_replaces_inherited_handoff():
+    from datasette_paper.markdown import extract_tasks
+
+    parent = _nest(
+        _task_item_nodes(_mention("marta")),
+        _task_item_nodes(_mention("dev"), _text("hand-off")),
+    )
+    doc = _doc({"type": "task_list", "content": [parent]})
+    tasks = extract_tasks(doc)
+    sub = tasks[1]
+    # Parent's people drop entirely — clean hand-off, not a union.
+    assert sub["assignees"] == ["dev"]
+    assert sub["assignees_inherited"] is False
+
+
+def test_task_assign_facets_resolve_independently():
+    from datasette_paper.markdown import extract_tasks
+
+    # Parent supplies assignee + due; subtask overrides only the due date.
+    parent = _nest(
+        _task_item_nodes(_mention("marta"), _date("2026-07-20")),
+        _task_item_nodes(_date("2026-07-25"), _text("own due, inherited person")),
+    )
+    doc = _doc({"type": "task_list", "content": [parent]})
+    sub = extract_tasks(doc)[1]
+    assert sub["assignees"] == ["marta"]
+    assert sub["assignees_inherited"] is True
+    assert sub["due"] == {"date": "2026-07-25", "time": None, "tz": None}
+    assert sub["due_inherited"] is False
+
+
+def test_task_assign_inheritance_chains_through_silent_middle():
+    from datasette_paper.markdown import extract_tasks
+
+    grandchild = _task_item("deepest")
+    middle = _nest(_task_item("silent middle"), grandchild)
+    top = _nest(_task_item_nodes(_mention("marta")), middle)
+    doc = _doc({"type": "task_list", "content": [top]})
+    tasks = extract_tasks(doc)
+    # top, middle, grandchild — the empty middle still forwards marta down.
+    assert [t["text"] for t in tasks] == ["", "silent middle", "deepest"]
+    assert tasks[1]["assignees"] == ["marta"]
+    assert tasks[1]["assignees_inherited"] is True
+    assert tasks[2]["assignees"] == ["marta"]
+    assert tasks[2]["assignees_inherited"] is True
+
+
+def test_task_assign_nested_mention_does_not_assign_parent():
+    from datasette_paper.markdown import extract_tasks
+
+    # A mention living in a *nested* task_list belongs to that item, never the
+    # parent — same own-paragraph boundary that scopes `text`.
+    parent = _nest(
+        _task_item("parent names nobody"),
+        _task_item_nodes(_mention("dev")),
+    )
+    doc = _doc({"type": "task_list", "content": [parent]})
+    tasks = extract_tasks(doc)
+    assert tasks[0]["assignees"] == []
+    assert tasks[1]["assignees"] == ["dev"]
+
+
+def test_task_assign_mention_in_prose_assigns_nothing():
+    from datasette_paper.markdown import extract_tasks
+
+    doc = _doc(
+        _para(_text("cc "), _mention("marta")),
+        {"type": "task_list", "content": [_task_item("unrelated")]},
+    )
+    tasks = extract_tasks(doc)
+    assert len(tasks) == 1
+    assert tasks[0]["assignees"] == []
+
+
+def test_task_assign_inherits_across_blockquote_boundary():
+    from datasette_paper.markdown import extract_tasks
+
+    # A subtask nested via a blockquote inside a task item still sees that
+    # task item as its ancestor (blockquote is not itself a task).
+    inner_list = {
+        "type": "task_list",
+        "content": [_task_item("quoted subtask")],
+    }
+    parent = {
+        "type": "task_item",
+        "attrs": {"checked": False},
+        "content": [
+            _para(_mention("marta")),
+            {"type": "blockquote", "content": [inner_list]},
+        ],
+    }
+    doc = _doc({"type": "task_list", "content": [parent]})
+    tasks = extract_tasks(doc)
+    assert tasks[1]["text"] == "quoted subtask"
+    assert tasks[1]["assignees"] == ["marta"]
+    assert tasks[1]["assignees_inherited"] is True
 
 
 # ---------------------------------------------------------------------------

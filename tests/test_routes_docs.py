@@ -587,6 +587,64 @@ async def test_get_tasks_endpoint(ds_paper):
 
 
 @pytest.mark.asyncio
+async def test_get_tasks_reports_assignees_and_due(ds_paper):
+    """@feat task-assign: the derived assignee/due fields ride the /tasks JSON."""
+    ds, paper_db = ds_paper
+
+    create = await ds.client.post("/-/paper/api/docs", json={"name": "Assigned"})
+    doc_id = create.json()["id"]
+
+    parent = {
+        "type": "task_item",
+        "attrs": {"checked": False},
+        "content": [
+            {
+                "type": "paragraph",
+                "content": [
+                    {"type": "text", "text": "ship it "},
+                    {"type": "mention", "attrs": {"actorId": "marta"}},
+                    {"type": "text", "text": " by "},
+                    {
+                        "type": "date",
+                        "attrs": {"date": "2026-07-20", "time": None, "tz": None},
+                    },
+                ],
+            },
+            {
+                "type": "task_list",
+                "content": [
+                    {
+                        "type": "task_item",
+                        "attrs": {"checked": False},
+                        "content": [
+                            {
+                                "type": "paragraph",
+                                "content": [{"type": "text", "text": "silent subtask"}],
+                            }
+                        ],
+                    }
+                ],
+            },
+        ],
+    }
+    snapshot = {
+        "type": "doc",
+        "content": [{"type": "task_list", "content": [parent]}],
+    }
+    await plant_snapshot(ds, doc_id, snapshot)
+
+    body = (await ds.client.get(f"/-/paper/api/docs/{doc_id}/tasks")).json()
+    tasks = body["tasks"]
+    assert tasks[0]["assignees"] == ["marta"]
+    assert tasks[0]["assignees_inherited"] is False
+    assert tasks[0]["due"] == {"date": "2026-07-20", "time": None, "tz": None}
+    # The mention-less subtask inherits both facets from its parent.
+    assert tasks[1]["assignees"] == ["marta"]
+    assert tasks[1]["assignees_inherited"] is True
+    assert tasks[1]["due_inherited"] is True
+
+
+@pytest.mark.asyncio
 async def test_get_tasks_groups_by_heading_section(ds_paper):
     ds, paper_db = ds_paper
 

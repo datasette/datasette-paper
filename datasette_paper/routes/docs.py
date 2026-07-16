@@ -17,7 +17,6 @@ from ..markdown_parser import markdown_to_doc, markdown_to_fragment
 from ..tables import count_tables_with_name, extract_tables, find_table_by_name
 from ..permissions import (
     PAPER_DOCS_PARENT,
-    PAPER_VIEW,
     PAPER_EDIT,
     PAPER_MANAGE,
     PaperDocResource,
@@ -130,12 +129,9 @@ async def profile_docs(datasette, request, profile_actor_id: str):
         limit = 10
     limit = max(1, min(limit, 25))
 
-    # Viewer's visible set, same 1000-doc precedent as list_docs. The doc id
-    # lives in `child` (parent is the fixed PAPER_DOCS_PARENT sentinel).
-    page = await datasette.allowed_resources(
-        action=PAPER_VIEW, actor=request.actor, limit=1000
-    )
-    viewer_ids = [int(r.child) for r in page.resources]
+    # Drain every page of the viewer's visible set. A bare ``limit=`` plus
+    # ``page.resources`` silently truncates actors with large grant sets.
+    viewer_ids = await viewable_doc_ids(datasette, request.actor)
     # Empty → nothing to intersect (also covers anonymous viewers on
     # locked-down instances).
     if not viewer_ids:
@@ -161,6 +157,70 @@ async def profile_docs(datasette, request, profile_actor_id: str):
             ]
         }
     )
+
+
+# @feat task-assign: cross-doc TODO listing — a profile actor's assigned tasks
+# across every active doc the *viewer* can see. Both TODO surfaces (the profile
+# section and the /-/paper/todos page) consume this one endpoint.
+@router.GET(r"^/-/paper/api/profile/(?P<profile_actor_id>[^/]+)/todos$")
+async def profile_todos(datasette, request, profile_actor_id: str):
+    """A profile actor's assigned tasks, viewer-acl-filtered.
+
+    Same "listing is ungated, results are acl-filtered" rule as profile_docs
+    (docs/PERMISSIONS.md): anyone may ask about anyone's TODOs, but only tasks
+    from docs the *viewer* holds ``paper-view`` on come back. Assignment is
+    pure interpretation of doc content (the m009 index is a derived cache), so
+    a row here is a task whose effective assignee — named on the item or
+    inherited down the task subtree — is ``profile_actor_id``.
+
+    ``status=open|done|all`` (default ``open``; 400 otherwise), same vocabulary
+    as the per-doc ``/tasks`` endpoint. Buckets are the client's job (they need
+    the viewer's timezone), so no bucketing here — just the flat, ordered list.
+    """
+    profile_actor_id = unquote(profile_actor_id)
+
+    status = (request.args.get("status") or "open").lower()
+    if status not in ("open", "done", "all"):
+        return Response.json(
+            {"error": "status must be one of: open, done, all"}, status=400
+        )
+
+    # Drain every page of the viewer's visible set. Empty → nothing to
+    # intersect (also anonymous viewers).
+    viewer_ids = await viewable_doc_ids(datasette, request.actor)
+    if not viewer_ids:
+        return Response.json({"actor_id": profile_actor_id, "todos": []})
+
+    db = paper_db(datasette)
+    rows = await db.list_profile_todos(doc_ids=viewer_ids, actor=profile_actor_id)
+    if status == "open":
+        rows = [r for r in rows if not r.checked]
+    elif status == "done":
+        rows = [r for r in rows if r.checked]
+
+    todos = []
+    for r in rows:
+        due = (
+            {"date": r.due_date, "time": r.due_time, "tz": r.due_tz}
+            if r.due_date
+            else None
+        )
+        todos.append(
+            {
+                "doc_id": r.doc_id,
+                "doc_name": r.doc_name,
+                "doc_url": f"/-/paper/doc/{r.doc_id}",
+                "ordinal": r.ordinal,
+                "text": r.text,
+                "checked": bool(r.checked),
+                "section": json.loads(r.section) if r.section else [],
+                "assignees": r.all_assignees.split(",") if r.all_assignees else [],
+                "assignees_inherited": bool(r.assignees_inherited),
+                "due": due,
+                "due_inherited": bool(r.due_inherited),
+            }
+        )
+    return Response.json({"actor_id": profile_actor_id, "todos": todos})
 
 
 @router.GET(r"^/-/paper/api/docs$")
@@ -202,14 +262,9 @@ async def list_docs(datasette, request):
         if t and t not in tags:
             tags.append(t)
 
-    # Pull every paper the actor can view in one shot (cap at 1000; if
-    # somebody has 1000+ papers visible we'll add proper pagination).
-    page = await datasette.allowed_resources(
-        action=PAPER_VIEW, actor=request.actor, limit=1000
-    )
-    # PaperDocResource is two-level — the doc id lives in `child`
-    # (parent is the fixed PAPER_DOCS_PARENT sentinel).
-    doc_ids = [int(r.child) for r in page.resources]
+    # Pull every paper the actor can view, draining the permission API's
+    # pagination so large grant sets are not silently truncated.
+    doc_ids = await viewable_doc_ids(datasette, request.actor)
     db = paper_db(datasette)
     if tags:
         rows = await db.list_docs_by_ids_states_kinds_and_tags(
@@ -759,15 +814,18 @@ async def create_doc(datasette, request, body: Annotated[CreateDocBody, Body()])
         seeded_from_snapshot = False
     # A snapshot-seeded doc (template or markdown) has body content that was
     # written straight to the version-0 snapshot, never flowing through the
-    # instance write-tail where `reindex_tags` / `reindex_links` run. Its derived
-    # indexes would stay empty until the first edit, so `/tags/{slug}/refs` and
-    # backlinks wouldn't see it. Build them now off the fresh instance. (The
-    # empty `insert_doc` branch has no body, so nothing to index.)
+    # instance write-tail where `reindex_tags` / `reindex_links` / `reindex_tasks`
+    # run. Its derived indexes would stay empty until the first edit, so
+    # `/tags/{slug}/refs`, backlinks, and `/todos` wouldn't see it. Build them
+    # now off the fresh instance. (The empty `insert_doc` branch has no body, so
+    # nothing to index.)
     if seeded_from_snapshot:
         registry = get_registry(datasette)
         instance = await registry.get(db, doc.id)
         await instance.reindex_links()
         await instance.reindex_tags()
+        # @feat task-assign: seed the assignment index for a markdown-created doc
+        await instance.reindex_tasks()
     # Seed the owner's acl Manager grant so the creator can view/edit/manage
     # their new doc. No-op for anonymous creates (created_by is None).
     await seed_owner_manager_grant(datasette, doc.id, doc.created_by)
@@ -1378,13 +1436,33 @@ async def post_snapshot(datasette, request, doc_id: int):
 @router.GET(r"^/-/paper/?$")
 async def paper_index_page(datasette, request):
     # Ungated shell; the client fetches /api/docs, which is acl-filtered.
+    # actor_id lets the client show the signed-in user's "My TODOs" link.
     return Response.html(
         await datasette.render_template(
             "paper_base.html",
             {
                 "page_title": "Papers",
                 "entrypoint": "src/pages/index/main.ts",
-                "page_data": {},
+                "page_data": {"actor_id": actor_id(request)},
+            },
+            request=request,
+        )
+    )
+
+
+# @feat task-assign: the dedicated cross-doc TODO page. Ungated shell — the
+# /todos API it calls is viewer-acl-filtered. page_data carries the signed-in
+# actor id (or null for anonymous) as the default subject; ?actor= overrides it
+# to view someone else's list (the ACL filter still protects doc visibility).
+@router.GET(r"^/-/paper/todos/?$")
+async def paper_todos_page(datasette, request):
+    return Response.html(
+        await datasette.render_template(
+            "paper_base.html",
+            {
+                "page_title": "TODOs",
+                "entrypoint": "src/pages/todos/main.ts",
+                "page_data": {"actor_id": actor_id(request)},
             },
             request=request,
         )

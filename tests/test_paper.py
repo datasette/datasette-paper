@@ -46,6 +46,29 @@ async def test_paper_index_renders_without_trailing_slash():
 
 
 @pytest.mark.asyncio
+async def test_paper_todos_page_renders():
+    """@feat task-assign: the /-/paper/todos shell mounts the todos entry and
+    carries the signed-in actor id in its page data (or null for anonymous)."""
+    datasette = Datasette(memory=True, config={"permissions": {}})
+
+    # Anonymous → page renders with a null default actor. The vite helper
+    # resolves the entry to the built, content-hashed `todos-*` asset.
+    response = await datasette.client.get("/-/paper/todos")
+    assert response.status_code == 200
+    assert b'id="app-root"' in response.content
+    assert b"todos" in response.content
+    assert b'"actor_id": null' in response.content
+
+    # Signed-in → the actor id rides in the page data as the default subject.
+    cookie = datasette.sign({"a": {"id": "pat"}}, "actor")
+    response = await datasette.client.get(
+        "/-/paper/todos", cookies={"ds_actor": cookie}
+    )
+    assert response.status_code == 200
+    assert b'"actor_id": "pat"' in response.content
+
+
+@pytest.mark.asyncio
 async def test_extra_template_vars_returns_entry_callable():
     """extra_template_vars should expose a vite-entry helper backed by datasette_vite."""
     datasette = Datasette(memory=True)

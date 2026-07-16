@@ -151,3 +151,25 @@ async def test_create_from_markdown_indexes_links(ds):
     back = await ds.client.get(f"/-/paper/api/docs/{target_id}/backlinks")
     assert back.status_code == 200, back.text
     assert [b["id"] for b in back.json()["backlinks"]] == [src_id]
+
+
+@pytest.mark.asyncio
+async def test_create_from_markdown_indexes_task_assignments(ds):
+    """@feat task-assign: same write-tail bypass for the assignment index — a
+    markdown-seeded task assigned to @alice must populate
+    `_datasette_paper_task_assignment` so `/todos` sees it without a first
+    edit."""
+    resp = await ds.client.post(
+        "/-/paper/api/docs",
+        json={
+            "name": "Assigned",
+            "content": "- [ ] [@alice](paper:/actor/alice) ship it\n",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    doc_id = resp.json()["id"]
+
+    todos = await ds.client.get("/-/paper/api/profile/alice/todos")
+    assert todos.status_code == 200, todos.text
+    rows = todos.json()["todos"]
+    assert [(r["doc_id"], r["text"]) for r in rows] == [(doc_id, "ship it")]

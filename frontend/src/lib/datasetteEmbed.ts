@@ -20,7 +20,7 @@
  */
 import { schema } from "./schema";
 import type { Command } from "prosemirror-state";
-import { TOOLBAR_ICONS } from "./icons";
+import { iconMarkup } from "./icons";
 import type { DatasetteStatus } from "./datasetteResolver";
 import { filterQueryParams, type EmbedFilter, type EmbedSort } from "./embedFilters";
 
@@ -116,14 +116,9 @@ export function kindIcon(kind: string | undefined): string {
   }
 }
 
-/** Paper's standard 14px inline-SVG envelope (currentColor, 16-unit viewBox). */
-const ICON_SVG_OPEN =
-  '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">';
-
-/** Full `<svg>` markup for a bundled icon name (its inner paths, wrapped). */
-export function iconMarkup(name: string): string {
-  return `${ICON_SVG_OPEN}${TOOLBAR_ICONS[name as keyof typeof TOOLBAR_ICONS] ?? ""}</svg>`;
-}
+// Compatibility re-export for existing embed consumers; generic icon ownership
+// lives in icons.ts.
+export { iconMarkup } from "./icons";
 
 /**
  * The icon `<svg>` markup to render for a resolved (ok) status. A third-party

@@ -185,3 +185,84 @@ export function formatDateLabel(attrs: DateAttrs): string {
   if (attrs.time) label += ` ${formatDateTime(attrs.time)}`;
   return label;
 }
+
+// --- zone-aware instant + overdue/today classification ----------------------
+// Pure date math (Intl only, no ProseMirror), kept here in the PM-free date
+// module so the inline chip (dateView.ts) AND the read-only TODO surfaces
+// (todos.ts) can share one overdue/today rule without either dragging the
+// NodeView + PM into its bundle. @feat date: instant/tint math.
+
+/** The offset (minutes, local − UTC) of `tz` at instant `at`. Throws on an
+ *  unresolvable zone name (the caller degrades to naive rendering). */
+function tzOffsetMinutes(tz: string, at: Date): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+  const parts: Record<string, string> = {};
+  for (const p of dtf.formatToParts(at)) parts[p.type] = p.value;
+  const asUTC = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+    Number(parts.second),
+  );
+  return (asUTC - at.getTime()) / 60000;
+}
+
+/** Resolve a timed atom's UTC instant from its authored wall time + zone, or
+ *  null when it has no time or the zone can't be resolved (naive rendering). */
+export function resolveInstant(attrs: DateAttrs): Date | null {
+  if (!attrs.time || !attrs.tz) return null;
+  const [y, mo, d] = attrs.date.split("-").map(Number);
+  const [hh, mm] = attrs.time.split(":").map(Number);
+  const wallUTC = Date.UTC(y, mo - 1, d, hh, mm);
+  try {
+    // Two passes so a DST boundary (offset differs side-to-side) converges.
+    let off = tzOffsetMinutes(attrs.tz, new Date(wallUTC));
+    let inst = new Date(wallUTC - off * 60000);
+    off = tzOffsetMinutes(attrs.tz, inst);
+    inst = new Date(wallUTC - off * 60000);
+    return inst;
+  } catch {
+    return null;
+  }
+}
+
+/** `YYYY-MM-DD` for `d` in the viewer's local zone. */
+export function localYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** The tint class for a date atom evaluated against `now`, or null (neutral).
+ *  Overdue = the instant/day has passed; today = it is the viewer's current
+ *  calendar day and not yet passed. Timed atoms classify purely by instant —
+ *  passed → overdue, else by the instant's calendar day in the VIEWER's zone
+ *  (comparing the authored `attrs.date` string here marks a future instant
+ *  overdue for any viewer whose local date is already past the author's).
+ *  Date-only (and timed-without-zone) atoms compare by calendar day. */
+export function classifyDate(
+  attrs: DateAttrs,
+  now: Date,
+): "overdue" | "today" | null {
+  const todayStr = localYmd(now);
+  const instant = resolveInstant(attrs);
+  if (instant) {
+    if (instant.getTime() < now.getTime()) return "overdue";
+    return localYmd(instant) === todayStr ? "today" : null;
+  }
+  if (attrs.date < todayStr) return "overdue";
+  if (attrs.date === todayStr) return "today";
+  return null;
+}

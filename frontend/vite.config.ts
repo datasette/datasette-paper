@@ -34,6 +34,7 @@ export default defineConfig({
         index: path.resolve(__dirname, "src/pages/index/main.ts"),
         doc: path.resolve(__dirname, "src/pages/doc/main.ts"),
         tag: path.resolve(__dirname, "src/pages/tag/main.ts"),
+        todos: path.resolve(__dirname, "src/pages/todos/main.ts"),
         profile_section: path.resolve(
           __dirname,
           "src/pages/profile_section/main.ts",

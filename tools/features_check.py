@@ -26,7 +26,10 @@ the two stay consistent:
   - a registered start file actually carries a marker for its slug;
   - lock-step groups (--lockstep): if a feature touches any file in the
     group it must touch them all (mirror files that must change together,
-    e.g. a schema defined in parallel on two sides of a wire).
+    e.g. a schema defined in parallel on two sides of a wire), unless the
+    slug is listed in --lockstep-exempt (a non-schema feature that
+    legitimately lives partly in a mirror file — e.g. an extractor that
+    reads the schema's nodes from inside the serializer).
 
 Everything project-specific is a flag; run `--help` for the list. Exits
 non-zero and prints every violation on failure.
@@ -132,6 +135,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         metavar="A,B,C",
         help="comma-separated group of files that must be marked together "
         "(repeatable for multiple groups); paths relative to --root",
+    )
+    p.add_argument(
+        "--lockstep-exempt",
+        action="append",
+        default=[],
+        metavar="SLUG",
+        help="feature slug allowed to touch a lock-step file without touching "
+        "the whole group (a non-schema feature that legitimately lives partly "
+        "in a mirror file, e.g. an extractor in the serializer); repeatable",
     )
     p.add_argument(
         "--require-test",
@@ -271,6 +283,8 @@ def main(argv: list[str]) -> int:
             errors.append(
                 f"{slug}: start file `{start}` carries no `{args.marker} {slug}` marker"
             )
+        if slug in set(args.lockstep_exempt):
+            continue
         for group in lockstep_groups:
             touched = paths & group
             missing = group - paths

@@ -64,6 +64,86 @@
   white-space: nowrap;
 }
 
+/* --- @feat task-assign: <profile-todos> rows -------------------------------
+ * Same literal-neutral palette as the papers section (no CSS token vars on the
+ * host profile page). Overdue/today tints are literal red/amber to match the
+ * inline date chip's intent without depending on paper's --pp-* tokens. */
+
+.paper-todos-check {
+  flex: 0 0 auto;
+  margin: 0;
+  align-self: center;
+  accent-color: #868e96;
+}
+
+.paper-todos-text {
+  flex: 1 1 auto;
+}
+
+.paper-todos-done {
+  color: #868e96;
+  text-decoration: line-through;
+}
+
+.paper-todos-due {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: #495057;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.paper-todos-due-icon {
+  display: inline-flex;
+  align-items: center;
+}
+
+.paper-todos-due-icon svg {
+  width: 0.8em;
+  height: 0.8em;
+}
+
+.paper-todos-due-overdue {
+  color: #d6336c;
+}
+
+.paper-todos-due-today {
+  color: #e8590c;
+}
+
+.paper-todos-assignee {
+  flex: 0 0 auto;
+  color: #495057;
+  background: #f1f3f5;
+  border-radius: 10px;
+  padding: 0.05rem 0.4rem;
+  font-size: 0.6875rem;
+  white-space: nowrap;
+}
+
+.paper-todos-assignee-inherited {
+  opacity: 0.6;
+}
+
+.paper-todos-doc {
+  font-weight: 500;
+}
+
+.paper-todos-more {
+  display: inline-block;
+  margin-top: 0.5rem;
+  color: #1971c2;
+  text-decoration: none;
+  font-size: 0.8125rem;
+  font-weight: 600;
+}
+
+.paper-todos-more:hover {
+  text-decoration: underline;
+}
+
 @media (prefers-color-scheme: dark) {
   .paper-profile-message {
     color: #adb5bd;
@@ -84,5 +164,26 @@
 
   .paper-profile-time {
     color: #868e96;
+  }
+
+  .paper-todos-due {
+    color: #ced4da;
+  }
+
+  .paper-todos-due-overdue {
+    color: #ff8787;
+  }
+
+  .paper-todos-due-today {
+    color: #ffa94d;
+  }
+
+  .paper-todos-assignee {
+    color: #ced4da;
+    background: #343a40;
+  }
+
+  .paper-todos-more {
+    color: #74c0fc;
   }
 }

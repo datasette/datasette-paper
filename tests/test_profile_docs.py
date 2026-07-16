@@ -172,7 +172,7 @@ async def test_route_actor_id_url_encoded_round_trips():
 
 @pytest.mark.asyncio
 async def test_profile_section_registered():
-    """The hook returns exactly one Papers section with the expected identity.
+    """The hook returns the Papers + Paper TODOs sections with expected identity.
 
     Invoked through Datasette's plugin manager (kanban's
     test_user_profile_section_registered is the model)."""
@@ -189,15 +189,28 @@ async def test_profile_section_registered():
     assert section.sort_order == 40
     assert section.icon is not None and "currentColor" in section.icon
 
+    # @feat task-assign: the same bundle also registers the Paper TODOs section.
+    todos = [s for s in sections if s.id == "todos"]
+    assert len(todos) == 1
+    todos_section = todos[0]
+    assert todos_section.tag_name == "profile-todos"
+    assert todos_section.label == "Paper TODOs"
+    assert todos_section.icon is not None and "currentColor" in todos_section.icon
+
 
 @pytest.mark.asyncio
 async def test_profile_section_asset_urls_resolve():
     """Every js/css URL points under the plugin's static dir and GETs 200 — a
     404 here means the entrypoint key went stale against manifest.json."""
     ds, _ = await setup_paper_datasette()
-    (section,) = datasette_user_profile_sections(ds)
+    sections = datasette_user_profile_sections(ds)
 
-    urls = section.all_js_urls() + section.all_css_urls()
+    # Both sections ship the same bundle; check every asset URL resolves.
+    urls = [
+        u
+        for section in sections
+        for u in section.all_js_urls() + section.all_css_urls()
+    ]
     assert urls, "expected at least one built js/css asset"
     prefix = "/-/static-plugins/datasette_paper/"
     for url in urls:
@@ -226,4 +239,6 @@ async def test_profile_page_renders_papers_section():
     resp = await ds.client.get("/-/profile/pat", cookies=actor_cookie(ds, "vic"))
     assert resp.status_code == 200, resp.text
     assert "profile-papers" in resp.text
+    # @feat task-assign: the TODOs section's custom element renders on the page
+    assert "profile-todos" in resp.text
     assert bundle_url in resp.text

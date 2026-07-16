@@ -416,12 +416,22 @@ def _render_list(node: dict, ordered: bool) -> str:
 def extract_tasks(doc: dict) -> List[dict]:
     """Walk a ProseMirror doc and collect every task_item.
 
-    Returns a list of `{text, checked, depth, section}` dicts in document
-    order. `depth` increments under each enclosing task_list / list_item /
-    blockquote so consumers can render nested tasks with appropriate
-    indentation. `section` is the path of enclosing headings (outermost to
-    innermost) — e.g. `[{"level": 2, "text": "Sprint 1"}, {"level": 3,
-    "text": "Sprint 1.2"}]`. A task before any heading has `section: []`.
+    Returns a list of `{text, checked, depth, section, assignees,
+    assignees_inherited, due, due_inherited}` dicts in document order. `depth`
+    increments under each enclosing task_list / list_item / blockquote so
+    consumers can render nested tasks with appropriate indentation. `section`
+    is the path of enclosing headings (outermost to innermost) — e.g.
+    `[{"level": 2, "text": "Sprint 1"}, {"level": 3, "text": "Sprint 1.2"}]`.
+    A task before any heading has `section: []`.
+
+    Assignment (the `task-assign` feature) is pure interpretation of doc
+    content — no ids, no records. `assignees` is the item's *effective* actor
+    ids (the mention atoms in its own paragraphs, deduped in doc order; falling
+    back to the nearest ancestor task_item's effective set when the item names
+    nobody). `due` is `{date, time, tz}` from the first date atom in the item's
+    own paragraphs, again inheriting from an ancestor task when the item has
+    none. The two facets resolve independently; `*_inherited` flags mark a
+    value that came from an ancestor rather than the item itself.
     """
     tasks: List[dict] = []
     NESTING = {
@@ -437,6 +447,11 @@ def extract_tasks(doc: dict) -> List[dict]:
         "table_header",
     }
     section_stack: List[dict] = []
+    # @feat task-assign: the effective (assignees, due) of each enclosing
+    # task_item, so a mention-less / date-less descendant inherits the nearest
+    # ancestor task_item's value. Only task_item ancestry is pushed here, so
+    # inheritance never leaks across a blockquote/list that isn't itself a task.
+    ancestor_stack: List[dict] = []
 
     def walk(node: dict, depth: int) -> None:
         t = node.get("type")
@@ -450,22 +465,78 @@ def extract_tasks(doc: dict) -> List[dict]:
         if t == "task_item":
             # The reported `text` is the item's own paragraph content,
             # not text from nested task_lists — those become separate
-            # entries at the next depth level.
+            # entries at the next depth level. In the same pass we collect the
+            # item's *own* assignees (mention atoms, deduped in doc order) and
+            # its own due date (the first date atom); mentions/dates inside a
+            # nested task_list belong to those items, not this one.
             text_parts: List[str] = []
+            own_assignees: List[str] = []
+            seen_assignees: set[str] = set()
+            own_due: Optional[dict] = None
             for child in node.get("content") or []:
-                if child.get("type") == "paragraph":
-                    text_parts.append(_flatten_text(child.get("content") or []))
+                if child.get("type") != "paragraph":
+                    continue
+                para_content = child.get("content") or []
+                text_parts.append(_flatten_text(para_content))
+                # @feat task-assign: mention → assignee, first date → due date,
+                # scoped to the item's own paragraphs (same boundary as `text`).
+                for inline in para_content:
+                    it = inline.get("type")
+                    if it == "mention":
+                        aid = (inline.get("attrs") or {}).get("actorId")
+                        if aid and aid not in seen_assignees:
+                            seen_assignees.add(aid)
+                            own_assignees.append(aid)
+                    elif it == "date" and own_due is None:
+                        a = inline.get("attrs") or {}
+                        if a.get("date"):
+                            own_due = {
+                                "date": a["date"],
+                                "time": a.get("time"),
+                                "tz": a.get("tz"),
+                            }
+            # @feat task-assign: own-overrides-inherited, per facet
+            # independently. Own non-empty fully replaces the inherited set
+            # ("yours unless you say otherwise" — a hand-off drops the parent's
+            # people); an empty own set inherits the nearest ancestor task's
+            # effective value (which itself may be inherited, so chains carry
+            # transitively through mention-less levels).
+            inherited = ancestor_stack[-1] if ancestor_stack else None
+            if own_assignees:
+                eff_assignees = own_assignees
+                assignees_inherited = False
+            elif inherited and inherited["assignees"]:
+                eff_assignees = list(inherited["assignees"])
+                assignees_inherited = True
+            else:
+                eff_assignees = []
+                assignees_inherited = False
+            if own_due is not None:
+                eff_due = own_due
+                due_inherited = False
+            elif inherited and inherited["due"] is not None:
+                eff_due = inherited["due"]
+                due_inherited = True
+            else:
+                eff_due = None
+                due_inherited = False
             tasks.append(
                 {
                     "text": "".join(text_parts).strip(),
                     "checked": bool(node.get("attrs", {}).get("checked", False)),
                     "depth": depth,
                     "section": [dict(s) for s in section_stack],
+                    "assignees": eff_assignees,
+                    "assignees_inherited": assignees_inherited,
+                    "due": eff_due,
+                    "due_inherited": due_inherited,
                 }
             )
+            ancestor_stack.append({"assignees": eff_assignees, "due": eff_due})
             for child in node.get("content") or []:
                 if child.get("type") != "paragraph":
                     walk(child, depth + 1)
+            ancestor_stack.pop()
             return
         next_depth = depth + 1 if t in NESTING else depth
         for child in node.get("content") or []:

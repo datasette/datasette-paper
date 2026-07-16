@@ -469,3 +469,63 @@ WHERE doc_id IN (
     SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
   )
 GROUP BY doc_id;
+
+-- ============================================================================
+-- Task assignment index (m009 _datasette_paper_task_assignment)
+--
+-- Derived cross-doc index of assigned task_items — one row per (doc, ordinal,
+-- effective assignee). Rebuilt wholesale per doc by the write-tail reindex
+-- (mirrors _datasette_paper_inline_tag / reindex_tags), purged with the doc on
+-- hard delete. Read by the /todos endpoint that backs both TODO surfaces.
+-- ============================================================================
+
+-- Clear a doc's assignment rows — the first half of replace_task_assignments,
+-- and the doc hard-delete purge (mirrors deleteInlineTagsForDoc).
+-- name: deleteTaskAssignmentsForDoc
+DELETE FROM _datasette_paper_task_assignment WHERE doc_id = $doc_id::integer;
+
+-- name: insertTaskAssignment
+INSERT INTO _datasette_paper_task_assignment
+    (doc_id, ordinal, assignee, inherited, checked, text, section,
+     due_date, due_time, due_tz, due_inherited, src_version)
+VALUES
+    ($doc_id::integer, $ordinal::integer, $assignee::text, $inherited::integer,
+     $checked::integer, $text::text, $section::text, $due_date::text,
+     $due_time::text, $due_tz::text, $due_inherited::integer,
+     $src_version::integer);
+
+-- Every doc id (any state/kind) — drives the one-time task-assignment backfill,
+-- which materializes each doc and reindexes it best-effort. Archived/trashed/
+-- template docs are indexed too (rows filtered at query time), so a later
+-- restore needs no reindex.
+-- name: selectAllDocIds :rows -> DocId
+SELECT id FROM _datasette_paper_doc;
+
+-- @feat task-assign: one profile actor $actor's assigned tasks across every
+-- active (non-archived/trashed) doc the *viewer* can see — the viewable set is
+-- passed as $doc_ids_json (same IN-list shape + acl-filter role as
+-- listProfileDocs), so visibility is enforced at query time, not at index
+-- time. Templates (kind != 'doc') are excluded. ``all_assignees`` is the full
+-- co-assignee set for the task (the index is one row per assignee, so a
+-- correlated group_concat re-gathers the others for the UI's chips). Status
+-- (open/done/all) is filtered in Python on ``checked``, matching the per-doc
+-- /tasks endpoint. Order: dated tasks first (undated sink to the end),
+-- ascending by due, then doc + ordinal for a stable, deterministic list.
+-- name: listProfileTodos :rows -> ProfileTodo
+SELECT t.doc_id, d.name AS doc_name, t.ordinal, t.text, t.checked,
+       t.section, t.inherited AS assignees_inherited,
+       t.due_date, t.due_time, t.due_tz, t.due_inherited,
+       (
+         SELECT group_concat(a2.assignee, ',')
+         FROM _datasette_paper_task_assignment a2
+         WHERE a2.doc_id = t.doc_id AND a2.ordinal = t.ordinal
+       ) AS all_assignees
+FROM _datasette_paper_task_assignment t
+JOIN _datasette_paper_doc d ON d.id = t.doc_id
+WHERE t.assignee = $actor::text
+  AND d.state = 'active'
+  AND d.kind = 'doc'
+  AND t.doc_id IN (
+    SELECT CAST(value AS INTEGER) FROM json_each($doc_ids_json::text)
+  )
+ORDER BY (t.due_date IS NULL), t.due_date, t.doc_id, t.ordinal;

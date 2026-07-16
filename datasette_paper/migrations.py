@@ -38,6 +38,12 @@ migrations = Migrations("datasette-paper")
 _ACL_MIGRATION_TABLE = "_datasette_paper_acl_migration"
 _ACL_MIGRATION_KEY = "shares_to_acl_grants"
 
+# Generic one-time-backfill marker table (key → done_at). Unlike a SQL
+# migration, these backfills need the Python materializer, so they run from the
+# startup tail guarded by a marker row instead of inside a migration step.
+_BACKFILL_TABLE = "_datasette_paper_backfill"
+_TASK_ASSIGN_BACKFILL_KEY = "task_assignments_v1"
+
 # Default general-access audience for migrated ``link-*`` visibility, named in
 # acl's own public-principal vocabulary: ``authenticated`` (anyone signed in),
 # ``everyone`` (incl. anonymous) or ``anonymous``. Override via the
@@ -684,3 +690,103 @@ def m008_doc_activity(db: Database):
         GROUP BY doc_id, actor_id;
         """
     )
+
+
+@migrations()
+def m009_task_assignments(db: Database):
+    # @feat task-assign: derived cross-doc index of assigned task_items, one row
+    # per (doc, task-ordinal, effective assignee). Rebuilt wholesale per doc by
+    # the write-tail reindex (mirrors _datasette_paper_inline_tag /
+    # reindex_tags). Assigned tasks only — a task with no effective assignee
+    # writes no rows, so `WHERE assignee = ?` is an indexed equality over
+    # exactly the rows that matter. The index is a *cache*, never authoritative:
+    # assignment is pure interpretation of doc content (extract_tasks), so this
+    # can always be dropped and rebuilt. DDL only — the initial backfill needs
+    # the materializer, so it runs as a Python pass from the startup tail
+    # (backfill_task_assignments), not here.
+    db.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS _datasette_paper_task_assignment (
+            --! Assigned task_items extracted from the materialized doc.
+            --! Rebuilt wholesale for a doc whenever it is re-extracted by the
+            --! write-tail reindex. One row per (doc, ordinal, assignee).
+            doc_id        INTEGER NOT NULL REFERENCES _datasette_paper_doc(id) ON DELETE CASCADE,
+            --- nth task_item in document order (0-based), matching the order
+            --- extract_tasks emits — the stable per-doc handle for a task.
+            ordinal       INTEGER NOT NULL,
+            --- Effective assignee actor id (own mention, or inherited from the
+            --- nearest ancestor task). One row per effective assignee.
+            assignee      TEXT    NOT NULL,
+            --- 1 iff the assignee was inherited rather than named on the item.
+            inherited     INTEGER NOT NULL,
+            --- Task checkbox state at index time.
+            checked       INTEGER NOT NULL,
+            --- Flattened task text (atoms dropped), as extract_tasks emits.
+            text          TEXT    NOT NULL,
+            --- Section breadcrumb (heading path) as JSON [{level,text}, ...],
+            --- '[]' before any heading — the UI renders it as a crumb trail.
+            section       TEXT    NOT NULL DEFAULT '[]',
+            --- Effective due date parts, any of which may be NULL.
+            due_date      TEXT,
+            due_time      TEXT,
+            due_tz        TEXT,
+            --- 1 iff the due date was inherited rather than on the item.
+            due_inherited INTEGER NOT NULL DEFAULT 0,
+            --- Doc version the index was last rebuilt at.
+            src_version   INTEGER NOT NULL,
+            PRIMARY KEY (doc_id, ordinal, assignee)
+        );
+        CREATE INDEX IF NOT EXISTS idx_paper_task_assignment_assignee
+            ON _datasette_paper_task_assignment(assignee, checked, due_date);
+        """
+    )
+
+
+async def backfill_task_assignments(datasette, *, force: bool = False) -> dict:
+    """One-time reindex of every existing doc's task-assignment rows.
+
+    @feat task-assign: the m009 index is kept current going forward by the
+    write-tail ``reindex_tasks``, but a doc never edited after deploy would be
+    invisible. This materializes each existing doc once and reindexes it
+    best-effort (log + continue on a per-doc failure, matching the reindex
+    contract). SQL migrations can't do this — they have no materializer — so it
+    runs from the startup tail, guarded by a marker row so it runs once.
+    ``force=True`` bypasses the marker for tests. Returns a small stats dict.
+    """
+    from .instance import get_registry
+    from .util import paper_db
+
+    internal = datasette.get_internal_database()
+    await internal.execute_write(
+        f"CREATE TABLE IF NOT EXISTS {_BACKFILL_TABLE} ("
+        "key TEXT PRIMARY KEY, done_at TEXT NOT NULL)"
+    )
+
+    if not force:
+        done = (
+            await internal.execute(
+                f"SELECT 1 FROM {_BACKFILL_TABLE} WHERE key = ?",
+                [_TASK_ASSIGN_BACKFILL_KEY],
+            )
+        ).rows
+        if done:
+            return {"skipped": True, "docs": 0}
+
+    db = paper_db(datasette)
+    registry = get_registry(datasette)
+    doc_ids = await db.all_doc_ids()
+    count = 0
+    for doc_id in doc_ids:
+        try:
+            instance = await registry.get(db, doc_id)
+            await instance.reindex_tasks()
+            count += 1
+        except Exception:
+            logger.exception("task-assignment backfill failed for doc %s", doc_id)
+
+    await internal.execute_write(
+        f"INSERT OR IGNORE INTO {_BACKFILL_TABLE} (key, done_at) "
+        "VALUES (?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        [_TASK_ASSIGN_BACKFILL_KEY],
+    )
+    return {"skipped": False, "docs": count}

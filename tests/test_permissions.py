@@ -308,5 +308,32 @@ async def test_viewable_doc_ids_anonymous_empty():
     assert await viewable_doc_ids(ds, None) == []
 
 
-# TODO: drain test — assert >100 viewable docs all returned (proves
-# pagination drain)
+@pytest.mark.asyncio
+async def test_viewable_doc_ids_drains_every_permission_page():
+    """The helper must use ``all()`` rather than the first page's resources."""
+    from types import SimpleNamespace
+
+    from datasette_paper.permissions import viewable_doc_ids
+
+    resources = [
+        SimpleNamespace(parent="docs", child=str(doc_id)) for doc_id in range(1105)
+    ]
+
+    class Page:
+        # Deliberately incomplete first page: consuming this attribute would
+        # reproduce the old 1,000-resource authorization truncation.
+        def __init__(self, all_resources):
+            self.resources = all_resources[:100]
+            self._all_resources = all_resources
+
+        async def all(self):
+            for resource in self._all_resources:
+                yield resource
+
+    class Datasette:
+        async def allowed_resources(self, *, action, actor):
+            assert action == "paper-view"
+            assert actor == {"id": "alice"}
+            return Page(resources)
+
+    assert await viewable_doc_ids(Datasette(), {"id": "alice"}) == list(range(1105))
