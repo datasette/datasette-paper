@@ -130,12 +130,9 @@ async def profile_docs(datasette, request, profile_actor_id: str):
         limit = 10
     limit = max(1, min(limit, 25))
 
-    # Viewer's visible set, same 1000-doc precedent as list_docs. The doc id
-    # lives in `child` (parent is the fixed PAPER_DOCS_PARENT sentinel).
-    page = await datasette.allowed_resources(
-        action=PAPER_VIEW, actor=request.actor, limit=1000
-    )
-    viewer_ids = [int(r.child) for r in page.resources]
+    # Drain every page of the viewer's visible set. A bare ``limit=`` plus
+    # ``page.resources`` silently truncates actors with large grant sets.
+    viewer_ids = await viewable_doc_ids(datasette, request.actor)
     # Empty → nothing to intersect (also covers anonymous viewers on
     # locked-down instances).
     if not viewer_ids:
@@ -189,12 +186,9 @@ async def profile_todos(datasette, request, profile_actor_id: str):
             {"error": "status must be one of: open, done, all"}, status=400
         )
 
-    # Viewer's visible set (same 1000-doc precedent + child-is-doc-id shape as
-    # profile_docs). Empty → nothing to intersect (also anonymous viewers).
-    page = await datasette.allowed_resources(
-        action=PAPER_VIEW, actor=request.actor, limit=1000
-    )
-    viewer_ids = [int(r.child) for r in page.resources]
+    # Drain every page of the viewer's visible set. Empty → nothing to
+    # intersect (also anonymous viewers).
+    viewer_ids = await viewable_doc_ids(datasette, request.actor)
     if not viewer_ids:
         return Response.json({"actor_id": profile_actor_id, "todos": []})
 
@@ -269,14 +263,9 @@ async def list_docs(datasette, request):
         if t and t not in tags:
             tags.append(t)
 
-    # Pull every paper the actor can view in one shot (cap at 1000; if
-    # somebody has 1000+ papers visible we'll add proper pagination).
-    page = await datasette.allowed_resources(
-        action=PAPER_VIEW, actor=request.actor, limit=1000
-    )
-    # PaperDocResource is two-level — the doc id lives in `child`
-    # (parent is the fixed PAPER_DOCS_PARENT sentinel).
-    doc_ids = [int(r.child) for r in page.resources]
+    # Pull every paper the actor can view, draining the permission API's
+    # pagination so large grant sets are not silently truncated.
+    doc_ids = await viewable_doc_ids(datasette, request.actor)
     db = paper_db(datasette)
     if tags:
         rows = await db.list_docs_by_ids_states_kinds_and_tags(

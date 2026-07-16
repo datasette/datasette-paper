@@ -213,3 +213,24 @@ async def test_viewer_with_no_grants_is_empty():
     status, body = await _todos(ds, "stranger", "pat")
     assert status == 200
     assert body == {"actor_id": "pat", "todos": []}
+
+
+@pytest.mark.asyncio
+async def test_permission_pagination_does_not_hide_todos(monkeypatch):
+    """A task beyond the permission API's old 1,000-resource cap is visible."""
+    ds, paper = await setup_paper_datasette()
+    doc_id = await create_doc(ds, "Late grant", actor_id="pat")
+    await _assign(ds, doc_id=doc_id, ordinal=0, assignee="pat", text="still visible")
+
+    async def all_viewable_doc_ids(datasette, actor):
+        assert datasette is ds
+        assert actor == {"id": "vic"}
+        return [*range(1, 1001), doc_id]
+
+    monkeypatch.setattr(
+        "datasette_paper.routes.docs.viewable_doc_ids", all_viewable_doc_ids
+    )
+
+    status, body = await _todos(ds, "vic", "pat")
+    assert status == 200
+    assert [todo["text"] for todo in body["todos"]] == ["still visible"]
