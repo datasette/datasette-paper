@@ -1018,6 +1018,83 @@ def test_sql_block_hidden_emits_hidden_token():
     assert md == "```sql db=data hidden\nselect 1\n```\n"
 
 
+# Ticket 04: sql_block `db` / source `name`,`db` are f-strung into the fence
+# info string — an unsafe value must degrade to absent, never break the
+# fence or spill into the body / inject a sibling token.
+@pytest.mark.parametrize("bad_db", ["x\n# H", "a b", "a`b"])
+def test_sql_block_unsafe_db_serializes_as_empty_db(bad_db):
+    # @feat sql-block: an unsafe `db` degrades to the bare `sql db=` discriminator
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "sql_block",
+                "attrs": {"db": bad_db, "hidden": False},
+                "content": [{"type": "text", "text": "select 1"}],
+            }
+        )
+    )
+    assert md == "```sql db=\nselect 1\n```\n"
+    # One-line info string, fence intact, no injected content line.
+    assert md.count("\n") == 3
+    assert "# H" not in md
+    assert "a b" not in md
+    assert "a`b" not in md
+
+
+@pytest.mark.parametrize("bad", ["x\n# H", "a b", "a`b"])
+def test_source_unsafe_name_and_db_serialize_as_absent(bad):
+    # @feat source: an unsafe `name`/`db` drops the token instead of corrupting
+    # the fence line (name is dropped entirely; db degrades the same way).
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "source",
+                "attrs": {"name": bad, "db": bad},
+                "content": [{"type": "text", "text": "select 1"}],
+            }
+        )
+    )
+    assert md == "```source\nselect 1\n```\n"
+    assert md.count("\n") == 3
+    assert "# H" not in md
+    assert "a b" not in md
+    assert "a`b" not in md
+
+
+def test_sql_block_valid_db_round_trips_through_parser():
+    # @feat sql-block: a safe `db` (the input-path charset) round-trips
+    # byte-identically through doc -> markdown -> doc.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    doc = _doc(
+        {
+            "type": "sql_block",
+            "attrs": {"db": "mydb", "hidden": False},
+            "content": [{"type": "text", "text": "select 1"}],
+        }
+    )
+    md = doc_to_markdown(doc)
+    assert md == "```sql db=mydb\nselect 1\n```\n"
+    assert markdown_to_doc(md) == doc
+
+
+def test_source_valid_name_and_db_round_trip_through_parser():
+    # @feat source: a safe `name`/`db` (the input-path charset) round-trips
+    # byte-identically through doc -> markdown -> doc.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    doc = _doc(
+        {
+            "type": "source",
+            "attrs": {"name": "my_source", "db": "mydb"},
+            "content": [{"type": "text", "text": "select 1"}],
+        }
+    )
+    md = doc_to_markdown(doc)
+    assert md == "```source name=my_source db=mydb\nselect 1\n```\n"
+    assert markdown_to_doc(md) == doc
+
+
 # ---------------------------------------------------------------------------
 # Ticket 05: combined fixture exercising ALL reference types in one doc.
 # Catches interaction bugs the per-type tests miss (e.g. the paper: converter

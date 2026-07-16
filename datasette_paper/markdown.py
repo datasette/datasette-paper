@@ -37,6 +37,31 @@ ResourceResolver = Callable[[str, str], Optional[Tuple[Optional[str], Optional[s
 RESERVED_FENCE_TOKENS = {"source", "paper-embed", "paper-toc", "paper-table"}
 _SAFE_LANG_RE = re.compile(r"^[^\s`=]+$")
 
+# `sql_block`'s `db` and `source`'s `name`/`db` are also f-strung into a fence
+# info string (`sql db=NAME`, `source name=NAME db=DB`) — same one-line, no-
+# backtick constraint as the language guard above, but these are `token=value`
+# pairs, so a bare "no whitespace" check isn't enough either: a space alone
+# would inject a spurious sibling token (`db=x hidden` flips the `hidden`
+# flag; `name=x db=evil` overrides the db). Restrict to the shape a `source`
+# name is already normalized to at every input path
+# (`frontend/src/lib/sourceBlockView.ts`'s `[^a-z0-9_]+` strip) widened to
+# case-insensitive plus `-` for db aliases (e.g. a real Datasette db name like
+# `sf-trees`); markdown_parser.py's `sql db=` / `source name=`/`db=`
+# discriminators split on any whitespace and take the rest of the token
+# verbatim, so this charset is well inside what still round-trips.
+_SAFE_ATTR_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]*$")
+
+
+def _safe_attr_token(value: object) -> str:
+    """Validate-or-degrade an info-string `token=value` attr: a non-`str` or a
+    value outside :data:`_SAFE_ATTR_TOKEN_RE` serializes as absent (empty
+    string) rather than corrupt the fence — the same shape as the
+    `code_block` language guard, just returning "" instead of falling back to
+    a bare fence (the `db=`/`name=` token itself is still meaningful empty)."""
+    s = value if isinstance(value, str) else ""
+    return s if _SAFE_ATTR_TOKEN_RE.match(s) else ""
+
+
 # The five GitHub-style admonition kinds — mirrors CALLOUT_KINDS in
 # frontend/src/lib/schema.ts and _CALLOUT_KINDS in datasette_paper/pm_schema.py.
 # An unrecognized kind (a hand-edited doc, a step that slipped past the
@@ -232,7 +257,7 @@ def _render_block(node: dict) -> str:
         # unconditionally is what keeps a db-less sql_block from round-
         # tripping back down to a code_block.
         attrs = node.get("attrs") or {}
-        db = attrs.get("db") or ""
+        db = _safe_attr_token(attrs.get("db"))
         text = "".join(c.get("text", "") for c in content)
         info = f"sql db={db}"
         if attrs.get("hidden"):
@@ -246,8 +271,8 @@ def _render_block(node: dict) -> str:
         # the discriminators (markdown_parser.py keys off `source`). Inline
         # `value` atoms reference it by name as `${{name.column}}`.
         attrs = node.get("attrs") or {}
-        name = attrs.get("name") or ""
-        db = attrs.get("db") or ""
+        name = _safe_attr_token(attrs.get("name"))
+        db = _safe_attr_token(attrs.get("db"))
         text = "".join(c.get("text", "") for c in content)
         info = "source"
         if name:
