@@ -552,6 +552,59 @@ class TestMarks:
         assert text_node["text"] == "text"
         assert "marks" not in text_node
 
+    @pytest.mark.parametrize(
+        "md",
+        [
+            "[x](javascript:alert(1))\n",
+            "[x](data:text/html,alert(1))\n",
+        ],
+    )
+    def test_link_unsafe_scheme_drops_mark(self, md):
+        """Defense-in-depth: paper's own ``is_safe_href`` allowlist gates the
+        link mark, independent of markdown-it's default validator (which
+        already denies these schemes at tokenize time — the text stays
+        literal and never reaches the link-mark branch at all). Either way
+        the end state is the same: no link mark carrying the bad scheme, and
+        the visible text survives.
+        """
+        doc = parse_and_validate(md)
+        para = doc["content"][0]
+        assert not any(
+            m.get("type") == "link" for n in para["content"] for m in n.get("marks", [])
+        )
+        assert "alert(1)" in "".join(n.get("text", "") for n in para["content"])
+
+    def test_link_safe_scheme_survives(self):
+        """Regression: https links aren't caught by the new allowlist gate."""
+        doc = parse_and_validate("[x](https://example.com)\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["marks"] == [
+            {"type": "link", "attrs": {"href": "https://example.com"}}
+        ]
+
+    def test_link_unsafe_scheme_dropped_even_when_markdown_it_would_allow_it(self):
+        """Prove paper's own ``is_safe_href`` gate — not just markdown-it's
+        default validator — is what drops the mark, by feeding hand-built
+        tokens (bypassing markdown-it's own ``validateLink`` tokenize-time
+        check entirely) straight into the inline-token → PM converter.
+        """
+        from markdown_it.token import Token
+
+        from datasette_paper.markdown_parser import _children_to_pm
+
+        tokens = [
+            Token(
+                type="link_open",
+                tag="a",
+                nesting=1,
+                attrs={"href": "javascript:alert(1)"},
+            ),
+            Token(type="text", tag="", nesting=0, content="click"),
+            Token(type="link_close", tag="a", nesting=-1),
+        ]
+        nodes = _children_to_pm(tokens)
+        assert nodes == [{"type": "text", "text": "click"}]
+
     def test_nested_marks(self):
         doc = parse_and_validate("**bold *and em***\n")
         # Two text nodes: 'bold ' (strong) and 'and em' (strong+em).
@@ -622,6 +675,41 @@ class TestInlineNodes:
             if n["type"] == "image"
         ]
         assert srcs == ["data:image/png;base64,AAAA", "https://example.com/y.png"]
+
+    def test_image_unsafe_scheme_is_dropped(self):
+        """Defense-in-depth: paper's own ``is_safe_image_src`` allowlist gates
+        the image, independent of markdown-it's default validator (which
+        already denies ``vbscript:`` at tokenize time — the markup stays
+        literal text and never reaches the image branch at all). Either way
+        the end state is the same: no image node with the bad scheme, and
+        the alt text survives as plain text.
+        """
+        doc = parse_and_validate("before ![cap](vbscript:alert(1)) after\n")
+        para = doc["content"][0]
+        assert all(n["type"] != "image" for n in para["content"])
+
+    def test_image_unsafe_scheme_dropped_even_when_markdown_it_would_allow_it(self):
+        """Prove paper's own ``is_safe_image_src`` gate — not just
+        markdown-it's default validator — is what drops the image, by
+        feeding a hand-built token (bypassing markdown-it's own
+        ``validateLink`` tokenize-time check entirely) straight into the
+        inline-token → PM converter.
+        """
+        from markdown_it.token import Token
+
+        from datasette_paper.markdown_parser import _children_to_pm
+
+        alt_text_token = Token(type="text", tag="", nesting=0, content="cap")
+        image_token = Token(
+            type="image",
+            tag="img",
+            nesting=0,
+            attrs={"src": "javascript:alert(1)", "alt": "cap"},
+            content="cap",
+            children=[alt_text_token],
+        )
+        nodes = _children_to_pm([image_token])
+        assert nodes == [{"type": "text", "text": "cap"}]
 
     def test_text_coalescing(self):
         """Adjacent text nodes with identical marks should be merged."""

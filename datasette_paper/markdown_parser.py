@@ -29,6 +29,7 @@ from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
 from .date_atom import parse_hm, parse_ymd
+from .pm_schema import is_safe_href, is_safe_image_src
 from .util import normalize_tag
 from .youtube import parse_youtube_url
 
@@ -568,9 +569,14 @@ def _children_to_pm(children) -> list[dict]:
             attrs = dict(c.attrs or {})
             src = attrs.get("src", "")
             alt = _image_alt_text(c) or attrs.get("alt", "")
-            if _is_oversized_data_src(src):
-                # Drop the oversized inline image but keep its alt as plain
-                # text so the surrounding prose isn't silently mangled.
+            if _is_oversized_data_src(src) or not is_safe_image_src(src):
+                # Drop the oversized/unsafe-scheme inline image but keep its
+                # alt as plain text so the surrounding prose isn't silently
+                # mangled. The scheme check is defense-in-depth: markdown-it's
+                # default validator already strips javascript:/data:text/html
+                # srcs to plain text, but paper enforces its own allowlist
+                # rather than trust that implicitly (matches the step-ingest
+                # guard and the serializer).
                 if alt:
                     push_text(alt)
             else:
@@ -596,9 +602,21 @@ def _children_to_pm(children) -> list[dict]:
             if mark_name == "link":
                 attrs = dict(c.attrs or {})
                 href = attrs.get("href") or ""
-                if not href:
+                # `paper:/`-scheme hrefs are the mention/tag/paper-link/
+                # inline-embed reference channel (see _convert_paper_refs
+                # below) — not a real browsable link, so is_safe_href's
+                # browsable-scheme allowlist doesn't apply to them. Let the
+                # mark through here; _convert_paper_refs either resolves it
+                # to an atom or silently drops it, so no raw `paper:` href
+                # ever survives to the final doc either way.
+                is_paper_ref = href.startswith(_PAPER_SCHEME)
+                if not href or not (is_paper_ref or is_safe_href(href)):
                     # pm_schema.link requires href — drop the mark for empty
                     # hrefs and let the wrapped text fall through unmarked.
+                    # Unsafe schemes get the same treatment: defense-in-depth
+                    # against markdown-it's default validator (which already
+                    # strips javascript:/data: today) so paper enforces its
+                    # own allowlist rather than trust that implicitly.
                     mark_stack.append({"_drop": True})
                 else:
                     mark_attrs: dict = {"href": href}
