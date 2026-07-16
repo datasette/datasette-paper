@@ -15,7 +15,7 @@ from urllib.parse import quote
 
 from .date_atom import render_date_atom
 from .pm_schema import is_safe_href, is_safe_image_src
-from .youtube import youtube_watch_url
+from .youtube import is_valid_video_id, youtube_watch_url
 
 # A resource-URL resolver: given (ref_type, value) it returns
 # ``(kind, url)`` where:
@@ -369,10 +369,12 @@ def _render_block(node: dict) -> str:
         # A lone URL on its own line — the markdown parser reads it back into a
         # video_embed (markdown_parser.py). Only YouTube exists today; an
         # unknown provider degrades to nothing renderable, so skip it rather
-        # than emit a bogus URL.
+        # than emit a bogus URL. videoId is re-validated here (not just
+        # truthy) because it's an untrusted node attr: a planted id with a
+        # newline would otherwise inject a block after the bare URL line.
         attrs = node.get("attrs") or {}
-        if (attrs.get("provider") or "youtube") != "youtube" or not attrs.get(
-            "videoId"
+        if (attrs.get("provider") or "youtube") != "youtube" or not is_valid_video_id(
+            attrs.get("videoId")
         ):
             return ""
         start = attrs.get("start")
