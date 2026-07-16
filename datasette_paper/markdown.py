@@ -117,15 +117,79 @@ def _resolve_resource(ref_type: str, value: str) -> Tuple[Optional[str], Optiona
     return kind, url
 
 
+# Chars backslash-escaped in a ref link's label so a free-form attr (a tag
+# slug, an embed ref, an actor id/display name) can't reopen the `[...]` link or
+# smuggle a raw HTML tag: the link brackets + the HTML-open angles. Narrower
+# than date_atom._LABEL_ESCAPE (which also escapes the inline-markup set) — a
+# ref label is not a strftime template, so escaping the brackets/angles is
+# enough to keep it inert while leaving ordinary labels (`#my_tag`, `@a.b`)
+# untouched.
+_REF_LABEL_ESCAPE = frozenset("[]<>")
+
+# A run of one or more newlines. Collapsed to a single space wherever an
+# untrusted attr lands in a construct whose closing delimiter can't be
+# backslash-escaped (`{{key}}`, `[[id]]`, `${{source.column}}`): a blank line
+# would otherwise close the construct and inject block markdown.
+_NEWLINE_RUN_RE = re.compile(r"[\r\n]+")
+
+
+def _coerce_attr_str(v) -> Optional[str]:
+    """Return ``v`` iff it is a non-empty ``str``, else ``None``.
+
+    The plain-string twin of ``date_atom``'s validate-then-drop guard. A
+    ProseMirror attr is untyped — any client that can write a collab step can
+    plant any JSON value — so an inline atom whose identity attr is a non-``str``
+    (an ``int`` handed to ``quote`` / ``str.startswith``) or empty has no
+    serializable form; the caller drops the atom (emits nothing for it) rather
+    than crash, mirroring ``render_date_atom`` returning ``None``.
+    """
+    return v if isinstance(v, str) and v else None
+
+
+def _collapse_newlines(s: str) -> str:
+    """Collapse every run of newlines in ``s`` to a single space.
+
+    The security-relevant half of :func:`escape_date_label` (date_atom.py) for
+    the bare ``{{key}}`` / ``[[id]]`` / ``${{source.column}}`` grammars, whose
+    ``}}`` / ``]]`` delimiters can't be backslash-escaped. A blank line inside
+    any of them closes the construct and lets the attr inject block markdown (a
+    heading, a second link) that materializes on the doc→md→doc round-trip;
+    folding newlines to a space removes that capability. Residual lossiness: a
+    newline in one of these attrs no longer survives the round-trip — but a
+    newline in a placeholder key / doc id / source / column is never meaningful,
+    so this only ever fires on a hostile value.
+    """
+    return _NEWLINE_RUN_RE.sub(" ", s)
+
+
+def _escape_ref_label(label: str) -> str:
+    """Neutralize a ref link's label as inert markdown link text.
+
+    Twin of :func:`escape_date_label` (date_atom.py) scoped to a ref link's
+    free-form label (a tag slug, an embed ref, an actor id/display name):
+    collapse any newline run to one space — a blank line inside ``[...]`` closes
+    the link and would inject block markdown — then backslash-escape the link
+    brackets ``[`` ``]`` and the HTML-open angles ``<`` ``>`` so the label can't
+    reopen the link or smuggle a raw HTML tag.
+    """
+    out: List[str] = []
+    for ch in _collapse_newlines(label):
+        if ch in _REF_LABEL_ESCAPE:
+            out.append("\\")
+        out.append(ch)
+    return "".join(out)
+
+
 def _ref_link(label: str, canonical: str, url: Optional[str]) -> str:
     """Render an inline ref link.
 
     With a resource ``url``: ``[label](url "canonical")`` — the canonical
     ``paper:/`` ref lives in the title (the round-trip-safe channel). Without
     one: ``[label](canonical)`` (ticket-02 behaviour). The ``"`` in the title is
-    escaped per CommonMark.
+    escaped per CommonMark. The label is free-form untrusted text, so it runs
+    through :func:`_escape_ref_label` to stay inert.
     """
-    safe_label = label.replace("]", "\\]")
+    safe_label = _escape_ref_label(label)
     if url:
         title = canonical.replace('"', '\\"')
         return f'[{safe_label}]({url} "{title}")'
@@ -758,40 +822,60 @@ def _render_inlines(nodes: list) -> str:
         ):  # @feat placeholder: serialize the atom to literal {{key}} (write-only)
             # Round-trip placeholders as `{{key}}` so the markdown export of
             # a template is self-documenting: anyone reading the markdown can
-            # see where substitutions will land.
-            key = n.get("attrs", {}).get("key", "")
-            out.append("{{" + str(key) + "}}")
+            # see where substitutions will land. The `key` attr is untyped, so
+            # drop a non-str/empty key (no meaningful `{{}}` to emit) and
+            # collapse newlines — a blank line in the key would close the
+            # `{{...}}` and inject a block (the `}}` can't be escaped here).
+            key = _coerce_attr_str(n.get("attrs", {}).get("key"))
+            if key is not None:
+                out.append("{{" + _collapse_newlines(key) + "}}")
         elif (
             t == "paper_link"
         ):  # @feat paper-link: serialize the atom to [[id]] markdown
             doc_id = (n.get("attrs") or {}).get("docId")
-            out.append(f"[[{doc_id}]]")
+            # docId is normally an int rowid (see test_paper_link_*), so coerce
+            # int/str rather than str-only — but drop anything else: a None/list
+            # has no valid `[[id]]` form (the old `[[None]]` was meaningless).
+            # Collapse newlines so a str docId can't close the `[[...]]` and
+            # inject a block (the `]]` can't be escaped in this bare grammar).
+            if isinstance(doc_id, str) or (
+                isinstance(doc_id, int) and not isinstance(doc_id, bool)
+            ):
+                out.append("[[" + _collapse_newlines(str(doc_id)) + "]]")
         elif (
             t == "mention"
         ):  # @feat mention: serialize the atom to [@label](paper:/actor/id) markdown
-            actor_id = (n.get("attrs") or {}).get("actorId") or ""
-            label = _actor_names.get().get(actor_id) or actor_id
-            # `[@Name](url "paper:/actor/<id>")` (or bare `paper:/actor/<id>`
-            # href if no resolver) — `@` inside the link text so it renders as a
-            # single "@Name" link; the canonical `paper:/actor/` ref lets the
-            # parser detect mentions unambiguously. Percent-encode the id so the
-            # canonical stays well-formed.
-            canonical = f"paper:/actor/{quote(actor_id, safe='')}"
-            _kind, url = _resolve_resource("actor", actor_id)
-            out.append(_ref_link("@" + label, canonical, url))
+            # `actorId` is untyped; drop a non-str/empty id (there is no actor to
+            # link, and `quote()` below raises on a non-str).
+            actor_id = _coerce_attr_str((n.get("attrs") or {}).get("actorId"))
+            if actor_id is not None:
+                label = _actor_names.get().get(actor_id) or actor_id
+                # `[@Name](url "paper:/actor/<id>")` (or bare `paper:/actor/<id>`
+                # href if no resolver) — `@` inside the link text so it renders
+                # as a single "@Name" link; the canonical `paper:/actor/` ref
+                # lets the parser detect mentions unambiguously. Percent-encode
+                # the id so the canonical stays well-formed; the label is
+                # escaped inert by `_ref_link`.
+                canonical = f"paper:/actor/{quote(actor_id, safe='')}"
+                _kind, url = _resolve_resource("actor", actor_id)
+                out.append(_ref_link("@" + label, canonical, url))
         elif (
             t == "tag"
         ):  # @feat tag: serialize the atom to [#tag](paper:/tag/slug) markdown
-            tag = (n.get("attrs") or {}).get("tag") or ""
-            # `[#tag](url "paper:/tag/<slug>")` (or bare href) — `#` inside the
-            # link text so it renders as a single "#tag" link; the canonical
-            # `paper:/tag/` ref lets the parser detect inline tags unambiguously
-            # (a bare `#tag` would collide with ATX headings). Slugs are
-            # normalized at every input path so `]` can't occur. Percent-encode
-            # the slug for the canonical.
-            canonical = f"paper:/tag/{quote(tag, safe='')}"
-            _kind, url = _resolve_resource("tag", tag)
-            out.append(_ref_link("#" + tag, canonical, url))
+            # `tag` is untyped; drop a non-str/empty slug (`"#" + tag` and
+            # `quote(tag)` below both raise on a non-str).
+            tag = _coerce_attr_str((n.get("attrs") or {}).get("tag"))
+            if tag is not None:
+                # `[#tag](url "paper:/tag/<slug>")` (or bare href) — `#` inside
+                # the link text so it renders as a single "#tag" link; the
+                # canonical `paper:/tag/` ref lets the parser detect inline tags
+                # unambiguously (a bare `#tag` would collide with ATX headings).
+                # Slugs are normalized at every input path, but a crafted step
+                # can still plant an arbitrary string, so the label is escaped
+                # inert by `_ref_link`. Percent-encode the slug for the canonical.
+                canonical = f"paper:/tag/{quote(tag, safe='')}"
+                _kind, url = _resolve_resource("tag", tag)
+                out.append(_ref_link("#" + tag, canonical, url))
         elif (
             t == "date"
         ):  # @feat date: serialize atom to a [<label>](paper:/date/<uri>) link
@@ -811,25 +895,28 @@ def _render_inlines(nodes: list) -> str:
         elif (
             t == "inline_embed"
         ):  # @feat inline-embed: serialize atom to a paper:/embed/<kind>/<ref> link
-            ref = (n.get("attrs") or {}).get("ref") or ""
-            # `[label](url "paper:/embed/<kind>/<ref>")` (or bare canonical
-            # href). The canonical ref's slashes stay raw (`safe='/'`) so the
-            # path is readable, but spaces / `%` / other awkward chars are
-            # percent-encoded so the markdown link destination round-trips
-            # losslessly; the parser `unquote`s it back. There is no resolved
-            # label at serialize time, so the ref doubles as the label.
-            #
-            # The provider `kind` and resource `url` come from the resolver
-            # (ticket 04): an embed claimed by a provider gets that provider's
-            # kind + its `resource_url(ref)`; an unclaimed (core Datasette) ref
-            # falls back to kind "datasette". The ref begins with "/", so the
-            # concatenation `paper:/embed/<kind>` + ref is a valid path.
-            ref_path = ref if ref.startswith("/") else "/" + ref
-            encoded_ref = quote(ref_path, safe="/")
-            kind, url = _resolve_resource("embed", ref)
-            kind = kind or "datasette"
-            canonical = f"paper:/embed/{kind}{encoded_ref}"
-            out.append(_ref_link(ref, canonical, url))
+            # `ref` is untyped; drop a non-str/empty ref (`ref.startswith`
+            # below raises on a non-str, and there is nothing to embed).
+            ref = _coerce_attr_str((n.get("attrs") or {}).get("ref"))
+            if ref is not None:
+                # `[label](url "paper:/embed/<kind>/<ref>")` (or bare canonical
+                # href). The canonical ref's slashes stay raw (`safe='/'`) so the
+                # path is readable, but spaces / `%` / other awkward chars are
+                # percent-encoded so the markdown link destination round-trips
+                # losslessly; the parser `unquote`s it back. There is no resolved
+                # label at serialize time, so the ref doubles as the label (and
+                # is escaped inert by `_ref_link`).
+                #
+                # The provider `kind` and resource `url` come from the resolver
+                # (ticket 04): an embed claimed by a provider gets that
+                # provider's kind + its `resource_url(ref)`; an unclaimed (core
+                # Datasette) ref falls back to kind "datasette".
+                ref_path = ref if ref.startswith("/") else "/" + ref
+                encoded_ref = quote(ref_path, safe="/")
+                kind, url = _resolve_resource("embed", ref)
+                kind = kind or "datasette"
+                canonical = f"paper:/embed/{kind}{encoded_ref}"
+                out.append(_ref_link(ref, canonical, url))
         elif (
             t == "value"
         ):  # @feat value: serialize atom to ${{source.column}} (+ optional format)
@@ -848,13 +935,27 @@ def _render_inlines(nodes: list) -> str:
             # column that is already a bare `\w+` keeps the clean unbracketed
             # form. (A literal `]` inside a column name still can't round-trip,
             # but that's vanishingly rare for a SQL identifier.)
+            #
+            # `source`/`column` are untyped; drop the atom if either is a
+            # non-str/empty (a `${{source.column}}` needs both). Collapse
+            # newlines in each — and in the format suffix, whose
+            # `_encode_value_format` args (currency/decimals/style) are equally
+            # untrusted — so a planted value can't close the `${{...}}` and
+            # inject a block (the `}}` can't be escaped in this bare grammar).
+            # Residual lossiness: a newline in source/column no longer survives
+            # the round-trip, but a newline there is never meaningful.
             attrs = n.get("attrs") or {}
-            source = str(attrs.get("source") or "")
-            column = str(attrs.get("column") or "")
-            column_md = column if re.fullmatch(r"\w+", column) else "[" + column + "]"
-            fmt = _encode_value_format(attrs.get("format"))
-            suffix = f" | {fmt}" if fmt else ""
-            out.append("${{" + source + "." + column_md + suffix + "}}")
+            source = _coerce_attr_str(attrs.get("source"))
+            column = _coerce_attr_str(attrs.get("column"))
+            if source is not None and column is not None:
+                source = _collapse_newlines(source)
+                column = _collapse_newlines(column)
+                column_md = (
+                    column if re.fullmatch(r"\w+", column) else "[" + column + "]"
+                )
+                fmt = _collapse_newlines(_encode_value_format(attrs.get("format")))
+                suffix = f" | {fmt}" if fmt else ""
+                out.append("${{" + source + "." + column_md + suffix + "}}")
 
     close_through(0)
     return "".join(out)
