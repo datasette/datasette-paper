@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from urllib.parse import parse_qs, unquote
 
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
+from .date_atom import parse_hm, parse_ymd
 from .util import normalize_tag
 from .youtube import parse_youtube_url
 
@@ -721,19 +721,6 @@ def _paper_ref_to_node(kind: str, value: str) -> dict | None:
     return None
 
 
-_DATE_ONLY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_DATE_TIME_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$")
-
-
-def _valid_calendar_date(s: str) -> bool:
-    """True iff ``s`` is a real ``YYYY-MM-DD`` calendar date (no Feb 30)."""
-    try:
-        datetime.strptime(s, "%Y-%m-%d")
-        return True
-    except ValueError:
-        return False
-
-
 def _date_ref_to_node(value: str) -> dict | None:
     """Build a `date` atom from a `paper:/date/` ref value, or None to degrade.
 
@@ -753,15 +740,9 @@ def _date_ref_to_node(value: str) -> dict | None:
         return vals[0] if vals and vals[0] else None
 
     fmt = _param("fmt")
-    m = _DATE_TIME_RE.match(path)
-    if m:
-        date_s, time_s = m.group(1), m.group(2)
-        # `HH:MM` matched the shape; strptime rejects 25:00 / 12:60 etc.
-        try:
-            datetime.strptime(time_s, "%H:%M")
-        except ValueError:
-            return None
-        if not _valid_calendar_date(date_s):
+    if len(path) == 16 and path[10] == "T":
+        date_s, time_s = path[:10], path[11:]
+        if parse_ymd(date_s) is None or parse_hm(time_s) is None:
             return None
         return {
             "type": "date",
@@ -772,7 +753,7 @@ def _date_ref_to_node(value: str) -> dict | None:
                 "format": fmt,
             },
         }
-    if _DATE_ONLY_RE.match(path) and _valid_calendar_date(path):
+    if parse_ymd(path) is not None:
         # A stray `tz` on a date-only ref is dropped: a calendar date is the
         # same for everyone, so only timed atoms carry a zone. A `fmt` is kept.
         return {

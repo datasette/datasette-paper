@@ -21,8 +21,6 @@ from datasette_paper.date_atom import (
     parse_ymd,
     render_date_atom,
     strftime_date,
-    valid_date,
-    valid_time,
 )
 
 
@@ -78,6 +76,8 @@ STRFTIME_FIXTURES = [
     ("%A, %B %o", 2026, 7, 20, "Monday, July 20th"),
     ("%a %b %-d", 2026, 7, 20, "Mon Jul 20"),
     ("%m/%d/%y", 2026, 7, 5, "07/05/26"),
+    ("%A %a", 1, 1, 1, "Monday Mon"),
+    ("%A %a", 99, 12, 31, "Thursday Thu"),
     ("%o", 2026, 7, 1, "1st"),
     ("%o", 2026, 7, 2, "2nd"),
     ("%o", 2026, 7, 3, "3rd"),
@@ -343,13 +343,6 @@ def test_parse_hm_invalid_returns_none(time):
 @pytest.mark.parametrize("time", [None, 1200, True, ["12:00"], {}])
 def test_parse_hm_non_string_returns_none(time):
     assert parse_hm(time) is None
-
-
-def test_valid_date_and_valid_time_are_bool_wrappers():
-    assert valid_date("2026-07-20") is True
-    assert valid_date("2026-02-30") is False
-    assert valid_time("23:59") is True
-    assert valid_time("24:00") is False
 
 
 # ---------------------------------------------------------------------------

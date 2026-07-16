@@ -1,6 +1,6 @@
 /**
  * The `date` atom's canonical label render. The fixture table below is shared
- * byte-for-byte with the Python twin in tests/test_markdown.py
+ * byte-for-byte with the Python twin in tests/test_date_atom.py
  * (`DATE_LABEL_FIXTURES` / `test_format_date_label_matches_fixtures`); keep the
  * two in sync whenever either label renderer changes — the markdown round-trip
  * relies on both sides producing an identical label.
@@ -10,7 +10,7 @@ import { describe, it, expect } from "vitest";
 import { formatDateLabel, strftimeDate, type DateAttrs } from "../dateFormat";
 
 // strftimeDate fixtures — mirrored byte-for-byte with STRFTIME_FIXTURES in
-// tests/test_markdown.py. 2026-07-20 is a Monday.
+// tests/test_date_atom.py. 2026-07-20 is a Monday.
 const STRFTIME_FIXTURES: [string, number, number, number, string][] = [
   ["%Y-%m-%d", 2026, 7, 20, "2026-07-20"],
   ["%b %-d, %Y", 2026, 7, 20, "Jul 20, 2026"],
@@ -18,6 +18,8 @@ const STRFTIME_FIXTURES: [string, number, number, number, string][] = [
   ["%A, %B %o", 2026, 7, 20, "Monday, July 20th"],
   ["%a %b %-d", 2026, 7, 20, "Mon Jul 20"],
   ["%m/%d/%y", 2026, 7, 5, "07/05/26"],
+  ["%A %a", 1, 1, 1, "Monday Mon"],
+  ["%A %a", 99, 12, 31, "Thursday Thu"],
   ["%o", 2026, 7, 1, "1st"],
   ["%o", 2026, 7, 2, "2nd"],
   ["%o", 2026, 7, 3, "3rd"],

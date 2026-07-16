@@ -58,6 +58,7 @@ const VALID: Case[] = [
   ["jul 13", "2027-07-13", null], // one day past → next year
   ["jan 5", "2027-01-05", null], // typed in July → next January
   ["dec 25", "2026-12-25", null], // typed in July → this year's Dec 25
+  ["feb 29", "2028-02-29", null], // next real occurrence skips non-leap years
 
   // relative
   ["today", "2026-07-14", null],

@@ -225,16 +225,6 @@ def parse_hm(time: object) -> Optional[Tuple[int, int]]:
     return t.hour, t.minute
 
 
-def valid_date(date: object) -> bool:
-    """True iff ``date`` is a real ``YYYY-MM-DD`` calendar date."""
-    return parse_ymd(date) is not None
-
-
-def valid_time(time: object) -> bool:
-    """True iff ``time`` is a real 24-hour ``HH:MM``."""
-    return parse_hm(time) is not None
-
-
 def escape_date_label(label: str) -> str:
     """Neutralize a date atom's label as inert markdown link text.
 
@@ -286,10 +276,10 @@ def render_date_atom(attrs: dict) -> Optional[str]:
     """
     # @feat date: validate untrusted atom attrs before they reach label / URI
     date = attrs.get("date")
-    if not valid_date(date):
+    if parse_ymd(date) is None:
         return None
     time = attrs.get("time")
-    if not valid_time(time):
+    if parse_hm(time) is None:
         time = None
     tz = attrs.get("tz")
     if not (isinstance(tz, str) and tz):

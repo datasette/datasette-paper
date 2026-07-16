@@ -1,5 +1,5 @@
 // Deterministic label render for a `date` atom — the twin of
-// `format_date_label` in datasette_paper/markdown.py. This is the canonical,
+// `format_date_label` in datasette_paper/date_atom.py. This is the canonical,
 // serialize-stable label: absent a custom `format` it shows "Jul 20, 2026"
 // (year always) and shows a timed atom's wall clock in its *stored* zone (no
 // viewer-zone conversion — `attrs.time` is already the author's wall time). A
@@ -7,7 +7,7 @@
 // auto-appends. The chip NodeView (dateView.ts) has its own compact,
 // viewer-facing render (omit current year, convert to the viewer's zone).
 // Keep `strftimeDate` byte-identical with the Python twin (shared fixtures).
-// @feat date: deterministic label render (twin of markdown.py format_date_label)
+// @feat date: deterministic label render (twin of date_atom.py format_date_label)
 
 export interface DateAttrs {
   date: string;
@@ -76,16 +76,34 @@ function ordinal(d: number): string {
   }
 }
 
+/** Monday=0 weekday for a proleptic Gregorian date.
+ *
+ * Avoids `new Date(y, ...)`, whose legacy constructor silently remaps years
+ * 0-99 to 1900-1999. Temporal.PlainDate would express this directly, but
+ * Temporal is not yet available in Safari without a polyfill.
+ */
+function gregorianWeekday(y: number, m: number, d: number): number {
+  const offsets = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4];
+  let year = y;
+  if (m < 3) year -= 1;
+  const sundayZero =
+    (year + Math.floor(year / 4) - Math.floor(year / 100) + Math.floor(year / 400) +
+      offsets[m - 1] +
+      d) %
+    7;
+  return (sundayZero + 6) % 7;
+}
+
 /**
  * Render a calendar date through a small, fixed strftime subset — the twin of
- * `strftime_date` in markdown.py. Hardcoded English names and a fixed directive
+ * `strftime_date` in date_atom.py. Hardcoded English names and a fixed directive
  * set (NOT the platform/locale strftime) so both sides agree byte-for-byte.
  * Directives (a leading `-` drops zero-pad): %Y %y %m %-m %B %b %d %-d %o %A %a
  * %%. `%o` is a paper extension — the ordinal day (20th). Unknown directives
  * pass through literally.
  */
 export function strftimeDate(fmt: string, y: number, m: number, d: number): string {
-  const weekday = (new Date(y, m - 1, d).getDay() + 6) % 7; // Monday=0
+  const weekday = gregorianWeekday(y, m, d);
   let out = "";
   let i = 0;
   const n = fmt.length;

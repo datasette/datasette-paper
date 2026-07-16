@@ -182,6 +182,54 @@ test.describe("date atom", () => {
     await expect(chip).toHaveAttribute("data-date-tz", "America/Los_Angeles");
   });
 
+  test("a timed date is visibly converted across midnight into the reader's zone", async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({ timezoneId: "Asia/Tokyo" });
+    const page = await context.newPage();
+    try {
+      const id = await seed(
+        page,
+        "Date Cross-Zone Render Target",
+        "Meet at [2026-07-20 3:00 PM]"
+          + "(paper:/date/2026-07-20T15:00?tz=America%2FLos_Angeles&fmt=%25Y-%25m-%25d)\n",
+      );
+      await gotoPaper(page, `${BASE}/doc/${id}`);
+
+      const chip = page.locator("#app-root .pm-date");
+      await expect(chip).toHaveText(/2026-07-21, 7:00 AM/);
+      await expect(chip).toHaveAttribute("title", /author's time/);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test("task tint boundaries cover today, prose, and initially checked tasks", async ({
+    page,
+  }) => {
+    const today = await page.evaluate(() => {
+      const now = new Date();
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    });
+    const id = await seed(
+      page,
+      "Date Tint Boundaries",
+      [
+        `prose [today](paper:/date/${today})`,
+        `- [ ] due [today](paper:/date/${today})`,
+        "- [x] old [past](paper:/date/2020-01-02)",
+      ].join("\n"),
+    );
+    await gotoPaper(page, `${BASE}/doc/${id}`);
+
+    const chips = page.locator("#app-root .pm-date");
+    await expect(chips).toHaveCount(3);
+    await expect(chips.nth(0)).not.toHaveClass(/pp-date-(today|overdue)/);
+    await expect(chips.nth(1)).toHaveClass(/pp-date-today/);
+    await expect(chips.nth(2)).not.toHaveClass(/pp-date-(today|overdue)/);
+  });
+
   test("a past date tints overdue inside an unchecked task and clears on check", async ({
     page,
   }) => {

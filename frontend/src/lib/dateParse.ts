@@ -115,14 +115,16 @@ function weekdayDelta(now: Date, target: number): number {
  * day is not a real calendar date in the resolved year.
  */
 function resolveYearless(month: number, day: number, now: Date): string | null {
-  const year = now.getFullYear();
-  if (!isRealDate(year, month, day)) return null;
-  const candidate = new Date(year, month - 1, day).getTime();
+  const startYear = now.getFullYear();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  if (candidate < today) {
-    return isRealDate(year + 1, month, day) ? fmt(year + 1, month, day) : null;
+  // At most eight iterations are needed to cross the Gregorian leap-year
+  // exceptions (for example, "feb 29" entered during a non-leap year).
+  for (let year = startYear; year <= startYear + 8; year++) {
+    if (!isRealDate(year, month, day)) continue;
+    const candidate = new Date(year, month - 1, day).getTime();
+    if (candidate >= today) return fmt(year, month, day);
   }
-  return fmt(year, month, day);
+  return null;
 }
 
 /** Two-digit years map to 20xx; anything longer is taken verbatim. */

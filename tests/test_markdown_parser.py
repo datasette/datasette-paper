@@ -797,6 +797,22 @@ class TestDate:
         assert all(n["type"] != "date" for n in content)
         assert content[0]["text"] == "bad"
 
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "２０２６-07-20",  # fullwidth digits
+            "2026-０7-20",
+            "2026-07-²0",
+            "2026-07-20T１２:00",
+            "2026-07-20T12:０0",
+        ],
+    )
+    def test_unicode_digits_degrade_to_text(self, path):
+        doc = parse_and_validate(f"[bad](paper:/date/{path})\n")
+        content = doc["content"][0]["content"]
+        assert all(n["type"] != "date" for n in content)
+        assert content[0]["text"] == "bad"
+
     def test_junk_path_degrades_to_text(self):
         doc = parse_and_validate("[whenever](paper:/date/soon)\n")
         content = doc["content"][0]["content"]
