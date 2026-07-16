@@ -564,7 +564,8 @@
 
 /* mention inline atom — rendered by MentionView, resolved live via the
  * ActorResolver. A subtle rounded pill carrying the actor's display name
- * (and optional avatar). Non-text-selectable so it acts as one unit. */
+ * (and optional avatar), linking to the actor's profile page.
+ * Non-text-selectable so it acts as one unit. */
 .editor-host .pm-mention {
   display: inline;
   white-space: nowrap;
@@ -574,6 +575,7 @@
   background: var(--pp-accent-bg);
   font-weight: 500;
   user-select: none;
+  text-decoration: none;
 }
 .editor-host .pm-mention--loading {
   color: var(--pp-fg-subtle);
