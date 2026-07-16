@@ -172,7 +172,7 @@ async def test_route_actor_id_url_encoded_round_trips():
 
 @pytest.mark.asyncio
 async def test_profile_section_registered():
-    """The hook returns the Papers + TODOs sections with the expected identity.
+    """The hook returns the Papers + Paper TODOs sections with expected identity.
 
     Invoked through Datasette's plugin manager (kanban's
     test_user_profile_section_registered is the model)."""
@@ -189,12 +189,12 @@ async def test_profile_section_registered():
     assert section.sort_order == 40
     assert section.icon is not None and "currentColor" in section.icon
 
-    # @feat task-assign: the same bundle also registers the TODOs section.
+    # @feat task-assign: the same bundle also registers the Paper TODOs section.
     todos = [s for s in sections if s.id == "todos"]
     assert len(todos) == 1
     todos_section = todos[0]
     assert todos_section.tag_name == "profile-todos"
-    assert todos_section.label == "TODOs"
+    assert todos_section.label == "Paper TODOs"
     assert todos_section.icon is not None and "currentColor" in todos_section.icon
 
 

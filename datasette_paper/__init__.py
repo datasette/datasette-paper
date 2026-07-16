@@ -405,7 +405,7 @@ def datasette_user_profile_sections(datasette):
         ),
         ProfileSection(
             id="todos",
-            label="TODOs",
+            label="Paper TODOs",
             tag_name="profile-todos",
             js_urls=js_urls,
             css_urls=css_urls,
