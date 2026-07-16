@@ -106,6 +106,142 @@ def test_strftime_weekday_is_monday_zero():
     assert strftime_date("%a", 2026, 7, 26) == "Sun"  # the following Sunday
 
 
+@pytest.mark.parametrize(
+    "month,full,abbr",
+    [
+        (1, "January", "Jan"),
+        (2, "February", "Feb"),
+        (3, "March", "Mar"),
+        (4, "April", "Apr"),
+        (5, "May", "May"),
+        (6, "June", "Jun"),
+        (7, "July", "Jul"),
+        (8, "August", "Aug"),
+        (9, "September", "Sep"),
+        (10, "October", "Oct"),
+        (11, "November", "Nov"),
+        (12, "December", "Dec"),
+    ],
+)
+def test_strftime_date_covers_every_month_name(month, full, abbr):
+    assert strftime_date("%B|%b|%m|%-m", 2026, month, 1) == (
+        f"{full}|{abbr}|{month:02d}|{month}"
+    )
+
+
+@pytest.mark.parametrize(
+    "day,full,abbr",
+    [
+        (20, "Monday", "Mon"),
+        (21, "Tuesday", "Tue"),
+        (22, "Wednesday", "Wed"),
+        (23, "Thursday", "Thu"),
+        (24, "Friday", "Fri"),
+        (25, "Saturday", "Sat"),
+        (26, "Sunday", "Sun"),
+    ],
+)
+def test_strftime_date_covers_every_weekday_name(day, full, abbr):
+    assert strftime_date("%A|%a", 2026, 7, day) == f"{full}|{abbr}"
+
+
+@pytest.mark.parametrize(
+    "day,expected",
+    [
+        (1, "1st"),
+        (2, "2nd"),
+        (3, "3rd"),
+        (4, "4th"),
+        (5, "5th"),
+        (6, "6th"),
+        (7, "7th"),
+        (8, "8th"),
+        (9, "9th"),
+        (10, "10th"),
+        (11, "11th"),
+        (12, "12th"),
+        (13, "13th"),
+        (14, "14th"),
+        (15, "15th"),
+        (16, "16th"),
+        (17, "17th"),
+        (18, "18th"),
+        (19, "19th"),
+        (20, "20th"),
+        (21, "21st"),
+        (22, "22nd"),
+        (23, "23rd"),
+        (24, "24th"),
+        (25, "25th"),
+        (26, "26th"),
+        (27, "27th"),
+        (28, "28th"),
+        (29, "29th"),
+        (30, "30th"),
+        (31, "31st"),
+    ],
+)
+def test_strftime_date_ordinal_for_every_possible_day(day, expected):
+    # January accepts the full 1-31 range, including every suffix edge.
+    assert strftime_date("%o", 2024, 1, day) == expected
+
+
+@pytest.mark.parametrize(
+    "fmt,expected",
+    [
+        ("", ""),
+        ("%%", "%"),
+        ("%%%%", "%%"),
+        ("%%Y", "%Y"),
+        ("%%%Y", "%2026"),
+        ("x%Yy", "x2026y"),
+        ("%Y%m%d", "20260705"),
+        ("%-Y|%-y|%-B|%-b|%-o|%-A|%-a|%-%", "2026|26|July|Jul|5th|Sunday|Sun|%"),
+        ("%--d", "%--d"),
+        ("%_", "%_"),
+        ("%💥", "%💥"),
+        ("before %Q after %-Z end", "before %Q after %-Z end"),
+    ],
+)
+def test_strftime_date_stresses_directive_scanner(fmt, expected):
+    assert strftime_date(fmt, 2026, 7, 5) == expected
+
+
+@pytest.mark.parametrize(
+    "year,expected_y,expected_short",
+    [
+        (1, "1", "01"),
+        (9, "9", "09"),
+        (99, "99", "99"),
+        (100, "100", "00"),
+        (1999, "1999", "99"),
+        (2000, "2000", "00"),
+        (2026, "2026", "26"),
+        (9999, "9999", "99"),
+    ],
+)
+def test_strftime_date_year_boundaries(year, expected_y, expected_short):
+    assert strftime_date("%Y|%y", year, 1, 1) == f"{expected_y}|{expected_short}"
+
+
+@pytest.mark.parametrize(
+    "year,month,day",
+    [
+        (2023, 2, 29),
+        (2024, 2, 30),
+        (2026, 0, 1),
+        (2026, 13, 1),
+        (2026, 1, 0),
+        (2026, 1, 32),
+    ],
+)
+def test_strftime_date_rejects_invalid_calendar_dates(year, month, day):
+    # Weekday calculation validates inputs before any directive is scanned,
+    # even for an empty or literal-only format.
+    with pytest.raises(ValueError):
+        strftime_date("literal only", year, month, day)
+
+
 # ---------------------------------------------------------------------------
 # parse_ymd — hand-rolled YYYY-MM-DD shape scan + datetime calendar check.
 # ---------------------------------------------------------------------------
