@@ -8,12 +8,12 @@ may differ.
 """
 
 import contextvars
-import datetime
 import json
 import re
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
 
+from .date_atom import render_date_atom
 from .youtube import youtube_watch_url
 
 # A resource-URL resolver: given (ref_type, value) it returns
@@ -129,141 +129,6 @@ def _ref_link(label: str, canonical: str, url: Optional[str]) -> str:
         title = canonical.replace('"', '\\"')
         return f'[{safe_label}]({url} "{title}")'
     return f"[{safe_label}]({canonical})"
-
-
-_DATE_MONTHS = (
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-)
-_DATE_MONTHS_FULL = (
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December",
-)
-# Indexed by Monday=0 (matches datetime.date.weekday()).
-_DATE_WEEKDAYS = (
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-)
-_DATE_WEEKDAYS_ABBR = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
-
-
-def _date_ordinal(d: int) -> str:
-    """1 → "1st", 2 → "2nd", 11 → "11th", 21 → "21st"."""
-    if 11 <= d % 100 <= 13:
-        suffix = "th"
-    else:
-        suffix = {1: "st", 2: "nd", 3: "rd"}.get(d % 10, "th")
-    return f"{d}{suffix}"
-
-
-def strftime_date(fmt: str, y: int, m: int, d: int) -> str:
-    """Render a calendar date through a small, fixed strftime subset.
-
-    Deliberately NOT ``datetime.strftime`` — that is locale- and
-    platform-dependent (`%-d` is a GNU extension, `%A` follows the process
-    locale). This hand-rolled subset hardcodes English names and a fixed
-    directive set so it is byte-identical with the TS twin ``strftimeDate`` in
-    frontend/src/lib/dateFormat.ts. Directives (a leading `-` drops zero-pad):
-    ``%Y %y %m %-m %B %b %d %-d %o %A %a %%``. ``%o`` is a paper extension —
-    the ordinal day (20th). Unknown directives pass through literally.
-    """
-    weekday = datetime.date(y, m, d).weekday()  # Monday=0
-    out: List[str] = []
-    i, n = 0, len(fmt)
-    while i < n:
-        ch = fmt[i]
-        if ch != "%":
-            out.append(ch)
-            i += 1
-            continue
-        i += 1
-        if i >= n:
-            out.append("%")
-            break
-        dash = fmt[i] == "-"
-        if dash:
-            i += 1
-            if i >= n:
-                out.append("%-")
-                break
-        spec = fmt[i]
-        i += 1
-        if spec == "Y":
-            out.append(str(y))
-        elif spec == "y":
-            out.append(f"{y % 100:02d}")
-        elif spec == "m":
-            out.append(str(m) if dash else f"{m:02d}")
-        elif spec == "B":
-            out.append(_DATE_MONTHS_FULL[m - 1])
-        elif spec == "b":
-            out.append(_DATE_MONTHS[m - 1])
-        elif spec == "d":
-            out.append(str(d) if dash else f"{d:02d}")
-        elif spec == "o":
-            out.append(_date_ordinal(d))
-        elif spec == "A":
-            out.append(_DATE_WEEKDAYS[weekday])
-        elif spec == "a":
-            out.append(_DATE_WEEKDAYS_ABBR[weekday])
-        elif spec == "%":
-            out.append("%")
-        else:
-            out.append(("%-" if dash else "%") + spec)  # unknown → literal
-    return "".join(out)
-
-
-def format_date_label(attrs: dict) -> str:
-    """Deterministic label for a `date` atom — the markdown link text.
-
-    The date portion is either a custom ``format`` (a strftime pattern rendered
-    by :func:`strftime_date`) or, absent one, the default "Jul 20, 2026" which
-    always includes the year (so serialization never depends on when it runs;
-    the chip's "omit current year" nicety stays client-side). A timed atom
-    appends the wall time in the *stored* zone as 12-hour "3:00 PM"
-    regardless of ``format`` — ``attrs.time`` already carries the author's wall
-    clock, so no zone conversion happens here. Keep byte-identical with the TS
-    twin ``formatDateLabel`` in frontend/src/lib/dateFormat.ts (shared
-    fixtures).
-    """
-    # @feat date: deterministic markdown-label render (twin of dateFormat.ts)
-    year_s, month_s, day_s = (attrs.get("date") or "").split("-")
-    y, m, d = int(year_s), int(month_s), int(day_s)
-    fmt = attrs.get("format")
-    label = strftime_date(fmt, y, m, d) if fmt else f"{_DATE_MONTHS[m - 1]} {d}, {y}"
-    time = attrs.get("time")
-    if time:
-        hh, mm = time.split(":")
-        hour = int(hh)
-        h12 = hour % 12 or 12
-        ampm = "AM" if hour < 12 else "PM"
-        label += f" {h12}:{mm} {ampm}"
-    return label
 
 
 def _prefix_quote_lines(text: str) -> str:
@@ -903,26 +768,13 @@ def _render_inlines(nodes: list) -> str:
             # a deterministic render of the attrs — always with the year and
             # the wall time in the *stored* zone — so a serialize never depends
             # on when it runs; the parser ignores the label and reads the URI.
-            attrs = n.get("attrs") or {}
-            date = str(attrs.get("date") or "")
-            time = attrs.get("time")
-            tz = attrs.get("tz")
-            fmt = attrs.get("format")
-            path = f"{date}T{time}" if time else date
-            params = []
-            # tz is only meaningful with a time (a calendar date is the same
-            # for everyone); a stray tz on a date-only atom is dropped.
-            if time and tz:
-                params.append(f"tz={quote(str(tz), safe='')}")
-            # A custom display format rides as a URL-encoded `fmt` query param
-            # (valid on date-only *and* timed atoms). The `%` directives encode
-            # to `%25…`; the parser `parse_qs`-decodes them back.
-            if fmt:
-                params.append(f"fmt={quote(str(fmt), safe='')}")
-            canonical = f"paper:/date/{path}"
-            if params:
-                canonical += "?" + "&".join(params)
-            out.append(_ref_link(format_date_label(attrs), canonical, None))
+            # `render_date_atom` (date_atom.py) validates the untrusted attrs
+            # and returns None to drop a structurally-invalid atom rather than
+            # crash. All the date-shaped logic lives there; markdown.py just
+            # wires the atom into the inline stream.
+            rendered = render_date_atom(n.get("attrs") or {})
+            if rendered is not None:
+                out.append(rendered)
         elif (
             t == "inline_embed"
         ):  # @feat inline-embed: serialize atom to a paper:/embed/<kind>/<ref> link

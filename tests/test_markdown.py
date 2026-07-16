@@ -748,164 +748,20 @@ def test_tag_percent_encodes_nested_slug():
 
 
 # ---------------------------------------------------------------------------
-# date atom — serializer + deterministic label. The label fixtures are shared
-# byte-for-byte with frontend/src/lib/__tests__/dateFormat.test.ts (keep the two
-# tables in sync when either label renderer changes).
+# date atom — serialized via date_atom.render_date_atom (unit tests live in
+# tests/test_date_atom.py). One integration smoke test here proves the
+# markdown serializer wires the atom in and drops an invalid one.
 # ---------------------------------------------------------------------------
 
-# (attrs, expected label) — mirrored in dateFormat.test.ts
-DATE_LABEL_FIXTURES = [
-    ({"date": "2026-07-20", "time": None, "tz": None}, "Jul 20, 2026"),
-    ({"date": "2026-01-05", "time": None, "tz": None}, "Jan 5, 2026"),
-    ({"date": "2026-12-25", "time": None, "tz": None}, "Dec 25, 2026"),
-    ({"date": "1999-11-02", "time": None, "tz": None}, "Nov 2, 1999"),
-    (
-        {"date": "2026-07-20", "time": "15:00", "tz": "America/Los_Angeles"},
-        "Jul 20, 2026 3:00 PM",
-    ),
-    ({"date": "2026-07-20", "time": "00:00", "tz": "UTC"}, "Jul 20, 2026 12:00 AM"),
-    ({"date": "2026-07-20", "time": "12:00", "tz": "UTC"}, "Jul 20, 2026 12:00 PM"),
-    (
-        {"date": "2026-07-20", "time": "09:05", "tz": "Europe/London"},
-        "Jul 20, 2026 9:05 AM",
-    ),
-    (
-        {"date": "2026-07-20", "time": "23:30", "tz": "Asia/Tokyo"},
-        "Jul 20, 2026 11:30 PM",
-    ),
-]
 
-
-# @feat date: label helper is deterministic + matches the TS twin fixtures
-@pytest.mark.parametrize("attrs,expected", DATE_LABEL_FIXTURES)
-def test_format_date_label_matches_fixtures(attrs, expected):
-    from datasette_paper.markdown import format_date_label
-
-    assert format_date_label(attrs) == expected
-
-
-def test_date_only_serializes_as_paper_date_link():
-    md = doc_to_markdown(
-        _doc(_para(_text("due "), {"type": "date", "attrs": {"date": "2026-07-20"}}))
+def test_date_atom_serializes_and_drops_invalid_through_doc_to_markdown():
+    good = {"type": "date", "attrs": {"date": "2026-07-20"}}
+    bad = {"type": "date", "attrs": {"date": "2026-02-30"}}
+    assert doc_to_markdown(_doc(_para(_text("on "), good))) == (
+        "on [Jul 20, 2026](paper:/date/2026-07-20)\n"
     )
-    assert md == "due [Jul 20, 2026](paper:/date/2026-07-20)\n"
-
-
-def test_timed_date_serializes_with_tz_query():
-    md = doc_to_markdown(
-        _doc(
-            _para(
-                {
-                    "type": "date",
-                    "attrs": {
-                        "date": "2026-07-20",
-                        "time": "15:00",
-                        "tz": "America/Los_Angeles",
-                    },
-                }
-            )
-        )
-    )
-    # tz rides as a URL-encoded query param (the `/` in the zone name can't live
-    # in the path); the label shows the wall time in the stored zone.
-    assert md == (
-        "[Jul 20, 2026 3:00 PM](paper:/date/2026-07-20T15:00?tz=America%2FLos_Angeles)\n"
-    )
-
-
-def test_timed_date_without_tz_omits_query():
-    md = doc_to_markdown(
-        _doc(_para({"type": "date", "attrs": {"date": "2026-07-20", "time": "09:05"}}))
-    )
-    assert md == "[Jul 20, 2026 9:05 AM](paper:/date/2026-07-20T09:05)\n"
-
-
-def test_date_only_drops_stray_tz():
-    # tz is only meaningful with a time; a date-only atom never emits one.
-    md = doc_to_markdown(
-        _doc(
-            _para(
-                {
-                    "type": "date",
-                    "attrs": {"date": "2026-07-20", "time": None, "tz": "UTC"},
-                }
-            )
-        )
-    )
-    assert md == "[Jul 20, 2026](paper:/date/2026-07-20)\n"
-
-
-# strftime_date fixtures — mirrored byte-for-byte in dateFormat.test.ts.
-# 2026-07-20 is a Monday (matches the dateParse NOW=2026-07-14 Tuesday fixture).
-STRFTIME_FIXTURES = [
-    ("%Y-%m-%d", 2026, 7, 20, "2026-07-20"),
-    ("%b %-d, %Y", 2026, 7, 20, "Jul 20, 2026"),
-    ("%B %-d, %Y", 2026, 7, 5, "July 5, 2026"),
-    ("%A, %B %o", 2026, 7, 20, "Monday, July 20th"),
-    ("%a %b %-d", 2026, 7, 20, "Mon Jul 20"),
-    ("%m/%d/%y", 2026, 7, 5, "07/05/26"),
-    ("%o", 2026, 7, 1, "1st"),
-    ("%o", 2026, 7, 2, "2nd"),
-    ("%o", 2026, 7, 3, "3rd"),
-    ("%o", 2026, 7, 11, "11th"),
-    ("%o", 2026, 7, 21, "21st"),
-    ("100%% sure on the %-d", 2026, 7, 4, "100% sure on the 4"),
-    ("%Q", 2026, 7, 4, "%Q"),  # unknown directive passes through literally
-]
-
-
-# @feat date: strftime subset renders identically to the TS twin
-@pytest.mark.parametrize("fmt,y,m,d,expected", STRFTIME_FIXTURES)
-def test_strftime_date_matches_fixtures(fmt, y, m, d, expected):
-    from datasette_paper.markdown import strftime_date
-
-    assert strftime_date(fmt, y, m, d) == expected
-
-
-def test_format_date_label_uses_format_with_appended_time():
-    from datasette_paper.markdown import format_date_label
-
-    # The format styles the DATE; a time still auto-appends in the stored zone.
-    label = format_date_label(
-        {"date": "2026-07-20", "time": "15:00", "tz": "UTC", "format": "%A, %B %o"}
-    )
-    assert label == "Monday, July 20th 3:00 PM"
-
-
-def test_date_with_format_serializes_fmt_param():
-    md = doc_to_markdown(
-        _doc(
-            _para(
-                {
-                    "type": "date",
-                    "attrs": {"date": "2026-07-20", "time": None, "format": "%Y-%m-%d"},
-                }
-            )
-        )
-    )
-    assert md == "[2026-07-20](paper:/date/2026-07-20?fmt=%25Y-%25m-%25d)\n"
-
-
-def test_timed_date_with_tz_and_format_serializes_both_params():
-    md = doc_to_markdown(
-        _doc(
-            _para(
-                {
-                    "type": "date",
-                    "attrs": {
-                        "date": "2026-07-20",
-                        "time": "15:00",
-                        "tz": "America/Los_Angeles",
-                        "format": "%b %-d",
-                    },
-                }
-            )
-        )
-    )
-    assert md == (
-        "[Jul 20 3:00 PM]"
-        "(paper:/date/2026-07-20T15:00?tz=America%2FLos_Angeles&fmt=%25b%20%25-d)\n"
-    )
+    # A structurally-invalid date is dropped; the surrounding text survives.
+    assert doc_to_markdown(_doc(_para(_text("x "), bad))) == "x\n"
 
 
 def test_inline_embed_serializes_as_paper_embed_scheme_link():
