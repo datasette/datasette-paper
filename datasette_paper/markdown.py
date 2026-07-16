@@ -14,6 +14,7 @@ from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
 
 from .date_atom import render_date_atom
+from .pm_schema import is_safe_href, is_safe_image_src
 from .youtube import youtube_watch_url
 
 # A resource-URL resolver: given (ref_type, value) it returns
@@ -621,6 +622,12 @@ def _escape_image_src(src: str) -> str:
     any src containing whitespace or a paren (escaping literal ``<``/``>``);
     otherwise emit it bare and untouched so plain URLs are byte-identical.
     """
+    # The src attr is untrusted; neutralize an unsafe scheme to ``#`` (mirroring
+    # the render sink's ``safe_image_src``) before any structural escaping.
+    # ``data:image/...`` srcs stay allowed by ``is_safe_image_src``, so inline
+    # pasted images are unaffected.
+    if not is_safe_image_src(src):
+        src = "#"
     if any(ch.isspace() for ch in src) or "(" in src or ")" in src:
         inner = src.replace("\\", "\\\\").replace("<", "\\<").replace(">", "\\>")
         return f"<{inner}>"
@@ -674,6 +681,13 @@ def _mark_delims(mark: dict) -> tuple[str, str]:
     if t == "link":
         attrs = mark.get("attrs") or {}
         href = attrs.get("href", "")
+        # The href attr is untrusted (a crafted step / pre-guard snapshot can
+        # plant a `javascript:`/`data:text/html` scheme). Serialize is the third
+        # trust boundary (alongside the render sink and the step guard): drop the
+        # link mark on an unsafe scheme and let the wrapped text serialize
+        # unmarked — matching how the parser drops an empty href.
+        if not is_safe_href(href):
+            return "", ""
         title = attrs.get("title")
         close = f']({href} "{title}")' if title else f"]({href})"
         return "[", close

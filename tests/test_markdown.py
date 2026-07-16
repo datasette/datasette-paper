@@ -1506,3 +1506,77 @@ def test_value_fallback_is_dropped_on_serialize():
     )
     assert md == "${{revenue.total | currency:USD}}\n"
     assert "N/A" not in md
+
+
+# ---------------------------------------------------------------------------
+# Scheme sanitization at serialize time (md-harden ticket 01). The link
+# href and image src attrs are untrusted (a crafted step / pre-guard
+# snapshot can plant a `javascript:`/`data:text/html` scheme); the
+# serializer is the third trust boundary, alongside the render sink and the
+# step-ingest guard, and routes both through the pm_schema allowlist.
+# ---------------------------------------------------------------------------
+
+
+def _link(text, href, title=None):
+    attrs = {"href": href}
+    if title is not None:
+        attrs["title"] = title
+    return _text(text, {"type": "link", "attrs": attrs})
+
+
+@pytest.mark.parametrize(
+    "href",
+    [
+        "javascript:alert(document.cookie)",
+        "vbscript:msgbox(1)",
+        "data:text/html,<script>alert(1)</script>",
+    ],
+)
+def test_unsafe_link_scheme_drops_mark_keeps_text(href):
+    # The link mark is dropped, but the wrapped text still serializes unmarked
+    # (mirrors the parser dropping an empty href).
+    md = doc_to_markdown(_doc(_para(_link("click me", href))))
+    assert md == "click me\n"
+    for scheme in ("javascript:", "vbscript:", "data:text/html"):
+        assert scheme not in md
+
+
+def test_unsafe_link_scheme_survives_control_char_obfuscation():
+    # `java\tscript:` normalizes to `javascript:` in is_safe_href, so it is
+    # still dropped rather than smuggled past the colon check.
+    md = doc_to_markdown(_doc(_para(_link("x", "java\tscript:alert(1)"))))
+    assert md == "x\n"
+    assert "script" not in md.replace("x\n", "")
+
+
+def test_safe_link_scheme_roundtrips_unchanged():
+    md = doc_to_markdown(_doc(_para(_link("docs", "https://example.com"))))
+    assert md == "[docs](https://example.com)\n"
+
+
+def test_unsafe_image_src_scheme_neutralized_to_hash():
+    md = doc_to_markdown(_doc(_para(_img("javascript:alert(1)", alt="x"))))
+    assert "javascript:" not in md
+    assert md == "![x](#)\n"
+
+
+def test_unsafe_image_data_html_src_neutralized():
+    md = doc_to_markdown(
+        _doc(_para(_img("data:text/html,<script>alert(1)</script>", alt="x")))
+    )
+    assert "data:text/html" not in md
+    assert "<script>" not in md
+    assert md == "![x](#)\n"
+
+
+def test_data_image_src_is_preserved():
+    # Regression guard: inline pasted images (data:image/...) are allowlisted
+    # by is_safe_image_src and must NOT be neutralized.
+    src = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABAQAAAAA"
+    md = doc_to_markdown(_doc(_para(_img(src, alt="pic"))))
+    assert md == f"![pic]({src})\n"
+
+
+def test_safe_image_http_src_roundtrips_unchanged():
+    md = doc_to_markdown(_doc(_para(_img("https://x/y.png", alt="a"))))
+    assert md == "![a](https://x/y.png)\n"
