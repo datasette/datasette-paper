@@ -97,6 +97,40 @@ def test_ordered_list_with_start_attr():
     assert md == "3. third\n4. fourth\n"
 
 
+@pytest.mark.parametrize("bad_level", ["x", None, [1], -3, 99])
+def test_heading_level_coerces_bad_attr_without_raising(bad_level):
+    """A planted non-numeric/None/container/out-of-range level (any JSON
+    value can land here — attr specs carry no type validation) must clamp
+    to 1-6 instead of crashing `int()`."""
+    md = doc_to_markdown(
+        _doc(
+            {"type": "heading", "attrs": {"level": bad_level}, "content": [_text("h")]}
+        )
+    )
+    hashes = md.split(" ", 1)[0]
+    assert 1 <= len(hashes) <= 6
+    assert set(hashes) == {"#"}
+
+
+@pytest.mark.parametrize("bad_order", ["x", None, 0, -5])
+def test_ordered_list_order_coerces_bad_attr_without_raising(bad_order):
+    """A planted non-numeric/None/zero/negative order must floor at 1
+    instead of crashing `int()`."""
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "ordered_list",
+                "attrs": {"order": bad_order},
+                "content": [
+                    {"type": "list_item", "content": [_para(_text("first"))]},
+                    {"type": "list_item", "content": [_para(_text("second"))]},
+                ],
+            }
+        )
+    )
+    assert md == "1. first\n2. second\n"
+
+
 def test_blockquote_prefixes_each_line():
     md = doc_to_markdown(
         _doc(
@@ -461,6 +495,23 @@ def test_extract_tasks_section_empty_before_any_heading():
     tasks = extract_tasks(doc)
     assert tasks[0]["section"] == []
     assert tasks[1]["section"] == [{"level": 2, "text": "Later"}]
+
+
+@pytest.mark.parametrize("bad_level", ["x", None, [1], -3, 99])
+def test_extract_tasks_heading_coerces_bad_level_without_raising(bad_level):
+    """`extract_tasks` walks the same untrusted doc as the serializer — a
+    planted bad `level` must clamp instead of crashing `int()`."""
+    from datasette_paper.markdown import extract_tasks
+
+    doc = _doc(
+        {"type": "heading", "attrs": {"level": bad_level}, "content": [_text("Sec")]},
+        {"type": "task_list", "content": [_task_item("a")]},
+    )
+    tasks = extract_tasks(doc)
+    assert len(tasks) == 1
+    [section_entry] = tasks[0]["section"]
+    assert 1 <= section_entry["level"] <= 6
+    assert section_entry["text"] == "Sec"
 
 
 def test_group_tasks_by_section():
