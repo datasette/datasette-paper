@@ -4,8 +4,9 @@
  * Mirrors the `mentionSuggest.ts` suggest skeleton (one PluginKey, a
  * `state.apply` that handles `setMeta` then recomputes from doc+selection, a
  * `decorations` prop, and a `Plugin.view` popup) with three differences:
- *   - Trigger is `/` gated to an EMPTY textblock at doc depth 1 (a `/`
- *     mid-sentence never fires) — the block must contain only the `/query`.
+ *   - Trigger is `/` at block start or after whitespace, in any textblock
+ *     (so `http://`, `3/4`, `path/to` never fire). Context correctness lives
+ *     in per-command `enabled` predicates, not in the trigger.
  *   - Results are a STATIC, filtered command registry (no fetch).
  *   - Commit clears the `/query` text first, then runs an arbitrary command.
  *
@@ -24,9 +25,10 @@ import {
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { setBlockType, wrapIn } from "prosemirror-commands";
 import { wrapInList } from "prosemirror-schema-list";
+import type { NodeType } from "prosemirror-model";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
-import { insertTable } from "./tables";
+import { insertTable, findTable } from "./tables";
 import { insertToc } from "./tocView";
 import { insertSqlBlock, insertSource } from "./sqlQuery";
 import { insertCallout } from "./callout";
@@ -81,9 +83,10 @@ const INACTIVE: SlashState = { active: false, query: "", from: -1, index: 0 };
 
 export const slashKey = new PluginKey<SlashState>("slashMenu");
 
-// `/` at the very start of the block, followed by a word-char query, anchored
-// to the text-before-cursor. The empty-block guard lives in recompute().
-const TRIGGER = /^\/(\w*)$/;
+// `/` at block start or after whitespace, followed by a word-char query,
+// anchored to the text before the cursor. Whitespace-or-start before the `/`
+// is what keeps http://, 3/4, path/to from firing.
+const TRIGGER = /(?:^|\s)\/(\w*)$/;
 
 function clampIndex(index: number, len: number): number {
   if (len <= 0) return 0;
@@ -142,18 +145,11 @@ function recompute(prev: SlashState, newState: EditorState): SlashState {
     return { ...INACTIVE, dismissedFrom: prev.dismissedFrom };
   }
   const $cursor = sel.$cursor;
-  // Gate to an empty top-level paragraph (mirrors canInsertTable's guard).
-  if ($cursor.depth !== 1 || $cursor.parent.type !== schema.nodes.paragraph) {
-    return INACTIVE;
-  }
-  // Nothing may follow the cursor in the block — the block is just `/query`.
-  if ($cursor.parent.content.size !== $cursor.parentOffset) return INACTIVE;
-
   const textBefore = $cursor.parent.textBetween(0, $cursor.parentOffset, undefined, "￼");
   const m = TRIGGER.exec(textBefore);
   if (!m) return INACTIVE;
 
-  const from = sel.from - m[0].length; // doc pos of the `/`
+  const from = sel.from - m[1].length - 1; // doc pos of the `/` (query + slash)
   if (prev.dismissedFrom !== undefined && prev.dismissedFrom === from) {
     return { ...INACTIVE, dismissedFrom: prev.dismissedFrom };
   }
@@ -449,6 +445,37 @@ function runCommand(cmd: Command): (view: EditorView) => void {
   return (view) => cmd(view.state, view.dispatch, view);
 }
 
+/** `insertCallout` refuses anywhere but an EMPTY top-level paragraph, and it
+ *  will still refuse at commit time if clearing the `/query` leaves text
+ *  behind. `enabled()` runs while the `/query` is still present, so "empty"
+ *  here means the query span is the block's entire content. */
+function calloutSlashEnabled(state: EditorState): boolean {
+  if (insertCallout("note")(state)) return true;
+  const ss = slashKey.getState(state);
+  if (!ss?.active) return false;
+  const $from = state.selection.$from;
+  if ($from.depth !== 1 || $from.parent.type !== schema.nodes.paragraph) return false;
+  return ss.from === $from.start() && $from.parentOffset === $from.parent.content.size;
+}
+
+/** True iff `nodeType` fits as a sibling of the current textblock, outside any
+ *  list item or table. The content-spec check alone is too permissive for the
+ *  "no table inside a task list / table cell" product rule — `task_item` is
+ *  `paragraph block*` and cells are `block+`, so they'd accept one — but the
+ *  markdown serializer can't round-trip these blocks inside list/table
+ *  containers, so the item is disabled there rather than lifted out. */
+function canInsertBlockHere(state: EditorState, nodeType: NodeType): boolean {
+  const $from = state.selection.$from;
+  const { list_item, task_item, table } = schema.nodes;
+  for (let d = $from.depth - 1; d > 0; d--) {
+    const t = $from.node(d).type;
+    if (t === list_item || t === task_item || t === table) return false;
+  }
+  const container = $from.node($from.depth - 1);
+  const index = $from.indexAfter($from.depth - 1);
+  return container.canReplaceWith(index, index, nodeType);
+}
+
 /** Build the default command registry. Dialog-backed commands use callbacks. */
 export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand[] {
   const { heading, code_block, blockquote, bullet_list, ordered_list, task_list, horizontal_rule } =
@@ -461,6 +488,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "h1",
       group: "styling",
       run: runCommand(setBlockType(heading, { level: 1 })),
+      enabled: (state) => setBlockType(heading, { level: 1 })(state),
     },
     {
       id: "h2",
@@ -469,6 +497,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "h2",
       group: "styling",
       run: runCommand(setBlockType(heading, { level: 2 })),
+      enabled: (state) => setBlockType(heading, { level: 2 })(state),
     },
     {
       id: "h3",
@@ -477,6 +506,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "h3",
       group: "styling",
       run: runCommand(setBlockType(heading, { level: 3 })),
+      enabled: (state) => setBlockType(heading, { level: 3 })(state),
     },
     {
       id: "bullet_list",
@@ -485,6 +515,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "listUl",
       group: "styling",
       run: runCommand(wrapInList(bullet_list)),
+      enabled: (state) => wrapInList(bullet_list)(state),
     },
     {
       id: "ordered_list",
@@ -493,6 +524,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "listOl",
       group: "styling",
       run: runCommand(wrapInList(ordered_list)),
+      enabled: (state) => wrapInList(ordered_list)(state),
     },
     {
       id: "task_list",
@@ -501,6 +533,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "taskList",
       group: "styling",
       run: runCommand(wrapInList(task_list)),
+      enabled: (state) => wrapInList(task_list)(state),
     },
     {
       id: "blockquote",
@@ -509,6 +542,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "quote",
       group: "styling",
       run: runCommand(wrapIn(blockquote)),
+      enabled: (state) => wrapIn(blockquote)(state),
     },
     {
       // @feat callout: slash entry inserts a note-kind callout (styling group)
@@ -530,6 +564,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "infoCircle",
       group: "styling",
       run: runCommand(insertCallout("note")),
+      enabled: calloutSlashEnabled,
     },
     {
       // @feat date: slash entry inserts today's date chip + opens its popup
@@ -572,6 +607,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "codeBlock",
       group: "styling",
       run: runCommand(setBlockType(code_block)),
+      enabled: (state) => setBlockType(code_block)(state),
     },
     {
       id: "sql_block",
@@ -582,6 +618,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       // Inserts an empty block; the NodeView defaults the database and the
       // header <select> lets the user change it.
       run: runCommand(insertSqlBlock()),
+      enabled: (state) => canInsertBlockHere(state, schema.nodes.sql_block),
     },
     // The native Datasette embed, split into two picker entries — each opens the
     // shared dialog filtered to its resource kind. Provider sources still come
@@ -593,6 +630,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "table",
       group: "datasette",
       run: () => cb.openDatasetteEmbed?.(undefined, "table"),
+      enabled: (state) => canInsertBlockHere(state, schema.nodes.block_embed),
     },
     {
       id: "block_embed_database",
@@ -601,6 +639,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       icon: "database",
       group: "datasette",
       run: () => cb.openDatasetteEmbed?.(undefined, "database"),
+      enabled: (state) => canInsertBlockHere(state, schema.nodes.block_embed),
     },
     {
       id: "value",
@@ -622,6 +661,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       group: "datasette",
       // A named query that inline ${{name.column}} values reference.
       run: runCommand(insertSource()),
+      enabled: (state) => canInsertBlockHere(state, schema.nodes.source),
     },
     {
       id: "table",
@@ -629,9 +669,9 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       keywords: ["grid", "table", "spreadsheet", "data"],
       icon: "table",
       group: "media",
-      // The slash menu only fires in an empty top-level paragraph, so a table
-      // is always insertable here — no canInsertTable gate needed.
       run: runCommand(insertTable(3, 3)),
+      // No table-in-table (findTable) and the container must accept one.
+      enabled: (state) => !findTable(state) && canInsertBlockHere(state, schema.nodes.table),
     },
     {
       id: "toc",
@@ -642,9 +682,8 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       // it would outrank the real Table command for `/table` (styling sorts
       // before media). In `media`, the earlier-registered Table command wins.
       group: "media",
-      // Slash menu only fires in an empty top-level paragraph, so insertion is
-      // always valid here (same as table/divider) — no gate needed.
       run: runCommand(insertToc),
+      enabled: (state) => canInsertBlockHere(state, schema.nodes.toc),
     },
     {
       id: "divider",
@@ -657,6 +696,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
           view.state.tr.replaceSelectionWith(horizontal_rule.create()).scrollIntoView(),
         );
       },
+      enabled: (state) => canInsertBlockHere(state, horizontal_rule),
     },
     {
       id: "image",

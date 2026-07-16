@@ -55,7 +55,7 @@ describe("slash trigger gating", () => {
     expect(slashKey.getState(state)!.query).toBe("head");
   });
 
-  it("does not fire mid-sentence", () => {
+  it("does not fire mid-word (no whitespace before the slash)", () => {
     const state = stateWith(
       [schema.node("paragraph", null, [schema.text("hello")])],
       6,
@@ -64,7 +64,48 @@ describe("slash trigger gating", () => {
     expect(slashKey.getState(state)!.active).toBe(false);
   });
 
-  it("does not fire in a nested block (list item)", () => {
+  it("does not fire after http:/ (slash-before-slash)", () => {
+    const state = stateWith(
+      [schema.node("paragraph", null, [schema.text("http:/")])],
+      7,
+      "/",
+    );
+    expect(slashKey.getState(state)!.active).toBe(false);
+  });
+
+  it("does not fire inside a/b or 3/4", () => {
+    for (const prefix of ["a", "3"]) {
+      const state = stateWith(
+        [schema.node("paragraph", null, [schema.text(prefix)])],
+        prefix.length + 1,
+        "/4",
+      );
+      expect(slashKey.getState(state)!.active).toBe(false);
+    }
+  });
+
+  it("does not fire on a non-empty selection (no $cursor)", () => {
+    const doc = schema.node("doc", null, [
+      schema.node("paragraph", null, [schema.text("/ab")]),
+    ]);
+    let state = EditorState.create({ doc, plugins: [createSlashSuggestPlugin(commands)] });
+    state = state.apply(state.tr.setSelection(TextSelection.create(state.doc, 1, 4)));
+    expect(slashKey.getState(state)!.active).toBe(false);
+  });
+
+  it("fires mid-sentence after a space", () => {
+    const state = stateWith(
+      [schema.node("paragraph", null, [schema.text("hello ")])],
+      7,
+      "/",
+    );
+    const ss = slashKey.getState(state)!;
+    expect(ss.active).toBe(true);
+    expect(ss.query).toBe("");
+    expect(ss.from).toBe(7); // doc pos of the `/`, right after "hello "
+  });
+
+  it("fires in a nested block (list item)", () => {
     const state = stateWith(
       [
         schema.node("bullet_list", null, [
@@ -74,7 +115,55 @@ describe("slash trigger gating", () => {
       3,
       "/",
     );
-    expect(slashKey.getState(state)!.active).toBe(false);
+    expect(slashKey.getState(state)!.active).toBe(true);
+  });
+
+  it("fires in a task list item", () => {
+    const state = stateWith(
+      [
+        schema.node("task_list", null, [
+          schema.node("task_item", null, [schema.node("paragraph")]),
+        ]),
+      ],
+      3,
+      "/",
+    );
+    expect(slashKey.getState(state)!.active).toBe(true);
+  });
+
+  it("fires in a table cell", () => {
+    const state = stateWith(
+      [
+        schema.node("table", null, [
+          schema.node("table_row", null, [
+            schema.node("table_cell", null, [schema.node("paragraph")]),
+          ]),
+        ]),
+      ],
+      4,
+      "/",
+    );
+    expect(slashKey.getState(state)!.active).toBe(true);
+  });
+
+  it("fires in a blockquote and a callout", () => {
+    const quote = stateWith(
+      [schema.node("blockquote", null, [schema.node("paragraph")])],
+      2,
+      "/",
+    );
+    expect(slashKey.getState(quote)!.active).toBe(true);
+    const callout = stateWith(
+      [
+        schema.node("callout", null, [
+          schema.node("callout_title"),
+          schema.node("paragraph"),
+        ]),
+      ],
+      4,
+      "/",
+    );
+    expect(slashKey.getState(callout)!.active).toBe(true);
   });
 
   it("closes when a space breaks the query", () => {
@@ -125,6 +214,80 @@ describe("filterSlashCommands", () => {
     ];
     const state = stateWith([schema.node("paragraph")], 1, "/", custom);
     expect(filterSlashCommands(custom, state, "").map((c) => c.id)).toEqual(["on"]);
+  });
+});
+
+describe("enabled() context gating", () => {
+  const taskItemState = () =>
+    stateWith(
+      [
+        schema.node("task_list", null, [
+          schema.node("task_item", null, [schema.node("paragraph")]),
+        ]),
+      ],
+      3,
+      "/",
+    );
+  const tableCellState = () =>
+    stateWith(
+      [
+        schema.node("table", null, [
+          schema.node("table_row", null, [
+            schema.node("table_cell", null, [schema.node("paragraph")]),
+          ]),
+        ]),
+      ],
+      4,
+      "/",
+    );
+
+  it("offers table/toc/sql in a top-level empty paragraph", () => {
+    const state = stateWith([schema.node("paragraph")], 1, "/");
+    const ids = filterSlashCommands(commands, state, "").map((c) => c.id);
+    for (const id of ["table", "toc", "sql_block", "source", "divider"]) {
+      expect(ids).toContain(id);
+    }
+  });
+
+  it("hides table/toc/sql/embeds in a task list item", () => {
+    const ids = filterSlashCommands(commands, taskItemState(), "").map((c) => c.id);
+    for (const id of [
+      "table",
+      "toc",
+      "sql_block",
+      "source",
+      "block_embed_table",
+      "block_embed_database",
+    ]) {
+      expect(ids).not.toContain(id);
+    }
+  });
+
+  it("hides table/toc/sql in a table cell", () => {
+    const ids = filterSlashCommands(commands, tableCellState(), "").map((c) => c.id);
+    for (const id of ["table", "toc", "sql_block"]) {
+      expect(ids).not.toContain(id);
+    }
+  });
+
+  it("hides headings in a task item (schema forbids the transform)", () => {
+    const ids = filterSlashCommands(commands, taskItemState(), "").map((c) => c.id);
+    for (const id of ["h1", "h2", "h3"]) {
+      expect(ids).not.toContain(id);
+    }
+  });
+
+  it("keeps inline atoms (date) available in every context", () => {
+    for (const state of [
+      stateWith([schema.node("paragraph")], 1, "/"),
+      taskItemState(),
+      tableCellState(),
+    ]) {
+      const ids = filterSlashCommands(commands, state, "").map((c) => c.id);
+      expect(ids).toContain("date");
+      expect(ids).toContain("date_today");
+      expect(ids).toContain("value");
+    }
   });
 });
 
@@ -269,6 +432,31 @@ describe("commitSlashSelection", () => {
       if (n.type.name === "source") hasSource = true;
     });
     expect(hasSource).toBe(true);
+  });
+
+  it("preserves preceding text when committing mid-block (/today after 'hello ')", () => {
+    const { view, get } = fakeView(
+      stateWith([schema.node("paragraph", null, [schema.text("hello ")])], 7, "/today"),
+    );
+    const ok = commitSlashSelection(commands)(view.state, view.dispatch, view);
+    expect(ok).toBe(true);
+    const block = get().doc.firstChild!;
+    expect(block.type.name).toBe("paragraph");
+    // "/today" was cleared, "hello " survived, and a date atom sits at the caret.
+    expect(block.textContent).toBe("hello ");
+    expect(block.childCount).toBe(2);
+    expect(block.child(1).type.name).toBe("date");
+  });
+
+  it("leaves no stray empty paragraph when a block insert splits at end of text", () => {
+    const { view, get } = fakeView(
+      stateWith([schema.node("paragraph", null, [schema.text("hello ")])], 7, "/table"),
+    );
+    commitSlashSelection(commands)(view.state, view.dispatch, view);
+    const types = [] as string[];
+    get().doc.forEach((n) => types.push(n.type.name));
+    expect(types).toEqual(["paragraph", "table"]);
+    expect(get().doc.firstChild!.textContent).toBe("hello ");
   });
 
   it("Inline value command drops the ${{ trigger text", () => {
