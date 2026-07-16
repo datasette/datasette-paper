@@ -1632,3 +1632,102 @@ def test_normal_image_roundtrips_unchanged_through_parser():
     md = doc_to_markdown(doc)
     back = markdown_to_doc(md)
     assert back == doc
+
+
+# ---------------------------------------------------------------------------
+# Ticket 02 (md-harden): the six inline atoms (placeholder / paper_link / tag /
+# mention / inline_embed / value) build markdown straight from untrusted node
+# attrs. A non-str attr must never crash the serializer (drop the atom the way
+# render_date_atom does), and a newline in any attr must never break out of its
+# `{{...}}` / `[[...]]` / `[...]` / `${{...}}` construct to inject a top-level
+# block on the doc→md→doc round-trip. Mirrors the robustness cases in
+# tests/test_date_atom.py.
+# ---------------------------------------------------------------------------
+
+
+def _wrap(node):
+    """A doc whose single paragraph is `x <atom>` — the leading text proves the
+    surrounding content survives even when the atom itself is dropped."""
+    return _doc(_para(_text("x "), node))
+
+
+# name -> factory that plants a value in the atom's identity attr.
+_ATOM_FACTORIES = {
+    "placeholder": lambda v: {"type": "placeholder", "attrs": {"key": v}},
+    "paper_link": lambda v: {"type": "paper_link", "attrs": {"docId": v}},
+    "tag": lambda v: {"type": "tag", "attrs": {"tag": v}},
+    "mention": lambda v: {"type": "mention", "attrs": {"actorId": v}},
+    "inline_embed": lambda v: {"type": "inline_embed", "attrs": {"ref": v}},
+    "value": lambda v: {"type": "value", "attrs": {"source": v, "column": "c"}},
+}
+
+
+@pytest.mark.parametrize("atom", sorted(_ATOM_FACTORIES))
+@pytest.mark.parametrize("bad", [5, ["x"], None, {"k": "v"}])
+def test_inline_atom_non_str_attr_does_not_crash(atom, bad):
+    # @feat placeholder paper-link tag mention inline-embed value: a non-str
+    # identity attr must never crash the serializer (pre-harden a non-str hit
+    # quote()/str.startswith/"#"+tag and 500'd the export for the whole doc).
+    md = doc_to_markdown(_wrap(_ATOM_FACTORIES[atom](bad)))  # must not raise
+    assert isinstance(md, str)
+    assert md.startswith("x")  # the surrounding text always survives
+
+
+@pytest.mark.parametrize("atom", sorted(_ATOM_FACTORIES))
+def test_inline_atom_newline_cannot_inject_top_level_block(atom):
+    # @feat placeholder paper-link tag mention inline-embed value: a blank line
+    # in an atom's attr must not break out of its construct and inject a block.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    node = _ATOM_FACTORIES[atom]("x\n\n# INJECTED")
+    md = doc_to_markdown(_wrap(node))
+    assert not md.lstrip().startswith("#")  # no heading at the start of the atom
+    back = markdown_to_doc(md)
+    # The only top-level node is the paragraph; nothing was injected.
+    assert _top_level_types(back) == ["paragraph"]
+    assert not any(n["type"] == "heading" for n in back["content"])
+
+
+def test_value_format_arg_newline_cannot_inject():
+    # The format suffix args (from _encode_value_format) are equally untrusted:
+    # a newline in `currency` must not break out of the `${{...}}`.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    node = {
+        "type": "value",
+        "attrs": {
+            "source": "revenue",
+            "column": "total",
+            "format": {"kind": "currency", "currency": "USD\n\n# INJECTED"},
+        },
+    }
+    md = doc_to_markdown(_doc(_para(node)))
+    assert "\n" not in md.rstrip("\n")  # the whole atom stays on one line
+    back = markdown_to_doc(md)
+    assert not any(n["type"] == "heading" for n in back["content"])
+
+
+# --- round-trip regression: ordinary atoms still round-trip unchanged ---
+
+
+@pytest.mark.parametrize(
+    "node",
+    [
+        {"type": "placeholder", "attrs": {"key": "today"}},
+        {"type": "paper_link", "attrs": {"docId": 12}},
+        {"type": "tag", "attrs": {"tag": "roadmap"}},
+        {"type": "mention", "attrs": {"actorId": "alice"}},
+        {"type": "inline_embed", "attrs": {"ref": "/fixtures/facetable"}},
+        {
+            "type": "value",
+            "attrs": {"source": "revenue", "column": "total", "format": None},
+        },
+    ],
+)
+def test_ordinary_inline_atom_roundtrips_unchanged(node):
+    # @feat placeholder paper-link tag mention inline-embed value: an ordinary
+    # atom still serializes and re-parses to a stable markdown string.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    md = doc_to_markdown(_doc(_para(node)))
+    assert doc_to_markdown(markdown_to_doc(md)) == md  # stable round-trip
