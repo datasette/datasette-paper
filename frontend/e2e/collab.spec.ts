@@ -94,6 +94,7 @@ test("view mode disables editing and hides the toolbar", async ({ page }) => {
   await expectEditorContains(page, "hello world");
 });
 
+// @feat copy-markdown: e2e — menu click puts the doc's markdown on the clipboard
 test("Copy md button writes a markdown serialization to the clipboard", async ({
   page,
 }) => {

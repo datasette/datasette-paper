@@ -10,14 +10,16 @@
  * ~50k gzipped), so this module never imports it at runtime — callers pass
  * the dynamically-imported module into `buildMarkdownSerializer`.
  *
- * Deliberately NOT covered: the table family. Serializing a selection that
- * contains a table throws (prosemirror-markdown errors on a node type with
- * no rule), and both call sites catch and fall back — plain text for the
- * clipboard, a `false` return for the copy button.
+ * Every node and mark in the schema has a rule — prosemirror-markdown
+ * throws on a node type with no rule, which silently turned the copy
+ * button into "✗ Failed" for any doc holding an uncovered node (tables,
+ * then the date atom). A parity test in markdownSerializer.test.ts walks
+ * the schema and fails on the next uncovered node.
  */
 
 import type { Node as PMNode } from "prosemirror-model";
 import { clampCalloutKind } from "./schema";
+import { formatDateLabel, type DateAttrs } from "./dateFormat";
 import { encodeFormat, type ValueFormat } from "./formatValue";
 import { youtubeWatchUrl } from "./youtube";
 import { tildeEncode } from "./datasetteEmbed";
@@ -68,15 +70,130 @@ function escapeLabel(label: string): string {
   return label.replace(/\]/g, "\\]");
 }
 
+// ── date atom (mirror of date_atom.py's render_date_atom) ───────────────────
+
+// The `date` attrs are untyped in the schema, so validate the same way the
+// backend does before anything reaches the label or the URI: `date` must be a
+// real YYYY-MM-DD calendar date (atom dropped otherwise), `time` a real HH:MM
+// (treated as date-only otherwise).
+function validYmd(v: unknown): v is string {
+  if (typeof v !== "string") return false;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return (
+    dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d
+  );
+}
+function validHm(v: unknown): v is string {
+  if (typeof v !== "string") return false;
+  const m = /^(\d{2}):(\d{2})$/.exec(v);
+  return m !== null && Number(m[1]) < 24 && Number(m[2]) < 60;
+}
+
+// Twin of `escape_date_label` (date_atom.py): the label embeds the untrusted
+// `format` string verbatim, so collapse newline runs (a blank line inside
+// `[...]` closes the link) and backslash-escape the inline-markup set + link
+// brackets + `<`/`>`.
+const DATE_LABEL_ESCAPE = new Set("\\`*_[]<>");
+function escapeDateLabel(label: string): string {
+  let out = "";
+  let prevNewline = false;
+  for (const ch of label) {
+    if (ch === "\r" || ch === "\n") {
+      if (!prevNewline) {
+        out += " ";
+        prevNewline = true;
+      }
+      continue;
+    }
+    prevNewline = false;
+    if (DATE_LABEL_ESCAPE.has(ch)) out += "\\";
+    out += ch;
+  }
+  return out;
+}
+
 /**
  * Build the paper `MarkdownSerializer` from a loaded `prosemirror-markdown`
  * module. Cheap to call — no caching needed. Serialize with
  * `{ tightLists: true }` (see `serializeDoc`) — the backend emits tight
  * lists, and the prosemirror-markdown default is loose.
  */
+// @feat copy-markdown: the serializer behind the button — a rule per schema node
 export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
   const { defaultMarkdownSerializer, MarkdownSerializer } = m;
-  return new MarkdownSerializer(
+
+  // ── table family (mirror of markdown.py's _render_table) ──────────────────
+  // The whole pipe table is built as a string (not via per-row state.render)
+  // because GFM cells are single-line: cell content re-enters the serializer
+  // through a throwaway one-block doc, then flattens. The helpers close over
+  // `serializer` (declared below them) for that nested pass — safe because
+  // they only run at serialize time, after the const initializes.
+
+  // Inline markdown of one cell block — the client twin of the backend's
+  // `_render_inlines(block.content)`: the block wrapper is dropped and its
+  // inline content rides through a bare paragraph so marks still render. A
+  // non-inline container (a nested list — rare in a cell) degrades to its
+  // plain text, since its structure can't survive a single-line cell anyway.
+  function blockInlineMd(block: PMNode): string {
+    if (!block.inlineContent) return block.textContent;
+    const nodes = block.type.schema.nodes;
+    const doc = nodes.doc.create(null, nodes.paragraph.create(null, block.content));
+    return serializeDoc(serializer, doc);
+  }
+
+  function cellText(cell: PMNode): string {
+    const parts: string[] = [];
+    cell.forEach((block) => {
+      const s = blockInlineMd(block).trim();
+      if (s) parts.push(s);
+    });
+    // Escape pipes (the one char that breaks a GFM cell) and collapse
+    // newlines to spaces, mirroring the backend's cell_text.
+    return parts.join(" ").replace(/\|/g, "\\|").replace(/[\r\n]+/g, " ").trim();
+  }
+
+  // GFM pipe table: first row becomes the header iff every cell in it is a
+  // `table_header`, else an empty header is synthesised (GFM requires one).
+  // Rectangular-table assumption matches the backend (the editor exposes no
+  // merge). A named table is preceded by the out-of-band ```paper-table
+  // sidecar fence carrying `{"name": …}` — without it the name is silently
+  // dropped on the round-trip, breaking `/tables/{name}` addressing.
+  // @feat tables: client markdown serialization — GFM pipe table + paper-table name sidecar (mirrors markdown.py)
+  function renderTable(node: PMNode): string {
+    const rows: PMNode[] = [];
+    node.forEach((r) => rows.push(r));
+    if (!rows.length) return "";
+    const cellsOf = (row: PMNode) => {
+      const cs: PMNode[] = [];
+      row.forEach((c) => cs.push(c));
+      return cs;
+    };
+    const firstCells = cellsOf(rows[0]);
+    const headerFirst =
+      firstCells.length > 0 && firstCells.every((c) => c.type.name === "table_header");
+    const width = Math.max(...rows.map((r) => r.childCount));
+    const pad = (vs: string[]) => vs.concat(Array<string>(width - vs.length).fill(""));
+    const header = headerFirst ? pad(firstCells.map(cellText)) : Array<string>(width).fill("");
+    const body = headerFirst ? rows.slice(1) : rows;
+    const out = [
+      "| " + header.join(" | ") + " |",
+      "| " + Array<string>(width).fill("---").join(" | ") + " |",
+      ...body.map((r) => "| " + pad(cellsOf(r).map(cellText)).join(" | ") + " |"),
+    ];
+    const tableMd = out.join("\n");
+    const name = node.attrs.name as string | null;
+    if (name) {
+      // No blank line between the sidecar's closing fence and the table —
+      // the fence already ends the block and GFM still detects the table.
+      return "```paper-table\n" + sortedJson({ name }) + "\n```\n" + tableMd;
+    }
+    return tableMd;
+  }
+
+  const serializer = new MarkdownSerializer(
     {
       ...defaultMarkdownSerializer.nodes,
       // Our code_block carries `language`, not the default schema's `params`.
@@ -198,9 +315,56 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
         const config = (node.attrs.config ?? {}) as Record<string, unknown>;
         fence(state, node, "paper-toc", Object.keys(config).length ? sortedJson(config) : "");
       },
+      // `[label](paper:/date/<iso>[?tz=…][&fmt=…])` — twin of the backend's
+      // render_date_atom, including its validate-then-drop guard: a
+      // structurally invalid date emits nothing rather than a broken ref.
+      // (Query params use encodeURIComponent, not byte-identical to python's
+      // quote(safe='') for `!'()*` — the parser unquotes either.)
+      // @feat date: client markdown serialization — [label](paper:/date/…) link (mirrors render_date_atom)
+      date(state, node) {
+        const date = node.attrs.date;
+        if (!validYmd(date)) return;
+        const time = validHm(node.attrs.time) ? node.attrs.time : null;
+        const tzAttr = node.attrs.tz;
+        const tz = typeof tzAttr === "string" && tzAttr ? tzAttr : null;
+        const fmtAttr = node.attrs.format;
+        const fmt = typeof fmtAttr === "string" && fmtAttr ? fmtAttr : null;
+        const path = time ? `${date}T${time}` : date;
+        const params: string[] = [];
+        // tz is only meaningful with a time; a stray tz on a date-only atom
+        // is dropped.
+        if (time && tz) params.push(`tz=${encodeURIComponent(tz)}`);
+        if (fmt) params.push(`fmt=${encodeURIComponent(fmt)}`);
+        const canonical =
+          `paper:/date/${path}` + (params.length ? "?" + params.join("&") : "");
+        const label = escapeDateLabel(
+          formatDateLabel({ date, time, tz, format: fmt } as DateAttrs),
+        );
+        state.write(`[${label}](${canonical})`);
+      },
+      table(state, node) {
+        const tableMd = renderTable(node);
+        // state.text (not write) so a table inside a callout keeps the
+        // `> ` prefix on every line.
+        if (tableMd) state.text(tableMd, false);
+        state.closeBlock(node);
+      },
+      // Unreachable through `table` (renderTable consumes the whole subtree);
+      // kept so a row/cell that escapes its table in an open slice degrades
+      // to its content instead of throwing.
+      table_row(state, node) {
+        state.renderContent(node);
+      },
+      table_cell(state, node) {
+        state.renderContent(node);
+      },
+      table_header(state, node) {
+        state.renderContent(node);
+      },
     },
     defaultMarkdownSerializer.marks,
   );
+  return serializer;
 }
 
 /** Serialize a node with the paper house options (tight lists, matching the

@@ -105,6 +105,7 @@
     themeSubOpen = false;
   }
 
+  // @feat copy-markdown: menu item handler — drives the ✓ Copied / ✗ Failed pill
   async function handleCopy() {
     closeMenu();
     if (!copyMarkdown) return;

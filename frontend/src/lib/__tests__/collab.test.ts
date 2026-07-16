@@ -3001,7 +3001,7 @@ describe("clipboardTextSerializer markdown copy", () => {
     conn.close();
   });
 
-  it("falls through when the slice holds a node with no markdown rule (table)", async () => {
+  it("serializes a callout slice that also holds a table (every node has a rule)", async () => {
     const conn = await setupView();
     const view = conn.view!;
 
@@ -3016,7 +3016,7 @@ describe("clipboardTextSerializer markdown copy", () => {
     const text = view.someProp("clipboardTextSerializer", (f) =>
       f(sliceOf(callout, table), view),
     );
-    expect(text).toBeUndefined();
+    expect(text).toBe("> [!NOTE]\n> body\n\n|  |\n| --- |\n|  |");
 
     conn.close();
   });

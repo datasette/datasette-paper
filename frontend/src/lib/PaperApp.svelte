@@ -218,6 +218,7 @@
     resolve?.(docId);
   }
 
+  // @feat copy-markdown: serialize the live doc + clipboard write (the button's action)
   async function copyMarkdown(): Promise<boolean> {
     if (!view) return false;
     try {
@@ -231,7 +232,12 @@
       const md = serializeDoc(serializer, view.state.doc);
       await navigator.clipboard.writeText(md);
       return true;
-    } catch {
+    } catch (err) {
+      // Surface the cause — this catch spans the chunk load, the serializer
+      // (which throws on any schema node without a rule) and the clipboard
+      // write; swallowing it silently turned a missing serializer rule into
+      // an undebuggable "✗ Failed" pill once already.
+      console.error("Copy as markdown failed:", err);
       return false;
     }
   }

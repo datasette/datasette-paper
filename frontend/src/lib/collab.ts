@@ -940,8 +940,8 @@ function clipboardMarkdownParser(
 // `> [!KIND] Title` structure. Scoped to callout-bearing slices on purpose:
 // everything else keeps ProseMirror's default text (including `leafText`
 // behaviors like embed-copy-url). Returning "" falls through to that default,
-// which also covers the not-yet-loaded serializer and any node the client
-// serializer has no rule for (tables) — `serialize` throws and we fall back.
+// which also covers the not-yet-loaded serializer and a `serialize` throw
+// (e.g. an open slice whose boundary nodes violate a rule's assumptions).
 // @feat callout: copying a selection with a callout puts its markdown on the clipboard
 function clipboardMarkdownSerializer(content: Slice): string {
   if (!mdSerializer) return "";

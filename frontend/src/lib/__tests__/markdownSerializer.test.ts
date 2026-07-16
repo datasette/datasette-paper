@@ -146,10 +146,110 @@ describe("custom node rules (backend output shapes)", () => {
     expect(md(toc)).toBe("```paper-toc\n```");
   });
 
-  it("throws on a table (no rule) — callers catch and fall back", () => {
+});
+
+// @feat copy-markdown: parity guard — every schema node/mark has a serializer rule
+describe("schema ↔ serializer parity", () => {
+  // prosemirror-markdown throws at serialize time on any node type with no
+  // rule, which turns the whole "Copy as markdown" button into "✗ Failed"
+  // for every doc containing that node. This walks the schema so the next
+  // node added without a serializer rule fails here, not in production.
+  it("every schema node type has a serializer rule", () => {
+    const covered = new Set(Object.keys(serializer.nodes));
+    const missing = Object.keys(schema.nodes).filter(
+      (name) => name !== "doc" && !covered.has(name),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("every schema mark type has a serializer rule", () => {
+    const covered = new Set(Object.keys(serializer.marks));
+    const missing = Object.keys(schema.marks).filter((name) => !covered.has(name));
+    expect(missing).toEqual([]);
+  });
+});
+
+// @feat date: client serializer emits the backend's [label](paper:/date/…) shapes
+describe("date atom markdown serialization", () => {
+  const inP = (dateAttrs: Record<string, unknown>) =>
+    md(n.paragraph.create(null, [n.date.create(dateAttrs)]));
+
+  it("date-only atom: default label + bare iso path", () => {
+    expect(inP({ date: "2026-07-20" })).toBe("[Jul 20, 2026](paper:/date/2026-07-20)");
+  });
+
+  it("timed atom with tz: 12-hour label + T-joined path + tz param", () => {
+    expect(inP({ date: "2026-07-20", time: "15:00", tz: "America/Los_Angeles" })).toBe(
+      "[Jul 20, 2026 3:00 PM](paper:/date/2026-07-20T15:00?tz=America%2FLos_Angeles)",
+    );
+  });
+
+  it("custom format rides as the fmt param; tz without time is dropped", () => {
+    expect(inP({ date: "2026-07-20", tz: "UTC", format: "%Y-%m-%d" })).toBe(
+      "[2026-07-20](paper:/date/2026-07-20?fmt=%25Y-%25m-%25d)",
+    );
+  });
+
+  it("structurally invalid atoms emit nothing (mirror of the backend drop)", () => {
+    expect(inP({ date: "2026-02-30" })).toBe("");
+    expect(inP({ date: "not-a-date" })).toBe("");
+  });
+
+  it("invalid time degrades to date-only", () => {
+    expect(inP({ date: "2026-07-20", time: "25:99" })).toBe(
+      "[Jul 20, 2026](paper:/date/2026-07-20)",
+    );
+  });
+
+  it("markup in a custom-format label is escaped inert", () => {
+    expect(inP({ date: "2026-07-20", format: "*%Y*" })).toBe(
+      "[\\*2026\\*](paper:/date/2026-07-20?fmt=*%25Y*)",
+    );
+  });
+});
+
+// @feat tables: client serializer emits the backend's GFM pipe table (+ name sidecar)
+describe("table markdown serialization", () => {
+  const cell = (s: string) => n.table_cell.create(null, p(s));
+  const hcell = (s: string) => n.table_header.create(null, p(s));
+
+  it("header-first table becomes a GFM pipe table", () => {
     const table = n.table.create(null, [
-      n.table_row.create(null, [n.table_cell.createAndFill()!]),
+      n.table_row.create(null, [hcell("a"), hcell("b")]),
+      n.table_row.create(null, [cell("1"), cell("2")]),
     ]);
-    expect(() => md(table)).toThrow();
+    expect(md(table)).toBe("| a | b |\n| --- | --- |\n| 1 | 2 |");
+  });
+
+  it("no header row → synthesised empty header (GFM requires one)", () => {
+    const table = n.table.create(null, [
+      n.table_row.create(null, [cell("x"), cell("y")]),
+    ]);
+    expect(md(table)).toBe("|  |  |\n| --- | --- |\n| x | y |");
+  });
+
+  it("a named table is preceded by the paper-table sidecar fence", () => {
+    const table = n.table.create({ name: "sales" }, [
+      n.table_row.create(null, [hcell("h")]),
+      n.table_row.create(null, [cell("x")]),
+    ]);
+    expect(md(table)).toBe(
+      '```paper-table\n{"name":"sales"}\n```\n| h |\n| --- |\n| x |',
+    );
+  });
+
+  it("cell text keeps inline marks and escapes pipes", () => {
+    const bold = n.paragraph.create(null, schema.text("a|b", [schema.marks.strong.create()]));
+    const table = n.table.create(null, [
+      n.table_row.create(null, [n.table_cell.create(null, bold)]),
+    ]);
+    expect(md(table)).toBe("|  |\n| --- |\n| **a\\|b** |");
+  });
+
+  it("serializes alongside other blocks and inside a callout", () => {
+    const table = n.table.create(null, [n.table_row.create(null, [hcell("h")])]);
+    expect(md(p("before"), table)).toBe("before\n\n| h |\n| --- |");
+    const callout = n.callout.create({ kind: "note" }, [title("T"), table.copy(table.content)]);
+    expect(md(callout)).toBe("> [!NOTE] T\n> | h |\n> | --- |");
   });
 });
