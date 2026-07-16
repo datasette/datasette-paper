@@ -5,7 +5,11 @@
 
 from datasette_paper.markdown import doc_to_markdown
 from datasette_paper.markdown_parser import markdown_to_doc
-from datasette_paper.youtube import parse_youtube_url, youtube_watch_url
+from datasette_paper.youtube import (
+    is_valid_video_id,
+    parse_youtube_url,
+    youtube_watch_url,
+)
 
 
 ID = "dQw4w9WgXcQ"
@@ -72,3 +76,41 @@ def test_url_with_surrounding_text_is_not_an_embed():
 def test_parse_youtube_url_helper():
     assert parse_youtube_url(f"https://youtu.be/{ID}?t=42") == (ID, 42)
     assert parse_youtube_url("https://vimeo.com/1") is None
+
+
+def _text_paragraph(text):
+    return {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+
+
+def test_invalid_video_id_drops_the_atom_no_injection():
+    # @feat video-embed: videoId is an untrusted node attr (planted via a
+    # crafted step), not just a truthy check — a malformed id, including one
+    # with a newline, must drop the atom rather than let the newline inject
+    # a block after the bare URL line. A trailing paragraph pins that nothing
+    # from the dropped attr leaks into the output around it.
+    for bad_id in ("aaaa\n\n# H", "short", "waytoolongvideoid", 5, None):
+        doc = _doc(_video(video_id=bad_id), _text_paragraph("AFTER"))
+        md = doc_to_markdown(doc)
+        # The dropped block leaves nothing but its (empty) separator — no
+        # URL line, and none of the planted "# H" heading markup survives.
+        assert md.strip() == "AFTER", bad_id
+        assert "watch?v=" not in md
+        assert "# H" not in md
+        # Round-tripping never materializes an injected heading/video_embed
+        # from the dropped attr.
+        round_tripped = markdown_to_doc(md)
+        assert [n.get("type") for n in round_tripped["content"]] == ["paragraph"]
+
+
+def test_valid_video_id_still_emits_canonical_url():
+    # Regression: a well-formed 11-char id is unaffected by the new check.
+    assert (
+        doc_to_markdown(_doc(_video(video_id=ID)))
+        == f"https://www.youtube.com/watch?v={ID}\n"
+    )
+
+
+def test_is_valid_video_id_helper():
+    assert is_valid_video_id(ID) is True
+    for bad in ("aaaa\n\n# H", "short", "waytoolongvideoid", 5, None, ""):
+        assert is_valid_video_id(bad) is False

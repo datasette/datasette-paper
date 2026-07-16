@@ -14,6 +14,18 @@ from urllib.parse import parse_qs, urlsplit
 # An 11-char YouTube video id.
 _VIDEO_ID_RE = re.compile(r"^[\w-]{11}$")
 
+
+def is_valid_video_id(v) -> bool:
+    """True iff ``v`` is a well-formed 11-char YouTube video id.
+
+    Public so callers outside this module (``markdown.py``'s serializer)
+    can re-validate an untrusted ``videoId`` attr without reaching for the
+    private regex directly. A valid id contains no newline or other
+    URL-breaking char, so once validated it's safe to splice into
+    ``youtube_watch_url``'s output."""
+    return isinstance(v, str) and bool(_VIDEO_ID_RE.match(v))
+
+
 _HOSTS = {"youtube.com", "youtu.be", "youtube-nocookie.com"}
 
 _DURATION_RE = re.compile(r"^(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$", re.IGNORECASE)
