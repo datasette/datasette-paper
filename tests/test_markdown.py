@@ -257,6 +257,45 @@ def test_extract_tasks_finds_task_items_inside_callout():
     assert tasks[0]["depth"] > 0
 
 
+# --- callout (ticket 07 — title newlines collapse) ---
+
+
+# @feat callout: a newline (incl. a blank line) embedded in the title
+# collapses to a single space, so the marker line stays single-line and no
+# extra heading bleeds into the body on the round-trip.
+def test_callout_title_newline_collapses_to_single_space():
+    doc = _doc(_callout("note", "T\n\n# INJ", _para(_text("body"))))
+    md = doc_to_markdown(doc)
+    lines = md.splitlines()
+    assert lines[0] == "> [!NOTE] T # INJ"
+    assert lines[1] == "> body"
+    assert len(lines) == 2  # no extra quoted line for the injected heading
+
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    back = markdown_to_doc(md)
+    callout = back["content"][0]
+    assert callout["type"] == "callout"
+    title_node, *body = callout["content"]
+    assert title_node["type"] == "callout_title"
+    assert "".join(c["text"] for c in title_node["content"]) == "T # INJ"
+    # Body holds only the original paragraph -- no extra body heading.
+    assert len(body) == 1
+    assert body[0]["type"] == "paragraph"
+
+
+def test_callout_title_single_line_round_trips_unchanged():
+    doc = _doc(_callout("tip", "Deployment gotcha", _para(_text("Body"))))
+    md = doc_to_markdown(doc)
+    assert md.splitlines()[0] == "> [!TIP] Deployment gotcha"
+
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    back = markdown_to_doc(md)
+    title_node = back["content"][0]["content"][0]
+    assert "".join(c["text"] for c in title_node["content"]) == "Deployment gotcha"
+
+
 def test_code_block_fenced():
     md = doc_to_markdown(
         _doc(

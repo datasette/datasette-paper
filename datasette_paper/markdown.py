@@ -320,7 +320,14 @@ def _render_block(node: dict) -> str:
         title_node = content[0] if content else None
         title = ""
         if title_node is not None and title_node.get("type") == "callout_title":
-            title = _flatten_text(title_node.get("content") or []).strip()
+            # @feat callout: collapse all whitespace (incl. embedded newlines) to a
+            # single space — the title is single-line by construction, and
+            # `calloutTitleNode` in schema.ts renders it as a plain (non-`pre`)
+            # text node, so the browser already collapses runs of whitespace the
+            # same way. An un-collapsed newline would otherwise split the title
+            # across the `> [!KIND] ...` marker line and an extra quoted body
+            # line, corrupting the callout on the doc→md→doc round-trip.
+            title = " ".join(_flatten_text(title_node.get("content") or []).split())
         marker = f"[!{kind.upper()}]"
         # @feat callout: a collapsed callout gets the Obsidian `-` fold suffix
         if attrs.get("collapsed"):
