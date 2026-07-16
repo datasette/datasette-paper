@@ -1350,3 +1350,55 @@ def test_data_image_src_is_preserved():
 def test_safe_image_http_src_roundtrips_unchanged():
     md = doc_to_markdown(_doc(_para(_img("https://x/y.png", alt="a"))))
     assert md == "![a](https://x/y.png)\n"
+
+
+# ---------------------------------------------------------------------------
+# Newline breakout in image src/alt (md-harden ticket 06). A newline inside a
+# `<...>`-wrapped image destination — or a blank line inside the alt bracket —
+# breaks the image syntax on reparse and lets the trailing text re-parse as a
+# new top-level block. Assert the doc→md→doc round-trip never materializes an
+# injected top-level node, following the injection style of
+# tests/test_date_atom.py.
+# ---------------------------------------------------------------------------
+
+
+def _top_level_types(doc):
+    return [n["type"] for n in doc["content"]]
+
+
+@pytest.mark.parametrize(
+    "src",
+    [
+        "https://x/y.png\n\n# INJECTED",
+        "https://x/y.png\r\n\r\n# INJECTED",
+        "https://x/y\nb.png",
+    ],
+)
+def test_image_src_newline_cannot_inject_top_level_block(src):
+    from datasette_paper.markdown import _escape_image_src
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    assert "\n" not in _escape_image_src(src)  # the newline run is stripped
+    assert "\r" not in _escape_image_src(src)
+    md = doc_to_markdown(_doc(_para(_img(src, alt="a"))))
+    back = markdown_to_doc(md)
+    assert _top_level_types(back) == ["paragraph"]
+    assert not any(n["type"] == "heading" for n in back["content"])
+
+
+def test_image_alt_blank_line_cannot_inject_top_level_block():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    md = doc_to_markdown(_doc(_para(_img("https://x/y.png", alt="a\n\n# INJECTED"))))
+    back = markdown_to_doc(md)
+    assert _top_level_types(back) == ["paragraph"]
+    assert not any(n["type"] == "heading" for n in back["content"])
+
+
+def test_normal_image_roundtrips_unchanged_through_parser():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    doc = _doc(_para(_img("https://example.com/x.png", alt="a photo")))
+    md = doc_to_markdown(doc)
+    back = markdown_to_doc(md)
+    assert back == doc
