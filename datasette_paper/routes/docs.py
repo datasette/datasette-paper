@@ -17,7 +17,6 @@ from ..markdown_parser import markdown_to_doc, markdown_to_fragment
 from ..tables import count_tables_with_name, extract_tables, find_table_by_name
 from ..permissions import (
     PAPER_DOCS_PARENT,
-    PAPER_VIEW,
     PAPER_EDIT,
     PAPER_MANAGE,
     PaperDocResource,
