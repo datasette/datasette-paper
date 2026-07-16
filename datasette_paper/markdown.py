@@ -604,13 +604,25 @@ def _escape_text(text: str) -> str:
     return _ESCAPE_RE.sub(r"\\\1", text)
 
 
+# A run of `\r`/`\n` in an image src or alt — used to neutralize both before
+# they can break the `![alt](src)` construct (see the two escapers below).
+_IMAGE_NEWLINE_RUN_RE = re.compile(r"[\r\n]+")
+
+
 def _escape_image_alt(alt: str) -> str:
     """Escape an image's alt text for the `![alt](...)` link-text slot.
 
-    Reuses the inline escaper: its set (``\\ ` * _ [ ]``) is a superset of
-    what the alt slot needs — unescaped `[`/`]` would otherwise truncate or
-    break the image syntax and drop the image on the round-trip.
+    Alt is untrusted display text: a blank line inside it would close the
+    ``![...]`` bracket early and let the rest re-parse as a following block
+    (the image twin of the date atom's label newline breakout), so any
+    newline run collapses to a single space first — kept local to this path
+    rather than the shared ``_escape_text``, since that escaper backs hard
+    breaks elsewhere. Then reuses the inline escaper: its set
+    (``\\ ` * _ [ ]``) is a superset of what the alt slot needs —
+    unescaped `[`/`]` would otherwise truncate or break the image syntax and
+    drop the image on the round-trip.
     """
+    alt = _IMAGE_NEWLINE_RUN_RE.sub(" ", alt)
     return _escape_text(alt)
 
 
@@ -628,6 +640,13 @@ def _escape_image_src(src: str) -> str:
     # pasted images are unaffected.
     if not is_safe_image_src(src):
         src = "#"
+    # A CommonMark image destination can't represent a raw line ending in
+    # either bare or `<...>` form — the angle-bracket wrap below sidesteps
+    # spaces/parens but NOT newlines, so a newline surviving into it would
+    # still break the image and let a trailing blank line inject a block
+    # (see ticket 06). A URL has no legitimate use for a raw newline, so
+    # strip the run entirely rather than collapsing it to a space.
+    src = _IMAGE_NEWLINE_RUN_RE.sub("", src)
     if any(ch.isspace() for ch in src) or "(" in src or ")" in src:
         inner = src.replace("\\", "\\\\").replace("<", "\\<").replace(">", "\\>")
         return f"<{inner}>"
