@@ -123,6 +123,16 @@ describe("custom node rules (backend output shapes)", () => {
     expect(md(bare)).toBe("```sql db=\nselect 2\n```");
   });
 
+  it("sql_block / source tilde-encode fence attr values (backend parser decodes)", () => {
+    // A db name is a filename stem — spaces and specials are legal — and the
+    // fence info string is space-delimited: a raw space would inject a
+    // sibling token. Mirror of `_fence_attr_token` in markdown.py.
+    const sql = n.sql_block.create({ db: "fee fi fo fum" }, text("select 1"));
+    expect(md(sql)).toBe("```sql db=fee+fi+fo+fum\nselect 1\n```");
+    const source = n.source.create({ name: "rev", db: "my=db `x`" }, text("select 2"));
+    expect(md(source)).toBe("```source name=rev db=my~3Ddb+~60x~60\nselect 2\n```");
+  });
+
   it("source / block_embed / toc emit their fence forms", () => {
     const source = n.source.create({ name: "revenue", db: "fixtures" }, text("select 3"));
     expect(md(source)).toBe("```source name=revenue db=fixtures\nselect 3\n```");

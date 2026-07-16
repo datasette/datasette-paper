@@ -20,6 +20,7 @@ import type { Node as PMNode } from "prosemirror-model";
 import { clampCalloutKind } from "./schema";
 import { encodeFormat, type ValueFormat } from "./formatValue";
 import { youtubeWatchUrl } from "./youtube";
+import { tildeEncode } from "./datasetteEmbed";
 import { RESERVED_FENCE_TOKENS } from "./languages";
 
 type PMMarkdown = typeof import("prosemirror-markdown");
@@ -167,17 +168,20 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
       },
       // ```sql db=NAME fence — `db=` is ALWAYS emitted (a bare `sql db=` for
       // a db-less block); the token is what distinguishes this from a plain
-      // ```sql code block on the round-trip.
+      // ```sql code block on the round-trip. Values are tilde-encoded (a db
+      // name is a filename stem — it can hold spaces/anything, and a raw
+      // space would inject a sibling info token); the backend parser
+      // tilde-decodes, mirror of `_fence_attr_token` in markdown.py.
       sql_block(state, node) {
-        let info = `sql db=${node.attrs.db ?? ""}`;
+        let info = `sql db=${tildeEncode(String(node.attrs.db ?? ""))}`;
         if (node.attrs.hidden) info += " hidden";
         fence(state, node, info, node.textContent);
       },
       // ```source name=NAME db=DB fence — a named SQL query.
       source(state, node) {
         let info = "source";
-        if (node.attrs.name) info += ` name=${node.attrs.name}`;
-        if (node.attrs.db) info += ` db=${node.attrs.db}`;
+        if (node.attrs.name) info += ` name=${tildeEncode(String(node.attrs.name))}`;
+        if (node.attrs.db) info += ` db=${tildeEncode(String(node.attrs.db))}`;
         fence(state, node, info, node.textContent);
       },
       // ```paper-embed fence with a one-line JSON body of the node attrs.

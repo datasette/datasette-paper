@@ -24,6 +24,7 @@ import json
 import re
 from urllib.parse import parse_qs, unquote
 
+from datasette.utils import tilde_decode
 from markdown_it import MarkdownIt
 from mdit_py_plugins.tasklists import tasklists_plugin
 
@@ -362,10 +363,13 @@ def _tokens_to_doc(tokens) -> dict:
                 name = None
                 db = None
                 for token in info.split()[1:]:
+                    # Values are tilde-encoded on serialize (see markdown.py's
+                    # `_fence_attr_token`); decode is identity for plain names,
+                    # so pre-encoding docs parse unchanged.
                     if token.startswith("name="):
-                        name = token[len("name=") :] or None
+                        name = tilde_decode(token[len("name=") :]) or None
                     elif token.startswith("db="):
-                        db = token[len("db=") :] or None
+                        db = tilde_decode(token[len("db=") :]) or None
                 source_block: dict = {
                     "type": "source",
                     "attrs": {"name": name, "db": db},
@@ -391,7 +395,7 @@ def _tokens_to_doc(tokens) -> dict:
                 hidden = False
                 for token in sql_tokens[1:]:
                     if token.startswith("db="):
-                        db = token[len("db=") :] or None
+                        db = tilde_decode(token[len("db=") :]) or None
                     elif token == "hidden":
                         hidden = True
                 # @feat sql-block: parse a ```sql db=NAME fence into a sql_block node

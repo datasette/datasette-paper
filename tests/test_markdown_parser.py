@@ -149,6 +149,18 @@ class TestBlocks:
         md = "```sql db=data hidden\nselect * from t\n```\n"
         assert doc_to_markdown(parse_and_validate(md)) == md
 
+    def test_sql_block_db_tilde_decodes(self):
+        # @feat sql-block: fence `db=` values are tilde-decoded (a Datasette
+        # db name is a filename stem — `fee fi fo fum.db` is legal — and the
+        # serializer tilde-encodes it into the space-delimited token grammar).
+        doc = parse_and_validate("```sql db=fee+fi+fo+fum\nselect 1\n```\n")
+        sb = doc["content"][0]
+        assert sb["attrs"] == {"db": "fee fi fo fum", "hidden": False}
+
+    def test_sql_block_encoded_db_round_trips(self):
+        md = "```sql db=fee+fi+fo+fum hidden\nselect 1\n```\n"
+        assert doc_to_markdown(parse_and_validate(md)) == md
+
     def test_source_from_source_fence(self):
         doc = parse_and_validate(
             "```source name=revenue db=data\nselect 1 as total\n```\n"
@@ -161,6 +173,14 @@ class TestBlocks:
     def test_source_round_trips(self):
         md = "```source name=revenue db=data\nselect sum(x) as total from t\n```\n"
         assert doc_to_markdown(parse_and_validate(md)) == md
+
+    def test_source_name_and_db_tilde_decode(self):
+        # @feat source: fence `name=`/`db=` values are tilde-decoded — the
+        # decode is identity for plain names, so pre-encoding docs (and the
+        # two tests above) parse unchanged.
+        doc = parse_and_validate("```source name=rev~2Dq db=my+db\nselect 1\n```\n")
+        sb = doc["content"][0]
+        assert sb["attrs"] == {"name": "rev-q", "db": "my db"}
 
     def test_plain_sql_fence_not_shadowed_by_source(self):
         # `source` discriminator is the leading token, not a substring; a

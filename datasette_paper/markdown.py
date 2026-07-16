@@ -13,6 +13,8 @@ import re
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import quote
 
+from datasette.utils import tilde_encode
+
 from .date_atom import render_date_atom
 from .pm_schema import is_safe_href, is_safe_image_src
 from .youtube import youtube_watch_url
@@ -36,6 +38,29 @@ ResourceResolver = Callable[[str, str], Optional[Tuple[Optional[str], Optional[s
 # unambiguous, so a `sql`-tagged code block stays a highlighted code block.
 RESERVED_FENCE_TOKENS = {"source", "paper-embed", "paper-toc", "paper-table"}
 _SAFE_LANG_RE = re.compile(r"^[^\s`=]+$")
+
+
+# `sql_block`'s `db` and `source`'s `name`/`db` are also f-strung into a fence
+# info string (`sql db=NAME`, `source name=NAME db=DB`) — same one-line, no-
+# backtick constraint as the language guard above, but these are `token=value`
+# pairs, so a bare "no whitespace" check isn't enough either: a space alone
+# would inject a spurious sibling token (`db=x hidden` flips the `hidden`
+# flag; `name=x db=evil` overrides the db). Unlike a `source` name (normalized
+# to `[a-z0-9_]` at every input path by `sourceBlockView.ts`), a `db` is a
+# real Datasette database name — a filename stem that can legitimately hold
+# spaces, dots, anything — so a charset restriction would drop legit values.
+# Tilde-encode instead (Datasette's own row-path encoding: `[A-Za-z0-9_-]`
+# verbatim, space → `+`, every other byte → `~XX`), which emits only
+# token-safe characters and round-trips losslessly through the parser's
+# `tilde_decode`. Identity for plain names, so pre-encoding docs still parse
+# the same. Mirror of `tildeEncode` in `frontend/src/lib/markdownSerializer.ts`.
+def _fence_attr_token(value: object) -> str:
+    """Encode-or-degrade an info-string `token=value` attr: a non-`str`
+    serializes as absent (empty string) — the `db=`/`name=` token itself is
+    still meaningful empty — and a `str` tilde-encodes, so no value can
+    corrupt the fence line or inject a sibling token."""
+    return tilde_encode(value) if isinstance(value, str) else ""
+
 
 # The five GitHub-style admonition kinds — mirrors CALLOUT_KINDS in
 # frontend/src/lib/schema.ts and _CALLOUT_KINDS in datasette_paper/pm_schema.py.
@@ -232,7 +257,7 @@ def _render_block(node: dict) -> str:
         # unconditionally is what keeps a db-less sql_block from round-
         # tripping back down to a code_block.
         attrs = node.get("attrs") or {}
-        db = attrs.get("db") or ""
+        db = _fence_attr_token(attrs.get("db"))
         text = "".join(c.get("text", "") for c in content)
         info = f"sql db={db}"
         if attrs.get("hidden"):
@@ -246,8 +271,8 @@ def _render_block(node: dict) -> str:
         # the discriminators (markdown_parser.py keys off `source`). Inline
         # `value` atoms reference it by name as `${{name.column}}`.
         attrs = node.get("attrs") or {}
-        name = attrs.get("name") or ""
-        db = attrs.get("db") or ""
+        name = _fence_attr_token(attrs.get("name"))
+        db = _fence_attr_token(attrs.get("db"))
         text = "".join(c.get("text", "") for c in content)
         info = "source"
         if name:
