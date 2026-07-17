@@ -189,50 +189,18 @@ def register_routes():
 
 
 @hookimpl
-# @feat cli-export: register the `datasette paper export` CLI command
 def register_commands(cli):
-    """Add a ``paper`` click group with an ``export`` subcommand.
+    """Add the ``paper`` click group (see ``datasette_paper/cli/``).
 
-    Group leaves room for future subcommands. The command body late-imports
-    ``datasette_paper.export`` so the hookimpl itself stays import-light —
-    prosemirror-py only loads when an export actually runs.
+    Thin delegate — the group lives in the ``cli`` package (one module per
+    subcommand) so this module (imported at plugin-load time) stays
+    import-light. ``cli`` modules only import ``click`` at top level; each
+    command body late-imports its machinery (e.g. prosemirror-py only
+    loads when a command that materializes a doc actually runs).
     """
-    import click
+    from .cli import paper
 
-    @cli.group()
-    def paper():
-        "Commands for datasette-paper"
-
-    @paper.command()
-    @click.argument("internal_db", type=click.Path(exists=True, dir_okay=False))
-    @click.argument("doc_id", type=int)
-    @click.option(
-        "-f",
-        "--format",
-        "fmt",
-        type=click.Choice(["markdown"]),
-        default="markdown",
-        show_default=True,
-        help="Output format",
-    )
-    def export(internal_db, doc_id, fmt):
-        """Print one paper doc to stdout.
-
-        INTERNAL_DB is the internal database this Datasette runs with
-        (`datasette --internal <path>` — papers live there, not in a content
-        database). DOC_ID is the numeric id from the doc's URL. Read-only:
-        safe to run against a file a live Datasette is currently serving.
-        """
-        from .export import ExportError, export_markdown, open_internal_db
-
-        try:
-            conn = open_internal_db(internal_db)
-            try:
-                click.echo(export_markdown(conn, doc_id), nl=False)
-            finally:
-                conn.close()
-        except ExportError as exc:
-            raise click.ClickException(str(exc)) from exc
+    cli.add_command(paper)
 
 
 @hookimpl

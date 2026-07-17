@@ -13,15 +13,18 @@ the mutation for locks.
 # @feat cli-export: CLI + export.py API tests (file-backed internal db)
 
 import json
-import shutil
 import sqlite3
 
 import pytest
-from click.testing import CliRunner
-from datasette.app import Datasette
-from datasette.cli import cli
 
-from conftest import DEFAULT_ACTOR_ID, _bind_default_actor
+from _cli import DEFAULT_CONTENT_MD as CONTENT_MD
+from _cli import append as _append
+from _cli import create_doc_with_content as _create_doc_with_content
+from _cli import document_markdown as _document_markdown
+from _cli import file_backed_ds as _file_backed_ds
+from _cli import mutated_copy as _mutated_copy
+from _cli import run_cli
+from _cli import snapshot_at_current_version as _snapshot_at_current_version
 from datasette_paper.db import PaperDB
 from datasette_paper.export import (
     ExportError,
@@ -32,74 +35,14 @@ from datasette_paper.export import (
 from datasette_paper.instance import get_registry
 from datasette_paper.sql import _queries
 
-CONTENT_MD = "# Title\n\nHello **world**.\n\n- [ ] a task\n"
 # A new doc holds one empty paragraph; append adds content after it, so the
 # exported markdown leads with the empty paragraph's blank line (same as the
 # /document endpoint — doc_to_markdown only rstrips).
 EXPORTED_MD = "\n\n" + CONTENT_MD
 
 
-async def _file_backed_ds(tmp_path):
-    """A Datasette whose internal db is a real file under *tmp_path*."""
-    internal = str(tmp_path / "internal.db")
-    ds = Datasette(
-        memory=True,
-        internal=internal,
-        config={"permissions": {"datasette-paper-create": True}},
-    )
-    await ds.invoke_startup()
-    _bind_default_actor(ds, DEFAULT_ACTOR_ID)
-    return ds, internal
-
-
-async def _create_doc_with_content(ds, content=CONTENT_MD):
-    resp = await ds.client.post("/-/paper/api/docs", json={"name": "Exportable"})
-    assert resp.status_code == 201, resp.text
-    doc_id = resp.json()["id"]
-    await _append(ds, doc_id, content)
-    return doc_id
-
-
-async def _append(ds, doc_id, content):
-    resp = await ds.client.post(
-        f"/-/paper/api/docs/{doc_id}/append", json={"content": content}
-    )
-    assert resp.status_code == 200, resp.text
-
-
-async def _document_markdown(ds, doc_id):
-    resp = await ds.client.get(f"/-/paper/api/docs/{doc_id}/document")
-    assert resp.status_code == 200
-    return resp.json()["content_markdown"]
-
-
-async def _snapshot_at_current_version(ds, doc_id):
-    """Write a real snapshot of the doc's live state; return its version."""
-    db = PaperDB(ds.get_internal_database())
-    registry = get_registry(ds)
-    inst = await registry.get(db, doc_id)
-    live = inst.materialize_live_doc()
-    version = inst.version
-    await db.insert_snapshot(
-        doc_id=doc_id, version=version, doc_json=json.dumps(live), actor_id=None
-    )
-    return version
-
-
-def _mutated_copy(internal, tmp_path, name, *statements):
-    """Copy the internal db and run raw SQL against the copy."""
-    copy = str(tmp_path / name)
-    shutil.copyfile(internal, copy)
-    conn = sqlite3.connect(copy)
-    for stmt, params in statements:
-        conn.execute(stmt, params)
-    conn.commit()
-    conn.close()
-    return copy
-
-
 def _run_export(db_path, doc_id, *extra):
-    return CliRunner().invoke(cli, ["paper", "export", db_path, str(doc_id), *extra])
+    return run_cli("paper", "export", db_path, str(doc_id), *extra)
 
 
 # ── happy paths ──────────────────────────────────────────────────────────────
