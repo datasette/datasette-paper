@@ -573,6 +573,6 @@ async def test_post_inline_and_block_embed_apply(ds_paper):
     md = doc.json()["content_markdown"]
     assert "[/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)" in md
     assert (
-        '```paper-embed\n{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```'
+        '```paper-embed\n{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```'
         in md
     )

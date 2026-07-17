@@ -1,0 +1,70 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Fences",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "attrs": {
+        "db": "data",
+        "hidden": false
+      },
+      "content": [
+        {
+          "text": "select * from vendors",
+          "type": "text"
+        }
+      ],
+      "type": "sql_block"
+    },
+    {
+      "attrs": {
+        "db": "data",
+        "hidden": true
+      },
+      "content": [
+        {
+          "text": "select 1",
+          "type": "text"
+        }
+      ],
+      "type": "sql_block"
+    },
+    {
+      "attrs": {
+        "db": "data",
+        "name": "revenue"
+      },
+      "content": [
+        {
+          "text": "select sum(amount) as total from sales",
+          "type": "text"
+        }
+      ],
+      "type": "source"
+    },
+    {
+      "attrs": {
+        "config": {},
+        "mode": "table",
+        "ref": "/data/vendors"
+      },
+      "type": "block_embed"
+    },
+    {
+      "attrs": {
+        "config": {}
+      },
+      "type": "toc"
+    }
+  ],
+  "type": "doc"
+}

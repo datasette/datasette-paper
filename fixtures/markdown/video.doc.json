@@ -1,0 +1,34 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Video",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "text": "An intro clip:",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "attrs": {
+        "provider": "youtube",
+        "start": null,
+        "videoId": "dQw4w9WgXcQ"
+      },
+      "type": "video_embed"
+    }
+  ],
+  "type": "doc"
+}

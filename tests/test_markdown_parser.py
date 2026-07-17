@@ -1279,7 +1279,7 @@ class TestTables:
         assert text["marks"] == [{"type": "strong"}]
 
     def test_paper_table_sidecar_sets_name(self):
-        md = '```paper-table\n{"name": "sales"}\n```\n| h |\n| --- |\n| x |\n'
+        md = '```paper-table\n{"name":"sales"}\n```\n| h |\n| --- |\n| x |\n'
         doc = parse_and_validate(md)
         # The sidecar fence emits no node of its own.
         assert [n["type"] for n in doc["content"]] == ["table"]
@@ -1291,9 +1291,9 @@ class TestTables:
         assert doc["content"][0]["attrs"]["name"] == "sales report"
 
     def test_table_name_round_trips(self):
-        md = '```paper-table\n{"name": "q3"}\n```\n| h |\n| --- |\n| x |\n'
+        md = '```paper-table\n{"name":"q3"}\n```\n| h |\n| --- |\n| x |\n'
         doc = parse_and_validate(md)
-        assert doc_to_markdown(doc).startswith('```paper-table\n{"name": "q3"}\n```\n')
+        assert doc_to_markdown(doc).startswith('```paper-table\n{"name":"q3"}\n```\n')
         # …and a second pass is stable.
         assert (
             markdown_to_doc(doc_to_markdown(doc))["content"][0]["attrs"]["name"] == "q3"
@@ -1420,8 +1420,8 @@ ROUNDTRIP_STABLE = [
     # an embed ref with multiple slashes (split-once gotcha)
     "see [/db/t/row/1](paper:/embed/datasette/db/t/row/1)\n",
     # block embed: paper-embed JSON fence (sorted keys, all three attrs)
-    '```paper-embed\n{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```\n',
-    '```paper-embed\n{"config": {}, "mode": "row", "ref": "/fixtures/facetable/1"}\n```\n',
+    '```paper-embed\n{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```\n',
+    '```paper-embed\n{"config":{},"mode":"row","ref":"/fixtures/facetable/1"}\n```\n',
     '```paper-embed\n{"config": {"columns": ["name", "id"]}, '
     '"mode": "table", "ref": "/fixtures/facetable"}\n```\n',
     # markdown-significant chars in plain text (re-parsed as markup unescaped)

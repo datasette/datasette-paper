@@ -113,7 +113,7 @@ def doc_to_markdown(
         out: List[str] = []
         for i, block in enumerate(blocks):
             if i:
-                out.append("\n")
+                out.append(_block_separator(blocks[i - 1], block, tight=False))
             out.append(_render_block(block))
         text = "".join(out).rstrip() + "\n"
         return text
@@ -247,6 +247,36 @@ def _int_attr(value, default, lo=None, hi=None):
     return n
 
 
+_LIST_TYPES = ("bullet_list", "ordered_list", "task_list")
+
+
+def _block_separator(prev: dict, current: dict, *, tight: bool) -> str:
+    """Extra separator between two sibling blocks (each rendered block
+    already ends with one newline, so ``"\\n"`` here means one blank line).
+
+    Mirrors prosemirror-markdown's ``flushClose`` behavior so the Python and
+    client serializers emit identical bytes (the fixtures/markdown golden
+    suite pins the two):
+
+    - two sibling lists of the SAME type get an extra blank line — the JS
+      serializer's convention for marking the boundary. Note CommonMark
+      parsers (ours included) still merge them into one list on re-parse;
+      adjacent same-type sibling lists are a documented markdown-inherent
+      loss, pinned by ``test_adjacent_same_type_lists_*``;
+    - inside a list item (``tight=True``) any other list sits tight against
+      the block above it — a different list type parses back distinct via
+      its marker;
+    - everything else gets the usual one blank line.
+    """
+    if current.get("type") in _LIST_TYPES:
+        if prev.get("type") == current.get("type"):
+            return "\n\n"
+        if tight:
+            return ""
+        return "\n"
+    return "\n"
+
+
 def _render_block(node: dict) -> str:
     t = node.get("type")
     content = node.get("content") or []
@@ -302,7 +332,7 @@ def _render_block(node: dict) -> str:
         inner_parts: List[str] = []
         for i, child in enumerate(content):
             if i:
-                inner_parts.append("\n")
+                inner_parts.append(_block_separator(content[i - 1], child, tight=False))
             inner_parts.append(_render_block(child))
         inner = "".join(inner_parts).rstrip("\n")
         return _prefix_quote_lines(inner) + "\n"
@@ -338,7 +368,9 @@ def _render_block(node: dict) -> str:
         body_parts: List[str] = []
         for i, child in enumerate(body_children):
             if i:
-                body_parts.append("\n")
+                body_parts.append(
+                    _block_separator(body_children[i - 1], child, tight=False)
+                )
             body_parts.append(_render_block(child))
         body = "".join(body_parts).rstrip("\n")
         lines = marker if not body else marker + "\n" + body
@@ -366,9 +398,12 @@ def _render_block(node: dict) -> str:
         }
         # A fenced block with info string `paper-embed`: the body is one JSON
         # object whose keys are exactly the node attrs. sort_keys → stable
-        # diffs; ensure_ascii=False keeps unicode readable. The parser reads it
-        # back in markdown_parser.py.
-        body = json.dumps(payload, sort_keys=True, ensure_ascii=False)
+        # diffs; ensure_ascii=False keeps unicode readable; compact separators
+        # byte-match JSON.stringify so the client serializer emits the
+        # identical fence. The parser reads it back in markdown_parser.py.
+        body = json.dumps(
+            payload, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
         return "```paper-embed\n" + body + "\n```\n"
     if (
         t == "video_embed"
@@ -394,16 +429,20 @@ def _render_block(node: dict) -> str:
         # non-empty config serializes as sorted JSON, read back in
         # markdown_parser.py. The rendered heading list is never persisted.
         if config:
-            body = json.dumps(config, sort_keys=True, ensure_ascii=False)
+            body = json.dumps(
+                config, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+            )
             return "```paper-toc\n" + body + "\n```\n"
         return "```paper-toc\n```\n"
     if t == "list_item":
         # list_item is rendered by _render_list with markers; calling here
-        # returns the bare child blocks.
+        # returns the bare child blocks, separated by _block_separator with
+        # tight=True — a nested list sits tight against the block above it,
+        # two paragraphs still get their blank line (see _block_separator).
         parts: List[str] = []
         for i, child in enumerate(content):
             if i:
-                parts.append("\n")
+                parts.append(_block_separator(content[i - 1], child, tight=True))
             parts.append(_render_block(child))
         return "".join(parts)
     # Fallback: unknown block — render its inlines if any, else empty.
@@ -482,7 +521,9 @@ def _render_table(node: dict) -> str:
         # fence already ends the block, and GFM still detects the table on the
         # next line). JSON body keeps names with spaces / `=` / special chars
         # safe, matching the `paper-embed` / `paper-toc` family.
-        body = json.dumps({"name": name}, sort_keys=True, ensure_ascii=False)
+        body = json.dumps(
+            {"name": name}, sort_keys=True, ensure_ascii=False, separators=(",", ":")
+        )
         return "```paper-table\n" + body + "\n```\n" + table_md
     return table_md
 

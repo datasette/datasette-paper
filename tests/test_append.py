@@ -105,11 +105,11 @@ async def test_append_inline_and_block_embed_roundtrip(ds):
     md = await _document_markdown(ds, doc_id)
     assert "[/fixtures/facetable](paper:/embed/datasette/fixtures/facetable)" in md
     assert (
-        '```paper-embed\n{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```'
+        '```paper-embed\n{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```'
         in md
     )
     assert (
-        '```paper-embed\n{"config": {}, "mode": "row", "ref": "/fixtures/vendors/42"}\n```'
+        '```paper-embed\n{"config":{},"mode":"row","ref":"/fixtures/vendors/42"}\n```'
         in md
     )
 
@@ -178,7 +178,7 @@ async def test_apply_markdown_edit_preserves_named_table(ds):
     being silently dropped."""
     doc_id = await create_doc(ds)
     # Seed a named table via the append endpoint (markdown sidecar form).
-    content = '```paper-table\n{"name": "sales"}\n```\n| h |\n| --- |\n| x |\n'
+    content = '```paper-table\n{"name":"sales"}\n```\n| h |\n| --- |\n| x |\n'
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/append", json={"content": content}
     )

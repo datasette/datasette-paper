@@ -1,0 +1,112 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Checklist",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "attrs": {
+            "checked": false
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "open task",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "task_item"
+        },
+        {
+          "attrs": {
+            "checked": true
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "done task",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "task_item"
+        },
+        {
+          "attrs": {
+            "checked": false
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "parent task",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "attrs": {
+                    "checked": false
+                  },
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "child task",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "task_item"
+                },
+                {
+                  "attrs": {
+                    "checked": true
+                  },
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "finished child",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "task_item"
+                }
+              ],
+              "type": "task_list"
+            }
+          ],
+          "type": "task_item"
+        }
+      ],
+      "type": "task_list"
+    }
+  ],
+  "type": "doc"
+}

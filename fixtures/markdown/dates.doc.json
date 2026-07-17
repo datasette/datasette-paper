@@ -1,0 +1,92 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Dates",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "text": "Kickoff on ",
+          "type": "text"
+        },
+        {
+          "attrs": {
+            "date": "2026-07-20",
+            "format": null,
+            "time": null,
+            "tz": null
+          },
+          "type": "date"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "text": "Standup at ",
+          "type": "text"
+        },
+        {
+          "attrs": {
+            "date": "2026-07-21",
+            "format": null,
+            "time": "09:30",
+            "tz": "America/Los_Angeles"
+          },
+          "type": "date"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "attrs": {
+            "checked": false
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "ship by ",
+                  "type": "text"
+                },
+                {
+                  "attrs": {
+                    "date": "2026-07-31",
+                    "format": "%Y-%m-%d",
+                    "time": null,
+                    "tz": null
+                  },
+                  "type": "date"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "task_item"
+        }
+      ],
+      "type": "task_list"
+    }
+  ],
+  "type": "doc"
+}

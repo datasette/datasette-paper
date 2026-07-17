@@ -88,6 +88,12 @@ types:
 # `tools/gen_queries.py` turns the IR into Python helpers that take a
 # `sqlite3.Connection` as their first arg (to slot into PaperDB's
 # `execute_write_fn` closures).
+# Regenerate fixtures/markdown/*.doc.json from their .md sources
+# (verifies each .md is in canonical serialized form first). Run after
+# adding or editing a golden markdown fixture.
+gen-markdown-fixtures:
+    uv run --prerelease=allow python tools/markdown_fixtures.py
+
 codegen-queries:
     #!/usr/bin/env bash
     set -euo pipefail

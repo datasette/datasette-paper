@@ -148,6 +148,31 @@ describe("custom node rules (backend output shapes)", () => {
 
 });
 
+// The expected strings mirror markdown.py's `_block_separator` and are
+// pinned with the SAME strings in tests/test_markdown.py ("sibling block
+// separators"). Round-trippable cases live in fixtures/markdown/ instead;
+// same-type adjacency is here because CommonMark merges the lists on
+// re-parse, so a fixture can't represent it.
+describe("sibling block separators (backend markdown.py mirror)", () => {
+  const li = (...blocks: PMNode[]) => n.list_item.create(null, blocks);
+  const ul = (...items: string[]) =>
+    n.bullet_list.create(null, items.map((s) => li(p(s))));
+
+  it("adjacent same-type lists get two blank lines (lossy on re-parse)", () => {
+    expect(md(ul("a"), ul("b"))).toBe("- a\n\n\n- b");
+    const nested = n.bullet_list.create(null, [li(p("parent"), ul("n1"), ul("n2"))]);
+    expect(md(nested)).toBe("- parent\n  - n1\n\n\n  - n2");
+  });
+
+  it("a different-type list sits tight inside an item; paragraphs keep blanks", () => {
+    const ol = n.ordered_list.create(null, [li(p("o1"))]);
+    const item = n.bullet_list.create(null, [
+      li(p("parent"), ul("n1"), ol, p("trailing")),
+    ]);
+    expect(md(item)).toBe("- parent\n  - n1\n  1. o1\n\n  trailing");
+  });
+});
+
 // @feat copy-markdown: parity guard — every schema node/mark has a serializer rule
 describe("schema ↔ serializer parity", () => {
   // prosemirror-markdown throws at serialize time on any node type with no

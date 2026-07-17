@@ -983,7 +983,7 @@ def test_named_table_emits_paper_table_sidecar():
     }
     md = doc_to_markdown(_doc(table))
     # Sidecar fence precedes the pipe table, immediately (no blank line).
-    assert md.startswith('```paper-table\n{"name": "sales"}\n```\n| Col |\n')
+    assert md.startswith('```paper-table\n{"name":"sales"}\n```\n| Col |\n')
 
 
 def test_anonymous_table_emits_no_sidecar():
@@ -1183,7 +1183,7 @@ def test_block_embed_serializes_as_paper_embed_json_fence():
     # Sorted-key JSON body with all three attrs (config defaults to {}).
     assert md == (
         "```paper-embed\n"
-        '{"config": {}, "mode": "table", "ref": "/fixtures/facetable"}\n```\n'
+        '{"config":{},"mode":"table","ref":"/fixtures/facetable"}\n```\n'
     )
 
 
@@ -1198,7 +1198,7 @@ def test_block_embed_non_default_mode_in_json_body():
     )
     assert md == (
         "```paper-embed\n"
-        '{"config": {}, "mode": "row", "ref": "/fixtures/facetable/1"}\n```\n'
+        '{"config":{},"mode":"row","ref":"/fixtures/facetable/1"}\n```\n'
     )
 
 
@@ -1218,8 +1218,8 @@ def test_block_embed_non_empty_config_in_json_body():
     # sort_keys gives a stable diff regardless of attr insertion order.
     assert md == (
         "```paper-embed\n"
-        '{"config": {"columns": ["name", "id"], "sort": "-created"}, '
-        '"mode": "row", "ref": "/fixtures/facetable"}\n```\n'
+        '{"config":{"columns":["name","id"],"sort":"-created"},'
+        '"mode":"row","ref":"/fixtures/facetable"}\n```\n'
     )
 
 
@@ -1242,8 +1242,8 @@ def test_block_embed_columns_roundtrip_byte_stable():
     md = doc_to_markdown(doc)
     assert md == (
         "```paper-embed\n"
-        '{"config": {"columns": ["name", "region"]}, '
-        '"mode": "table", "ref": "/data/vendors"}\n```\n'
+        '{"config":{"columns":["name","region"]},'
+        '"mode":"table","ref":"/data/vendors"}\n```\n'
     )
     # serialize → parse → identical (order preserved, not reordered/dropped).
     assert markdown_to_doc(md) == doc
@@ -1278,13 +1278,13 @@ def test_block_embed_filters_sort_columns_roundtrip_byte_stable():
     md = doc_to_markdown(doc)
     assert md == (
         "```paper-embed\n"
-        '{"config": {"columns": ["name", "id"], '
-        '"filters": ['
-        '{"column": "name", "op": "contains", "value": "Vendor 1"}, '
-        '{"column": "id", "op": "gte", "value": "5"}, '
-        '{"column": "region", "op": "notblank"}], '
-        '"sort": {"column": "id", "desc": true}}, '
-        '"mode": "table", "ref": "/data/vendors"}\n```\n'
+        '{"config":{"columns":["name","id"],'
+        '"filters":['
+        '{"column":"name","op":"contains","value":"Vendor 1"},'
+        '{"column":"id","op":"gte","value":"5"},'
+        '{"column":"region","op":"notblank"}],'
+        '"sort":{"column":"id","desc":true}},'
+        '"mode":"table","ref":"/data/vendors"}\n```\n'
     )
     # serialize → parse → identical (filter order, the value-less no-value
     # entry, and the sort direction all survive).
@@ -1308,7 +1308,7 @@ def test_toc_with_config_serializes_sorted_json_and_roundtrips():
     doc = _doc({"type": "toc", "attrs": {"config": {"maxLevel": 2, "minLevel": 2}}})
     md = doc_to_markdown(doc)
     # sort_keys gives a stable diff regardless of attr insertion order.
-    assert md == '```paper-toc\n{"maxLevel": 2, "minLevel": 2}\n```\n'
+    assert md == '```paper-toc\n{"maxLevel":2,"minLevel":2}\n```\n'
     assert markdown_to_doc(md) == doc
 
 
@@ -1935,3 +1935,46 @@ def test_ordinary_inline_atom_roundtrips_unchanged(node):
 
     md = doc_to_markdown(_doc(_para(node)))
     assert doc_to_markdown(markdown_to_doc(md)) == md  # stable round-trip
+
+
+# ── sibling block separators (client-serializer parity) ─────────────────────
+# The expected strings mirror the client's prosemirror-markdown flushClose
+# behavior and are pinned with the SAME strings in the client suite
+# (markdownSerializer.test.ts, "sibling block separators"). Cases that a
+# markdown round-trip can represent live in fixtures/markdown/ instead.
+
+
+def _li(*blocks):
+    return {"type": "list_item", "content": list(blocks)}
+
+
+def _ul(*items):
+    return {"type": "bullet_list", "content": [_li(_para(_text(s))) for s in items]}
+
+
+def test_adjacent_same_type_lists_get_two_blank_lines():
+    # Doc level and inside a list item: an extra blank line marks the
+    # boundary between two sibling lists of the same type.
+    assert doc_to_markdown(_doc(_ul("a"), _ul("b"))) == "- a\n\n\n- b\n"
+    nested = _doc(
+        {
+            "type": "bullet_list",
+            "content": [_li(_para(_text("parent")), _ul("n1"), _ul("n2"))],
+        }
+    )
+    assert doc_to_markdown(nested) == "- parent\n  - n1\n\n\n  - n2\n"
+
+
+def test_adjacent_same_type_lists_merge_on_reparse():
+    # Documented markdown-inherent loss: CommonMark has no way to keep two
+    # adjacent same-marker lists distinct (a blank-line run does not split a
+    # list), so the boundary above does NOT survive a doc→md→doc round-trip
+    # — the parser folds them into one list. Pinned so a future fix (e.g.
+    # alternating bullet markers) shows up as an intentional change here.
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    md = doc_to_markdown(_doc(_ul("a"), _ul("b")))
+    reparsed = markdown_to_doc(md)
+    lists = [b for b in reparsed["content"] if b["type"] == "bullet_list"]
+    assert len(lists) == 1
+    assert len(lists[0]["content"]) == 2  # both items survive, in one list

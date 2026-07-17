@@ -1,0 +1,120 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Inline atoms",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "text": "Prefill {{city}} then see ",
+          "type": "text"
+        },
+        {
+          "attrs": {
+            "docId": 7
+          },
+          "type": "paper_link"
+        },
+        {
+          "text": " for details.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "text": "Ping ",
+          "type": "text"
+        },
+        {
+          "attrs": {
+            "actorId": "ana"
+          },
+          "type": "mention"
+        },
+        {
+          "text": " about ",
+          "type": "text"
+        },
+        {
+          "attrs": {
+            "tag": "urgent"
+          },
+          "type": "tag"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "text": "Revenue is ",
+          "type": "text"
+        },
+        {
+          "attrs": {
+            "column": "total",
+            "format": {
+              "currency": "USD",
+              "kind": "currency"
+            },
+            "source": "revenue"
+          },
+          "type": "value"
+        },
+        {
+          "text": " across ",
+          "type": "text"
+        },
+        {
+          "attrs": {
+            "column": "region count",
+            "format": null,
+            "source": "revenue"
+          },
+          "type": "value"
+        },
+        {
+          "text": " regions.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "text": "Live rows in ",
+          "type": "text"
+        },
+        {
+          "attrs": {
+            "ref": "/data/vendors"
+          },
+          "type": "inline_embed"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    }
+  ],
+  "type": "doc"
+}

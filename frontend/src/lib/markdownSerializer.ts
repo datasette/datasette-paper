@@ -29,10 +29,11 @@ type PMMarkdown = typeof import("prosemirror-markdown");
 type MarkdownSerializer = import("prosemirror-markdown").MarkdownSerializer;
 type MarkdownSerializerState = import("prosemirror-markdown").MarkdownSerializerState;
 
-// Mirror of `json.dumps(..., sort_keys=True, ensure_ascii=False)` for the
-// JSON-body fence family (paper-embed / paper-toc): recursively sort object
-// keys like the backend does. (Not byte-identical — python puts a space
-// after `:` and `,` — but the parser only needs *valid* JSON.)
+// Mirror of `json.dumps(..., sort_keys=True, separators=(",", ":"),
+// ensure_ascii=False)` for the JSON-body fence family (paper-embed /
+// paper-toc / paper-table): recursively sort object keys like the backend
+// does. Byte-identical with the backend since it moved to compact
+// separators — pinned by the fixtures/markdown golden suite.
 function sortedJson(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) => {
     if (v && typeof v === "object" && !Array.isArray(v)) {
@@ -201,13 +202,24 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
       code_block(state, node) {
         fence(state, node, safeFenceLanguage(node.attrs.language), node.textContent);
       },
-      // GFM-style `- [ ] foo` / `- [x] foo`. The checkbox is content, not
-      // marker, so continuation lines indent by the 2-col `- ` like a bullet.
+      // The backend serializes bullets as `- `; prosemirror-markdown's
+      // default is `*`. Same 2-col continuation indent either way.
+      bullet_list(state, node) {
+        state.renderList(node, "  ", () => "- ");
+      },
+      // GFM-style `- [ ] foo` / `- [x] foo`. The checkbox is part of the
+      // *marker* (not written as item content): renderList only indents
+      // nested blocks by `delim` when the marker goes through it — writing
+      // the checkbox inside task_item left every item at one flat level,
+      // so a re-parse turned children into siblings. Continuation lines
+      // still indent by 2 (the marker for indent purposes is just `- `,
+      // matching the backend's _render_task_list).
       task_list(state, node) {
-        state.renderList(node, "  ", () => "");
+        state.renderList(node, "  ", (i) =>
+          node.child(i).attrs.checked ? "- [x] " : "- [ ] ",
+        );
       },
       task_item(state, node) {
-        state.write(node.attrs.checked ? "- [x] " : "- [ ] ");
         state.renderContent(node);
       },
       // A lone canonical YouTube URL on its own line — the bare-URL form the

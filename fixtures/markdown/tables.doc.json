@@ -1,0 +1,310 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Tables",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "attrs": {
+        "name": null
+      },
+      "content": [
+        {
+          "content": [
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Item",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_header"
+            },
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Owner",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_header"
+            },
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Cost",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_header"
+            }
+          ],
+          "type": "table_row"
+        },
+        {
+          "content": [
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Design sprint",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_cell"
+            },
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "alice",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_cell"
+            },
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "$4,000",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_cell"
+            }
+          ],
+          "type": "table_row"
+        },
+        {
+          "content": [
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "marks": [
+                        {
+                          "type": "strong"
+                        }
+                      ],
+                      "text": "Infra",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_cell"
+            },
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "bob",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_cell"
+            },
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "a|b",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_cell"
+            }
+          ],
+          "type": "table_row"
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "attrs": {
+        "name": "budget"
+      },
+      "content": [
+        {
+          "content": [
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Line",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_header"
+            },
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Amount",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_header"
+            }
+          ],
+          "type": "table_row"
+        },
+        {
+          "content": [
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "Hosting",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_cell"
+            },
+            {
+              "attrs": {
+                "colspan": 1,
+                "colwidth": null,
+                "rowspan": 1
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "12",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "table_cell"
+            }
+          ],
+          "type": "table_row"
+        }
+      ],
+      "type": "table"
+    }
+  ],
+  "type": "doc"
+}

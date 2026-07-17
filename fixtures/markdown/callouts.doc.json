@@ -1,0 +1,123 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Callouts",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "attrs": {
+        "collapsed": false,
+        "kind": "note"
+      },
+      "content": [
+        {
+          "content": [
+            {
+              "text": "A titled note",
+              "type": "text"
+            }
+          ],
+          "type": "callout_title"
+        },
+        {
+          "content": [
+            {
+              "text": "With body text.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "type": "callout"
+    },
+    {
+      "attrs": {
+        "collapsed": true,
+        "kind": "warning"
+      },
+      "content": [
+        {
+          "content": [],
+          "type": "callout_title"
+        },
+        {
+          "content": [
+            {
+              "text": "Collapsed warning body.",
+              "type": "text"
+            }
+          ],
+          "type": "paragraph"
+        }
+      ],
+      "type": "callout"
+    },
+    {
+      "attrs": {
+        "collapsed": false,
+        "kind": "important"
+      },
+      "content": [
+        {
+          "content": [
+            {
+              "text": "Checklist inside",
+              "type": "text"
+            }
+          ],
+          "type": "callout_title"
+        },
+        {
+          "content": [
+            {
+              "attrs": {
+                "checked": false
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "quoted task",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "task_item"
+            },
+            {
+              "attrs": {
+                "checked": true
+              },
+              "content": [
+                {
+                  "content": [
+                    {
+                      "text": "quoted done",
+                      "type": "text"
+                    }
+                  ],
+                  "type": "paragraph"
+                }
+              ],
+              "type": "task_item"
+            }
+          ],
+          "type": "task_list"
+        }
+      ],
+      "type": "callout"
+    }
+  ],
+  "type": "doc"
+}

@@ -1,0 +1,213 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Nested list shapes",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "parent with nested bullet then ordered",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "nested bullet",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "list_item"
+                }
+              ],
+              "type": "bullet_list"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "nested ordered",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "list_item"
+                }
+              ],
+              "type": "ordered_list"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "parent with ordered then task",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "ordered child",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "list_item"
+                }
+              ],
+              "type": "ordered_list"
+            },
+            {
+              "content": [
+                {
+                  "attrs": {
+                    "checked": false
+                  },
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "task child",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "task_item"
+                }
+              ],
+              "type": "task_list"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "parent with trailing paragraph",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "nested bullet",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "list_item"
+                }
+              ],
+              "type": "bullet_list"
+            },
+            {
+              "content": [
+                {
+                  "text": "a trailing paragraph inside the item",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "two paragraphs before a nested list",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "text": "second paragraph",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "nested after two paragraphs",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "list_item"
+                }
+              ],
+              "type": "bullet_list"
+            }
+          ],
+          "type": "list_item"
+        }
+      ],
+      "type": "bullet_list"
+    }
+  ],
+  "type": "doc"
+}
