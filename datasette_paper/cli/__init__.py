@@ -13,6 +13,7 @@ not load until a command that actually materializes a doc runs).
 
 import click
 
+from .dump import dump
 from .export import export
 from .list import list_docs
 
@@ -22,5 +23,6 @@ def paper():
     "Commands for datasette-paper"
 
 
+paper.add_command(dump)
 paper.add_command(export)
 paper.add_command(list_docs)
