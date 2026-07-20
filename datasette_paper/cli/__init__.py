@@ -16,6 +16,7 @@ import click
 from .check import check
 from .dump import dump
 from .export import export
+from .info import info
 from .list import list_docs
 
 
@@ -27,4 +28,5 @@ def paper():
 paper.add_command(check)
 paper.add_command(dump)
 paper.add_command(export)
+paper.add_command(info)
 paper.add_command(list_docs)

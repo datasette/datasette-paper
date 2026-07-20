@@ -609,6 +609,14 @@ ORDER BY version;
     return [Step(*row) for row in cursor.fetchall()]
 
 
+def count_steps_for_doc(conn: sqlite3.Connection, doc_id: int) -> Any | None:
+    sql = "SELECT count(*) FROM _datasette_paper_step WHERE doc_id = $doc_id::integer;"
+    params = {"doc_id::integer": doc_id}
+    cursor = conn.execute(sql, params)
+    row = cursor.fetchone()
+    return row[0] if row is not None else None
+
+
 def insert_snapshot(
     conn: sqlite3.Connection,
     doc_id: int,
@@ -642,6 +650,14 @@ LIMIT 1;
     cursor = conn.execute(sql, params)
     row = cursor.fetchone()
     return Snapshot(*row) if row is not None else None
+
+
+def count_snapshots_for_doc(conn: sqlite3.Connection, doc_id: int) -> Any | None:
+    sql = "SELECT count(*) FROM _datasette_paper_snapshot WHERE doc_id = $doc_id::integer;"
+    params = {"doc_id::integer": doc_id}
+    cursor = conn.execute(sql, params)
+    row = cursor.fetchone()
+    return row[0] if row is not None else None
 
 
 def delete_steps_up_to_version(

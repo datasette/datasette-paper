@@ -334,6 +334,11 @@ WHERE doc_id = $doc_id::integer
   AND version > $after_version::integer
 ORDER BY version;
 
+-- Total step rows for a doc, snapshot-folded or not — `paper info`'s total
+-- weight figure (vs. the live tail from `selectStepsAfter`).
+-- name: countStepsForDoc :value
+SELECT count(*) FROM _datasette_paper_step WHERE doc_id = $doc_id::integer;
+
 -- ============================================================================
 -- Snapshots
 -- ============================================================================
@@ -348,6 +353,11 @@ FROM _datasette_paper_snapshot
 WHERE doc_id = $doc_id::integer
 ORDER BY version DESC
 LIMIT 1;
+
+-- Total snapshot rows for a doc — pre-compaction debris (see `paper info`)
+-- includes any old snapshots not yet pruned by `deleteSnapshotsBelowVersion`.
+-- name: countSnapshotsForDoc :value
+SELECT count(*) FROM _datasette_paper_snapshot WHERE doc_id = $doc_id::integer;
 
 -- ============================================================================
 -- Compaction

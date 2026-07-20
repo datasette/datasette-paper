@@ -1736,6 +1736,30 @@
       "result_class": "Step"
     },
     {
+      "name": "countStepsForDoc",
+      "result_type": "Value",
+      "sql": "SELECT count(*) FROM _datasette_paper_step WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "count(*)",
+          "origin_database": null,
+          "origin_table": null,
+          "origin_column": null,
+          "decltype": null,
+          "nullable": null
+        }
+      ],
+      "result_class": null
+    },
+    {
       "name": "insertSnapshot",
       "result_type": "Void",
       "sql": "INSERT INTO _datasette_paper_snapshot (doc_id, version, doc_json, actor_id)\nVALUES ($doc_id::integer, $version::integer, $doc_json::text, $actor_id::text::);",
@@ -1815,6 +1839,30 @@
         }
       ],
       "result_class": "Snapshot"
+    },
+    {
+      "name": "countSnapshotsForDoc",
+      "result_type": "Value",
+      "sql": "SELECT count(*) FROM _datasette_paper_snapshot WHERE doc_id = $doc_id::integer;",
+      "parameters": [
+        {
+          "full_name": "$doc_id::integer",
+          "name": "doc_id",
+          "annotated_type": "integer",
+          "nullable": false
+        }
+      ],
+      "columns": [
+        {
+          "name": "count(*)",
+          "origin_database": null,
+          "origin_table": null,
+          "origin_column": null,
+          "decltype": null,
+          "nullable": null
+        }
+      ],
+      "result_class": null
     },
     {
       "name": "deleteStepsUpToVersion",
