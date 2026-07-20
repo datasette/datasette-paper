@@ -18,6 +18,7 @@ from .dump import dump
 from .export import export
 from .info import info
 from .list import list_docs
+from .tables import tables_cmd
 
 
 @click.group()
@@ -30,3 +31,4 @@ paper.add_command(dump)
 paper.add_command(export)
 paper.add_command(info)
 paper.add_command(list_docs)
+paper.add_command(tables_cmd)
