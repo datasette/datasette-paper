@@ -1,6 +1,6 @@
 [project]
 name = "datasette-paper"
-version = "0.0.2a13"
+version = "0.0.2a14"
 description = ""
 readme = "README.md"
 authors = [{name = "Alex Garcia"}]
