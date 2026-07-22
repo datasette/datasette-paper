@@ -1,12 +1,13 @@
 <script lang="ts">
   import type { EditorView } from "prosemirror-view";
   import type { MarkType, NodeType } from "prosemirror-model";
-  import { toggleMark, setBlockType, wrapIn, lift } from "prosemirror-commands";
+  import { toggleMark, setBlockType, wrapIn, lift, chainCommands } from "prosemirror-commands";
   import { wrapInList, liftListItem, sinkListItem } from "prosemirror-schema-list";
   import { undo, redo, undoDepth, redoDepth } from "prosemirror-history";
   import { schema } from "./schema";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { blockTypeLabel } from "./blockTypeLabel";
+  import { activeListType } from "./activeListType";
   import { wrapSelectionInCallout, unwrapCallout } from "./callout";
   import { canInsertTable, insertTable } from "./tables";
   import { insertToc } from "./tocView";
@@ -46,6 +47,8 @@
   // Wrapper element per menu (trigger + popup), so a click on the trigger reads
   // as "inside" and doesn't trip the outside-click close.
   let textRoot: HTMLDivElement | undefined = $state();
+  let linkRoot: HTMLDivElement | undefined = $state();
+  let listRoot: HTMLDivElement | undefined = $state();
   let embedRoot: HTMLDivElement | undefined = $state();
   let placeholderRoot: HTMLDivElement | undefined = $state();
 
@@ -53,12 +56,16 @@
     switch (name) {
       case "text":
         return textRoot;
+      case "link":
+        return linkRoot;
+      case "list":
+        return listRoot;
       case "embed":
         return embedRoot;
       case "placeholder":
         return placeholderRoot;
       default:
-        return undefined; // link / list / insert land in tickets 02/03
+        return undefined; // insert lands in ticket 03
     }
   }
 
@@ -233,6 +240,18 @@
     return () => run(wrapInList(node));
   }
 
+  // Indent / outdent for the List ▾ menu. Unlike the old single-command
+  // buttons, these chain task_item then list_item so they work in task lists
+  // too — matching the Tab / Shift-Tab keymap in collab.ts.
+  const sinkList = chainCommands(
+    sinkListItem(schema.nodes.task_item),
+    sinkListItem(schema.nodes.list_item),
+  );
+  const liftList = chainCommands(
+    liftListItem(schema.nodes.task_item),
+    liftListItem(schema.nodes.list_item),
+  );
+
   // Text ▾ menu rows: close the menu, then run the block-type command. Kept
   // generic (takes the action thunk) so every row reads the same.
   function chooseBlock(action: () => void) {
@@ -365,6 +384,13 @@
   const isLink = $derived.by(() => {
     void tick;
     return isLinkActive();
+  });
+  // List ▾ trigger + active-row marker: the innermost list wrapping the
+  // selection ("bullet_list" / "ordered_list" / "task_list"), or null when the
+  // selection sits outside any list. Trigger is active whenever this is non-null.
+  const activeList = $derived.by(() => {
+    void tick;
+    return view ? activeListType(view.state) : null;
   });
   // Text ▾ trigger label — current block type at the cursor.
   const blockLabel = $derived.by(() => {
@@ -582,14 +608,134 @@
   {@render btn("bold", "Bold (⌘B)", toggle(schema.marks.strong), isBold)}
   {@render btn("italic", "Italic (⌘I)", toggle(schema.marks.em), isItalic)}
   {@render btn("code", "Inline code (⌘`)", toggle(schema.marks.code), isCode)}
-  {@render btn("link", "Link (⌘K)", toggleLink, isLink)}
-  {@render btn("wikilink", "Link to a page ([[)", startWikiLink)}
+  <!-- Link ▾ — merges the URL-link and wiki-link buttons; trigger active when
+       the selection carries a link mark (isLink). -->
+  <div class="tb-menu-wrap" bind:this={linkRoot}>
+    <button
+      type="button"
+      class="tb-btn tb-trigger tb-trigger-icon"
+      class:active={openMenu === "link" || isLink}
+      aria-haspopup="menu"
+      aria-expanded={openMenu === "link"}
+      aria-label="Link"
+      title="Link"
+      onclick={() => toggleMenu("link")}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+        {@html TOOLBAR_ICONS["link"]}
+      </svg>
+      <svg class="tb-trigger-chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+        {@html TOOLBAR_ICONS["chevronDown"]}
+      </svg>
+    </button>
+    {#if openMenu === "link"}
+      <div class="tb-menu" role="menu" aria-label="Link">
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-menu-item"
+          class:active={isLink}
+          onclick={chooseBlock(toggleLink)}
+        >
+          {@render menuIcon("link")}
+          <span class="tb-menu-label">Link</span>
+          <span class="tb-menu-hint">⌘K</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-menu-item"
+          onclick={chooseBlock(startWikiLink)}
+        >
+          {@render menuIcon("wikilink")}
+          <span class="tb-menu-label">Link to a page</span>
+          <span class="tb-menu-hint">[[</span>
+        </button>
+      </div>
+    {/if}
+  </div>
   <span class="tb-sep" aria-hidden="true"></span>
-  {@render btn("listUl", "Bullet list", wrapList(schema.nodes.bullet_list))}
-  {@render btn("listOl", "Numbered list", wrapList(schema.nodes.ordered_list))}
-  {@render btn("taskList", "Task list (⌘⇧7)", wrapList(schema.nodes.task_list))}
-  {@render btn("outdent", "Outdent list (⌘[)", () => run(liftListItem(schema.nodes.list_item)))}
-  {@render btn("indent", "Indent list (⌘])", () => run(sinkListItem(schema.nodes.list_item)))}
+  <!-- List ▾ — merges the five list buttons; trigger active when the selection
+       sits inside any list (activeList !== null). -->
+  <div class="tb-menu-wrap" bind:this={listRoot}>
+    <button
+      type="button"
+      class="tb-btn tb-trigger tb-trigger-icon"
+      class:active={openMenu === "list" || activeList !== null}
+      aria-haspopup="menu"
+      aria-expanded={openMenu === "list"}
+      aria-label="List"
+      title="List"
+      onclick={() => toggleMenu("list")}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+        {@html TOOLBAR_ICONS["listUl"]}
+      </svg>
+      <svg class="tb-trigger-chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+        {@html TOOLBAR_ICONS["chevronDown"]}
+      </svg>
+    </button>
+    {#if openMenu === "list"}
+      <div class="tb-menu" role="menu" aria-label="List">
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-menu-item"
+          class:active={activeList === "bullet_list"}
+          onclick={chooseBlock(wrapList(schema.nodes.bullet_list))}
+        >
+          {@render menuIcon("listUl")}
+          <span class="tb-menu-label">Bullet list</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-menu-item"
+          class:active={activeList === "ordered_list"}
+          onclick={chooseBlock(wrapList(schema.nodes.ordered_list))}
+        >
+          {@render menuIcon("listOl")}
+          <span class="tb-menu-label">Numbered list</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-menu-item"
+          class:active={activeList === "task_list"}
+          onclick={chooseBlock(wrapList(schema.nodes.task_list))}
+        >
+          {@render menuIcon("taskList")}
+          <span class="tb-menu-label">Task list</span>
+          <span class="tb-menu-hint">⌘⇧7</span>
+        </button>
+        <span class="tb-menu-sep" role="separator"></span>
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-menu-item"
+          onclick={chooseBlock(() => run(sinkList))}
+        >
+          {@render menuIcon("indent")}
+          <span class="tb-menu-label">Indent</span>
+          <span class="tb-menu-hint">⌘]</span>
+        </button>
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-menu-item"
+          onclick={chooseBlock(() => run(liftList))}
+        >
+          {@render menuIcon("outdent")}
+          <span class="tb-menu-label">Outdent</span>
+          <span class="tb-menu-hint">⌘[</span>
+        </button>
+      </div>
+    {/if}
+  </div>
   <span class="tb-sep" aria-hidden="true"></span>
   {@render btn("hr", "Horizontal rule", insertHorizontalRule)}
   {@render btn("listNested", "Insert table of contents", () => run(insertToc))}
@@ -786,6 +932,12 @@
   .tb-trigger-chevron {
     color: var(--pp-fg-muted);
     flex: 0 0 auto;
+  }
+  /* Icon-first triggers (Link ▾ / List ▾): a 16px icon + chevron, tighter than
+     the text-label Text ▾ trigger. */
+  .tb-trigger-icon {
+    gap: 2px;
+    padding: 0 4px;
   }
   .tb-menu {
     position: absolute;
