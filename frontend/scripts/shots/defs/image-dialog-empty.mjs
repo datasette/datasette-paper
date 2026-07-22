@@ -7,7 +7,12 @@ export default defineShot({
   doc: "richId",
   freeze: false,
   prepare: async (page) => {
-    await page.locator('.paper-toolbar [aria-label="Insert image"]').click();
+    // Image insert moved behind the toolbar's ＋ Insert menu.
+    await page.locator('.paper-toolbar [aria-label="Insert"]').click();
+    await page
+      .locator('.tb-insert-menu')
+      .getByRole("menuitem", { name: "Image", exact: true })
+      .click();
     await page.locator("dialog.image-dialog").waitFor({ state: "visible", timeout: 10_000 });
   },
   capture: (page, file) => page.locator("dialog.image-dialog").screenshot({ path: file }),

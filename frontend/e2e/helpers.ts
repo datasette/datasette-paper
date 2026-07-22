@@ -1,7 +1,51 @@
-import { type Page, expect } from "@playwright/test";
+import { type Locator, type Page, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 
 const BASE = `/-/paper`;
+
+// ─── toolbar menu helpers ───────────────────────────────────────────────────
+// The redesigned toolbar (design.md §Final control set) moved every insert and
+// most block-type controls behind dropdown menus: ＋ Insert, Text ▾, Link ▾,
+// List ▾. Reaching a control now means opening its menu and clicking a
+// `role=menuitem` row. All locators are scoped inside `#app-root` — the
+// datasette-debug-bar plugin injects an "act as" <select> and its own controls
+// *outside* that root, so an unscoped role query can be ambiguous.
+
+/** Open the ＋ Insert menu and return the `role=menu` locator (already visible).
+ * The menu renders the shared slash-command registry (image, table, date,
+ * embeds, TOC, divider, …) plus a trailing Placeholders section on templates. */
+export async function openInsertMenu(page: Page): Promise<Locator> {
+  const root = page.locator("#app-root");
+  await root.getByRole("button", { name: "Insert", exact: true }).click();
+  const menu = root.getByRole("menu", { name: "Insert" });
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+/** Open the ＋ Insert menu and click the insert menuitem with the given
+ * accessible name (e.g. "Image", "Table", "Embed a table"). */
+export async function insertViaMenu(page: Page, label: string): Promise<void> {
+  const menu = await openInsertMenu(page);
+  await menu.getByRole("menuitem", { name: label, exact: true }).click();
+}
+
+/** Open the Text ▾ (block-type "turn into") menu and return its `role=menu`. */
+export async function openTextMenu(page: Page): Promise<Locator> {
+  const root = page.locator("#app-root");
+  await root.getByRole("button", { name: "Turn into", exact: true }).click();
+  const menu = root.getByRole("menu", { name: "Turn into" });
+  await expect(menu).toBeVisible();
+  return menu;
+}
+
+/** Open the Link ▾ menu and return its `role=menu`. */
+export async function openLinkMenu(page: Page): Promise<Locator> {
+  const root = page.locator("#app-root");
+  await root.getByRole("button", { name: "Link", exact: true }).click();
+  const menu = root.getByRole("menu", { name: "Link" });
+  await expect(menu).toBeVisible();
+  return menu;
+}
 
 // Must match the value in playwright.config.ts. Hard-coding it here
 // (rather than reading from an env var) keeps the helpers usable
