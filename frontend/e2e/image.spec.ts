@@ -8,7 +8,7 @@
  * directly and the EditorView wiring is a thin one-liner.
  */
 import { test, expect } from "@playwright/test";
-import { createPaper, gotoPaper } from "./helpers";
+import { createPaper, gotoPaper, insertViaMenu } from "./helpers";
 
 // A 1x1 transparent PNG.
 const PNG_B64 =
@@ -19,8 +19,8 @@ test.describe("image insert dialog", () => {
     const doc = await createPaper(page);
     await gotoPaper(page, doc.url);
 
-    // Open the dialog from the toolbar.
-    await page.locator('.paper-toolbar [aria-label="Insert image"]').click();
+    // Open the dialog from the toolbar's ＋ Insert menu.
+    await insertViaMenu(page, "Image");
     const dialog = page.locator("dialog.image-dialog");
     await expect(dialog).toBeVisible();
 
@@ -102,7 +102,7 @@ test.describe("large image overflow", () => {
 
     // Insert a 2000px-wide SVG image through the dialog (the real insert path).
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="2000" height="300"><rect width="2000" height="300" fill="#4a9eff"/></svg>`;
-    await page.locator('.paper-toolbar [aria-label="Insert image"]').click();
+    await insertViaMenu(page, "Image");
     const dialog = page.locator("dialog.image-dialog");
     await dialog.locator(".img-tab", { hasText: "Upload from computer" }).click();
     await page.setInputFiles(".image-upload-input", {
