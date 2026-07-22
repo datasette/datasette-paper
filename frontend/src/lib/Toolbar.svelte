@@ -443,6 +443,20 @@
   // rule untouched). Kept as a derived string so both the strip and the
   // hide-keyboard button track the keyboard together.
   const mobileBottomStyle = $derived(isMobile ? `bottom: ${kbOffset}px` : "");
+
+  // Bottom offset for any dropdown menu on mobile. The strip has `overflow-x:
+  // auto` (safety valve), which forces `overflow-y` to clip — so a menu that is
+  // an absolutely-positioned descendant of the strip gets clipped no matter
+  // which way it opens. Escaping that requires `position: fixed` (containing
+  // block = viewport, outside the clip). A fixed menu then can't use
+  // `bottom: 100%` relative to its trigger, so we compute the strip-top offset:
+  // the strip pins at `bottom: kbOffset` and is ~36px tall plus its safe-area
+  // padding-bottom (mirrors the hide-keyboard button's
+  // `height: calc(36px + env(safe-area-inset-bottom))`). Empty on desktop, where
+  // menus stay the absolutely-positioned `.tb-menu` popover under the trigger.
+  const mobileMenuBottomStyle = $derived(
+    isMobile ? `bottom: calc(${kbOffset}px + 36px + env(safe-area-inset-bottom))` : "",
+  );
 </script>
 
 {#snippet btn(name: ToolbarIconName, title: string, onclick: () => void, pressed: boolean | undefined = undefined, disabled = false)}
@@ -482,7 +496,11 @@
 
 <div class="paper-toolbar" role="toolbar" aria-label="Editor toolbar" style={mobileBottomStyle}>
   {@render btn("undo", "Undo", () => run(undo), undefined, !canUndo)}
-  {@render btn("redo", "Redo", () => run(redo), undefined, !canRedo)}
+  <!-- Redo is dropped from the mobile strip (space; ⌘⇧Z and the iOS three-finger
+       gesture cover it — design.md §Mobile). Undo stays. -->
+  {#if !isMobile}
+    {@render btn("redo", "Redo", () => run(redo), undefined, !canRedo)}
+  {/if}
   <span class="tb-sep" aria-hidden="true"></span>
   <!-- Text ▾ — block-type "turn into" dropdown; trigger label doubles as the
        current-block indicator (blockLabel, RAF-tick derived). -->
@@ -504,7 +522,7 @@
       </svg>
     </button>
     {#if openMenu === "text"}
-      <div class="tb-menu" role="menu" aria-label="Turn into">
+      <div class="tb-menu" role="menu" aria-label="Turn into" style={mobileMenuBottomStyle}>
         <button
           type="button"
           role="menuitem"
@@ -612,7 +630,7 @@
       </svg>
     </button>
     {#if openMenu === "link"}
-      <div class="tb-menu" role="menu" aria-label="Link">
+      <div class="tb-menu" role="menu" aria-label="Link" style={mobileMenuBottomStyle}>
         <button
           type="button"
           role="menuitem"
@@ -661,7 +679,7 @@
       </svg>
     </button>
     {#if openMenu === "list"}
-      <div class="tb-menu" role="menu" aria-label="List">
+      <div class="tb-menu" role="menu" aria-label="List" style={mobileMenuBottomStyle}>
         <button
           type="button"
           role="menuitem"
@@ -738,7 +756,16 @@
       <span class="tb-trigger-label tb-insert-label">Insert</span>
     </button>
     {#if openMenu === "insert"}
-      <div class="tb-menu tb-insert-menu" role="menu" aria-label="Insert">
+      <!-- ≤640px this becomes a fixed full-width bottom sheet (grab handle +
+           4-column labeled grid); same DOM, swapped by the media query + the
+           `tb-sheet` class. The inline bottom offset stacks it above the strip. -->
+      <div
+        class="tb-menu tb-insert-menu"
+        class:tb-sheet={isMobile}
+        role="menu"
+        aria-label="Insert"
+        style={mobileMenuBottomStyle}
+      >
         {#each insertGroups as g (g.key)}
           <div class="tb-insert-header" aria-hidden="true">{g.label}</div>
           <div class="tb-insert-grid">
@@ -993,11 +1020,6 @@
   .tb-insert-item:disabled:hover {
     background: transparent;
   }
-  @media (max-width: 640px) {
-    .tb-insert-grid {
-      grid-template-columns: 1fr;
-    }
-  }
   .tb-placeholder-loading {
     padding: 8px 10px;
     font-size: 12px;
@@ -1035,12 +1057,20 @@
     max-width: 130px;
   }
 
-  /* ─── mobile: bottom-pinned, horizontally-scrolling strip ──────────────────
+  /* ─── mobile: bottom-pinned strip ─────────────────────────────────────────
    * On phones the toolbar leaves the top and pins to the bottom of the screen,
    * riding above the software keyboard (JS sets an inline `bottom` via the
-   * VisualViewport gap). It becomes a single non-wrapping row that scrolls
-   * horizontally, with room reserved on the right for the fixed hide-keyboard
-   * button. Breakpoint mirrors MOBILE_QUERY in the script. */
+   * VisualViewport gap). It's a single non-wrapping row, with room reserved on
+   * the right for the fixed hide-keyboard button. Breakpoint mirrors
+   * MOBILE_QUERY in the script.
+   *
+   * Width budget (redo + separators dropped on mobile; measured 2026-07-21):
+   * the strip is [undo][Text ▾][B][I][code][Link ▾][List ▾][＋] which renders
+   * to ~353px of content (undo/B/I/code 4×28, Text ▾ ~54, Link/List ▾ ~38
+   * each, ＋ icon-only ~31, gaps + 6px left / 46px right padding). That fits
+   * 375px-and-wider phones (iPhone SE/mini upward) with no scroll; only at the
+   * legacy 320px floor does the `overflow-x: auto` safety valve engage, so
+   * nothing is ever lost. */
   .tb-hide-keyboard {
     display: none;
   }
@@ -1068,15 +1098,83 @@
       /* Clear the iOS home indicator when the keyboard is closed. */
       padding-bottom: calc(4px + env(safe-area-inset-bottom));
     }
-    /* Keep separators and buttons from being squeezed by the flex row. */
-    .paper-toolbar .tb-btn,
-    .paper-toolbar .tb-sep {
+    /* Keep buttons from being squeezed by the flex row. */
+    .paper-toolbar .tb-btn {
       flex: 0 0 auto;
+    }
+    /* Separators are dropped on the strip: the dropdown triggers already read
+       as group boundaries, and the ~36px they cost is what lets the strip fit
+       a 375px phone without engaging the scroll valve. */
+    .paper-toolbar .tb-sep {
+      display: none;
     }
     /* ＋ Insert collapses to icon-only on the mobile strip (ticket 04 turns the
        menu itself into a bottom sheet; the trigger shrinks here already). */
     .tb-insert-label {
       display: none;
+    }
+    /* Dropdown menus can't hang below a bottom-pinned strip (they'd land under
+       the keyboard / off-screen), and they can't open *upward* as ordinary
+       absolute popovers either: the strip's `overflow-x: auto` (safety valve)
+       forces `overflow-y` to clip, which would swallow a menu anchored to its
+       in-strip trigger. So on mobile every menu is `position: fixed` (containing
+       block = viewport, outside the clip), docked bottom-left just above the
+       strip. The vertical offset is the inline `mobileMenuBottomStyle`; the
+       Insert menu widens to a full sheet via `.tb-sheet` below. */
+    .tb-menu {
+      position: fixed;
+      top: auto;
+      left: 6px;
+      right: auto;
+    }
+    /* ＋ Insert bottom sheet: full-width fixed panel above the strip. Grab
+       handle, 4-column labeled icon grid (icon over small label), safe-area
+       padding. Same DOM as the desktop menu — only the layout swaps. The inline
+       `bottom` (mobileMenuBottomStyle) stacks it on top of the strip. */
+    .tb-insert-menu.tb-sheet {
+      position: fixed;
+      left: 0;
+      right: 0;
+      top: auto;
+      width: 100%;
+      min-width: 0;
+      max-height: 60vh;
+      overflow-y: auto;
+      border-radius: 14px 14px 0 0;
+      border-left: none;
+      border-right: none;
+      padding: 8px 10px calc(14px + env(safe-area-inset-bottom));
+      box-shadow: 0 -6px 18px var(--pp-shadow);
+    }
+    /* Grab handle bar, centered above the grid (pseudo-element keeps the DOM
+       identical to desktop). */
+    .tb-insert-menu.tb-sheet::before {
+      content: "";
+      display: block;
+      width: 34px;
+      height: 4px;
+      border-radius: 2px;
+      background: var(--pp-border-strong);
+      margin: 0 auto 8px;
+    }
+    .tb-insert-menu.tb-sheet .tb-insert-grid {
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+    }
+    /* Cells: icon above a small label, centered. */
+    .tb-insert-menu.tb-sheet .tb-insert-item {
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+      padding: 8px 2px;
+      text-align: center;
+    }
+    .tb-insert-menu.tb-sheet .tb-insert-item .tb-menu-label {
+      flex: 0 0 auto;
+      font-size: 10.5px;
+      line-height: 1.2;
+      white-space: normal;
+      text-align: center;
     }
     .tb-hide-keyboard {
       position: fixed;
