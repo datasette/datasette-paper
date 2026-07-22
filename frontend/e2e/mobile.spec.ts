@@ -11,8 +11,8 @@
 import { test, expect } from "@playwright/test";
 import { createPaper, gotoPaper } from "./helpers";
 
-test.describe("wiki-link starter button", () => {
-  test("clicking the toolbar [[ button opens the autocomplete", async ({
+test.describe("wiki-link starter", () => {
+  test("the Link ▾ menu's 'Link to a page' row opens the autocomplete", async ({
     page,
   }) => {
     const host = await createPaper(page);
@@ -21,11 +21,13 @@ test.describe("wiki-link starter button", () => {
     // Place the cursor in the editor first so the insert has a selection.
     await page.locator(".ProseMirror").click();
 
-    const btn = page
-      .locator("#app-root")
-      .getByRole("button", { name: "Link to a page ([[)" });
-    await expect(btn).toBeVisible();
-    await btn.click();
+    // Post-redesign (ticket 02) the wiki-link starter is a row inside the
+    // Link ▾ dropdown, not a top-level toolbar button. Open the menu first.
+    const root = page.locator("#app-root");
+    await root.getByRole("button", { name: "Link", exact: true }).click();
+    const row = root.getByRole("menuitem", { name: /Link to a page/ });
+    await expect(row).toBeVisible();
+    await row.click();
 
     // Inserting `[[` trips the wikiLinkSuggest trigger exactly like typing it.
     await expect(page.locator(".pm-wikilink-popup")).toBeVisible({
@@ -36,12 +38,12 @@ test.describe("wiki-link starter button", () => {
 
 test.describe("mobile toolbar layout", () => {
   test.use({
-    viewport: { width: 390, height: 844 },
+    viewport: { width: 375, height: 667 },
     hasTouch: true,
     isMobile: true,
   });
 
-  test("toolbar pins to the bottom as a single scrolling row", async ({
+  test("toolbar pins to the bottom as a single non-scrolling row", async ({
     page,
   }) => {
     const host = await createPaper(page);
@@ -57,7 +59,7 @@ test.describe("mobile toolbar layout", () => {
         position: cs.position,
         flexWrap: cs.flexWrap,
         overflowX: cs.overflowX,
-        // scrollWidth > clientWidth ⇒ the row actually overflows and scrolls.
+        // scrollWidth > clientWidth ⇒ the row overflows and scrolls.
         overflows: el.scrollWidth > el.clientWidth,
         bottom: rect.bottom,
         innerHeight: window.innerHeight,
@@ -66,10 +68,66 @@ test.describe("mobile toolbar layout", () => {
 
     expect(layout.position).toBe("fixed");
     expect(layout.flexWrap).toBe("nowrap");
+    // overflow-x stays as a safety valve, but at this 375px viewport (iPhone
+    // SE/mini — the small end of current phones) the slim strip fits without
+    // engaging it; only the legacy 320px floor still scrolls.
     expect(layout.overflowX).toBe("auto");
-    expect(layout.overflows).toBe(true);
+    expect(layout.overflows).toBe(false);
     // Pinned to the bottom edge of the viewport (keyboard closed ⇒ offset 0).
     expect(Math.abs(layout.bottom - layout.innerHeight)).toBeLessThan(2);
+  });
+
+  test("redo is dropped from the strip; undo stays", async ({ page }) => {
+    const host = await createPaper(page);
+    await gotoPaper(page, host.url);
+
+    const root = page.locator("#app-root");
+    // Redo is dropped on mobile (⌘⇧Z / three-finger redo cover it); undo stays.
+    await expect(root.getByRole("button", { name: "Redo" })).toHaveCount(0);
+    await expect(root.getByRole("button", { name: "Undo" })).toBeVisible();
+  });
+
+  test("＋ Insert opens as a full-width bottom sheet above the strip", async ({
+    page,
+  }) => {
+    const host = await createPaper(page);
+    await gotoPaper(page, host.url);
+
+    const root = page.locator("#app-root");
+    // The debug bar (outside #app-root) overlaps the bottom edge in this
+    // viewport and would intercept a positional click on the pinned strip, so
+    // dispatch the click directly — that overlay doesn't exist in the real app.
+    await root
+      .getByRole("button", { name: "Insert", exact: true })
+      .dispatchEvent("click");
+
+    const sheet = root.locator(".tb-insert-menu");
+    await expect(sheet).toBeVisible();
+
+    const info = await sheet.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      const rect = el.getBoundingClientRect();
+      const grid = el.querySelector(".tb-insert-grid") as HTMLElement;
+      return {
+        position: cs.position,
+        hasSheetClass: el.classList.contains("tb-sheet"),
+        // A `repeat(4, 1fr)` grid resolves to four track widths.
+        gridTracks: getComputedStyle(grid).gridTemplateColumns.split(" ").length,
+        fullWidth: Math.abs(rect.width - window.innerWidth) < 2,
+        // Sits above the bottom-pinned strip, not under it / off-screen.
+        aboveStrip: rect.bottom < window.innerHeight - 1,
+        // Grab-handle pseudo-element is drawn (::before has content).
+        hasGrabHandle:
+          getComputedStyle(el, "::before").content !== "none",
+      };
+    });
+
+    expect(info.position).toBe("fixed");
+    expect(info.hasSheetClass).toBe(true);
+    expect(info.gridTracks).toBe(4);
+    expect(info.fullWidth).toBe(true);
+    expect(info.aboveStrip).toBe(true);
+    expect(info.hasGrabHandle).toBe(true);
   });
 
   test("hide-keyboard button is present and outside the scrolling strip", async ({
@@ -122,7 +180,9 @@ test.describe("mobile toolbar layout", () => {
     expect(stacked.byNoWrap).toBe(true);
   });
 
-  test("desktop keeps the top, wrapping toolbar", async ({ page }) => {
+  test("desktop keeps the top, single-row toolbar with redo", async ({
+    page,
+  }) => {
     // Override the mobile viewport for this one case.
     await page.setViewportSize({ width: 1200, height: 900 });
     const host = await createPaper(page);
@@ -134,7 +194,13 @@ test.describe("mobile toolbar layout", () => {
       return { position: cs.position, flexWrap: cs.flexWrap };
     });
     expect(style.position).toBe("sticky");
-    expect(style.flexWrap).toBe("wrap");
+    // The redesigned strip never wraps by construction (design.md §Final
+    // control set) — flex-wrap is removed on both desktop and mobile.
+    expect(style.flexWrap).toBe("nowrap");
+    // Redo stays on desktop (only the mobile strip drops it).
+    await expect(
+      page.locator("#app-root").getByRole("button", { name: "Redo" }),
+    ).toBeVisible();
     // No hide-keyboard button on desktop.
     await expect(page.locator("#app-root .tb-hide-keyboard")).toHaveCount(0);
   });
@@ -142,7 +208,7 @@ test.describe("mobile toolbar layout", () => {
 
 test.describe("mobile sidebar collapse", () => {
   test.use({
-    viewport: { width: 390, height: 844 },
+    viewport: { width: 375, height: 667 },
     hasTouch: true,
     isMobile: true,
   });

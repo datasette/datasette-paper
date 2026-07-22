@@ -9,7 +9,12 @@ export default defineShot({
   freeze: false,
   themes: ["light", "dark"],
   prepare: async (page) => {
-    await page.locator('.paper-toolbar [aria-label="Insert image"]').click();
+    // Image insert moved behind the toolbar's ＋ Insert menu.
+    await page.locator('.paper-toolbar [aria-label="Insert"]').click();
+    await page
+      .locator('.tb-insert-menu')
+      .getByRole("menuitem", { name: "Image", exact: true })
+      .click();
     const dialog = page.locator("dialog.image-dialog");
     await dialog.waitFor({ state: "visible", timeout: 10_000 });
     await dialog.locator(".img-tab", { hasText: "Upload from computer" }).click();

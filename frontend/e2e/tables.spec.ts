@@ -7,21 +7,21 @@ import { test, expect } from "@playwright/test";
 import {
   createPaper,
   gotoPaper,
+  openInsertMenu,
   waitForServerVersion,
 } from "./helpers";
 
 const BASE = `/-/paper`;
 
-/** Insert a table by clicking the toolbar's Insert-table button. The
- * button is gated by canInsertTable() — enabled only when the cursor
- * sits on an empty top-level paragraph, which is the default state of
- * a freshly-created paper. */
+/** Insert a table via the toolbar's ＋ Insert menu → "Table" row. The
+ * row is gated by canInsertTable() — enabled only when the cursor sits
+ * on an empty top-level paragraph, which is the default state of a
+ * freshly-created paper. */
 async function insertTableViaToolbar(page: import("@playwright/test").Page) {
-  const btn = page.getByRole("button", {
-    name: "Insert table (empty paragraphs only)",
-  });
-  await expect(btn).toBeEnabled();
-  await btn.click();
+  const menu = await openInsertMenu(page);
+  const item = menu.getByRole("menuitem", { name: "Table", exact: true });
+  await expect(item).toBeEnabled();
+  await item.click();
   await expect(page.locator(".ProseMirror table")).toBeVisible();
 }
 
@@ -133,28 +133,28 @@ test("API button opens the table's URL in a new tab once a name is set", async (
   await popup.close();
 });
 
-test("Insert-table toolbar button disables when the paragraph is non-empty", async ({ page }) => {
+test("Insert-table menu row disables where a table can't be inserted", async ({ page }) => {
   const { url } = await createPaper(page);
   await gotoPaper(page, url);
 
-  const btn = page.getByRole("button", {
-    name: "Insert table (empty paragraphs only)",
-  });
-  // Empty paragraph → enabled.
-  await expect(btn).toBeEnabled();
+  // The ＋ Insert menu's "Table" row is gated by the slash command's
+  // enabled() predicate (`!findTable(state) && canInsertBlockHere(...)`), so it
+  // disables where a table can't legally land — notably inside another table
+  // (no table-in-table). Opening the menu closes on the outside-click that
+  // focuses the editor, so we reopen it to re-read the row's live state.
+  const tableRow = (menu: import("@playwright/test").Locator) =>
+    menu.getByRole("menuitem", { name: "Table", exact: true });
 
-  // Type something — the paragraph is no longer empty, so button disables.
-  await page.locator(".ProseMirror").click();
-  await page.keyboard.type("hello");
-  await expect(btn).toBeDisabled();
+  // Empty top-level paragraph → enabled.
+  await expect(tableRow(await openInsertMenu(page))).toBeEnabled();
+  await page.keyboard.press("Escape");
 
-  // Backspace it back to empty → re-enabled.
-  await page.keyboard.press("Backspace");
-  await page.keyboard.press("Backspace");
-  await page.keyboard.press("Backspace");
-  await page.keyboard.press("Backspace");
-  await page.keyboard.press("Backspace");
-  await expect(btn).toBeEnabled();
+  // Insert a table and put the caret inside a cell → the row disables
+  // (findTable(state) is truthy, so no table-in-table). This proves the
+  // enabled() gate reaches the menu row and tracks the live cursor context.
+  await insertTableViaToolbar(page);
+  await page.locator(".ProseMirror table th").first().click();
+  await expect(tableRow(await openInsertMenu(page))).toBeDisabled();
 });
 
 test("Tab in the bottom-right cell appends a new row", async ({ page }) => {

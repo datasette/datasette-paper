@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   createPaper,
   gotoPaper,
+  openInsertMenu,
   typeInEditor,
   expectEditorContains,
   waitForServerVersion,
@@ -124,18 +125,20 @@ test("regular doc does NOT show the Template badge", async ({ page }) => {
   await expect(page.locator(".template-pill")).toHaveCount(0);
 });
 
-test("placeholder dropdown appears in the toolbar only on templates", async ({
+test("placeholder section appears in the Insert menu only on templates", async ({
   page,
 }) => {
-  // Regular doc — no placeholder trigger.
+  // Regular doc — the ＋ Insert menu has no Placeholders section.
   const doc = await createPaper(page);
   await gotoPaper(page, doc.url);
-  await expect(page.locator(".tb-placeholder-trigger")).toHaveCount(0);
+  const docMenu = await openInsertMenu(page);
+  await expect(docMenu.locator(".tb-placeholder-item")).toHaveCount(0);
 
-  // Template — trigger visible.
+  // Template — the Placeholders section lazy-loads its rows on open.
   const tmpl = await createPaper(page, { kind: "template" });
   await gotoPaper(page, tmpl.url);
-  await expect(page.locator(".tb-placeholder-trigger")).toBeVisible();
+  const tmplMenu = await openInsertMenu(page);
+  await expect(tmplMenu.locator(".tb-placeholder-item").first()).toBeVisible();
 });
 
 test("inserting a placeholder in a template renders the pill", async ({ page }) => {
@@ -145,12 +148,12 @@ test("inserting a placeholder in a template renders the pill", async ({ page }) 
   // Focus the editor so the placeholder lands at the current selection.
   await page.locator(".ProseMirror").click();
 
-  // Open the placeholder dropdown and click the `today` item. The
-  // dropdown lazy-loads its contents from /-/paper/api/template_params
-  // when first opened.
-  await page.locator(".tb-placeholder-trigger").click();
-  const todayItem = page
-    .locator(".tb-placeholder-menu .tb-placeholder-key", { hasText: /^today$/ })
+  // Open the ＋ Insert menu and click the `today` placeholder row. The
+  // Placeholders section lazy-loads its contents from
+  // /-/paper/api/template_params when the menu first opens on a template.
+  const menu = await openInsertMenu(page);
+  const todayItem = menu
+    .locator(".tb-placeholder-item", { hasText: /^today\b/ })
     .first();
   await expect(todayItem).toBeVisible();
   await todayItem.click();
@@ -169,9 +172,9 @@ test("placeholder authored in a template resolves to text in the clone", async (
   await gotoPaper(page, tmpl.url);
   await page.locator(".ProseMirror").click();
   await page.keyboard.type("Date: ");
-  await page.locator(".tb-placeholder-trigger").click();
-  await page
-    .locator(".tb-placeholder-menu .tb-placeholder-key", { hasText: /^today$/ })
+  const menu = await openInsertMenu(page);
+  await menu
+    .locator(".tb-placeholder-item", { hasText: /^today\b/ })
     .first()
     .click();
 

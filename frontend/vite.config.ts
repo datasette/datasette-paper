@@ -84,8 +84,10 @@ export default defineConfig({
     strictPort: true,
     cors: true,
     origin: "http://localhost:5173",
+    // No hmr.host: the client falls back to the page's location.hostname,
+    // which is right both locally and when the page is opened from another
+    // device (tailscale IP) with `--host 0.0.0.0`.
     hmr: {
-      host: "localhost",
       protocol: "ws",
     },
   },

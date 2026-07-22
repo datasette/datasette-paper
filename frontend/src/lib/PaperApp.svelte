@@ -19,7 +19,7 @@
   import type { SourceStore } from "./sourceStore";
   import ImageDialog from "./ImageDialog.svelte";
   import DatasetteEmbedDialog from "./DatasetteEmbedDialog.svelte";
-  import type { EmbedKindFilter } from "./slashMenu";
+  import type { EmbedKindFilter, SlashCommand } from "./slashMenu";
   import CreatePageDialog from "./CreatePageDialog.svelte";
   import { insertImage } from "./image";
   import { buildMarkdownSerializer, serializeDoc } from "./markdownSerializer";
@@ -75,6 +75,9 @@
   let view: EditorView | null = $state(null);
   // Per-connection source store, surfaced to the Sources panel for value counts.
   let sourceStore = $state<SourceStore | null>(null);
+  // The connection's `/` slash-command registry, shared with the toolbar's ＋
+  // Insert menu so the two never drift and dialogs stay single-instance.
+  let insertCommands = $state<SlashCommand[]>([]);
   let users = $state(0);
   let mode: "edit" | "view" = $state("edit");
   let permissions = $state<BootstrapPermissions | null>(null);
@@ -173,6 +176,7 @@
       reporter,
     );
     sourceStore = conn.getSourceStore();
+    insertCommands = conn.getSlashCommands();
 
     return () => {
       unsub?.();
@@ -326,16 +330,7 @@
     <div class="status-banner status-{status.state}">{status.message}</div>
   {/if}
   {#if canEdit && mode === "edit"}
-    <Toolbar
-      {view}
-      {kind}
-      onInsertImage={() => (imageDialogOpen = true)}
-      onInsertEmbed={(sourceId) => {
-        embedSource = sourceId;
-        embedFilter = undefined;
-        embedDialogOpen = true;
-      }}
-    />
+    <Toolbar {view} {kind} {insertCommands} />
   {/if}
   <div class="editor-host" bind:this={editorEl}></div>
   <ImageDialog bind:open={imageDialogOpen} oninsert={onImageInsert} />
