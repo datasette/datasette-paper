@@ -2083,6 +2083,13 @@ export class EditorConnection {
     return this.sourceStore;
   }
 
+  /** The `/` slash-command registry (built once in the constructor). The ＋
+   *  Insert toolbar menu renders this same array so the two entry points share
+   *  one registry — and one set of image/embed dialog callbacks. */
+  getSlashCommands(): SlashCommand[] {
+    return this.slashCommands;
+  }
+
   // ── Close ─────────────────────────────────────────────────────────────────
 
   /** Tear down cleanly. Idempotent. */

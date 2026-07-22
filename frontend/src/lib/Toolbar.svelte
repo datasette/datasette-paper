@@ -9,29 +9,24 @@
   import { blockTypeLabel } from "./blockTypeLabel";
   import { activeListType } from "./activeListType";
   import { wrapSelectionInCallout, unwrapCallout } from "./callout";
-  import { canInsertTable, insertTable } from "./tables";
-  import { insertToc } from "./tocView";
-  import { canInsertDate, insertDateAndEdit } from "./dateView";
-  import { embedInsertSources } from "./embedProviders";
+  import type { SlashCommand } from "./slashMenu";
+  import { insertMenuGroups } from "./insertMenuItems";
   // The in-table action bar (add/delete row/col, name input) is owned
-  // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). Only the
-  // initial Insert-table button lives in the toolbar.
+  // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). No table-mode
+  // controls live in the toolbar.
 
   let {
     view,
     kind = "doc",
-    onInsertImage,
-    onInsertEmbed,
+    insertCommands = [],
   }: {
     view: EditorView | null;
     kind?: "doc" | "template";
-    // Opens the (PaperApp-owned) image insert dialog. Shared with the `/`
-    // slash menu so there is only ever one ImageDialog instance.
-    onInsertImage?: () => void;
-    // Opens the (PaperApp-owned) embed picker dialog for `sourceId`
-    // (undefined = native Datasette). Same callback shape as the `/` menu's
-    // openDatasetteEmbed.
-    onInsertEmbed?: (sourceId?: string) => void;
+    // The `/` slash-command registry (built once in collab.ts) — the ＋ Insert
+    // menu renders it directly so the two entry points never drift. Dialog-
+    // backed commands (image, embed picker) already carry their PaperApp-owned
+    // callbacks, so opening one from here reuses the single dialog instance.
+    insertCommands?: SlashCommand[];
   } = $props();
 
   // ─── shared dropdown machinery ──────────────────────────────────────────────
@@ -39,9 +34,9 @@
   // key and binds its wrapper element as the menu root; a single $effect (below)
   // handles outside-click / Escape close plus ArrowUp/Down + Enter roving
   // navigation over that menu's `[role=menuitem]` rows. Deliberately generic:
-  // tickets 02/03 add "link" / "list" / "insert" keys and retire the
-  // transitional "embed" / "placeholder" ones (they fold into "insert").
-  type MenuName = "text" | "link" | "list" | "insert" | "embed" | "placeholder";
+  // the ＋ Insert menu (with the template placeholder section folded in) is the
+  // "insert" key.
+  type MenuName = "text" | "link" | "list" | "insert";
   let openMenu = $state<MenuName | null>(null);
 
   // Wrapper element per menu (trigger + popup), so a click on the trigger reads
@@ -49,8 +44,7 @@
   let textRoot: HTMLDivElement | undefined = $state();
   let linkRoot: HTMLDivElement | undefined = $state();
   let listRoot: HTMLDivElement | undefined = $state();
-  let embedRoot: HTMLDivElement | undefined = $state();
-  let placeholderRoot: HTMLDivElement | undefined = $state();
+  let insertRoot: HTMLDivElement | undefined = $state();
 
   function menuRoot(name: MenuName): HTMLElement | undefined {
     switch (name) {
@@ -60,12 +54,10 @@
         return linkRoot;
       case "list":
         return listRoot;
-      case "embed":
-        return embedRoot;
-      case "placeholder":
-        return placeholderRoot;
+      case "insert":
+        return insertRoot;
       default:
-        return undefined; // insert lands in ticket 03
+        return undefined;
     }
   }
 
@@ -135,38 +127,15 @@
     };
   });
 
-  // ─── embed dropdown ─────────────────────────────────────────────────────────
-  // Launcher for the existing embed picker. Items come from the shared
-  // `embedInsertSources()` (the same list the `/` menu uses) so the two entry
-  // points never drift. Synchronous/in-memory — no fetch, no loading state.
-
-  /** Resolve each source's TOOLBAR_ICONS key, falling back to "database" for an
-   *  absent/unknown manifest icon. Pure so it can be unit-tested without DOM. */
-  function embedDropdownItems(): { id?: string; label: string; icon: ToolbarIconName }[] {
-    return embedInsertSources().map((s) => ({
-      id: s.id,
-      label: s.label,
-      icon: (s.icon && s.icon in TOOLBAR_ICONS ? s.icon : "database") as ToolbarIconName,
-    }));
-  }
-
-  let embedItems = $state(embedDropdownItems());
-
-  function onEmbedTriggerClick() {
-    const items = embedDropdownItems();
-    // Single source (no third-party providers — the default install): a
-    // one-item menu is noise, so open the native dialog directly.
-    if (items.length <= 1) {
-      closeMenu();
-      onInsertEmbed?.(undefined);
-      return;
-    }
-    embedItems = items;
-    toggleMenu("embed");
-  }
+  // ─── ＋ Insert menu ──────────────────────────────────────────────────────────
+  // Rendered from the shared `insertCommands` registry (see prop docstring),
+  // filtered/grouped by the pure `insertMenuGroups` helper. Recomputed each RAF
+  // tick so per-command `enabled(state)` gating (canInsertTable / canDate) stays
+  // live with the cursor. On a template, a trailing Placeholders section (below)
+  // folds in.
 
   // Lazy-loaded list of built-in placeholder keys with sample values.
-  // Fetched once on demand (when the dropdown opens for the first
+  // Fetched once on demand (when the Insert menu opens for the first
   // time on a template) and cached for the session.
   type ParamInfo = { key: string; sample: string };
   let placeholderParams = $state<ParamInfo[] | null>(null);
@@ -193,6 +162,24 @@
     const tr = view.state.tr.replaceSelectionWith(node).scrollIntoView();
     view.dispatch(tr);
     view.focus();
+  }
+
+  // Commit an ＋ Insert row: close the menu, run the slash command (each handles
+  // its own dialog/insert), then restore editor focus — mirrors the slash
+  // popup's runSlashCommand tail (there's no `/query` to clear here).
+  function runInsertCommand(cmd: SlashCommand) {
+    if (!view) return;
+    closeMenu();
+    cmd.run(view);
+    view.focus();
+  }
+
+  // Open/close the ＋ Insert menu; on a template, kick the (cached) placeholder
+  // fetch the first time it opens so the trailing Placeholders section fills in.
+  function onInsertTriggerClick() {
+    const opening = openMenu !== "insert";
+    toggleMenu("insert");
+    if (opening && kind === "template") void loadPlaceholderParams();
   }
 
   // ─── helpers ──────────────────────────────────────────────────────────────
@@ -266,14 +253,6 @@
   function toggleCallout() {
     if (!view) return;
     run(isCallout ? unwrapCallout : wrapSelectionInCallout("note"));
-  }
-
-  function insertHorizontalRule() {
-    if (!view) return;
-    const hr = schema.nodes.horizontal_rule;
-    const tr = view.state.tr.replaceSelectionWith(hr.create()).scrollIntoView();
-    view.dispatch(tr);
-    view.focus();
   }
 
   function toggleLink() {
@@ -405,13 +384,12 @@
     void tick;
     return view ? redoDepth(view.state) > 0 : false;
   });
-  const canTable = $derived.by(() => {
+  // ＋ Insert menu contents from the shared slash registry. Recomputed on the
+  // RAF tick so each command's enabled(state) gate (table-in-list, canDate, …)
+  // tracks the cursor; `insertMenuGroups` is pure so it's unit-tested directly.
+  const insertGroups = $derived.by(() => {
     void tick;
-    return view ? canInsertTable(view.state) : false;
-  });
-  const canDate = $derived.by(() => {
-    void tick;
-    return view ? canInsertDate(view.state) : false;
+    return insertMenuGroups(insertCommands, view ? view.state : null);
   });
 
   // ─── mobile layout ──────────────────────────────────────────────────────────
@@ -485,9 +463,10 @@
   </button>
 {/snippet}
 
-<!-- Leading icon for a dropdown menu row. Falls back to a "¶" glyph for the
-     `paragraph` slot until its bootstrap `text-paragraph` path is pasted into
-     icons.ts — the swap is then a one-line addition there, no markup change. -->
+<!-- Leading icon for a dropdown menu row / trigger. Falls back to a text glyph
+     for the `paragraph` ("¶") and `plus` ("＋") slots until their bootstrap
+     paths (`text-paragraph` / `plus-lg`) are pasted into icons.ts — the swap is
+     then a one-line addition there, no markup change. -->
 {#snippet menuIcon(name: string)}
   {#if TOOLBAR_ICONS[name]}
     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -496,6 +475,8 @@
     </svg>
   {:else if name === "paragraph"}
     <span class="tb-menu-glyph" aria-hidden="true">¶</span>
+  {:else if name === "plus"}
+    <span class="tb-menu-glyph" aria-hidden="true">＋</span>
   {/if}
 {/snippet}
 
@@ -737,86 +718,49 @@
     {/if}
   </div>
   <span class="tb-sep" aria-hidden="true"></span>
-  {@render btn("hr", "Horizontal rule", insertHorizontalRule)}
-  {@render btn("listNested", "Insert table of contents", () => run(insertToc))}
-  {@render btn("image", "Insert image", () => onInsertImage?.())}
-  <!-- @feat date: toolbar button — insert today's chip + open its editor popup
-       (same flow as the /date slash entry) -->
-  {@render btn(
-    "calendarEvent",
-    "Insert date",
-    () => view && insertDateAndEdit(view),
-    undefined,
-    !canDate,
-  )}
-  {@render btn(
-    "table",
-    "Insert table (empty paragraphs only)",
-    () => run(insertTable(3, 3)),
-    undefined,
-    !canTable,
-  )}
-  <!-- Embed launcher. Reuses the bundled `database` icon; opens the existing
-       picker dialog. NOT gated on `kind` — available for both doc & template
-       (unlike the placeholder dropdown, which is template-only). -->
-  <div class="tb-embed-wrap" bind:this={embedRoot}>
+  <!-- ＋ Insert — one menu fed by the shared slash-command registry (insertGroups
+       from insertMenuGroups). Replaces the per-insert buttons + the bespoke embed
+       dropdown; disabled rows come straight from each command's enabled(state)
+       gate. On a template, the trailing Placeholders section folds in.
+       @feat date: the /date command surfaces here as an Insert menu row. -->
+  <div class="tb-menu-wrap" bind:this={insertRoot}>
     <button
       type="button"
-      class="tb-btn"
-      class:active={openMenu === "embed"}
+      class="tb-btn tb-trigger tb-trigger-insert"
+      class:active={openMenu === "insert"}
       aria-haspopup="menu"
-      aria-expanded={openMenu === "embed"}
-      aria-label="Insert embed"
-      title="Insert Datasette embed"
-      onclick={onEmbedTriggerClick}
+      aria-expanded={openMenu === "insert"}
+      aria-label="Insert"
+      title="Insert…"
+      onclick={onInsertTriggerClick}
     >
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-        <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
-        {@html TOOLBAR_ICONS["database"]}
-      </svg>
+      {@render menuIcon("plus")}
+      <span class="tb-trigger-label tb-insert-label">Insert</span>
     </button>
-    {#if openMenu === "embed"}
-      <div class="tb-embed-menu" role="menu">
-        {#each embedItems as src (src.label)}
-          <button
-            type="button"
-            role="menuitem"
-            class="tb-embed-item"
-            onclick={() => {
-              closeMenu();
-              onInsertEmbed?.(src.id);
-            }}
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
-              {@html TOOLBAR_ICONS[src.icon]}
-            </svg>
-            <span>{src.label}</span>
-          </button>
+    {#if openMenu === "insert"}
+      <div class="tb-menu tb-insert-menu" role="menu" aria-label="Insert">
+        {#each insertGroups as g (g.key)}
+          <div class="tb-insert-header" aria-hidden="true">{g.label}</div>
+          <div class="tb-insert-grid">
+            {#each g.rows as row (row.command.id)}
+              <button
+                type="button"
+                role="menuitem"
+                class="tb-menu-item tb-insert-item"
+                disabled={row.disabled}
+                title={row.disabled
+                  ? `${row.command.label} — not available here`
+                  : row.command.label}
+                onclick={() => runInsertCommand(row.command)}
+              >
+                {@render menuIcon(row.command.icon)}
+                <span class="tb-menu-label">{row.command.label}</span>
+              </button>
+            {/each}
+          </div>
         {/each}
-      </div>
-    {/if}
-  </div>
-  {#if kind === "template"}
-    <span class="tb-sep" aria-hidden="true"></span>
-    <div class="tb-placeholder-wrap" bind:this={placeholderRoot}>
-      <button
-        type="button"
-        class="tb-btn tb-placeholder-trigger"
-        aria-haspopup="menu"
-        aria-expanded={openMenu === "placeholder"}
-        aria-label="Insert placeholder"
-        title={"Insert placeholder ({key})"}
-        onclick={() => {
-          const opening = openMenu !== "placeholder";
-          toggleMenu("placeholder");
-          if (opening) void loadPlaceholderParams();
-        }}
-      >
-        <span class="tb-placeholder-label">{"{ }"}</span>
-      </button>
-      {#if openMenu === "placeholder"}
-        <div class="tb-placeholder-menu" role="menu">
+        {#if kind === "template"}
+          <div class="tb-insert-header" aria-hidden="true">Placeholders</div>
           {#if placeholderLoading && placeholderParams === null}
             <div class="tb-placeholder-loading">Loading…</div>
           {:else if placeholderParams && placeholderParams.length}
@@ -834,10 +778,10 @@
           {:else}
             <div class="tb-placeholder-loading">No placeholders defined.</div>
           {/if}
-        </div>
-      {/if}
-    </div>
-  {/if}
+        {/if}
+      </div>
+    {/if}
+  </div>
 </div>
 
 <!-- Hide-keyboard button (mobile only). Rendered outside `.paper-toolbar` so it
@@ -871,13 +815,13 @@
     /* deliberate literal: very faint toolbar elevation (.04), lighter than the
        --pp-shadow (.12) used by popovers/dialogs. */
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
-    flex-wrap: wrap;
+    /* No flex-wrap: the redesigned strip is ~9 controls and fits on one row by
+       construction (design.md §Final control set). Mobile re-pins + scrolls. */
     position: sticky;
     top: 8px;
     z-index: 10;
     margin: 0 auto 12px;
     width: fit-content;
-    justify-content: center;
   }
   .tb-btn {
     display: inline-flex;
@@ -1008,72 +952,51 @@
     background: var(--pp-border);
     margin: 4px 6px;
   }
-  .tb-embed-wrap {
-    position: relative;
-    display: inline-flex;
-  }
-  .tb-embed-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 20;
-    min-width: 200px;
-    background: var(--pp-bg);
-    border: 1px solid var(--pp-border);
-    border-radius: 8px;
-    box-shadow: 0 4px 14px var(--pp-shadow);
-    padding: 4px;
-    display: flex;
-    flex-direction: column;
-  }
-  .tb-embed-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 10px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    font: inherit;
-    text-align: left;
-    color: var(--pp-fg);
-    cursor: pointer;
-  }
-  .tb-embed-item:hover {
-    background: var(--pp-surface-2);
-  }
-  .tb-embed-item svg {
-    flex: 0 0 auto;
-    color: var(--pp-fg-muted);
-  }
-  .tb-placeholder-wrap {
-    position: relative;
-    display: inline-flex;
-  }
-  .tb-placeholder-trigger {
-    width: auto;
+  /* ─── ＋ Insert menu ───────────────────────────────────────────────────────
+   * Reuses the shared `.tb-menu` shell + `.tb-menu-item` rows; adds group
+   * headers and a two-column grid on wide viewports (one column ≤640px). */
+  .tb-trigger-insert {
+    gap: 4px;
     padding: 0 8px;
-    font-size: 12px;
+  }
+  .tb-insert-menu {
+    min-width: 300px;
+  }
+  .tb-insert-header {
+    padding: 6px 10px 2px;
+    font-size: 11px;
     font-weight: 600;
-    /* deliberate literal: deep-navy placeholder accent, darker than --pp-accent. */
-    color: #0b3b8a;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pp-fg-subtle);
   }
-  .tb-placeholder-label {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  /* Two-column grid ≥641px; collapses to one below (design.md §＋ Insert). */
+  .tb-insert-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
   }
-  .tb-placeholder-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    right: 0;
-    z-index: 20;
-    min-width: 220px;
-    background: var(--pp-bg);
-    border: 1px solid var(--pp-border);
-    border-radius: 8px;
-    box-shadow: 0 4px 14px var(--pp-shadow);
-    padding: 4px;
-    display: flex;
-    flex-direction: column;
+  .tb-insert-item {
+    min-width: 0;
+  }
+  .tb-insert-item .tb-menu-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  /* Disabled row: the command's enabled(state) gate rejected the context
+     (e.g. table inside a list). Non-clickable, dimmed; reason in `title`. */
+  .tb-insert-item:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .tb-insert-item:disabled:hover {
+    background: transparent;
+  }
+  @media (max-width: 640px) {
+    .tb-insert-grid {
+      grid-template-columns: 1fr;
+    }
   }
   .tb-placeholder-loading {
     padding: 8px 10px;
@@ -1149,6 +1072,11 @@
     .paper-toolbar .tb-btn,
     .paper-toolbar .tb-sep {
       flex: 0 0 auto;
+    }
+    /* ＋ Insert collapses to icon-only on the mobile strip (ticket 04 turns the
+       menu itself into a bottom sheet; the trigger shrinks here already). */
+    .tb-insert-label {
+      display: none;
     }
     .tb-hide-keyboard {
       position: fixed;
