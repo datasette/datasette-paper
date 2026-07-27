@@ -9,6 +9,13 @@ surface import-light: modules in this package only import ``click`` (and
 ``._common``) at top level, and each command body late-imports its
 machinery (``datasette_paper.export`` pulls in prosemirror-py, which must
 not load until a command that actually materializes a doc runs).
+
+Note this package is no longer the *only* CLI surface: ``standalone.py``
+(same directory) is a separate, independent ``[project.scripts]`` entry
+point (``datasette-paper``) that *launches* an in-process Datasette
+instance — it is not part of the ``paper`` group above, is never
+``add_command``-ed into it, and is never imported at plugin-load time
+(only the console script imports it). See ``plans/cli-top/README.md``.
 """
 
 import click
