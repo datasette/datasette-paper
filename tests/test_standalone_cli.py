@@ -398,9 +398,13 @@ def test_first_launch_redirects_to_welcome_doc_second_to_index(tmp_path, monkeyp
 
 # @feat cli-top: regression test for the console-script import order —
 # importing datasette_paper.cli.standalone FIRST makes datasette's
-# entry-point loader scan the half-initialized datasette_paper module
-# (zero hookimpls registered: no routes, no startup/migrations).
-# `_repair_plugin_registration` must restore a full registration. Needs a
+# entry-point loader scan half-initialized plugin modules (zero hookimpls
+# registered: no routes, no startup/migrations) — datasette_paper itself
+# AND dependencies its import chain pulls in mid-cycle, e.g.
+# datasette_user_profiles (whose lost register_actions caused
+# "Unknown action: profile_access" and whose lost startup left
+# "no such table: datasette_user_profiles").
+# `_repair_plugin_registration` must restore full registrations. Needs a
 # subprocess: inside pytest, datasette is already fully imported and the
 # broken import order can't be reproduced in-process.
 def test_repair_plugin_registration_console_script_import_order():
@@ -417,16 +421,22 @@ def test_repair_plugin_registration_console_script_import_order():
         _repair_plugin_registration()
 
         import datasette_paper
+        import datasette_user_profiles
         from datasette.plugins import pm
 
-        assert pm.is_registered(datasette_paper)
-        for hookname in ("startup", "register_routes", "register_actions"):
-            impls = [
-                i
-                for i in getattr(pm.hook, hookname).get_hookimpls()
-                if i.plugin is datasette_paper
-            ]
-            assert impls, f"datasette_paper has no {hookname} hookimpl registered"
+        checks = [
+            (datasette_paper, ("startup", "register_routes", "register_actions")),
+            (datasette_user_profiles, ("startup", "register_actions")),
+        ]
+        for module, hooknames in checks:
+            assert pm.is_registered(module), module.__name__
+            for hookname in hooknames:
+                impls = [
+                    i
+                    for i in getattr(pm.hook, hookname).get_hookimpls()
+                    if i.plugin is module
+                ]
+                assert impls, f"{module.__name__} has no {hookname} hookimpl"
         print("ok")
         """
     )
