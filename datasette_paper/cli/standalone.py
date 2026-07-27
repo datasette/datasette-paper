@@ -309,33 +309,43 @@ async def _seed_welcome_doc(ds, *, user_id) -> int:
 
 
 # @feat cli-top: registration repair for the console-script import order —
-# without it the launched instance has no paper routes or migrations at all.
+# without it the launched instance has no paper routes or migrations at all,
+# and dependencies caught in the same import cycle (datasette-user-profiles)
+# lose their actions/startup too.
 def _repair_plugin_registration():
-    """Re-register ``datasette_paper`` with pluggy if its hookimpls are missing.
+    """Re-register every plugin module pluggy scanned while half-initialized.
 
     The console script imports ``datasette_paper.cli.standalone`` first, so
     Python begins executing ``datasette_paper/__init__`` — whose import chain
     reaches ``datasette.plugins``, which loads entry points *during* that
-    import. Pluggy gets the half-initialized module out of ``sys.modules``
-    and scans it for hookimpls before any are defined: the plugin ends up
-    registered with zero hooks (no routes → 404s, no ``startup`` → no
-    migrations → "no such table: _datasette_paper_doc"). Every other entry
+    import. Any plugin module that is mid-import at that moment comes out of
+    ``sys.modules`` half-initialized, and pluggy scans it for hookimpls
+    before they're defined: the plugin ends up registered with zero hooks.
+    That's ``datasette_paper`` itself (no routes → 404s, no ``startup`` → no
+    migrations → "no such table: _datasette_paper_doc") **and** dependencies
+    its chain imports directly — ``datasette_user_profiles`` (imported for
+    ``resolve_profile_actors``) loses ``register_actions`` ("Unknown action:
+    profile_access") and its table-creating ``startup``. Every other entry
     into the package (``datasette`` CLI, pytest) imports datasette first and
-    never hits this. By the time ``launch()`` runs the module is complete,
-    so unregister + register makes pluggy re-scan and pick up everything.
-    No-op when registration is already intact.
+    never hits this.
+
+    By the time ``launch()`` runs, every module is fully imported — so any
+    registered module plugin with zero hookimpls on file is either a
+    mid-import casualty or genuinely hookless, and re-registering is the
+    correct repair for the former and a no-op for the latter.
     """
-    import datasette_paper
+    import types
+
     from datasette.plugins import pm
 
-    if pm.is_registered(datasette_paper):
-        impls = [
-            i for i in pm.hook.startup.get_hookimpls() if i.plugin is datasette_paper
-        ]
-        if impls:
-            return
-        pm.unregister(datasette_paper)
-    pm.register(datasette_paper, name="paper")
+    for plugin in list(pm.get_plugins()):
+        if not isinstance(plugin, types.ModuleType):
+            continue
+        if pm.get_hookcallers(plugin):
+            continue
+        name = pm.get_name(plugin)
+        pm.unregister(plugin)
+        pm.register(plugin, name=name)
 
 
 def _validate_user_dbs(user_dbs, *, ctx):
