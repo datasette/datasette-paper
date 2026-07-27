@@ -47,6 +47,11 @@ CI = "https://github.com/datasette/datasette-paper/actions"
 [project.entry-points.datasette]
 paper = "datasette_paper"
 
+[project.scripts]
+# @feat cli-top: standalone launcher entry point, independent of the
+# `datasette paper` click group registered via `paper` above.
+datasette-paper = "datasette_paper.cli.standalone:main"
+
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
