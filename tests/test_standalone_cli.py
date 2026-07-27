@@ -16,6 +16,8 @@ runs.
 # @feat cli-top: CLI-surface tests — argv splitting, defaults, the launch
 # flow (smoke + missing-user-db), and the pre-existing-db warning.
 
+from urllib.parse import urlsplit
+
 import click.testing
 import pytest
 from datasette.app import Datasette
@@ -28,6 +30,25 @@ from datasette_paper.cli.standalone import (
     main,
     split_argv,
 )
+
+
+def _unregister_login_plugin():
+    """Undo `launch()`'s `pm.register(..., name="paper-local-login")`.
+
+    A real `datasette-paper` invocation only ever runs once per process — the
+    registration is meant to live for the process lifetime. A test that
+    invokes `main` twice (simulating two separate launches against the same
+    tmp home) needs to unregister between calls or the second `pm.register`
+    under the same fixed name raises.
+    """
+    existing = pm.get_plugin("paper-local-login")
+    if existing is not None:
+        pm.unregister(existing)
+
+
+def _path_and_query(url: str) -> str:
+    parts = urlsplit(url)
+    return parts.path + (f"?{parts.query}" if parts.query else "")
 
 
 @pytest.fixture(autouse=True)
@@ -298,3 +319,78 @@ def test_launch_no_warning_and_no_check_on_fresh_db(tmp_path, monkeypatch):
 
     assert result.exit_code == 0, result.output
     assert "Warning" not in result.output
+
+
+# ---------------------------------------------------------------------------
+# First-launch welcome doc (ticket 03).
+# ---------------------------------------------------------------------------
+
+
+def test_no_seed_on_existing_db_even_with_zero_docs(tmp_path, monkeypatch):
+    """First-launch detection is "the file didn't exist", not "zero docs" —
+    a pre-existing (even empty) internal db must never seed."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    internal_db = tmp_path / "internal.db"
+    internal_db.touch()  # exists, but has no schema/docs yet
+    assert internal_db.exists()
+
+    async def _boom(ds, **kwargs):
+        raise AssertionError(
+            "_seed_welcome_doc should not run against a pre-existing db"
+        )
+
+    monkeypatch.setattr(standalone, "_seed_welcome_doc", _boom)
+
+    captured = _patch_launch_boundaries(monkeypatch, actor_id="testuser")
+    runner = click.testing.CliRunner()
+    try:
+        result = runner.invoke(main, [str(internal_db)])
+    finally:
+        _unregister_login_plugin()
+
+    assert result.exit_code == 0, result.output
+    assert "/-/paper-local-login?token=" in captured["opened_url"]
+
+
+def test_first_launch_redirects_to_welcome_doc_second_to_index(tmp_path, monkeypatch):
+    """CLI smoke: a fresh internal db seeds a welcome doc and the login URL
+    redirects there; relaunching against the same (now-existing) internal db
+    redirects to the plain doc index instead."""
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    internal_db = tmp_path / "internal.db"
+    assert not internal_db.exists()
+
+    runner = click.testing.CliRunner()
+
+    # --- First launch: fresh db, seeds + redirects to the welcome doc. ---
+    captured_1 = _patch_launch_boundaries(monkeypatch, actor_id="testuser")
+    try:
+        result_1 = runner.invoke(main, [str(internal_db)])
+        assert result_1.exit_code == 0, result_1.output
+        assert internal_db.exists()
+
+        resp_1 = run_sync(
+            lambda: captured_1["ds"].client.get(
+                _path_and_query(captured_1["opened_url"]), follow_redirects=False
+            )
+        )
+        assert resp_1.status_code == 302
+        assert resp_1.headers["location"].startswith("/-/paper/doc/")
+    finally:
+        _unregister_login_plugin()
+
+    # --- Second launch: same tmp home, db now exists -> default index. ---
+    captured_2 = _patch_launch_boundaries(monkeypatch, actor_id="testuser")
+    try:
+        result_2 = runner.invoke(main, [str(internal_db)])
+        assert result_2.exit_code == 0, result_2.output
+
+        resp_2 = run_sync(
+            lambda: captured_2["ds"].client.get(
+                _path_and_query(captured_2["opened_url"]), follow_redirects=False
+            )
+        )
+        assert resp_2.status_code == 302
+        assert resp_2.headers["location"] == "/-/paper/"
+    finally:
+        _unregister_login_plugin()

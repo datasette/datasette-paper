@@ -62,8 +62,21 @@ class LocalLoginPlugin:
     """
 
     def __init__(self, user_id, token, next_path=DEFAULT_NEXT_PATH):
-        # next_path must be same-origin (starts with "/") and is never taken
-        # from the request — it's fixed at construction time by the CLI.
+        # next_path must be same-origin (starts with "/", not "//") and is
+        # never taken from the request — it's fixed at construction time (or
+        # by the CLI mutating .next_path after a first-launch welcome-doc
+        # seed; see `launch()`). `register_routes` re-reads `self.next_path`
+        # on every call (Datasette recomputes routes per `ds.app()`), so a
+        # post-construction mutation is picked up before uvicorn ever serves
+        # a request.
+        if (
+            not isinstance(next_path, str)
+            or not next_path.startswith("/")
+            or next_path.startswith("//")
+        ):
+            raise ValueError(
+                f"next_path must be a same-origin path starting with '/': {next_path!r}"
+            )
         self.user_id = user_id
         self.token = token
         self.next_path = next_path
@@ -250,6 +263,51 @@ async def _check_preexisting_db(ds, *, user_id, internal_db_path):
     )
 
 
+#: Name of the first-launch welcome doc, seeded via the real create route.
+WELCOME_DOC_NAME = "Welcome to datasette-paper"
+
+
+def _load_welcome_markdown() -> str:
+    """Read the shipped ``cli/welcome.md`` package-data file.
+
+    ``importlib.resources`` (not a bare ``Path(__file__).parent / "..."``
+    read) so the file is found whether the package is installed from a
+    wheel/sdist or run from a checkout — see the
+    ``[tool.setuptools.package-data]`` entry in ``pyproject.toml``.
+    """
+    from importlib import resources
+
+    return resources.files("datasette_paper.cli").joinpath("welcome.md").read_text()
+
+
+# @feat cli-top: first-launch welcome doc — seeded through the real
+# `POST /-/paper/api/docs` create route (no duplicated create logic: the
+# route itself does markdown_to_doc, the version-0 snapshot insert, the
+# reindex sweep, and the owner Manager-grant seeding), authenticated as the
+# launch actor via a signed ds_actor cookie.
+async def _seed_welcome_doc(ds, *, user_id) -> int:
+    """POST the welcome markdown through the create route; return the doc id.
+
+    Deliberately does not reimplement any create-route logic — a plain
+    authenticated POST gets the same markdown_to_doc parse, version-0
+    snapshot, reindex sweep, and owner-grant seeding as a hand-created doc.
+    Raises ``click.ClickException`` (message includes the response body) on
+    anything but 201, so a broken ``welcome.md`` fails the launch loudly
+    instead of quietly 500ing later in the browser.
+    """
+    cookie = ds.sign({"a": {"id": user_id}}, "actor")
+    resp = await ds.client.post(
+        "/-/paper/api/docs",
+        json={"name": WELCOME_DOC_NAME, "content": _load_welcome_markdown()},
+        cookies={"ds_actor": cookie},
+    )
+    if resp.status_code != 201:
+        raise click.ClickException(
+            f"Failed to seed the welcome doc ({resp.status_code}): {resp.text}"
+        )
+    return resp.json()["id"]
+
+
 def _validate_user_dbs(user_dbs, *, ctx):
     for path in user_dbs:
         p = Path(path)
@@ -297,6 +355,15 @@ def launch(*, internal_db, port, host, user_dbs, ctx=None):
                 ds, user_id=user_id, internal_db_path=internal_db_path
             )
         )
+    else:
+        # First launch (the internal db file didn't exist when we resolved
+        # it above — NOT "zero docs", so deleting the welcome doc later
+        # never resurrects it): seed it and point this launch's login
+        # redirect at it instead of the doc index. `register_routes` reads
+        # `login_plugin.next_path` fresh on every `ds.app()` call, so this
+        # mutation lands before uvicorn ever serves a request.
+        doc_id = run_sync(lambda: _seed_welcome_doc(ds, user_id=user_id))
+        login_plugin.next_path = f"/-/paper/doc/{doc_id}"
     if warning:
         click.echo(warning)
 

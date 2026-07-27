@@ -109,6 +109,42 @@ async def test_composed_config_gates_create_to_launch_actor(ds_with_login):
     assert anon_resp.status_code == 403
 
 
+# ---------------------------------------------------------------------------
+# next_path (ticket 03): the first-launch welcome-doc redirect target.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_custom_next_path_redirects_there(tmp_path):
+    """A non-default `next_path` (the CLI's first-launch welcome-doc
+    redirect) is honored instead of the `/-/paper/` default."""
+    ds = build_instance(
+        internal_db_path=tmp_path / "internal.db",
+        user_dbs=[],
+        user_id=ACTOR_ID,
+        secret="fixed-test-secret",
+    )
+    await ds.invoke_startup()
+    plugin = LocalLoginPlugin(ACTOR_ID, TOKEN, next_path="/-/paper/doc/42")
+    pm.register(plugin, name="paper-local-login-test-next-path")
+    try:
+        resp = await ds.client.get(
+            f"/-/paper-local-login?token={TOKEN}", follow_redirects=False
+        )
+        assert resp.status_code == 302
+        assert resp.headers["location"] == "/-/paper/doc/42"
+    finally:
+        pm.unregister(plugin)
+
+
+@pytest.mark.parametrize(
+    "bad_next_path", ["", "no-leading-slash", "//evil.example.com"]
+)
+def test_next_path_must_be_same_origin(bad_next_path):
+    with pytest.raises(ValueError):
+        LocalLoginPlugin(ACTOR_ID, TOKEN, next_path=bad_next_path)
+
+
 @pytest.mark.asyncio
 async def test_secret_persists_across_relaunches(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
