@@ -67,6 +67,8 @@ include = ["datasette_paper*"]
 # `**/*` is recursive — Vite writes JS/CSS into static/gen/, and a plain
 # `static/*` glob would skip the subdir's contents. `manifest.json` lives
 # at the package root because that's where `datasette_vite._load_manifest`
-# looks for it.
-datasette_paper = ["static/**/*", "templates/**/*", "manifest.json"]
+# looks for it. `cli/welcome.md` is the first-launch welcome doc shipped by
+# the standalone CLI (ticket 03 of plans/cli-top) — without it in an sdist/
+# wheel install, `standalone.launch()` can't find the file to seed.
+datasette_paper = ["static/**/*", "templates/**/*", "manifest.json", "cli/welcome.md"]
 
