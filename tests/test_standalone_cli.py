@@ -394,3 +394,47 @@ def test_first_launch_redirects_to_welcome_doc_second_to_index(tmp_path, monkeyp
         assert resp_2.headers["location"] == "/-/paper/"
     finally:
         _unregister_login_plugin()
+
+
+# @feat cli-top: regression test for the console-script import order —
+# importing datasette_paper.cli.standalone FIRST makes datasette's
+# entry-point loader scan the half-initialized datasette_paper module
+# (zero hookimpls registered: no routes, no startup/migrations).
+# `_repair_plugin_registration` must restore a full registration. Needs a
+# subprocess: inside pytest, datasette is already fully imported and the
+# broken import order can't be reproduced in-process.
+def test_repair_plugin_registration_console_script_import_order():
+    import subprocess
+    import sys
+    import textwrap
+
+    snippet = textwrap.dedent(
+        """
+        # Mimic the console script: this import runs datasette_paper/__init__,
+        # whose import chain triggers datasette's entry-point loading mid-import.
+        from datasette_paper.cli.standalone import _repair_plugin_registration
+
+        _repair_plugin_registration()
+
+        import datasette_paper
+        from datasette.plugins import pm
+
+        assert pm.is_registered(datasette_paper)
+        for hookname in ("startup", "register_routes", "register_actions"):
+            impls = [
+                i
+                for i in getattr(pm.hook, hookname).get_hookimpls()
+                if i.plugin is datasette_paper
+            ]
+            assert impls, f"datasette_paper has no {hookname} hookimpl registered"
+        print("ok")
+        """
+    )
+    proc = subprocess.run(
+        [sys.executable, "-c", snippet],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "ok" in proc.stdout
