@@ -1,25 +1,25 @@
-"""Standalone ``datasette-paper`` console script.
+"""``datasette paper serve`` — launch a local, single-user paper instance.
 
-A "just run it" launcher for a local, single-user paper instance:
-
-    datasette-paper [INTERNAL_DB] [-p PORT] [-h HOST] [-- DB...]
+    datasette paper serve [INTERNAL_DB] [-p PORT] [-h HOST] [-- DB...]
 
 It builds a ``Datasette`` instance **in-process** (no subprocess), serves it
 with uvicorn, and opens the browser on a one-time login URL that sets a
 signed actor cookie for ``$USER`` and redirects to ``/-/paper/``.
 
-This is a separate ``[project.scripts]`` entry point
-(``datasette-paper = "datasette_paper.cli.standalone:main"``) — distinct
-from the ``datasette paper`` click group in ``datasette_paper/cli/__init__.py``
-(offline commands over an internal db file, registered via the
-``register_commands`` hookimpl). This module is **never** imported at
-plugin-load time, so it is not wired into that group. It keeps the ``cli/``
-package's import-light convention where practical: only ``click`` (+
-stdlib) at module scope; ``datasette``/``uvicorn`` are late-imported inside
-function bodies. The one exception is ``hookimpl``, needed at class-body
-evaluation time for :class:`LocalLoginPlugin`'s decorator — unavoidable, and
-harmless here since this module is only ever imported by the console script
-itself (never by a plain ``datasette`` invocation).
+The same command object is also the ``datasette-paper`` console script
+(``[project.scripts] datasette-paper = "datasette_paper.cli.serve:serve"``)
+— a pure alias, same flags, same behavior. The two entries differ in one
+way that matters: the console script imports this package *before*
+datasette, which trips the half-initialized-plugin scan that
+:func:`_repair_plugin_registration` exists to repair; under
+``datasette paper serve`` datasette is imported first and the repair is a
+natural no-op.
+
+Import-light like the rest of ``cli/`` — ``datasette``/``uvicorn`` are
+late-imported inside function bodies — with one documented exception:
+``hookimpl`` is needed at class-body evaluation time for
+:class:`LocalLoginPlugin`'s decorator. Harmless in the plugin-load path:
+importing it just re-imports the already-loaded ``datasette`` package.
 
 See ``plans/cli-top/README.md`` for the full design/decisions table.
 """
@@ -46,7 +46,7 @@ DEFAULT_HOST = "127.0.0.1"
 
 
 # @feat cli-top: one-off local-login plugin, registered only on the
-# standalone CLI's own Datasette instance — validates the launch token,
+# serve command's own Datasette instance — validates the launch token,
 # sets a signed $USER actor cookie, and redirects to next_path.
 class LocalLoginPlugin:
     """One-off auth plugin, registered programmatically per launch.
@@ -193,7 +193,7 @@ def split_argv(argv):
     return argv, []
 
 
-class _StandaloneCommand(click.Command):
+class _ServeCommand(click.Command):
     """Intercepts ``--`` before click's own argument parsing runs.
 
     ``parse_args`` is the one hook that sees the raw argv click was
@@ -315,7 +315,7 @@ async def _seed_welcome_doc(ds, *, user_id) -> int:
 def _repair_plugin_registration():
     """Re-register every plugin module pluggy scanned while half-initialized.
 
-    The console script imports ``datasette_paper.cli.standalone`` first, so
+    The console script imports ``datasette_paper.cli.serve`` first, so
     Python begins executing ``datasette_paper/__init__`` — whose import chain
     reaches ``datasette.plugins``, which loads entry points *during* that
     import. Any plugin module that is mid-import at that moment comes out of
@@ -422,12 +422,13 @@ def launch(*, internal_db, port, host, user_dbs, ctx=None):
     )
 
 
-# @feat cli-top: `datasette-paper` standalone launcher — click command
+# @feat cli-top: the `datasette paper serve` command (also the
+# `datasette-paper` console script via [project.scripts]) — click command
 # entry point (`[project.scripts] datasette-paper`), splits `sys.argv` on
 # a literal `--` before click parses so extra positionals never collide
 # with the optional INTERNAL_DB argument.
 @click.command(
-    cls=_StandaloneCommand,
+    cls=_ServeCommand,
     context_settings={"max_content_width": 100},
 )
 @click.argument(
@@ -451,7 +452,7 @@ def launch(*, internal_db, port, host, user_dbs, ctx=None):
     "visitors stay anonymous (cookie auth), no extra guard needed.",
 )
 @click.pass_context
-def main(ctx, internal_db, port, host):
+def serve(ctx, internal_db, port, host):
     """Launch a local, single-user datasette-paper instance.
 
     Builds a Datasette instance in-process, serves it with uvicorn, and
@@ -477,4 +478,4 @@ def main(ctx, internal_db, port, host):
 
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    serve()

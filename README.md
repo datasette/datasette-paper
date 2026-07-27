@@ -102,14 +102,17 @@ Datasette uses an ephemeral tempfile for the internal DB that is deleted
 when the process exits. The plugin emits a startup warning when it detects
 this, so you don't lose your papers to a forgotten flag.
 
-## Standalone CLI
+## Local single-user serving
 
-For a local, single-user instance there's also a separate console script
-that handles all of the above for you — no flags to remember:
+For a local, single-user instance there's a `serve` subcommand that
+handles all of the above for you — no flags to remember:
 
 ```bash
-datasette-paper
+datasette paper serve
 ```
+
+The standalone `datasette-paper` console script is an alias for the same
+command, handy with `uvx datasette-paper`.
 
 This builds a Datasette instance in-process, serves it with uvicorn, and
 opens your browser on a one-time login URL that signs you in as your OS
@@ -118,14 +121,14 @@ user (`$USER`) and redirects to `/-/paper/`. Papers persist at
 different location:
 
 ```bash
-datasette-paper [INTERNAL_DB] [-p PORT] [-h HOST] [-- DB...]
+datasette paper serve [INTERNAL_DB] [-p PORT] [-h HOST] [-- DB...]
 ```
 
 - `INTERNAL_DB` — optional, defaults to `~/.datasette/internal-paper.db`
   (created on first run).
 - `-p/--port` — default `8001`. `-h/--host` — default `127.0.0.1`.
 - `-- DB...` — extra database files to serve alongside, e.g.
-  `datasette-paper -- mydata.db`.
+  `datasette paper serve -- mydata.db`.
 
 Only the browser that followed the login URL is signed in as `$USER` —
 everyone else (curl, another device on `-h 0.0.0.0`) stays anonymous, so
@@ -141,7 +144,7 @@ they can read/list but not create.
   Copying that file back to an older deployment afterward hands it a
   forward-migrated schema.
 
-If you point `datasette-paper` at a database from a different
+If you point `serve` at a database from a different
 datasette-paper deployment, its access grants are keyed to that
 deployment's actor ids, not yours — the index can look empty even though
 the file is full of papers. The CLI warns you when this happens; use the

@@ -1,9 +1,9 @@
 """Tests for the `datasette-paper` standalone launcher's CLI surface
-(ticket 02 of ``plans/cli-top``): ``split_argv``, defaults, the ``main``
+(ticket 02 of ``plans/cli-top``): ``split_argv``, defaults, the ``serve``
 click command, and the pre-existing-db warning check.
 
 No uvicorn, no real browser: ``uvicorn.run`` / ``webbrowser.open`` are
-monkeypatched everywhere ``main``/``launch`` actually runs. Anything that
+monkeypatched everywhere ``serve``/``launch`` actually runs. Anything that
 needs an event loop of its own (``launch`` uses ``datasette.cli.run_sync``,
 which creates a *fresh* loop) is exercised from a plain, non-``asyncio``
 test function — calling it from inside an already-running
@@ -24,10 +24,10 @@ from datasette.app import Datasette
 from datasette.cli import run_sync
 from datasette.plugins import pm
 
-from datasette_paper.cli import standalone
-from datasette_paper.cli.standalone import (
+import datasette_paper.cli.serve as serve_mod
+from datasette_paper.cli.serve import (
     default_internal_db_path,
-    main,
+    serve,
     split_argv,
 )
 
@@ -37,7 +37,7 @@ def _unregister_login_plugin():
 
     A real `datasette-paper` invocation only ever runs once per process — the
     registration is meant to live for the process lifetime. A test that
-    invokes `main` twice (simulating two separate launches against the same
+    invokes `serve` twice (simulating two separate launches against the same
     tmp home) needs to unregister between calls or the second `pm.register`
     under the same fixed name raises.
     """
@@ -100,7 +100,7 @@ def test_default_internal_db_path_under_home(monkeypatch, tmp_path):
 
 
 def test_port_and_host_option_defaults():
-    by_name = {p.name: p for p in main.params}
+    by_name = {p.name: p for p in serve.params}
     assert by_name["port"].default == 8001
     assert by_name["host"].default == "127.0.0.1"
     assert by_name["port"].show_default is True
@@ -108,7 +108,7 @@ def test_port_and_host_option_defaults():
 
 
 # ---------------------------------------------------------------------------
-# `main` smoke tests — uvicorn.run / webbrowser.open monkeypatched.
+# `serve` smoke tests — uvicorn.run / webbrowser.open monkeypatched.
 # ---------------------------------------------------------------------------
 
 
@@ -129,7 +129,7 @@ def _patch_launch_boundaries(monkeypatch, *, actor_id="testuser"):
         captured["opened_url"] = url
         return True
 
-    real_build_instance = standalone.build_instance
+    real_build_instance = serve_mod.build_instance
 
     def spy_build_instance(**kwargs):
         ds = real_build_instance(**kwargs)
@@ -139,8 +139,8 @@ def _patch_launch_boundaries(monkeypatch, *, actor_id="testuser"):
 
     monkeypatch.setattr(uvicorn, "run", fake_uvicorn_run)
     monkeypatch.setattr(webbrowser, "open", fake_webbrowser_open)
-    monkeypatch.setattr(standalone, "get_actor_id", lambda: actor_id)
-    monkeypatch.setattr(standalone, "build_instance", spy_build_instance)
+    monkeypatch.setattr(serve_mod, "get_actor_id", lambda: actor_id)
+    monkeypatch.setattr(serve_mod, "build_instance", spy_build_instance)
     return captured
 
 
@@ -154,7 +154,7 @@ def test_main_smoke_user_dbs_and_login_url(tmp_path, monkeypatch):
 
     runner = click.testing.CliRunner()
     result = runner.invoke(
-        main,
+        serve,
         [str(internal_db), "-p", "9123", "-h", "0.0.0.0", "--", str(user_db)],
     )
     assert result.exit_code == 0, result.output
@@ -180,7 +180,7 @@ def test_main_no_internal_db_positional_uses_default_under_home(tmp_path, monkey
     captured = _patch_launch_boundaries(monkeypatch)
 
     runner = click.testing.CliRunner()
-    result = runner.invoke(main, [])
+    result = runner.invoke(serve, [])
     assert result.exit_code == 0, result.output
 
     expected = home / ".datasette" / "internal-paper.db"
@@ -198,7 +198,7 @@ def test_main_explicit_internal_db_overrides_default_and_neednt_exist(
     assert not custom.exists()
 
     runner = click.testing.CliRunner()
-    result = runner.invoke(main, [str(custom)])
+    result = runner.invoke(serve, [str(custom)])
     assert result.exit_code == 0, result.output
     assert captured["build_calls"][0]["internal_db_path"] == custom
 
@@ -209,7 +209,7 @@ def test_main_missing_user_db_is_usage_error(tmp_path, monkeypatch):
 
     missing = tmp_path / "does-not-exist.db"
     runner = click.testing.CliRunner()
-    result = runner.invoke(main, ["--", str(missing)])
+    result = runner.invoke(serve, ["--", str(missing)])
 
     assert result.exit_code != 0
     assert str(missing) in result.output
@@ -222,7 +222,7 @@ def test_main_missing_user_db_is_usage_error(tmp_path, monkeypatch):
 
 
 def test_preexisting_db_warning_pure_function():
-    warning = standalone._preexisting_db_warning(
+    warning = serve_mod._preexisting_db_warning(
         [1, 2, 3], [], user_id="alice", internal_db_path="internal.db"
     )
     assert warning is not None
@@ -233,7 +233,7 @@ def test_preexisting_db_warning_pure_function():
 
 def test_preexisting_db_no_warning_when_actor_has_a_visible_doc():
     assert (
-        standalone._preexisting_db_warning(
+        serve_mod._preexisting_db_warning(
             [1, 2], [2], user_id="alice", internal_db_path="internal.db"
         )
         is None
@@ -242,7 +242,7 @@ def test_preexisting_db_no_warning_when_actor_has_a_visible_doc():
 
 def test_preexisting_db_no_warning_when_no_docs_at_all():
     assert (
-        standalone._preexisting_db_warning(
+        serve_mod._preexisting_db_warning(
             [], [], user_id="alice", internal_db_path="internal.db"
         )
         is None
@@ -279,7 +279,7 @@ def test_launch_warns_when_preexisting_db_has_no_visible_docs(tmp_path, monkeypa
 
     _patch_launch_boundaries(monkeypatch, actor_id="testuser")
     runner = click.testing.CliRunner()
-    result = runner.invoke(main, [str(internal_db)])
+    result = runner.invoke(serve, [str(internal_db)])
 
     assert result.exit_code == 0, result.output
     assert "testuser" in result.output
@@ -294,7 +294,7 @@ def test_launch_no_warning_when_actor_owns_a_doc(tmp_path, monkeypatch):
 
     _patch_launch_boundaries(monkeypatch, actor_id="testuser")
     runner = click.testing.CliRunner()
-    result = runner.invoke(main, [str(internal_db)])
+    result = runner.invoke(serve, [str(internal_db)])
 
     assert result.exit_code == 0, result.output
     assert "Warning" not in result.output
@@ -311,11 +311,11 @@ def test_launch_no_warning_and_no_check_on_fresh_db(tmp_path, monkeypatch):
     async def _boom(ds, **kwargs):
         raise AssertionError("_check_preexisting_db should not run for a fresh db")
 
-    monkeypatch.setattr(standalone, "_check_preexisting_db", _boom)
+    monkeypatch.setattr(serve_mod, "_check_preexisting_db", _boom)
 
     _patch_launch_boundaries(monkeypatch, actor_id="testuser")
     runner = click.testing.CliRunner()
-    result = runner.invoke(main, [str(internal_db)])
+    result = runner.invoke(serve, [str(internal_db)])
 
     assert result.exit_code == 0, result.output
     assert "Warning" not in result.output
@@ -339,12 +339,12 @@ def test_no_seed_on_existing_db_even_with_zero_docs(tmp_path, monkeypatch):
             "_seed_welcome_doc should not run against a pre-existing db"
         )
 
-    monkeypatch.setattr(standalone, "_seed_welcome_doc", _boom)
+    monkeypatch.setattr(serve_mod, "_seed_welcome_doc", _boom)
 
     captured = _patch_launch_boundaries(monkeypatch, actor_id="testuser")
     runner = click.testing.CliRunner()
     try:
-        result = runner.invoke(main, [str(internal_db)])
+        result = runner.invoke(serve, [str(internal_db)])
     finally:
         _unregister_login_plugin()
 
@@ -365,7 +365,7 @@ def test_first_launch_redirects_to_welcome_doc_second_to_index(tmp_path, monkeyp
     # --- First launch: fresh db, seeds + redirects to the welcome doc. ---
     captured_1 = _patch_launch_boundaries(monkeypatch, actor_id="testuser")
     try:
-        result_1 = runner.invoke(main, [str(internal_db)])
+        result_1 = runner.invoke(serve, [str(internal_db)])
         assert result_1.exit_code == 0, result_1.output
         assert internal_db.exists()
 
@@ -382,7 +382,7 @@ def test_first_launch_redirects_to_welcome_doc_second_to_index(tmp_path, monkeyp
     # --- Second launch: same tmp home, db now exists -> default index. ---
     captured_2 = _patch_launch_boundaries(monkeypatch, actor_id="testuser")
     try:
-        result_2 = runner.invoke(main, [str(internal_db)])
+        result_2 = runner.invoke(serve, [str(internal_db)])
         assert result_2.exit_code == 0, result_2.output
 
         resp_2 = run_sync(
@@ -397,7 +397,7 @@ def test_first_launch_redirects_to_welcome_doc_second_to_index(tmp_path, monkeyp
 
 
 # @feat cli-top: regression test for the console-script import order —
-# importing datasette_paper.cli.standalone FIRST makes datasette's
+# importing datasette_paper.cli.serve FIRST makes datasette's
 # entry-point loader scan half-initialized plugin modules (zero hookimpls
 # registered: no routes, no startup/migrations) — datasette_paper itself
 # AND dependencies its import chain pulls in mid-cycle, e.g.
@@ -416,7 +416,7 @@ def test_repair_plugin_registration_console_script_import_order():
         """
         # Mimic the console script: this import runs datasette_paper/__init__,
         # whose import chain triggers datasette's entry-point loading mid-import.
-        from datasette_paper.cli.standalone import _repair_plugin_registration
+        from datasette_paper.cli.serve import _repair_plugin_registration
 
         _repair_plugin_registration()
 
@@ -448,3 +448,23 @@ def test_repair_plugin_registration_console_script_import_order():
     )
     assert proc.returncode == 0, proc.stderr
     assert "ok" in proc.stdout
+
+
+# @feat cli-top: group-dispatch test — `datasette paper serve -- a.db` must
+# deliver the literal `--` to serve's parse_args untouched (click groups
+# don't parse interspersed args, but that's exactly the kind of "should"
+# that deserves pinning: the direct-invocation tests above never exercise
+# the group hop).
+def test_group_dispatch_passes_double_dash_through(tmp_path, monkeypatch):
+    from datasette_paper.cli import paper
+
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    captured = _patch_launch_boundaries(monkeypatch)
+    user_db = tmp_path / "mydata.db"
+    user_db.write_text("")
+
+    runner = click.testing.CliRunner()
+    result = runner.invoke(paper, ["serve", "--", str(user_db)])
+    assert result.exit_code == 0, result.output
+    assert captured["build_calls"][0]["user_dbs"] == [str(user_db)]
+    assert captured["ds"].files == (str(user_db),)

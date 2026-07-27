@@ -1,5 +1,5 @@
 """Tests for the one-off local-login plugin + instance factory in
-``datasette_paper.cli.standalone`` (ticket 01 of ``plans/cli-top``).
+``datasette_paper.cli.serve`` (ticket 01 of ``plans/cli-top``).
 
 ``LocalLoginPlugin`` is registered programmatically (never shipped as part
 of the ``datasette-paper`` plugin proper), so every test here registers it
@@ -16,7 +16,7 @@ import pytest_asyncio
 from datasette.plugins import pm
 
 from conftest import actor_cookie
-from datasette_paper.cli.standalone import (
+from datasette_paper.cli.serve import (
     LocalLoginPlugin,
     build_instance,
     load_or_create_secret,

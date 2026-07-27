@@ -17,7 +17,7 @@ smoke tests.
 import pytest
 
 from conftest import actor_cookie
-from datasette_paper.cli.standalone import (
+from datasette_paper.cli.serve import (
     WELCOME_DOC_NAME,
     _load_welcome_markdown,
     _seed_welcome_doc,
@@ -84,10 +84,10 @@ async def test_seed_welcome_doc_bad_content_raises_click_exception(
 ):
     """A broken welcome.md must fail the launch loudly (a ClickException the
     CLI can surface), not 500 later when a user's browser lands on it."""
-    import datasette_paper.cli.standalone as standalone
+    import datasette_paper.cli.serve as serve_mod
 
     monkeypatch.setattr(
-        standalone, "_load_welcome_markdown", lambda: {"not": "a string"}
+        serve_mod, "_load_welcome_markdown", lambda: {"not": "a string"}
     )
 
     ds = build_instance(
