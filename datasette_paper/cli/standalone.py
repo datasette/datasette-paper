@@ -308,6 +308,36 @@ async def _seed_welcome_doc(ds, *, user_id) -> int:
     return resp.json()["id"]
 
 
+# @feat cli-top: registration repair for the console-script import order —
+# without it the launched instance has no paper routes or migrations at all.
+def _repair_plugin_registration():
+    """Re-register ``datasette_paper`` with pluggy if its hookimpls are missing.
+
+    The console script imports ``datasette_paper.cli.standalone`` first, so
+    Python begins executing ``datasette_paper/__init__`` — whose import chain
+    reaches ``datasette.plugins``, which loads entry points *during* that
+    import. Pluggy gets the half-initialized module out of ``sys.modules``
+    and scans it for hookimpls before any are defined: the plugin ends up
+    registered with zero hooks (no routes → 404s, no ``startup`` → no
+    migrations → "no such table: _datasette_paper_doc"). Every other entry
+    into the package (``datasette`` CLI, pytest) imports datasette first and
+    never hits this. By the time ``launch()`` runs the module is complete,
+    so unregister + register makes pluggy re-scan and pick up everything.
+    No-op when registration is already intact.
+    """
+    import datasette_paper
+    from datasette.plugins import pm
+
+    if pm.is_registered(datasette_paper):
+        impls = [
+            i for i in pm.hook.startup.get_hookimpls() if i.plugin is datasette_paper
+        ]
+        if impls:
+            return
+        pm.unregister(datasette_paper)
+    pm.register(datasette_paper, name="paper")
+
+
 def _validate_user_dbs(user_dbs, *, ctx):
     for path in user_dbs:
         p = Path(path)
@@ -325,6 +355,7 @@ def launch(*, internal_db, port, host, user_dbs, ctx=None):
     from datasette.cli import run_sync
     from datasette.plugins import pm
 
+    _repair_plugin_registration()
     _validate_user_dbs(user_dbs, ctx=ctx)
 
     internal_db_path = (
