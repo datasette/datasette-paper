@@ -33,10 +33,13 @@ from importlib import metadata
 
 from opentelemetry import metrics as otel_metrics
 from opentelemetry import trace as otel_trace
+from opentelemetry.trace import Status, StatusCode
 
+from .errors import BadVersionError, ConflictError, GoneError, InvalidStepError
 from .telemetry_registry import (
     DOC_ID,
     ERROR_TYPE,
+    EVENTS_SUBMIT,
     M_BROADCAST_FANOUT,
     M_DB_QUERY_DURATION,
     M_EVENTS_BATCH_BYTES,
@@ -58,7 +61,10 @@ from .telemetry_registry import (
     M_STEPS_TAIL_MAX,
     M_WRITE_LOCK_WAIT,
     OPERATION,
+    ORIGIN,
+    OUTCOME,
     QUERY_NAME,
+    STEP_COUNT,
     WRITE_LOCK_WAIT,
 )
 
@@ -168,6 +174,62 @@ def db_query_timer(query_name: str, operation: str):
         raise
     finally:
         db_query_duration.record(time.perf_counter() - started, attributes)
+
+
+@contextmanager
+def submit_pipeline(doc_id: int, origin: str, step_count: int | None = None):
+    """Wrap one write pipeline in ``paper.events.submit`` end to end.
+    @feat telemetry: the submit span + outcome counter + duration histogram.
+
+    Yields a mutable state dict whose ``"outcome"`` key the body may set
+    for non-exception outcomes (``"empty"``, a no-op edit); exceptions map
+    to their protocol outcome here. Every exit path — return, protocol
+    error, unexpected exception — stamps ``paper.outcome`` on the span and
+    records ``paper.events.submitted`` / ``paper.events.duration`` with
+    ``{outcome, origin}``. Only an *unexpected* exception sets span status
+    ``ERROR``: conflicts, bad versions, gone history and invalid steps are
+    the protocol working.
+    """
+    origin = clamp(origin, ORIGIN.values, "api")
+    started = time.perf_counter()
+    state = {"outcome": "ok"}
+    # record_exception / set_status_on_exception are off because a
+    # ConflictError escaping this block is a 409 on its way to the client,
+    # not a failure — the SDK default would stamp ERROR on every protocol
+    # outcome. The unexpected-exception branch below sets ERROR itself.
+    with tracer.start_as_current_span(
+        EVENTS_SUBMIT, record_exception=False, set_status_on_exception=False
+    ) as span:
+        if span.is_recording():
+            span.set_attribute(DOC_ID, doc_id)
+            span.set_attribute(ORIGIN, origin)
+            if step_count is not None:
+                span.set_attribute(STEP_COUNT, step_count)
+        try:
+            yield state
+        except BadVersionError:
+            state["outcome"] = "bad_version"
+            raise
+        except ConflictError:
+            state["outcome"] = "conflict"
+            raise
+        except GoneError:
+            state["outcome"] = "gone"
+            raise
+        except InvalidStepError:
+            state["outcome"] = "invalid_step"
+            raise
+        except BaseException:
+            state["outcome"] = "error"
+            span.set_status(Status(StatusCode.ERROR))
+            raise
+        finally:
+            outcome = clamp(state["outcome"], OUTCOME.values, "error")
+            if span.is_recording():
+                span.set_attribute(OUTCOME, outcome)
+            attributes = {OUTCOME: outcome, ORIGIN: origin}
+            events_submitted.add(1, attributes)
+            events_duration.record(time.perf_counter() - started, attributes)
 
 
 def record_write_lock_wait(doc_id: int, start_time_ns: int, end_time_ns: int) -> None:

@@ -116,8 +116,9 @@ async def _append_to_paper(datasette, actor, doc_id, content):
             {"doc_id": doc_id, "version": instance.version, "appended_blocks": 0}
         )
     try:
+        # @feat telemetry: agent-originated writes are stamped origin=agent
         new_version = await instance.append_fragment(
-            fragment, actor_id=_actor_id(actor)
+            fragment, actor_id=_actor_id(actor), origin="agent"
         )
     except InvalidStepError as exc:
         return json.dumps({"error": "invalid_content", "message": exc.message})
@@ -194,7 +195,7 @@ async def _run_markdown_edit(datasette, instance, doc_id, edit_fn, actor):
     """Apply a markdown transform and return the updated doc (or an error)."""
     try:
         new_version = await instance.apply_markdown_edit(
-            edit_fn, actor_id=_actor_id(actor)
+            edit_fn, actor_id=_actor_id(actor), origin="agent"
         )
     except _EditError as exc:
         return json.dumps({"error": "edit_failed", "message": str(exc)})
