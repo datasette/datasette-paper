@@ -1048,6 +1048,10 @@ class Instance:
         queue is removed from ``self.subscribers``.
 
         Returns the number of subscribers that were revoked.
+
+        Telemetry: deliberately no counter here — the SSE loop's
+        ``revoked`` close reason (``paper.sse.streams.closed``) is the
+        count. Do not add a second one.
         """
         from .permissions import PaperDocResource, PAPER_VIEW
 

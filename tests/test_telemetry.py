@@ -384,3 +384,62 @@ async def test_hydrate_span_reports_tail_length(ds_paper, otel_spans):
     assert span.attributes["paper.doc_id"] == doc_id
     assert span.attributes["paper.snapshot_version"] == 0
     assert span.attributes["paper.tail_length"] == 3
+
+
+# --- Ticket 05: SSE — request-span enrichment, never own spans ------------
+
+
+async def _open_sse(ds, doc_id, version=0, actor="alice"):
+    from test_sse_events import _sse_get
+
+    return await _sse_get(
+        ds, f"/-/paper/api/docs/{doc_id}/events?version={version}", actor_id=actor
+    )
+
+
+@pytest.mark.asyncio
+async def test_sse_enriches_request_span_when_recording(
+    ds_with_doc, otel_spans, monkeypatch
+):
+    import datasette_paper.sse as sse_module
+
+    monkeypatch.setattr(sse_module, "HEARTBEAT_SECONDS", 0.05)
+    ds, _paper, doc_id = ds_with_doc
+    otel_spans.clear()
+    stream = await _open_sse(ds, doc_id)
+    assert stream.status == 200
+    stream.disconnect()
+    await asyncio.wait_for(stream._task, 5)
+    server_spans = [
+        span
+        for span in otel_spans.get_finished_spans()
+        if span.kind == SpanKind.SERVER
+        and span.attributes.get("paper.doc_id") == doc_id
+    ]
+    (request,) = server_spans
+    assert request.attributes["paper.close_reason"] == "client_disconnect"
+    (backlog_event,) = [
+        event for event in request.events if event.name == "paper.sse.backlog"
+    ]
+    assert backlog_event.attributes["paper.step_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_sse_route_opens_no_paper_spans(ds_with_doc, otel_spans, monkeypatch):
+    # @feat telemetry: pins the design decision — the streaming route gets
+    # no spans of its own, ever (the request span would hold them open for
+    # the connection lifetime; gauges + span events carry the signal).
+    import datasette_paper.sse as sse_module
+
+    monkeypatch.setattr(sse_module, "HEARTBEAT_SECONDS", 0.05)
+    ds, _paper, doc_id = ds_with_doc
+    otel_spans.clear()
+    stream = await _open_sse(ds, doc_id)
+    assert stream.status == 200
+    stream.disconnect()
+    await asyncio.wait_for(stream._task, 5)
+    assert not [
+        span
+        for span in otel_spans.get_finished_spans()
+        if span.name.startswith("paper.sse")
+    ]

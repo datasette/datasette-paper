@@ -247,3 +247,118 @@ async def test_materialize_duration_histogram_split_by_cache_hit(
             "paper.materialize.duration", {"paper.cache_hit": cache_hit}
         )
         assert point.count == 1
+
+
+# --- Ticket 05: SSE stream metrics ----------------------------------------
+
+
+async def _open_sse(ds, doc_id, version=0, actor="alice"):
+    from test_sse_events import _sse_get
+
+    return await _sse_get(
+        ds, f"/-/paper/api/docs/{doc_id}/events?version={version}", actor_id=actor
+    )
+
+
+@pytest.mark.asyncio
+async def test_open_streams_gauge_counts_subscribers(ds_with_doc):
+    from datasette_paper.instance import get_registry
+    from datasette_paper.util import paper_db
+
+    ds, _paper, doc_id = ds_with_doc
+    registry = get_registry(ds)
+    telemetry.register_instance_registry(registry)  # weakset was drained
+    instance = await registry.get(paper_db(ds), doc_id)
+    q1, _ = await instance.subscribe_with_backlog(0, client_id=1, actor_id="alice")
+    _q2, _ = await instance.subscribe_with_backlog(0, client_id=2, actor_id="alice")
+    assert _observations(telemetry.observe_open_streams()) == [2]
+    instance.unsubscribe(q1)
+    assert _observations(telemetry.observe_open_streams()) == [1]
+
+
+@pytest.mark.asyncio
+async def test_stream_closed_counter_client_disconnect(
+    ds_with_doc, otel_metrics, monkeypatch
+):
+    import asyncio
+
+    import datasette_paper.sse as sse_module
+
+    monkeypatch.setattr(sse_module, "HEARTBEAT_SECONDS", 0.05)
+    ds, _paper, doc_id = ds_with_doc
+    otel_metrics.reader.get_metrics_data()
+    stream = await _open_sse(ds, doc_id)
+    assert stream.status == 200
+    stream.disconnect()
+    await asyncio.wait_for(stream._task, 5)
+    otel_metrics.collect()
+    counter = otel_metrics.point(
+        "paper.sse.streams.closed", {"paper.close_reason": "client_disconnect"}
+    )
+    assert counter.value == 1
+    duration = otel_metrics.point(
+        "paper.sse.stream.duration", {"paper.close_reason": "client_disconnect"}
+    )
+    assert duration.count == 1
+
+
+@pytest.mark.asyncio
+async def test_stream_closed_counter_revoked(ds_with_doc, otel_metrics, monkeypatch):
+    import asyncio
+
+    import datasette_paper.sse as sse_module
+    from conftest import grant_role, revoke_role
+    from datasette_paper.instance import get_registry
+    from datasette_paper.util import paper_db
+
+    monkeypatch.setattr(sse_module, "HEARTBEAT_SECONDS", 0.05)
+    ds, _paper, doc_id = ds_with_doc
+    await grant_role(ds, doc_id, "bob", "Viewer")
+    otel_metrics.reader.get_metrics_data()
+    stream = await _open_sse(ds, doc_id, actor="bob")
+    assert stream.status == 200
+    registry = get_registry(ds)
+    instance = await registry.get(paper_db(ds), doc_id)
+    for _ in range(100):
+        if instance.subscribers:
+            break
+        await asyncio.sleep(0.01)
+    await revoke_role(ds, doc_id, "bob")
+    revoked = await instance.revoke_unauthorized(ds)
+    assert revoked == 1
+    await asyncio.wait_for(stream._task, 5)
+    otel_metrics.collect()
+    counter = otel_metrics.point(
+        "paper.sse.streams.closed", {"paper.close_reason": "revoked"}
+    )
+    assert counter.value == 1
+
+
+@pytest.mark.asyncio
+async def test_backlog_gone_counter(ds_with_doc, otel_metrics):
+    from conftest import plant_snapshot
+    from test_sse_events import SSEStream
+
+    ds, _paper, doc_id = ds_with_doc
+    # A snapshot at v5 with no surviving tail: oldest available version is
+    # 5, so subscribing at version=1 is history that is gone.
+    await plant_snapshot(
+        ds,
+        doc_id,
+        {"type": "doc", "content": [{"type": "paragraph"}]},
+        version=5,
+        replace=True,
+    )
+    otel_metrics.reader.get_metrics_data()
+    import asyncio
+
+    signed = ds.sign({"a": {"id": "alice"}}, "actor")
+    stream = SSEStream(
+        ds.app(),
+        f"/-/paper/api/docs/{doc_id}/events?version=1",
+        cookie_header=f"ds_actor={signed}".encode(),
+    )
+    await asyncio.wait_for(stream.run(), 5)
+    assert stream.status == 410
+    otel_metrics.collect()
+    assert otel_metrics.point("paper.sse.backlog.gone").value == 1
