@@ -47,6 +47,23 @@ def test_gauge_callbacks_yield_nothing_with_no_registry():
     assert _observations(telemetry.observe_presence_clients()) == [0]
 
 
+@pytest.mark.asyncio
+async def test_db_query_duration_records_per_helper(ds_with_doc, otel_metrics):
+    _ds, paper, doc_id = ds_with_doc
+    # Drain what the fixture's create_doc recorded, then measure two
+    # distinct read helpers.
+    otel_metrics.reader.get_metrics_data()
+    await paper.select_doc_by_id(doc_id)
+    await paper.list_docs()
+    otel_metrics.collect()
+    for name in ("select_doc_by_id", "list_docs"):
+        point = otel_metrics.point(
+            "paper.db.query.duration",
+            {"paper.query_name": name, "paper.operation": "read"},
+        )
+        assert point.count == 1
+
+
 def test_register_instance_registry_is_weak():
     registry = InstanceRegistry()
     telemetry.register_instance_registry(registry)
