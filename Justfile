@@ -227,49 +227,46 @@ dev *flags:
             -s settings.max_post_body_bytes 13631488 \
             {{flags}}
 
-# The dev server with OpenTelemetry console exporters — enough to eyeball
-# a trace while editing: open a doc, type a sentence, and the POST /events
-# trace prints paper.events.submit → write_lock.wait / validate_steps /
-# db.query (core's, `datasette.callback: insert_steps`) / broadcast /
-# reindex ×3; the metrics dump follows every 5s. The SDK enters via
-# `--with` only — core and the plugin stay opentelemetry-api-only. For a
-# real trace UI use the Jaeger recipe in Datasette's demos/otel/ (branch
-# asg017/otel-dev) instead of the console.
+# The dev server with OpenTelemetry export to a local Jaeger, via the
+# datasette-otel-otlp plugin (sibling checkout, unreleased — pulled in
+# with `--with` so it never touches the runtime deps or the test env,
+# where its import-time TracerProvider would fight the test fixtures).
+# No `opentelemetry-instrument`, no OTEL_* env vars: the plugin's whole
+# point is that one `-s plugins.datasette-otel-otlp.endpoint` flag.
 #
-# The explicit datasette --with pin mirrors the [tool.uv.sources] dev pin
-# in pyproject.toml: uv's --with overlay resolves its own datasette (the
-# sibling plugins depend on it) and a released wheel would shadow the
-# kit-branch install, breaking the datasette.telemetry_registry import.
-# Delete that line together with the pyproject pin once the kit ships.
+# Flow: `just jaeger` in one terminal, `just dev-otel` in another, then
+# open a doc and type — the POST /events trace (paper.events.submit →
+# write_lock.wait / validate_steps / db.query with
+# `datasette.callback: insert_steps` / broadcast / reindex ×3) shows up
+# at http://localhost:16686 under service "datasette-paper".
 #
-# The plugins dir is tools/otel-console-fix (not tests/sample-plugin):
-# it carries a dev-only patch that makes the kit's registry classes
-# deepcopy-able so the console *metrics* exporter doesn't crash — see
-# that module's docstring for the upstream bug.
+# Traces only: the plugin installs a TracerProvider, not a MeterProvider,
+# and Jaeger ingests traces only — paper's paper.* metrics stay no-op
+# here. To collect metrics too, run under `opentelemetry-instrument` with
+# an OTLP metrics backend instead (see docs/TELEMETRY.md).
 dev-otel *flags:
-    DATASETTE_SECRET=abc123 \
-    OTEL_SERVICE_NAME=paper \
-    OTEL_TRACES_EXPORTER=console \
-    OTEL_METRICS_EXPORTER=console \
-    OTEL_LOGS_EXPORTER=none \
-    OTEL_BSP_SCHEDULE_DELAY=1000 \
-    OTEL_METRIC_EXPORT_INTERVAL=5000 \
-    uv run --prerelease=allow \
-        --with 'datasette @ git+https://github.com/simonw/datasette@asg017/otel-phase1-6-plugin-kit' \
-        --with opentelemetry-distro \
-        --with opentelemetry-sdk \
+    DATASETTE_SECRET=abc123 uv run --prerelease=allow \
+        --with ../datasette-otel-otlp \
         --with ../datasette-sidebar \
         --with ../datasette-user-profiles \
         --with ../datasette-debug-gotham \
         --with llm-openrouter \
-        opentelemetry-instrument datasette \
+        datasette \
             --internal {{INTERNAL_DEV_DB}} \
-            --plugins-dir tools/otel-console-fix \
+            --plugins-dir tests/sample-plugin \
+            -s plugins.datasette-otel-otlp.endpoint http://localhost:4318 \
+            -s plugins.datasette-otel-otlp.service_name datasette-paper \
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
             -s permissions.profile_access true \
             -s settings.max_post_body_bytes 13631488 \
             {{flags}}
+
+# Jaeger from its own binary — no Docker. UI on http://localhost:16686
+jaeger:
+    @command -v jaeger >/dev/null || { echo "No jaeger binary on PATH. Grab one from https://www.jaegertracing.io/download/"; exit 1; }
+    @echo "UI: http://localhost:16686 — the OTLP ingest port :4318 has no UI"
+    jaeger
 
 dev-with-hmr *flags:
     watchexec \

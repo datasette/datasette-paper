@@ -32,18 +32,29 @@ with OpenTelemetry, through `opentelemetry-api` only. The plugin never
 installs a provider or an exporter: with no SDK in the process every
 span is a no-op `NonRecordingSpan`, every instrument does nothing, and
 the observable-gauge callbacks never run. Turning telemetry **on** is
-the operator's move, exactly as with Datasette core:
+the operator's move, exactly as with Datasette core. The easiest way is
+the `datasette-otel-otlp` plugin — one config flag, no `OTEL_*`
+environment variables, no `opentelemetry-instrument` wrapper:
 
 ```bash
-uv run --with opentelemetry-distro --with opentelemetry-sdk \\
-    opentelemetry-instrument datasette --internal internal.db ...
+datasette --internal internal.db \\
+    -s plugins.datasette-otel-otlp.endpoint http://localhost:4318 \\
+    -s plugins.datasette-otel-otlp.service_name datasette-paper ...
 ```
 
-with the usual environment knobs (`OTEL_SERVICE_NAME`,
-`OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER=console` or an OTLP
-endpoint, `OTEL_LOGS_EXPORTER=none` unless you collect logs). For local
-eyeballing there is `just dev-otel`, which runs the dev server with
-console exporters. See Datasette's own telemetry documentation for the
+For local development, `just jaeger` (a `jaeger` binary from
+https://www.jaegertracing.io/download/ — the UI is at
+http://localhost:16686, the :4318 ingest port has no UI) plus
+`just dev-otel` gives a browsable trace UI for real editing sessions.
+
+**Metrics:** that plugin exports *traces only* (it installs a
+`TracerProvider`, not a `MeterProvider`), and Jaeger ingests traces
+only — so under `just dev-otel` the `paper.*` metrics below stay no-op.
+To collect them, run under a metrics-capable setup instead, e.g.
+`opentelemetry-instrument` (`--with opentelemetry-distro --with
+opentelemetry-sdk`) with `OTEL_METRICS_EXPORTER` pointed at an OTLP
+metrics backend such as Prometheus or Grafana. The registry below is the
+contract either way. See Datasette's own telemetry documentation for the
 full operator story.
 
 Every signal below lives in the `datasette_paper` instrumentation scope
