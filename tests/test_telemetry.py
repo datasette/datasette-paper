@@ -443,3 +443,111 @@ async def test_sse_route_opens_no_paper_spans(ds_with_doc, otel_spans, monkeypat
         for span in otel_spans.get_finished_spans()
         if span.name.startswith("paper.sse")
     ]
+
+
+# --- Ticket 06: write tail — reindex, snapshot, markdown ------------------
+
+
+@pytest.mark.asyncio
+async def test_reindex_emits_three_spans_per_write(ds_with_doc, otel_spans):
+    # @feat telemetry: three paper.reindex children per accepted write.
+    ds, _paper, doc_id = ds_with_doc
+    otel_spans.clear()
+    assert (await _post_step(ds, doc_id)).status_code == 200
+    finished = otel_spans.get_finished_spans()
+    (submit,) = _spans_named(otel_spans, "paper.events.submit")
+    reindex = [
+        span for span in _children_of(finished, submit) if span.name == "paper.reindex"
+    ]
+    assert {span.attributes["paper.index"] for span in reindex} == {
+        "links",
+        "tags",
+        "tasks",
+    }
+    for span in reindex:
+        assert span.attributes["paper.doc_id"] == doc_id
+
+
+@pytest.mark.asyncio
+async def test_reindex_failure_is_error_span_and_counted(
+    ds_with_doc, otel_spans, otel_metrics
+):
+    from datasette_paper.instance import get_registry
+    from datasette_paper.util import paper_db
+
+    ds, _paper, doc_id = ds_with_doc
+    registry = get_registry(ds)
+    instance = await registry.get(paper_db(ds), doc_id)
+
+    async def explode(**kwargs):
+        raise RuntimeError("tag index unavailable")
+
+    instance.db.replace_inline_tags = explode
+    otel_spans.clear()
+    otel_metrics.reader.get_metrics_data()
+    # The write still succeeds — a derived-index failure must not fail
+    # the user's edit (existing contract).
+    assert (await _post_step(ds, doc_id)).status_code == 200
+    (tags_span,) = [
+        span
+        for span in _spans_named(otel_spans, "paper.reindex")
+        if span.attributes["paper.index"] == "tags"
+    ]
+    assert tags_span.status.status_code == StatusCode.ERROR
+    assert any(event.name == "exception" for event in tags_span.events)
+    otel_metrics.collect()
+    point = otel_metrics.point("paper.reindex.failures", {"paper.index": "tags"})
+    assert point.value == 1
+
+
+@pytest.mark.asyncio
+async def test_snapshot_span_auto_vs_client(ds_with_doc, otel_spans, monkeypatch):
+    from datasette_paper import instance as instance_mod
+
+    monkeypatch.setattr(instance_mod, "SNAPSHOT_THRESHOLD", 1)
+    ds, _paper, doc_id = ds_with_doc
+    otel_spans.clear()
+    assert (await _post_step(ds, doc_id)).status_code == 200
+    (auto_span,) = _spans_named(otel_spans, "paper.snapshot")
+    assert auto_span.attributes["paper.trigger"] == "auto"
+    assert auto_span.attributes["paper.snapshot_bytes"] > 0
+    assert auto_span.attributes["paper.tail_trimmed"] >= 1
+
+    # Raise the threshold so the next write does NOT auto-snapshot, then
+    # drop it again so the explicit POST /snapshot sees enough drift.
+    monkeypatch.setattr(instance_mod, "SNAPSHOT_THRESHOLD", 100)
+    assert (await _post_step(ds, doc_id, version=1)).status_code == 200
+    monkeypatch.setattr(instance_mod, "SNAPSHOT_THRESHOLD", 1)
+    otel_spans.clear()
+    resp = await ds.client.post(f"/-/paper/api/docs/{doc_id}/snapshot")
+    assert resp.status_code == 200
+    (client_span,) = _spans_named(otel_spans, "paper.snapshot")
+    assert client_span.attributes["paper.trigger"] == "client"
+
+
+@pytest.mark.asyncio
+async def test_markdown_parse_span_on_append_route(ds_with_doc, otel_spans, tmp_path):
+    ds, _paper, doc_id = ds_with_doc
+    body = "some **markdown** to append"
+    otel_spans.clear()
+    resp = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/append", json={"content": body}
+    )
+    assert resp.status_code == 200
+    (parse,) = _spans_named(otel_spans, "paper.markdown.parse")
+    assert parse.attributes["paper.markdown_bytes"] == len(body)
+
+    # The CLI export path stays span-free: wrap the call site, not the
+    # parser/serializer modules.
+    from _cli import create_doc_with_content, file_backed_ds, run_cli
+
+    cli_ds, internal = await file_backed_ds(tmp_path)
+    cli_doc_id = await create_doc_with_content(cli_ds)
+    otel_spans.clear()
+    result = run_cli("paper", "export", internal, str(cli_doc_id))
+    assert result.exit_code == 0, result.output
+    assert not [
+        span
+        for span in otel_spans.get_finished_spans()
+        if span.name.startswith("paper.markdown.")
+    ]

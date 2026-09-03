@@ -362,3 +362,46 @@ async def test_backlog_gone_counter(ds_with_doc, otel_metrics):
     assert stream.status == 410
     otel_metrics.collect()
     assert otel_metrics.point("paper.sse.backlog.gone").value == 1
+
+
+# --- Ticket 06: write-tail counters + size histograms ---------------------
+
+
+@pytest.mark.asyncio
+async def test_snapshots_written_counter_by_trigger(
+    ds_with_doc, otel_metrics, monkeypatch
+):
+    from datasette_paper import instance as instance_mod
+
+    ds, _paper, doc_id = ds_with_doc
+    otel_metrics.reader.get_metrics_data()
+    monkeypatch.setattr(instance_mod, "SNAPSHOT_THRESHOLD", 1)
+    assert (await _post_step(ds, doc_id)).status_code == 200  # auto
+    monkeypatch.setattr(instance_mod, "SNAPSHOT_THRESHOLD", 100)
+    assert (await _post_step(ds, doc_id, version=1)).status_code == 200
+    monkeypatch.setattr(instance_mod, "SNAPSHOT_THRESHOLD", 1)
+    resp = await ds.client.post(f"/-/paper/api/docs/{doc_id}/snapshot")
+    assert resp.status_code == 200  # client
+    otel_metrics.collect()
+    for trigger in ("auto", "client"):
+        point = otel_metrics.point(
+            "paper.snapshots.written", {"paper.trigger": trigger}
+        )
+        assert point.value == 1
+
+
+@pytest.mark.asyncio
+async def test_batch_bytes_histogram_records_step_sizes(ds_with_doc, otel_metrics):
+    from _steps import insert_at
+
+    ds, _paper, doc_id = ds_with_doc
+    otel_metrics.reader.get_metrics_data()
+    step_json = insert_at(1)
+    resp = await ds.client.post(
+        f"/-/paper/api/docs/{doc_id}/events",
+        json={"version": 0, "clientID": 42, "steps": [step_json]},
+    )
+    assert resp.status_code == 200
+    otel_metrics.collect()
+    (point,) = otel_metrics.points("paper.events.batch_bytes")
+    assert point.sum == len(step_json)

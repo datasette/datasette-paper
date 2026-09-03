@@ -23,6 +23,7 @@ import json
 
 from datasette_agent.tools import AgentTool
 
+from . import telemetry
 from .errors import InvalidStepError
 from .instance import get_registry
 from .markdown import doc_to_markdown
@@ -65,7 +66,8 @@ async def _create_paper(datasette, actor, name=None, content=None):
     aid = _actor_id(actor)
     doc_name = (name or "Untitled").strip() or "Untitled"
     if content:
-        doc_json = markdown_to_doc(content)
+        with telemetry.markdown_parse_span(content):
+            doc_json = markdown_to_doc(content)
         doc = await db.insert_doc_with_snapshot(
             name=doc_name,
             created_by=aid,
@@ -90,7 +92,10 @@ async def _read_paper(datasette, actor, doc_id):
     doc, instance = await _load_instance(datasette, doc_id)
     if doc is None:
         return json.dumps({"error": "Document not found"})
-    md = doc_to_markdown(instance.materialize_live_doc())
+    live_doc = instance.materialize_live_doc()
+    cached = instance._cached_live_doc_json
+    with telemetry.markdown_serialize_span(len(cached) if cached is not None else None):
+        md = doc_to_markdown(live_doc)
     return json.dumps(
         {
             "doc_id": doc_id,
@@ -110,7 +115,8 @@ async def _append_to_paper(datasette, actor, doc_id, content):
     doc, instance = await _load_instance(datasette, doc_id)
     if doc is None:
         return json.dumps({"error": "Document not found"})
-    fragment = markdown_to_fragment(content)
+    with telemetry.markdown_parse_span(content):
+        fragment = markdown_to_fragment(content)
     if not fragment:
         return json.dumps(
             {"doc_id": doc_id, "version": instance.version, "appended_blocks": 0}
