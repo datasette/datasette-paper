@@ -8,6 +8,7 @@ from urllib.parse import unquote
 from datasette import Forbidden, Response
 from datasette_plugin_router import Body
 
+from .. import telemetry
 from ..router import router
 from ..embed_providers import make_resource_resolver, provider_manifest
 from ..errors import InvalidStepError
@@ -796,7 +797,9 @@ async def create_doc(datasette, request, body: Annotated[CreateDocBody, Body()])
         # markdown_to_doc always returns a schema-valid doc (an empty/
         # whitespace body becomes a single blank paragraph), so we store it
         # as the version-0 snapshot the same way template instantiation does.
-        doc_json = markdown_to_doc(content)
+        # @feat telemetry: request-path markdown parse (create-from-markdown)
+        with telemetry.markdown_parse_span(content):
+            doc_json = markdown_to_doc(content)
         doc = await db.insert_doc_with_snapshot(
             name=name,
             created_by=actor_id(request),
@@ -935,9 +938,13 @@ async def get_document(datasette, request, doc_id: int):
     # Resolve real resource URLs (and embed provider kinds) for inline refs;
     # the canonical paper:/ ref is kept in each link's title for lossless
     # round-trips. Request in scope → absolute URLs for external renderers.
-    md = doc_to_markdown(
-        live_doc, resource_url=make_resource_resolver(datasette, request)
-    )
+    # @feat telemetry: request-path markdown serialize; the cached JSON the
+    # materialize just built is the cheap size proxy.
+    cached = instance._cached_live_doc_json
+    with telemetry.markdown_serialize_span(len(cached) if cached is not None else None):
+        md = doc_to_markdown(
+            live_doc, resource_url=make_resource_resolver(datasette, request)
+        )
 
     accept = request.headers.get("accept", "") or request.headers.get("Accept", "")
     if _wants_markdown(accept):
@@ -1134,7 +1141,8 @@ async def append_doc(
     registry = get_registry(datasette)
     instance = await registry.get(db, doc_id)
 
-    fragment = markdown_to_fragment(content)
+    with telemetry.markdown_parse_span(content):
+        fragment = markdown_to_fragment(content)
     if not fragment:
         # Empty / whitespace-only markdown — nothing to append. Report the
         # current version so callers don't treat it as an error.
@@ -1423,7 +1431,10 @@ async def post_snapshot(datasette, request, doc_id: int):
             status=409,
         )
     await instance.record_client_doc(
-        instance.version, json.dumps(materialized), actor_id=actor_id(request)
+        instance.version,
+        json.dumps(materialized),
+        actor_id=actor_id(request),
+        trigger="client",
     )
     return Response.json({"version": instance.snapshot_version})
 

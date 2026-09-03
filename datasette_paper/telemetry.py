@@ -37,6 +37,7 @@ from opentelemetry.trace import Status, StatusCode
 
 from .errors import BadVersionError, ConflictError, GoneError, InvalidStepError
 from .telemetry_registry import (
+    DOC_BYTES,
     DOC_ID,
     ERROR_TYPE,
     EVENTS_SUBMIT,
@@ -60,6 +61,9 @@ from .telemetry_registry import (
     M_SSE_STREAMS_OPEN,
     M_STEPS_TAIL_MAX,
     M_WRITE_LOCK_WAIT,
+    MARKDOWN_BYTES,
+    MARKDOWN_PARSE,
+    MARKDOWN_SERIALIZE,
     OPERATION,
     ORIGIN,
     OUTCOME,
@@ -174,6 +178,32 @@ def db_query_timer(query_name: str, operation: str):
         raise
     finally:
         db_query_duration.record(time.perf_counter() - started, attributes)
+
+
+@contextmanager
+def markdown_parse_span(markdown_text: str):
+    """``paper.markdown.parse`` around a request-path ``markdown_to_doc`` /
+    ``markdown_to_fragment`` call. Records the input's byte length only —
+    never the text. Wrap the *call site*, not the parser module, so the
+    CLI and ``export.py`` stay span-free.
+    """
+    with tracer.start_as_current_span(MARKDOWN_PARSE) as span:
+        if span.is_recording():
+            span.set_attribute(MARKDOWN_BYTES, len(markdown_text))
+        yield
+
+
+@contextmanager
+def markdown_serialize_span(doc_bytes: int | None = None):
+    """``paper.markdown.serialize`` around a request-path
+    ``doc_to_markdown`` call. ``doc_bytes`` is the length of the JSON doc
+    fed in (a size, never the doc) — pass None when no cheap serialized
+    form is at hand rather than serializing just to measure.
+    """
+    with tracer.start_as_current_span(MARKDOWN_SERIALIZE) as span:
+        if span.is_recording() and doc_bytes is not None:
+            span.set_attribute(DOC_BYTES, doc_bytes)
+        yield
 
 
 @contextmanager

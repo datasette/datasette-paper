@@ -51,6 +51,7 @@ import weakref
 from typing import Optional
 
 from opentelemetry import trace as otel_trace
+from opentelemetry.trace import Status, StatusCode
 
 from . import telemetry
 from .db import PaperDB
@@ -61,14 +62,20 @@ from .telemetry_registry import (
     BROADCAST,
     CACHE_HIT,
     DOC_ID,
+    INDEX,
     INSTANCE_HYDRATE,
     MATERIALIZE,
     POISONED,
+    REINDEX,
+    SNAPSHOT,
+    SNAPSHOT_BYTES,
     SNAPSHOT_VERSION,
     STEP_COUNT,
     STEPS_APPLIED,
     SUBSCRIBERS,
     TAIL_LENGTH,
+    TAIL_TRIMMED,
+    TRIGGER,
     VALIDATE_STEPS,
 )
 
@@ -639,27 +646,32 @@ class Instance:
         ``_datasette_paper_inline_tag`` current as of the latest write, which is
         what ``GET /tags/{slug}/refs`` joins against.
         """
-        if self._materialization_error is not None:
-            return
-        if self._tags_indexed_version == self.version:
-            return
-        try:
-            live_json = self.materialize_live_doc()
+        # @feat telemetry: one paper.reindex span per index, three per
+        # write; a swallowed failure marks the span ERROR and bumps the
+        # failure counter — the log line stays (spans don't replace logs).
+        with self._reindex_span("tags") as span:
             if self._materialization_error is not None:
                 return
-            from .tags import extract_tags
+            if self._tags_indexed_version == self.version:
+                return
+            try:
+                live_json = self.materialize_live_doc()
+                if self._materialization_error is not None:
+                    return
+                from .tags import extract_tags
 
-            tags: dict[str, int] = {}
-            for slug in extract_tags(live_json):
-                tags[slug] = tags.get(slug, 0) + 1
-            await self.db.replace_inline_tags(
-                doc_id=self.doc_id,
-                src_version=self.version,
-                tags=tags,
-            )
-            self._tags_indexed_version = self.version
-        except Exception:
-            logger.exception("inline-tag reindex failed for doc %s", self.doc_id)
+                tags: dict[str, int] = {}
+                for slug in extract_tags(live_json):
+                    tags[slug] = tags.get(slug, 0) + 1
+                await self.db.replace_inline_tags(
+                    doc_id=self.doc_id,
+                    src_version=self.version,
+                    tags=tags,
+                )
+                self._tags_indexed_version = self.version
+            except Exception as exc:
+                self._record_reindex_failure(span, "tags", exc)
+                logger.exception("inline-tag reindex failed for doc %s", self.doc_id)
 
     # @feat task-assign: write-tail reindex of the assigned-task index off the
     # materialized doc — a third sibling beside reindex_links / reindex_tags.
@@ -674,25 +686,29 @@ class Instance:
         ?`` an indexed equality. Keeps ``_datasette_paper_task_assignment``
         current as of the latest write for the ``/todos`` endpoint.
         """
-        if self._materialization_error is not None:
-            return
-        if self._tasks_indexed_version == self.version:
-            return
-        try:
-            live_json = self.materialize_live_doc()
+        with self._reindex_span("tasks") as span:
             if self._materialization_error is not None:
                 return
-            from .markdown import extract_tasks
+            if self._tasks_indexed_version == self.version:
+                return
+            try:
+                live_json = self.materialize_live_doc()
+                if self._materialization_error is not None:
+                    return
+                from .markdown import extract_tasks
 
-            rows = task_assignment_rows(extract_tasks(live_json))
-            await self.db.replace_task_assignments(
-                doc_id=self.doc_id,
-                src_version=self.version,
-                rows=rows,
-            )
-            self._tasks_indexed_version = self.version
-        except Exception:
-            logger.exception("task-assignment reindex failed for doc %s", self.doc_id)
+                rows = task_assignment_rows(extract_tasks(live_json))
+                await self.db.replace_task_assignments(
+                    doc_id=self.doc_id,
+                    src_version=self.version,
+                    rows=rows,
+                )
+                self._tasks_indexed_version = self.version
+            except Exception as exc:
+                self._record_reindex_failure(span, "tasks", exc)
+                logger.exception(
+                    "task-assignment reindex failed for doc %s", self.doc_id
+                )
 
     # @feat snapshot-log: write-tail reindex of derived rows off the materialized doc
     async def reindex_links(self) -> None:
@@ -703,27 +719,56 @@ class Instance:
         logs any persistence error (an edge-index failure must not fail the
         user's edit).
         """
-        if self._materialization_error is not None:
-            return
-        if self._links_indexed_version == self.version:
-            return
-        try:
-            live_json = self.materialize_live_doc()
+        with self._reindex_span("links") as span:
             if self._materialization_error is not None:
                 return
-            from .links import extract_links
+            if self._links_indexed_version == self.version:
+                return
+            try:
+                live_json = self.materialize_live_doc()
+                if self._materialization_error is not None:
+                    return
+                from .links import extract_links
 
-            edges: dict[int, int] = {}
-            for dst in extract_links(live_json):
-                edges[dst] = edges.get(dst, 0) + 1
-            await self.db.replace_links(
-                src_doc_id=self.doc_id,
-                src_version=self.version,
-                edges=edges,
-            )
-            self._links_indexed_version = self.version
-        except Exception:
-            logger.exception("link reindex failed for doc %s", self.doc_id)
+                edges: dict[int, int] = {}
+                for dst in extract_links(live_json):
+                    edges[dst] = edges.get(dst, 0) + 1
+                await self.db.replace_links(
+                    src_doc_id=self.doc_id,
+                    src_version=self.version,
+                    edges=edges,
+                )
+                self._links_indexed_version = self.version
+            except Exception as exc:
+                self._record_reindex_failure(span, "links", exc)
+                logger.exception("link reindex failed for doc %s", self.doc_id)
+
+    @contextlib.contextmanager
+    def _reindex_span(self, index: str):
+        """One ``paper.reindex`` span, attributed by index kind.
+
+        The early returns (poisoned history, already indexed at this
+        version) end the span with no further attributes.
+        """
+        with telemetry.tracer.start_as_current_span(REINDEX) as span:
+            if span.is_recording():
+                span.set_attribute(DOC_ID, self.doc_id)
+                # index is one of the three code literals; the registry
+                # enum + conformance test enforce membership.
+                span.set_attribute(INDEX, index)
+            yield span
+
+    @staticmethod
+    def _record_reindex_failure(span, index: str, exc: Exception) -> None:
+        """Mark a swallowed reindex failure: span ERROR + failure counter.
+
+        The existing ``logger.exception`` at the call site stays — spans
+        do not replace logs; without this counter nothing but the log
+        surfaces these.
+        """
+        span.record_exception(exc)
+        span.set_status(Status(StatusCode.ERROR))
+        telemetry.reindex_failures.add(1, {INDEX: index})
 
     async def _maybe_auto_snapshot(self, actor_id: Optional[str]) -> None:
         """Snapshot when the step tail has drifted past the threshold.
@@ -743,7 +788,7 @@ class Instance:
         if self._materialization_error is not None:
             return
         await self.record_client_doc(
-            self.version, json.dumps(materialized), actor_id=actor_id
+            self.version, json.dumps(materialized), actor_id=actor_id, trigger="auto"
         )
 
     async def append_fragment(
@@ -830,12 +875,6 @@ class Instance:
         from .markdown import doc_to_markdown
         from .markdown_parser import markdown_to_doc
         from .pm_schema import schema
-        from .telemetry_registry import (
-            DOC_BYTES,
-            MARKDOWN_BYTES,
-            MARKDOWN_PARSE,
-            MARKDOWN_SERIALIZE,
-        )
 
         with telemetry.submit_pipeline(
             self.doc_id, origin, step_count=1
@@ -846,18 +885,17 @@ class Instance:
 
                 # @feat telemetry: the serialize + reparse are the costly
                 # halves of a markdown read-modify-write; sizes only.
-                with telemetry.tracer.start_as_current_span(MARKDOWN_SERIALIZE) as span:
-                    if span.is_recording() and self._cached_live_doc_json is not None:
-                        span.set_attribute(DOC_BYTES, len(self._cached_live_doc_json))
+                cached = self._cached_live_doc_json
+                with telemetry.markdown_serialize_span(
+                    len(cached) if cached is not None else None
+                ):
                     current_md = doc_to_markdown(live_json)
                 new_md = edit_fn(current_md)
                 if new_md == current_md:
                     submit_state["outcome"] = "empty"
                     return self.version  # no-op edit
 
-                with telemetry.tracer.start_as_current_span(MARKDOWN_PARSE) as span:
-                    if span.is_recording():
-                        span.set_attribute(MARKDOWN_BYTES, len(new_md))
+                with telemetry.markdown_parse_span(new_md):
                     new_blocks = markdown_to_doc(new_md).get("content") or []
                 try:
                     old_doc = schema.node_from_json(live_json)
@@ -1143,9 +1181,24 @@ class Instance:
         version: int,
         doc_json: str,
         actor_id: Optional[str] = None,
+        trigger: str = "client",
     ) -> None:
-        """Persist a snapshot if threshold since last snapshot has been reached."""
-        if (version - self.snapshot_version) >= SNAPSHOT_THRESHOLD:
+        """Persist a snapshot if threshold since last snapshot has been reached.
+
+        ``trigger`` says what asked: ``"client"`` (POST /snapshot) or
+        ``"auto"`` (``_maybe_auto_snapshot``). The below-threshold no-op
+        emits no telemetry.
+        """
+        if (version - self.snapshot_version) < SNAPSHOT_THRESHOLD:
+            return
+        # @feat telemetry: the snapshot write + tail trim, with sizes only
+        # (byte length of the doc JSON — never the doc).
+        trigger = telemetry.clamp(trigger, TRIGGER.values, "client")
+        with telemetry.tracer.start_as_current_span(SNAPSHOT) as span:
+            if span.is_recording():
+                span.set_attribute(DOC_ID, self.doc_id)
+                span.set_attribute(TRIGGER, trigger)
+                span.set_attribute(SNAPSHOT_BYTES, len(doc_json))
             await self.db.insert_snapshot(
                 doc_id=self.doc_id,
                 version=version,
@@ -1160,8 +1213,13 @@ class Instance:
             # materialize re-apply already-applied steps on top of the new
             # base — same positions, very different doc — and surface as e.g.
             # "Structure gap-replace would overwrite content" partway through.
+            tail_trimmed = 0
             while self.steps_tail and self.steps_tail[0]["version"] <= version:
                 self.steps_tail.popleft()
+                tail_trimmed += 1
+            if span.is_recording():
+                span.set_attribute(TAIL_TRIMMED, tail_trimmed)
+            telemetry.snapshots_written.add(1, {TRIGGER: trigger})
             # Cached live doc + any poisoned-history marker were computed
             # from the old base; both are stale now.
             self._cached_live_doc_json = None
