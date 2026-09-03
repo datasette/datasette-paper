@@ -238,6 +238,17 @@ dev *flags:
 # `--with` only — core and the plugin stay opentelemetry-api-only. For a
 # real trace UI use the Jaeger recipe in Datasette's demos/otel/ (branch
 # asg017/otel-dev) instead of the console.
+#
+# The explicit datasette --with pin mirrors the [tool.uv.sources] dev pin
+# in pyproject.toml: uv's --with overlay resolves its own datasette (the
+# sibling plugins depend on it) and a released wheel would shadow the
+# kit-branch install, breaking the datasette.telemetry_registry import.
+# Delete that line together with the pyproject pin once the kit ships.
+#
+# The plugins dir is tools/otel-console-fix (not tests/sample-plugin):
+# it carries a dev-only patch that makes the kit's registry classes
+# deepcopy-able so the console *metrics* exporter doesn't crash — see
+# that module's docstring for the upstream bug.
 dev-otel *flags:
     DATASETTE_SECRET=abc123 \
     OTEL_SERVICE_NAME=paper \
@@ -247,6 +258,7 @@ dev-otel *flags:
     OTEL_BSP_SCHEDULE_DELAY=1000 \
     OTEL_METRIC_EXPORT_INTERVAL=5000 \
     uv run --prerelease=allow \
+        --with 'datasette @ git+https://github.com/simonw/datasette@asg017/otel-phase1-6-plugin-kit' \
         --with opentelemetry-distro \
         --with opentelemetry-sdk \
         --with ../datasette-sidebar \
@@ -255,7 +267,7 @@ dev-otel *flags:
         --with llm-openrouter \
         opentelemetry-instrument datasette \
             --internal {{INTERNAL_DEV_DB}} \
-            --plugins-dir tests/sample-plugin \
+            --plugins-dir tools/otel-console-fix \
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
             -s permissions.profile_access true \
