@@ -464,7 +464,12 @@ class Instance:
                 )
             return new_ver
 
-        new_version = await self.db.database.execute_write_fn(write_all)
+        # @feat telemetry: named after what it does so core's db.query span
+        # reads `datasette.callback == "insert_steps"`, plus paper's
+        # per-helper duration series — the same treatment as PaperDB's shims.
+        write_all.__qualname__ = "insert_steps"
+        with telemetry.db_query_timer("insert_steps", "write"):
+            new_version = await self.db.database.execute_write_fn(write_all)
 
         # Fetch the newly inserted steps to get their created_at values. Safe
         # under the lock — no other writer can have advanced the version while

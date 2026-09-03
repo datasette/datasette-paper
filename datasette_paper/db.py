@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 from typing import Optional
 
+from . import telemetry
 from .sql import _queries
 
 
@@ -43,10 +44,23 @@ class PaperDB:
         Multi-statement operations (``insert_step``, ``replace_links``,
         ``set_doc_tags``, ``hard_delete_doc``, ``insert_doc_with_snapshot``)
         keep their explicit closures so the transaction stays atomic.
+
+        @feat telemetry: a named closure rather than a lambda, so core's
+        ``db.query`` span reports ``datasette.callback == query_fn.__name__``
+        (a lambda would report ``PaperDB._exec.<locals>.<lambda>`` for every
+        helper — core's plugin docs say "pass named callables" for exactly
+        this). ``__name__`` rather than the helper's own ``__qualname__``
+        keeps the value free of ``<locals>`` noise. The timer records
+        paper's per-helper histogram beside core's — a deliberate
+        two-series design, not a substitute.
         """
-        return await self.database.execute_write_fn(
-            lambda conn: query_fn(conn, **kwargs)
-        )
+
+        def call(conn):
+            return query_fn(conn, **kwargs)
+
+        call.__qualname__ = query_fn.__name__
+        with telemetry.db_query_timer(query_fn.__name__, "write"):
+            return await self.database.execute_write_fn(call)
 
     async def _read(self, query_fn, **kwargs):
         """Run a single generated read-only query via ``execute_fn``.
@@ -57,8 +71,17 @@ class PaperDB:
         issuing dependent reads, and the collab protocol tolerates a
         slightly stale version (that's the 409 catch-up path), so reads
         need no write-queue serialization.
+
+        @feat telemetry: same named-closure + per-helper-timer treatment
+        as ``_exec`` — see there.
         """
-        return await self.database.execute_fn(lambda conn: query_fn(conn, **kwargs))
+
+        def call(conn):
+            return query_fn(conn, **kwargs)
+
+        call.__qualname__ = query_fn.__name__
+        with telemetry.db_query_timer(query_fn.__name__, "read"):
+            return await self.database.execute_fn(call)
 
     # ------------------------------------------------------------------
     # Doc
@@ -81,7 +104,13 @@ class PaperDB:
                 kind=kind,
             )
 
-        doc = await self.database.execute_write_fn(write)
+        # Normalized closure name (matching the _read/_exec convention) so
+        # core's db.query span reads `datasette.callback == "insert_doc"`
+        # rather than `PaperDB.insert_doc.<locals>.write`. Same at every
+        # explicit-closure site below.
+        write.__qualname__ = "insert_doc"
+        with telemetry.db_query_timer("insert_doc", "write"):
+            doc = await self.database.execute_write_fn(write)
         assert doc is not None
         return doc
 
@@ -123,7 +152,9 @@ class PaperDB:
             )
             return doc
 
-        return await self.database.execute_write_fn(write)
+        write.__qualname__ = "insert_doc_with_snapshot"
+        with telemetry.db_query_timer("insert_doc_with_snapshot", "write"):
+            return await self.database.execute_write_fn(write)
 
     async def update_doc_name(
         self, *, doc_id: int, name: str
@@ -250,7 +281,9 @@ class PaperDB:
                     src_version=src_version,
                 )
 
-        await self.database.execute_write_fn(write)
+        write.__qualname__ = "replace_links"
+        with telemetry.db_query_timer("replace_links", "write"):
+            await self.database.execute_write_fn(write)
 
     async def links_by_src(self, *, src_doc_id: int) -> list[_queries.LinkEdge]:
         return await self._read(_queries.select_links_by_src, src_doc_id=src_doc_id)
@@ -302,7 +335,9 @@ class PaperDB:
                     src_version=src_version,
                 )
 
-        await self.database.execute_write_fn(write)
+        write.__qualname__ = "replace_inline_tags"
+        with telemetry.db_query_timer("replace_inline_tags", "write"):
+            await self.database.execute_write_fn(write)
 
     async def tag_refs(
         self, *, tag: str, viewable_ids: list[int]
@@ -349,7 +384,9 @@ class PaperDB:
                     src_version=src_version,
                 )
 
-        await self.database.execute_write_fn(write)
+        write.__qualname__ = "replace_task_assignments"
+        with telemetry.db_query_timer("replace_task_assignments", "write"):
+            await self.database.execute_write_fn(write)
 
     async def all_doc_ids(self) -> list[int]:
         # Every doc id, any state/kind — drives the one-time backfill.
@@ -374,7 +411,9 @@ class PaperDB:
             for tag in tags:
                 _queries.insert_doc_tag(conn, doc_id=doc_id, tag=tag)
 
-        await self.database.execute_write_fn(write)
+        write.__qualname__ = "set_doc_tags"
+        with telemetry.db_query_timer("set_doc_tags", "write"):
+            await self.database.execute_write_fn(write)
 
     async def list_tags_for_doc(self, *, doc_id: int) -> list[str]:
         rows = await self._read(_queries.list_tags_for_doc, doc_id=doc_id)
@@ -472,7 +511,9 @@ class PaperDB:
             _queries.delete_task_assignments_for_doc(conn, doc_id=doc_id)
             _queries.hard_delete_doc(conn, doc_id=doc_id)
 
-        await self.database.execute_write_fn(write)
+        write.__qualname__ = "hard_delete_doc"
+        with telemetry.db_query_timer("hard_delete_doc", "write"):
+            await self.database.execute_write_fn(write)
 
     # ------------------------------------------------------------------
     # Steps
@@ -507,7 +548,9 @@ class PaperDB:
                 _queries.upsert_doc_activity(conn, doc_id=doc_id, actor_id=actor_id)
             return new_version
 
-        return await self.database.execute_write_fn(write)
+        write.__qualname__ = "insert_step"
+        with telemetry.db_query_timer("insert_step", "write"):
+            return await self.database.execute_write_fn(write)
 
     async def select_steps_after(
         self, *, doc_id: int, after_version: int
@@ -557,4 +600,6 @@ class PaperDB:
                 conn, doc_id=doc_id, version=version
             )
 
-        await self.database.execute_write_fn(write)
+        write.__qualname__ = "compact_doc"
+        with telemetry.db_query_timer("compact_doc", "write"):
+            await self.database.execute_write_fn(write)
