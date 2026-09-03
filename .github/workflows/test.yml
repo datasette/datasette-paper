@@ -31,6 +31,8 @@ jobs:
         run: just check-backend
       - name: Feature markers in sync
         run: just check-features
+      - name: Telemetry docs fresh
+        run: just check-telemetry-docs-fresh
       - name: Backend tests
         run: just test
 

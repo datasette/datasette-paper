@@ -49,6 +49,7 @@ check-backend:
 check:
     just check-backend
     just check-features
+    just check-telemetry-docs-fresh
     just check-frontend
 
 # --- Lint ---
@@ -137,6 +138,26 @@ check-queries-fresh:
         exit 1
     }
 
+# --- Codegen: telemetry reference ---
+
+# Regenerate docs/TELEMETRY.md from datasette_paper/telemetry_registry.py.
+# Run after any registry change (new span/metric/attribute, renamed entry,
+# edited description). CI gate is `just check-telemetry-docs-fresh`.
+telemetry-docs:
+    uv run --prerelease=allow python tools/telemetry_doc.py
+
+# CI gate: render to a temp file and diff against the checked-in copy.
+check-telemetry-docs-fresh:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp=$(mktemp)
+    trap "rm -f $tmp" EXIT
+    uv run --prerelease=allow python tools/telemetry_doc.py "$tmp" >/dev/null
+    diff -u docs/TELEMETRY.md "$tmp" || {
+        echo "::error:: docs/TELEMETRY.md is stale — run \`just telemetry-docs\`"
+        exit 1
+    }
+
 # Validate that the FEATURES.md registry and the in-code `@feat` markers
 # stay in sync: no orphan/empty markers, every feature has a test marker,
 # the start file is real, and schema-lockstep features touch all four
@@ -201,6 +222,38 @@ dev *flags:
         --with ../datasette-debug-gotham \
         --with llm-openrouter \
         datasette \
+            --internal {{INTERNAL_DEV_DB}} \
+            --plugins-dir tests/sample-plugin \
+            -s permissions.datasette-paper-create true \
+            -s permissions.datasette-sidebar-access true \
+            -s permissions.profile_access true \
+            -s settings.max_post_body_bytes 13631488 \
+            {{flags}}
+
+# The dev server with OpenTelemetry console exporters — enough to eyeball
+# a trace while editing: open a doc, type a sentence, and the POST /events
+# trace prints paper.events.submit → write_lock.wait / validate_steps /
+# db.query (core's, `datasette.callback: insert_steps`) / broadcast /
+# reindex ×3; the metrics dump follows every 5s. The SDK enters via
+# `--with` only — core and the plugin stay opentelemetry-api-only. For a
+# real trace UI use the Jaeger recipe in Datasette's demos/otel/ (branch
+# asg017/otel-dev) instead of the console.
+dev-otel *flags:
+    DATASETTE_SECRET=abc123 \
+    OTEL_SERVICE_NAME=paper \
+    OTEL_TRACES_EXPORTER=console \
+    OTEL_METRICS_EXPORTER=console \
+    OTEL_LOGS_EXPORTER=none \
+    OTEL_BSP_SCHEDULE_DELAY=1000 \
+    OTEL_METRIC_EXPORT_INTERVAL=5000 \
+    uv run --prerelease=allow \
+        --with opentelemetry-distro \
+        --with opentelemetry-sdk \
+        --with ../datasette-sidebar \
+        --with ../datasette-user-profiles \
+        --with ../datasette-debug-gotham \
+        --with llm-openrouter \
+        opentelemetry-instrument datasette \
             --internal {{INTERNAL_DEV_DB}} \
             --plugins-dir tests/sample-plugin \
             -s permissions.datasette-paper-create true \
