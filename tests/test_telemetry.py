@@ -304,3 +304,83 @@ async def test_write_lock_wait_span_has_explicit_duration(ds_with_doc, otel_span
     assert any(span.end_time - span.start_time >= 50_000_000 for span in waits)
     for span in waits:
         assert span.attributes["paper.doc_id"] == doc_id
+
+
+# --- Ticket 04: materialize + hydrate spans -------------------------------
+
+
+_BAD_STEP = {
+    "stepType": "replace",
+    "from": 0,
+    "to": 0,
+    "slice": {"content": [{"type": "text", "text": "x"}]},
+}
+
+
+async def _poisoned_instance(paper, name="Poisoned"):
+    """A hydrated Instance whose one-step history fails to apply."""
+    import json as _json
+
+    from datasette_paper.instance import Instance
+
+    doc = await paper.insert_doc(name=name)
+    await paper.insert_step(
+        doc_id=doc.id, client_id=1, actor_id=None, step_json=_json.dumps(_BAD_STEP)
+    )
+    return await Instance.hydrate(paper, doc.id)
+
+
+@pytest.mark.asyncio
+async def test_materialize_cache_hit_vs_miss(ds_with_doc, otel_spans):
+    # @feat telemetry: cache_hit distinguishes a replay from a lookup.
+    ds, _paper, doc_id = ds_with_doc
+    from datasette_paper.instance import get_registry
+    from datasette_paper.util import paper_db
+
+    registry = get_registry(ds)
+    instance = await registry.get(paper_db(ds), doc_id)
+    assert (await _post_step(ds, doc_id)).status_code == 200
+    otel_spans.clear()
+    instance._cached_live_doc_json = None  # force a real replay
+    instance.materialize_live_doc()
+    instance.materialize_live_doc()
+    first, second = _spans_named(otel_spans, "paper.materialize")
+    assert first.attributes["paper.cache_hit"] is False
+    assert first.attributes["paper.steps_applied"] == 1
+    assert second.attributes["paper.cache_hit"] is True
+    assert second.attributes["paper.steps_applied"] == 0
+
+
+@pytest.mark.asyncio
+async def test_materialize_poisoned_sets_attribute_not_error(ds_paper, otel_spans):
+    _ds, paper = ds_paper
+    instance = await _poisoned_instance(paper)
+    otel_spans.clear()
+    instance.materialize_live_doc()
+    (span,) = _spans_named(otel_spans, "paper.materialize")
+    assert span.attributes["paper.poisoned"] is True
+    assert span.status.status_code == StatusCode.UNSET
+
+
+@pytest.mark.asyncio
+async def test_hydrate_span_reports_tail_length(ds_paper, otel_spans):
+    ds, paper = ds_paper
+    from conftest import plant_snapshot
+    from datasette_paper.instance import get_registry
+
+    doc_id = await create_doc(ds, "Hydrate me")
+    await plant_snapshot(
+        ds, doc_id, {"type": "doc", "content": [{"type": "paragraph"}]}
+    )
+    for pos in (1, 2, 3):
+        await paper.insert_step(
+            doc_id=doc_id, client_id=1, actor_id=None, step_json=insert_at(pos, "x")
+        )
+    registry = get_registry(ds)
+    registry._instances.pop(doc_id, None)
+    otel_spans.clear()
+    await registry.get(paper, doc_id)
+    (span,) = _spans_named(otel_spans, "paper.instance.hydrate")
+    assert span.attributes["paper.doc_id"] == doc_id
+    assert span.attributes["paper.snapshot_version"] == 0
+    assert span.attributes["paper.tail_length"] == 3

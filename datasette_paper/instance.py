@@ -60,8 +60,16 @@ from .sse import SSEEvent
 from .telemetry_registry import (
     BATCH_BYTES,
     BROADCAST,
+    CACHE_HIT,
+    DOC_ID,
+    INSTANCE_HYDRATE,
+    MATERIALIZE,
+    POISONED,
+    SNAPSHOT_VERSION,
     STEP_COUNT,
+    STEPS_APPLIED,
     SUBSCRIBERS,
+    TAIL_LENGTH,
     VALIDATE_STEPS,
 )
 
@@ -217,34 +225,44 @@ class Instance:
 
     @classmethod
     # @feat snapshot-log: load latest snapshot + steps_after into the in-memory tail
+    # @feat telemetry: the cold-start span + histogram + cache-miss counter
     async def hydrate(cls, db: PaperDB, doc_id: int) -> "Instance":
         """Load instance state from the database."""
-        snapshot = await db.select_latest_snapshot(doc_id=doc_id)
-        if snapshot is None:
-            snapshot_version = 0
-            snapshot_doc_json = empty_doc_json()
-        else:
-            snapshot_version = snapshot.version
-            snapshot_doc_json = snapshot.doc_json
+        started = time.perf_counter()
+        with telemetry.tracer.start_as_current_span(INSTANCE_HYDRATE) as span:
+            snapshot = await db.select_latest_snapshot(doc_id=doc_id)
+            if snapshot is None:
+                snapshot_version = 0
+                snapshot_doc_json = empty_doc_json()
+            else:
+                snapshot_version = snapshot.version
+                snapshot_doc_json = snapshot.doc_json
 
-        steps_after = await db.select_steps_after(
-            doc_id=doc_id, after_version=snapshot_version
-        )
+            steps_after = await db.select_steps_after(
+                doc_id=doc_id, after_version=snapshot_version
+            )
 
-        steps_tail: collections.deque = collections.deque(maxlen=MAX_TAIL)
-        true_version = snapshot_version
-        for step in steps_after:
-            steps_tail.append(_step_record(step))
-            true_version = step.version
+            steps_tail: collections.deque = collections.deque(maxlen=MAX_TAIL)
+            true_version = snapshot_version
+            for step in steps_after:
+                steps_tail.append(_step_record(step))
+                true_version = step.version
 
-        return cls(
-            db=db,
-            doc_id=doc_id,
-            version=true_version,
-            snapshot_version=snapshot_version,
-            snapshot_doc_json=snapshot_doc_json,
-            steps_tail=steps_tail,
-        )
+            if span.is_recording():
+                span.set_attribute(DOC_ID, doc_id)
+                span.set_attribute(SNAPSHOT_VERSION, snapshot_version)
+                span.set_attribute(TAIL_LENGTH, len(steps_tail))
+            telemetry.hydrate_duration.record(time.perf_counter() - started)
+            telemetry.instances_hydrated.add(1)
+
+            return cls(
+                db=db,
+                doc_id=doc_id,
+                version=true_version,
+                snapshot_version=snapshot_version,
+                snapshot_doc_json=snapshot_doc_json,
+                steps_tail=steps_tail,
+            )
 
     # @feat snapshot-log: apply steps_tail over snapshot via prosemirror-py (cached)
     def materialize_live_doc(self) -> dict:
@@ -255,60 +273,91 @@ class Instance:
 
         On step-apply failure, returns the doc as far as steps successfully
         applied, plus logs a warning. Should never raise.
+
+        @feat telemetry: paper.materialize is **synchronous on the event
+        loop** — this span is the one that explains a slow trace whose SQL
+        is fast. The span status stays UNSET even when history is poisoned
+        (the method's contract is "never raises"); the
+        paper.instances.poisoned gauge is the alert.
         """
-        if (
+        started = time.perf_counter()
+        cache_hit = (
             self._cached_live_doc_json is not None
             and self._cached_live_version == self.version
-        ):
-            return json.loads(self._cached_live_doc_json)
-
-        # Late imports keep the prosemirror dep optional at module-load
-        # time and avoid pulling lxml on cold paths that don't need it.
-        from prosemirror.transform import Step
-
-        from .pm_schema import schema
-
-        # Re-materializing — wipe any prior poisoned-history marker so a
-        # subsequently repaired tail (admin trimmed the bad step, the
-        # registry was forced to re-hydrate) clears the gate cleanly.
-        self._materialization_error = None
-
-        try:
-            doc = schema.node_from_json(json.loads(self.snapshot_doc_json))
-        except Exception:
-            logger.exception(
-                "doc_id=%s: snapshot_doc_json failed to parse, returning raw",
-                self.doc_id,
-            )
-            return json.loads(self.snapshot_doc_json)
-
-        for record in self.steps_tail:
+        )
+        steps_applied = 0
+        snapshot_parse_failed = False
+        with telemetry.tracer.start_as_current_span(MATERIALIZE) as span:
             try:
-                step = Step.from_json(schema, json.loads(record["step_json"]))
-                result = step.apply(doc)
-                if result.failed:
-                    logger.warning(
-                        "doc_id=%s version=%s: Step.apply failed: %s",
-                        self.doc_id,
-                        record["version"],
-                        result.failed,
-                    )
-                    self._materialization_error = (record["version"], result.failed)
-                    break
-                doc = result.doc
-            except Exception as exc:
-                logger.exception(
-                    "doc_id=%s version=%s: Step.apply raised",
-                    self.doc_id,
-                    record["version"],
-                )
-                self._materialization_error = (record["version"], str(exc))
-                break
+                if cache_hit:
+                    return json.loads(self._cached_live_doc_json)
 
-        live = doc.to_json()
-        self._cached_live_doc_json = json.dumps(live)
-        self._cached_live_version = self.version
-        return live
+                # Late imports keep the prosemirror dep optional at
+                # module-load time and avoid pulling lxml on cold paths
+                # that don't need it.
+                from prosemirror.transform import Step
+
+                from .pm_schema import schema
+
+                # Re-materializing — wipe any prior poisoned-history marker
+                # so a subsequently repaired tail (admin trimmed the bad
+                # step, the registry was forced to re-hydrate) clears the
+                # gate cleanly.
+                self._materialization_error = None
+
+                try:
+                    doc = schema.node_from_json(json.loads(self.snapshot_doc_json))
+                except Exception:
+                    logger.exception(
+                        "doc_id=%s: snapshot_doc_json failed to parse, returning raw",
+                        self.doc_id,
+                    )
+                    snapshot_parse_failed = True
+                    return json.loads(self.snapshot_doc_json)
+
+                for record in self.steps_tail:
+                    try:
+                        step = Step.from_json(schema, json.loads(record["step_json"]))
+                        result = step.apply(doc)
+                        if result.failed:
+                            logger.warning(
+                                "doc_id=%s version=%s: Step.apply failed: %s",
+                                self.doc_id,
+                                record["version"],
+                                result.failed,
+                            )
+                            self._materialization_error = (
+                                record["version"],
+                                result.failed,
+                            )
+                            break
+                        doc = result.doc
+                        steps_applied += 1
+                    except Exception as exc:
+                        logger.exception(
+                            "doc_id=%s version=%s: Step.apply raised",
+                            self.doc_id,
+                            record["version"],
+                        )
+                        self._materialization_error = (record["version"], str(exc))
+                        break
+
+                live = doc.to_json()
+                self._cached_live_doc_json = json.dumps(live)
+                self._cached_live_version = self.version
+                return live
+            finally:
+                poisoned = (
+                    snapshot_parse_failed or self._materialization_error is not None
+                )
+                if span.is_recording():
+                    span.set_attribute(DOC_ID, self.doc_id)
+                    span.set_attribute(CACHE_HIT, cache_hit)
+                    span.set_attribute(STEPS_APPLIED, steps_applied)
+                    span.set_attribute(POISONED, poisoned)
+                telemetry.materialize_duration.record(
+                    time.perf_counter() - started, {CACHE_HIT: cache_hit}
+                )
 
     def _raise_if_poisoned(self) -> None:
         """Reject a write if a step in history couldn't be materialized.
@@ -1223,6 +1272,10 @@ class InstanceRegistry:
         # write lock. Treat the cap as soft while docs are active, and prune
         # on cache hits too so disconnected docs get reclaimed. Never evict
         # the instance being returned.
+        # @feat telemetry: only a real LRU eviction counts — tests that
+        # force a re-hydrate by deleting from _instances directly, and
+        # ``discard`` for permanent deletion, are not evictions and must not
+        # inflate the churn counter.
         for candidate, cached in list(self._instances.items()):
             if len(self._instances) <= MAX_INSTANCES:
                 break
@@ -1230,6 +1283,7 @@ class InstanceRegistry:
                 continue
             self._evicted[candidate] = cached
             del self._instances[candidate]
+            telemetry.instances_evicted.add(1)
 
         return inst
 
