@@ -49,6 +49,7 @@ import time
 import weakref
 from typing import Optional
 
+from . import telemetry
 from .db import PaperDB
 from .errors import BadVersionError, ConflictError, GoneError, InvalidStepError
 from .sql import _queries
@@ -1124,4 +1125,11 @@ def get_registry(datasette) -> InstanceRegistry:
     """Get or create the InstanceRegistry attached to this Datasette instance."""
     if not hasattr(datasette, "_paper_registry"):
         datasette._paper_registry = InstanceRegistry()
+        # @feat telemetry: weakly register the new registry so the gauge
+        # callbacks (open streams, live/poisoned instances, tail max,
+        # presence) can observe it from the SDK's collection thread. Weak
+        # registration is the whole lifecycle — Datasette.close() knows
+        # nothing about paper, so the registry simply vanishes from the
+        # gauges when the Datasette is garbage collected.
+        telemetry.register_instance_registry(datasette._paper_registry)
     return datasette._paper_registry

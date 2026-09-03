@@ -19,6 +19,22 @@ import json
 import pytest_asyncio
 from datasette.app import Datasette
 
+# @feat telemetry: one import line registers Datasette's plugin telemetry
+# kit fixtures. otel_provider / otel_meter_provider are session-scoped and
+# autouse (a real in-memory SDK provider installed before the first span,
+# so the ProxyTracer caches a concrete tracer); otel_reset is autouse and
+# drains the exporter + reader after every test; otel_spans / otel_metrics
+# are the function-scoped accessors tests take. With no SDK installed the
+# autouse fixtures no-op and the function-scoped ones skip.
+from datasette.telemetry_testing import (  # noqa: F401
+    MetricsCollector,
+    otel_metrics,
+    otel_meter_provider,
+    otel_provider,
+    otel_reset,
+    otel_spans,
+)
+
 from datasette_acl.grants import Principal, grant, revoke
 from datasette_paper.db import PaperDB
 from datasette_paper.instance import MAX_STEP_BYTES, get_registry
@@ -29,6 +45,22 @@ from datasette_paper.permissions import (
 
 
 DEFAULT_ACTOR_ID = "alice"
+
+
+def pytest_collection_modifyitems(config, items):
+    # @feat telemetry: front-load the one test that shells out to a fresh
+    # interpreter. Late in a serial run the pytest process holds enough
+    # threads that the fork half of subprocess's fork+exec can crash the
+    # interpreter on macOS/CPython 3.13 (SIGBUS inside _execute_child) —
+    # see the assert_package_never_imports_sdk docstring in
+    # datasette.telemetry_testing; Datasette's own conftest does the same.
+    _move_to_front(items, "test_package_never_imports_the_sdk")
+
+
+def _move_to_front(items, test_name):
+    found = [item for item in items if item.name == test_name]
+    if found:
+        items.insert(0, items.pop(items.index(found[0])))
 
 
 def make_datasette(*, granted: bool = True) -> Datasette:
