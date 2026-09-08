@@ -231,11 +231,22 @@ dev *flags:
             {{flags}}
 
 # The dev server with OpenTelemetry export to a local Jaeger, via the
-# datasette-otel-otlp plugin (sibling checkout, unreleased — pulled in
-# with `--with` so it never touches the runtime deps or the test env,
-# where its import-time TracerProvider would fight the test fixtures).
+# datasette-otel-otlp-exporter plugin, plus datasette-otel-viewer for the
+# in-Datasette span browser at /-/otel/traces.
+#
+# The other dev plugins come from the `dev` dependency group, but these
+# two stay on `--with ../` sibling paths: neither is on PyPI, and neither
+# repo can be resolved from a pyproject source today (the exporter repo
+# is not public; the viewer's pushed metadata still says
+# `datasette-otel-receiver`). That matters because uv locks *every*
+# dependency group, so an unresolvable path or git source in pyproject.toml
+# fails plain `uv run` — it would break `just test` and CI for anyone
+# without the sibling checkouts, not just this recipe. A failing `--with`
+# only breaks this recipe. Once both are published, move them into the
+# `dev` group and drop these two flags.
+#
 # No `opentelemetry-instrument`, no OTEL_* env vars: the plugin's whole
-# point is that one `-s plugins.datasette-otel-otlp.endpoint` flag.
+# point is that one `-s plugins.datasette-otel-otlp-exporter.endpoint` flag.
 #
 # Flow: `just jaeger` in one terminal, `just dev-otel` in another, then
 # open a doc and type — the POST /events trace (paper.events.submit →
@@ -249,16 +260,14 @@ dev *flags:
 # an OTLP metrics backend instead (see docs/TELEMETRY.md).
 dev-otel *flags:
     DATASETTE_SECRET=abc123 uv run --prerelease=allow \
-        --with ../datasette-otel-otlp \
-        --with ../datasette-sidebar \
-        --with ../datasette-user-profiles \
-        --with ../datasette-debug-gotham \
-        --with llm-openrouter \
+        --with ../datasette-otel-otlp-exporter \
+        --with ../datasette-otel-viewer \
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
             --plugins-dir tests/sample-plugin \
-            -s plugins.datasette-otel-otlp.endpoint http://localhost:4318 \
-            -s plugins.datasette-otel-otlp.service_name datasette-paper \
+            -s plugins.datasette-otel-otlp-exporter.endpoint http://localhost:4318 \
+            -s plugins.datasette-otel-otlp-exporter.service_name datasette-paper \
+            -s permissions.datasette-otel-viewer true \
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
             -s permissions.profile_access true \

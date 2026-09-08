@@ -33,13 +33,13 @@ installs a provider or an exporter: with no SDK in the process every
 span is a no-op `NonRecordingSpan`, every instrument does nothing, and
 the observable-gauge callbacks never run. Turning telemetry **on** is
 the operator's move, exactly as with Datasette core. The easiest way is
-the `datasette-otel-otlp` plugin — one config flag, no `OTEL_*`
+the `datasette-otel-otlp-exporter` plugin — one config flag, no `OTEL_*`
 environment variables, no `opentelemetry-instrument` wrapper:
 
 ```bash
 datasette --internal internal.db \\
-    -s plugins.datasette-otel-otlp.endpoint http://localhost:4318 \\
-    -s plugins.datasette-otel-otlp.service_name datasette-paper ...
+    -s plugins.datasette-otel-otlp-exporter.endpoint http://localhost:4318 \\
+    -s plugins.datasette-otel-otlp-exporter.service_name datasette-paper ...
 ```
 
 For local development, `just jaeger` (a `jaeger` binary from
