@@ -202,8 +202,8 @@ registry) and carries no document content or user identifiers. To watch the
 traces locally: `just jaeger` in one terminal (needs a `jaeger` binary from
 [jaegertracing.io](https://www.jaegertracing.io/download/); UI at
 http://localhost:16686), `just dev-otel` in another — the dev server with
-the `datasette-otel-otlp` plugin exporting to Jaeger via a single
-`-s plugins.datasette-otel-otlp.endpoint` flag, no `OTEL_*` env vars.
+the `datasette-otel-otlp-exporter` plugin exporting to Jaeger via a single
+`-s plugins.datasette-otel-otlp-exporter.endpoint` flag, no `OTEL_*` env vars.
 Traces only: Jaeger and the plugin don't carry metrics — see
 `docs/TELEMETRY.md` for how to collect those.
 
