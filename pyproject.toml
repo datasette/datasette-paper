@@ -27,6 +27,8 @@ dependencies = [
 dev = [
     "datasette-agent",
     "datasette-debug-gotham>=0.1.0a3",
+    "datasette-sidebar>=0.0.1a3",
+    "llm-openrouter>=0.7",
     "pytest",
     "pytest-asyncio",
     # Pinned: ruff 0.16 formats code blocks in markdown and enables new

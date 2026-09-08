@@ -182,9 +182,10 @@ test-all *flags:
 
 # --- Dev server ---
 
-# Run datasette with the local plugin loaded, plus optional sibling
-# plugins from ../ (matches the datasette-sheets dev layout). The
-# `--with` paths are tolerated-missing — uv ignores them if absent.
+# Run datasette with the local plugin loaded, plus the dev-only sibling
+# plugins (sidebar, user-profiles, debug-gotham, llm-openrouter). Those
+# live in the `dev` dependency group in pyproject.toml, which `uv run`
+# installs by default — no `--with` flags needed here.
 #
 # Papers live in Datasette's internal DB; pass `--internal <path>` so they
 # persist across restarts. No user database needs to be attached.
@@ -196,10 +197,6 @@ test-all *flags:
 # as anonymous and exercises only the read-only path.)
 dev *flags:
     DATASETTE_SECRET=abc123 uv run --prerelease=allow \
-        --with ../datasette-sidebar \
-        --with ../datasette-user-profiles \
-        --with ../datasette-debug-gotham \
-        --with llm-openrouter \
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
             --plugins-dir tests/sample-plugin \
