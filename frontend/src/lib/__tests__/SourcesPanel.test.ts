@@ -121,6 +121,71 @@ describe("SourcesPanel", () => {
     expect(v.countSources()).toBe(0);
   });
 
+  it("saves the same source after another edit shifts it to a new position", async () => {
+    const first = sourceNode("first", "data", "select 1");
+    const target = sourceNode("target", "data", "select 2");
+    const v = makeView([first, target]);
+    render(SourcesPanel, { view: v.view });
+    await open();
+    await fireEvent.click(screen.getAllByRole("button", { name: "Edit source" })[1]);
+    await fireEvent.input(screen.getByPlaceholderText("revenue"), { target: { value: "edited" } });
+    v.view.dispatch(v.view.state.tr.insertText(" + 100", 2));
+    await fireEvent.click(screen.getByText("Save"));
+    expect(v.names()).toEqual(["first", "edited"]);
+    expect(v.view.state.doc.child(0).textContent).toBe("s + 100elect 1");
+  });
+
+  it("preserves the draft when a collaborator removes the source and shortens the document", async () => {
+    const v = makeView([
+      sourceNode("first", "data", "select something_long"),
+      sourceNode("target", "data", "select 2"),
+    ]);
+    render(SourcesPanel, { view: v.view });
+    await open();
+    await fireEvent.click(screen.getAllByRole("button", { name: "Edit source" })[1]);
+    await fireEvent.input(screen.getByPlaceholderText("revenue"), { target: { value: "my draft" } });
+    v.view.dispatch(v.view.state.tr.replaceWith(0, v.view.state.doc.content.size, schema.node("paragraph")));
+    await fireEvent.click(screen.getByText("Save"));
+    expect(v.countSources()).toBe(0);
+    expect(screen.getByRole("alert").textContent).toMatch(/changed or was removed/);
+    expect((screen.getByPlaceholderText("revenue") as HTMLInputElement).value).toBe("my draft");
+  });
+
+  it("does not overwrite a source that a collaborator changed while its form was open", async () => {
+    const v = makeView([sourceNode("target", "data", "select 2")]);
+    render(SourcesPanel, { view: v.view });
+    await open();
+    await fireEvent.click(screen.getByRole("button", { name: "Edit source" }));
+    v.view.dispatch(v.view.state.tr.insertText(" + 100", 9));
+    await fireEvent.click(screen.getByText("Save"));
+    expect(v.view.state.doc.firstChild!.textContent).toBe("select 2 + 100");
+    expect(screen.getByRole("alert").textContent).toMatch(/changed or was removed/);
+  });
+
+  it("keeps delete confirmation on the same source when an earlier source disappears", async () => {
+    const first = sourceNode("first", "data", "select 1");
+    const v = makeView([first, sourceNode("target", "data", "select 2")]);
+    render(SourcesPanel, { view: v.view });
+    await open();
+    await fireEvent.click(screen.getAllByRole("button", { name: "Delete source" })[1]);
+    v.view.dispatch(v.view.state.tr.delete(0, first.nodeSize));
+    await vi.waitFor(() => expect(screen.getAllByRole("button", { name: "Edit source" })).toHaveLength(1));
+    await fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    expect(v.countSources()).toBe(0);
+  });
+
+  it("does not transfer delete confirmation to a source replacing the deleted target", async () => {
+    const first = sourceNode("first", "data", "select 1");
+    const v = makeView([first, sourceNode("keep", "data", "select 2")]);
+    render(SourcesPanel, { view: v.view });
+    await open();
+    await fireEvent.click(screen.getAllByRole("button", { name: "Delete source" })[0]);
+    v.view.dispatch(v.view.state.tr.delete(0, first.nodeSize));
+    await vi.waitFor(() => expect(screen.getAllByRole("button", { name: "Edit source" })).toHaveLength(1));
+    expect(screen.queryByRole("button", { name: "Delete" })).toBeNull();
+    expect(v.names()).toEqual(["keep"]);
+  });
+
   it("shows how many times each source is used", async () => {
     const value = schema.nodes.value.create({
       source: "revenue",
