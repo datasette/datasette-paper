@@ -92,44 +92,6 @@ async def sse_events(datasette, request, send, receive):
             await _send_status(send, 400, b"Invalid version")
         return
 
-    # --- Open the SSE stream ---
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 200,
-            "headers": [
-                (b"content-type", b"text/event-stream"),
-                (b"cache-control", b"no-cache"),
-                (b"x-accel-buffering", b"no"),
-            ],
-        }
-    )
-
-    # Flush any backlog before reading from the queue. The backlog
-    # covers versions up to instance.version as observed at subscribe
-    # time; any later ``add_events`` enqueued to ``queue`` for us, so
-    # the order on the wire is (backlog, then live broadcasts) with no
-    # overlap.
-    if backlog is not None:
-        await send(
-            {
-                "type": "http.response.body",
-                "body": format_event("update", backlog),
-                "more_body": True,
-            }
-        )
-
-    # Send the current presence snapshot once so the new subscriber sees
-    # everyone already on the doc.
-    if instance.presence:
-        await send(
-            {
-                "type": "http.response.body",
-                "body": format_event("presence", instance._presence_payload()),
-                "more_body": True,
-            }
-        )
-
     disconnected = asyncio.Event()
 
     async def watch_disconnect():
@@ -144,6 +106,46 @@ async def sse_events(datasette, request, send, receive):
 
     watcher = asyncio.create_task(watch_disconnect())
     try:
+        # The initial writes sit inside the try so a client that drops
+        # during headers/backlog still hits the ``finally`` unsubscribe —
+        # otherwise its queue keeps collecting every later edit.
+        await send(
+            {
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-type", b"text/event-stream"),
+                    (b"cache-control", b"no-cache"),
+                    (b"x-accel-buffering", b"no"),
+                ],
+            }
+        )
+
+        # Flush any backlog before reading from the queue. The backlog
+        # covers versions up to instance.version as observed at subscribe
+        # time; any later ``add_events`` enqueued to ``queue`` for us, so
+        # the order on the wire is (backlog, then live broadcasts) with no
+        # overlap.
+        if backlog is not None:
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": format_event("update", backlog),
+                    "more_body": True,
+                }
+            )
+
+        # Send the current presence snapshot once so the new subscriber sees
+        # everyone already on the doc.
+        if instance.presence:
+            await send(
+                {
+                    "type": "http.response.body",
+                    "body": format_event("presence", instance._presence_payload()),
+                    "more_body": True,
+                }
+            )
+
         while not disconnected.is_set():
             try:
                 payload = await asyncio.wait_for(
