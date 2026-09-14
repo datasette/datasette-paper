@@ -8,30 +8,17 @@ with OpenTelemetry, through `opentelemetry-api` only. The plugin never
 installs a provider or an exporter: with no SDK in the process every
 span is a no-op `NonRecordingSpan`, every instrument does nothing, and
 the observable-gauge callbacks never run. Turning telemetry **on** is
-the operator's move, exactly as with Datasette core. The easiest way is
-the `datasette-otel-otlp-exporter` plugin — one config flag, no `OTEL_*`
-environment variables, no `opentelemetry-instrument` wrapper:
-
-```bash
-datasette --internal internal.db \
-    -s plugins.datasette-otel-otlp-exporter.endpoint http://localhost:4318 \
-    -s plugins.datasette-otel-otlp-exporter.service_name datasette-paper ...
-```
-
-For local development, `just jaeger` (a `jaeger` binary from
-https://www.jaegertracing.io/download/ — the UI is at
-http://localhost:16686, the :4318 ingest port has no UI) plus
-`just dev-otel` gives a browsable trace UI for real editing sessions.
-
-**Metrics:** that plugin exports *traces only* (it installs a
-`TracerProvider`, not a `MeterProvider`), and Jaeger ingests traces
-only — so under `just dev-otel` the `paper.*` metrics below stay no-op.
-To collect them, run under a metrics-capable setup instead, e.g.
+the operator's move, exactly as with Datasette core — e.g.
 `opentelemetry-instrument` (`--with opentelemetry-distro --with
-opentelemetry-sdk`) with `OTEL_METRICS_EXPORTER` pointed at an OTLP
-metrics backend such as Prometheus or Grafana. The registry below is the
-contract either way. See Datasette's own telemetry documentation for the
-full operator story.
+opentelemetry-sdk`) with `OTEL_TRACES_EXPORTER` / `OTEL_METRICS_EXPORTER`
+pointed at an OTLP backend. The registry below is the contract either
+way. See Datasette's own telemetry documentation for the full operator
+story.
+
+For local development, `just dev-otel` runs the dev server with the
+`datasette-otel-viewer` plugin, which installs its own trace and metric
+providers and serves both at `/-/otel` — traces and the `paper.*`
+metrics below, browsable for real editing sessions.
 
 Every signal below lives in the `datasette_paper` instrumentation scope
 under the `paper.*` prefix. All of it is declared in
