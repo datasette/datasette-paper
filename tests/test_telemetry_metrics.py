@@ -176,6 +176,34 @@ async def test_evicted_counter_after_max_instances(ds_paper, otel_metrics, monke
 
 
 @pytest.mark.asyncio
+async def test_hydrate_joined_and_reclaimed_counters(
+    ds_paper, otel_metrics, monkeypatch
+):
+    # @feat telemetry: a concurrent miss joins the in-flight hydrate and an
+    # evicted-but-held instance is handed back — neither is a real hydrate.
+    import asyncio
+
+    from datasette_paper import instance as instance_mod
+
+    monkeypatch.setattr(instance_mod, "MAX_INSTANCES", 1)
+    _ds, paper = ds_paper
+    doc1 = await paper.insert_doc(name="one")
+    doc2 = await paper.insert_doc(name="two")
+    registry = InstanceRegistry()
+    otel_metrics.reader.get_metrics_data()
+    first, joined = await asyncio.gather(
+        registry.get(paper, doc1.id), registry.get(paper, doc1.id)
+    )
+    assert joined is first
+    await registry.get(paper, doc2.id)  # evicts doc1; `first` keeps it alive
+    assert await registry.get(paper, doc1.id) is first
+    otel_metrics.collect()
+    assert otel_metrics.point("paper.instances.hydrate_joined").value == 1
+    assert otel_metrics.point("paper.instances.reclaimed").value == 1
+    assert otel_metrics.point("paper.instances.hydrated").value == 2
+
+
+@pytest.mark.asyncio
 async def test_tail_max_gauge_tracks_longest_tail(ds_paper):
     from _steps import insert_at
     from conftest import create_doc

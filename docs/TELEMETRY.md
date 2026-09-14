@@ -187,7 +187,19 @@ Step-batch submissions by outcome and origin. `conflict` (409) is contention, `g
 
 *Counter, unit `{instance}`.*
 
-Instance cache misses — hydrates from the database.
+Real instance hydrates from the database — one per cold start. A caller that joins an in-flight hydrate or is handed back an evicted instance does not count here; see `paper.instances.hydrate_joined` and `paper.instances.reclaimed`.
+
+### `paper.instances.hydrate_joined`
+
+*Counter, unit `{request}`.*
+
+Registry misses that joined a hydrate already in flight for the same doc instead of starting their own. The shared hydrate's span parents under the first requester's trace only, so each joining caller's current span gets a `paper.instance.hydrate.joined` event (`paper.doc_id`) instead.
+
+### `paper.instances.reclaimed`
+
+*Counter, unit `{instance}`.*
+
+Registry misses answered by an LRU-evicted instance that a suspended caller still held, handed back instead of hydrating a second authority for the doc.
 
 ### `paper.instances.evicted`
 

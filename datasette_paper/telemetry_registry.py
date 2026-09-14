@@ -374,7 +374,28 @@ M_INSTANCES_HYDRATED = MetricName(
     "paper.instances.hydrated",
     COUNTER,
     "{instance}",
-    "Instance cache misses — hydrates from the database.",
+    "Real instance hydrates from the database — one per cold start. A "
+    "caller that joins an in-flight hydrate or is handed back an evicted "
+    "instance does not count here; see ``paper.instances.hydrate_joined`` "
+    "and ``paper.instances.reclaimed``.",
+)
+M_INSTANCES_HYDRATE_JOINED = MetricName(
+    "paper.instances.hydrate_joined",
+    COUNTER,
+    "{request}",
+    "Registry misses that joined a hydrate already in flight for the same "
+    "doc instead of starting their own. The shared hydrate's span parents "
+    "under the first requester's trace only, so each joining caller's "
+    "current span gets a ``paper.instance.hydrate.joined`` event "
+    "(``paper.doc_id``) instead.",
+)
+M_INSTANCES_RECLAIMED = MetricName(
+    "paper.instances.reclaimed",
+    COUNTER,
+    "{instance}",
+    "Registry misses answered by an LRU-evicted instance that a suspended "
+    "caller still held, handed back instead of hydrating a second "
+    "authority for the doc.",
 )
 M_INSTANCES_EVICTED = MetricName(
     "paper.instances.evicted",
@@ -493,6 +514,8 @@ METRICS = (
     M_PRESENCE_CLIENTS,
     M_EVENTS_SUBMITTED,
     M_INSTANCES_HYDRATED,
+    M_INSTANCES_HYDRATE_JOINED,
+    M_INSTANCES_RECLAIMED,
     M_INSTANCES_EVICTED,
     M_SSE_STREAMS_CLOSED,
     M_SSE_BACKLOG_GONE,

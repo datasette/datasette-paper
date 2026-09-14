@@ -221,7 +221,7 @@ class Instance:
 
     @classmethod
     # @feat snapshot-log: load latest snapshot + steps_after into the in-memory tail
-    # @feat telemetry: the cold-start span + histogram + cache-miss counter
+    # @feat telemetry: the cold-start span + histogram + real-hydrate counter
     async def hydrate(cls, db: PaperDB, doc_id: int) -> "Instance":
         """Load instance state from the database."""
         started = time.perf_counter()
@@ -1275,7 +1275,12 @@ class InstanceRegistry:
 
         if key not in self._instances:
             inst = self._evicted.pop(key, None)
-            if inst is None:
+            # @feat telemetry: the two misses that don't hydrate are counted
+            # apart from paper.instances.hydrated (which Instance.hydrate
+            # bumps only for a real cold start).
+            if inst is not None:
+                telemetry.instances_reclaimed.add(1)
+            else:
                 task = self._hydrating.get(key)
                 if task is None:
                     task = asyncio.ensure_future(Instance.hydrate(db, doc_id))
@@ -1285,6 +1290,16 @@ class InstanceRegistry:
                     task.add_done_callback(
                         lambda _t, key=key: self._hydrating.pop(key, None)
                     )
+                else:
+                    # The shared hydrate's span parents under the first
+                    # requester's trace only; a span event is how a joining
+                    # caller's trace shows where its wait went.
+                    telemetry.instances_hydrate_joined.add(1)
+                    span = otel_trace.get_current_span()
+                    if span.is_recording():
+                        span.add_event(
+                            "paper.instance.hydrate.joined", {DOC_ID: doc_id}
+                        )
                 # Shield: one cancelled request (client disconnect) must not
                 # cancel the hydrate other requests are awaiting.
                 inst = await asyncio.shield(task)

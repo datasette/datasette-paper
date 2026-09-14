@@ -386,6 +386,30 @@ async def test_hydrate_span_reports_tail_length(ds_paper, otel_spans):
     assert span.attributes["paper.tail_length"] == 3
 
 
+@pytest.mark.asyncio
+async def test_hydrate_join_adds_event_on_joining_callers_span(ds_paper, otel_spans):
+    from datasette_paper.instance import InstanceRegistry
+
+    _ds, paper = ds_paper
+    doc = await paper.insert_doc(name="Joined")
+    registry = InstanceRegistry()
+
+    async def get_under(name):
+        with telemetry.tracer.start_as_current_span(name):
+            return await registry.get(paper, doc.id)
+
+    otel_spans.clear()
+    await asyncio.gather(get_under("first"), get_under("joiner"))
+    (first,) = _spans_named(otel_spans, "first")
+    (joiner,) = _spans_named(otel_spans, "joiner")
+    assert not [e for e in first.events if e.name == "paper.instance.hydrate.joined"]
+    (event,) = [e for e in joiner.events if e.name == "paper.instance.hydrate.joined"]
+    assert event.attributes["paper.doc_id"] == doc.id
+    # No links, no extra spans: the one hydrate parents under the first.
+    (hydrate,) = _spans_named(otel_spans, "paper.instance.hydrate")
+    assert hydrate.parent.span_id == first.context.span_id
+
+
 # --- Ticket 05: SSE — request-span enrichment, never own spans ------------
 
 
