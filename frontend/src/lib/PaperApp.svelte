@@ -317,9 +317,13 @@
   {/if}
   {#if stepError}
     <div class="status-banner status-step-error" role="alert">
-      Could not apply edit at version {stepError.version}. The doc is shown
-      up to the last good edit and is read-only until an admin repairs the
-      history.
+      {#if stepError.phase === "reset"}
+        {stepError.message}
+      {:else}
+        Could not apply edit at version {stepError.version}. The doc is shown
+        up to the last good edit and is read-only until an admin repairs the
+        history.
+      {/if}
     </div>
   {/if}
   {#if status.state !== "ok"}

@@ -87,7 +87,30 @@ async def sse_events(datasette, request, send, receive):
         )
     except (GoneError, BadVersionError) as exc:
         if isinstance(exc, GoneError):
-            await _send_status(send, 410, b"History gone")
+            if client_id is not None:
+                # Native EventSource hides HTTP failure status codes, so a
+                # stale idle editor would retry the same evicted version
+                # forever. Tell browser editors in-band to re-bootstrap;
+                # keep HTTP 410 for callers without a clientID.
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [
+                            (b"content-type", b"text/event-stream"),
+                            (b"cache-control", b"no-cache"),
+                        ],
+                    }
+                )
+                await send(
+                    {
+                        "type": "http.response.body",
+                        "body": format_event("reset", {"reason": "history_gone"}),
+                        "more_body": False,
+                    }
+                )
+            else:
+                await _send_status(send, 410, b"History gone")
         else:
             await _send_status(send, 400, b"Invalid version")
         return
