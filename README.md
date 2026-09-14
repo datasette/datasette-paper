@@ -186,6 +186,18 @@ docs, bootstrap a paper, post step batches, stream updates over SSE, manage
 shares, render markdown / extract tasks. See `CLAUDE.md` for the full
 endpoint table.
 
+## Observability
+
+Paper instruments its own hot paths — the collab write pipeline, SSE
+streams, instance materialization, the write tail — with OpenTelemetry,
+through `opentelemetry-api` only: no provider, no exporter, no cost until
+the operator installs an SDK (e.g. `opentelemetry-instrument datasette …`).
+Every span, metric and attribute is documented in
+[`docs/TELEMETRY.md`](docs/TELEMETRY.md) (generated from the in-code
+registry) and carries no document content or user identifiers. To watch
+traces and metrics locally, `just dev-otel` runs the dev server with the
+`datasette-otel-viewer` plugin (browse at `/-/otel`).
+
 ## Frontend stack
 
 Vite + Svelte 5 + ProseMirror. Bundle outputs to `datasette_paper/static/`.

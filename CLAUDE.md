@@ -80,6 +80,13 @@ comments at the relevant code site.
    PEP 563 turns those into strings and breaks URL var injection.
 4. **Build before e2e.** Playwright's `webServer` does not run
    `just frontend` — if you skip it, the page loads nothing.
+5. **Every telemetry signal is a registry entry.** Any new span, metric or
+   attribute must be declared in `datasette_paper/telemetry_registry.py`
+   (with `values=` enums on closed sets, `optional=True` for
+   sometimes-absent attributes) — the conformance test in
+   `tests/test_telemetry_registry.py` enforces both directions, plus a
+   sentinel-secret privacy walk. Never record document content, doc names,
+   or actor ids on a signal; `paper.doc_id` goes on spans only.
 
 ## Development
 
@@ -114,5 +121,8 @@ if anything Python changed — it's not bundled into a single recipe yet.
 If `format-backend` rewrites files, re-stage. Routes signature change
 → `just types-routes` (refreshes `frontend/api.d.ts`). Edits to
 `sql/queries.sql` or `migrations.py` → `just codegen-queries`
-(uses `uv run solite`; CI gate is `just check-queries-fresh`).
+(uses `uv run solite`; CI gate is `just check-queries-fresh`). Edits to
+`datasette_paper/telemetry_registry.py` → `just telemetry-docs`
+(regenerates `docs/TELEMETRY.md`; CI gate is
+`just check-telemetry-docs-fresh`).
 

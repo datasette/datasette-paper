@@ -1,12 +1,16 @@
 """Route handlers for the collaborative events (steps) API."""
 
 import asyncio
+import time
 from typing import Annotated
 
 from datasette import Response
+from datasette.telemetry import request_span
 from datasette_plugin_router import Body
 
+from .. import telemetry
 from ..router import router
+from ..telemetry_registry import CLOSE_REASON, DOC_ID, GONE_RESPONSE, STEP_COUNT
 from ..instance import get_registry
 from ..errors import (
     BadVersionError,
@@ -87,6 +91,16 @@ async def sse_events(datasette, request, send, receive):
         )
     except (GoneError, BadVersionError) as exc:
         if isinstance(exc, GoneError):
+            # @feat telemetry: the requested version fell off the step
+            # tail — counted separately from POST outcomes, split by how
+            # the client is told (410 vs in-band reset), and stamped on the
+            # request span like the streaming path's enrichment.
+            gone_response = "reset" if client_id is not None else "status"
+            telemetry.sse_backlog_gone.add(1, {GONE_RESPONSE: gone_response})
+            span = request_span(request.scope)
+            if span is not None:
+                span.set_attribute(DOC_ID, doc_id)
+                span.set_attribute(GONE_RESPONSE, gone_response)
             if client_id is not None:
                 # Native EventSource hides HTTP failure status codes, so a
                 # stale idle editor would retry the same evicted version
@@ -115,6 +129,23 @@ async def sse_events(datasette, request, send, receive):
             await _send_status(send, 400, b"Invalid version")
         return
 
+    # @feat telemetry: this route opens NO spans of its own, ever — the
+    # request span stays open for the whole connection (a documented core
+    # caveat: "Streaming responses hold the request span open" in
+    # Datasette's plugin-telemetry docs), so per-stream signal rides on
+    # gauges/counters/histograms plus enrichment of core's request span.
+    # request_span() reads the recording SERVER span off the ASGI scope
+    # (falling back to the current span) and returns None when nothing
+    # records — which is also the signal to skip the enrichment work.
+    opened_at = time.perf_counter()
+    span = request_span(request.scope)
+    if span is not None:
+        span.set_attribute(DOC_ID, doc_id)
+        span.add_event(
+            "paper.sse.backlog",
+            {STEP_COUNT: len(backlog["steps"]) if backlog else 0},
+        )
+
     disconnected = asyncio.Event()
 
     async def watch_disconnect():
@@ -128,6 +159,7 @@ async def sse_events(datasette, request, send, receive):
             disconnected.set()
 
     watcher = asyncio.create_task(watch_disconnect())
+    close_reason = "client_disconnect"
     try:
         # The initial writes sit inside the try so a client that drops
         # during headers/backlog still hits the ``finally`` unsubscribe —
@@ -194,6 +226,7 @@ async def sse_events(datasette, request, send, receive):
                     # Server-initiated close — emitted by
                     # Instance.revoke_unauthorized when an actor's
                     # access is removed mid-session.
+                    close_reason = "revoked"
                     break
                 body = format_event(event_name, payload)
             except asyncio.TimeoutError:
@@ -209,10 +242,23 @@ async def sse_events(datasette, request, send, receive):
                     }
                 )
             except Exception:
+                close_reason = "send_error"
                 break
     except (asyncio.CancelledError, ConnectionError, OSError):
-        pass
+        close_reason = "cancelled"
     finally:
+        # @feat telemetry: one close-reason per stream — on the request
+        # span (when recording) and on the closed counter + lifetime
+        # histogram, whose enum the registry clamps.
+        close_reason = telemetry.clamp(
+            close_reason, CLOSE_REASON.values, "client_disconnect"
+        )
+        if span is not None:
+            span.set_attribute(CLOSE_REASON, close_reason)
+        telemetry.sse_streams_closed.add(1, {CLOSE_REASON: close_reason})
+        telemetry.sse_stream_duration.record(
+            time.perf_counter() - opened_at, {CLOSE_REASON: close_reason}
+        )
         instance.unsubscribe(queue)
         watcher.cancel()
         try:
