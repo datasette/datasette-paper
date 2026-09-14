@@ -317,3 +317,32 @@ async def test_sweep_trashed_kicks_subscribers_and_evicts_instance(ds):
 
     payload = await asyncio.wait_for(queue.get(), timeout=1)
     assert payload == {"kind": "closed"}
+
+
+@pytest.mark.asyncio
+async def test_sweep_forgets_evicted_instance_before_rowid_reuse(ds_paper, monkeypatch):
+    from _steps import insert_at
+
+    import datasette_paper.instance as instance_module
+
+    monkeypatch.setattr(instance_module, "MAX_INSTANCES", 1)
+    ds, db = ds_paper
+    other = await db.insert_doc(name="Other")
+    deleted = await db.insert_doc(name="To delete")
+    registry = get_registry(ds)
+    old_instance = await registry.get(db, deleted.id)
+    await old_instance.add_events(0, 1, "alice", [insert_at(1, "Old content")])
+    await registry.get(db, other.id)
+    assert deleted.id not in registry._instances
+
+    await db.trash_doc(doc_id=deleted.id, delete_at="2000-01-01T00:00:00.000Z")
+    assert await sweep_trashed(ds) == 1
+    replacement = await db.insert_doc(name="Replacement")
+    assert replacement.id == deleted.id
+
+    # A suspended request still holds old_instance, but its weak-cache entry
+    # must be invalidated when the document is permanently deleted.
+    fresh = await registry.get(db, replacement.id)
+    assert fresh is not old_instance
+    assert fresh.version == 0
+    assert fresh.materialize_live_doc() == json.loads(instance_module.empty_doc_json())
