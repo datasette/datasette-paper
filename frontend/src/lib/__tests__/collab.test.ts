@@ -443,6 +443,20 @@ describe("send() 200 response", () => {
   });
 });
 
+describe("bootstrap after close", () => {
+  it("does not resurrect an editor when a bootstrap response arrives after close", async () => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((done) => { resolve = done; });
+    globalThis.fetch = vi.fn().mockReturnValue(pending);
+    const conn = new EditorConnection(makeOpts(makeEl()));
+    conn.close();
+    resolve({ ok: true, status: 200, json: async () => BOOTSTRAP } as Response);
+    await new Promise((done) => setTimeout(done, 0));
+    expect(conn.view).toBeNull();
+    expect(MockEventSource.instances).toHaveLength(0);
+  });
+});
+
 // ─── Test: onLastEdited attribution ──────────────────────────────────────────
 // @feat last-edited-indicator: onLastEdited fires from the SSE update
 // ride-along (lastActor/lastEditedAt) and from our own send confirm.
