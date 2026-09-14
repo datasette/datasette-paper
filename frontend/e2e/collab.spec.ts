@@ -55,6 +55,86 @@ test("two browser contexts see each other's edits", async ({ browser }) => {
   await ctxB.close();
 });
 
+test("remote edits can overtake a delayed save response without breaking collaboration", async ({ browser }) => {
+  const ctxA = await browser.newContext();
+  const ctxB = await browser.newContext();
+  let releaseResponse!: () => void;
+  const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
+  try {
+    const pageA = await ctxA.newPage();
+    const pageB = await ctxB.newPage();
+    const errors: string[] = [];
+    await pageA.addInitScript(() => {
+      const state = window as unknown as { __paperUpdateVersion: number };
+      state.__paperUpdateVersion = 0;
+      const NativeEventSource = window.EventSource;
+      window.EventSource = class extends NativeEventSource {
+        constructor(url: string | URL, options?: EventSourceInit) {
+          super(url, options);
+          this.addEventListener("update", (event) => {
+            state.__paperUpdateVersion = JSON.parse((event as MessageEvent).data).version;
+          });
+        }
+      };
+    });
+    const { id, url } = await createPaper(pageA);
+    await gotoPaper(pageA, url);
+    await gotoPaper(pageB, url);
+    pageA.on("pageerror", (error) => errors.push(error.message));
+    pageB.on("pageerror", (error) => errors.push(error.message));
+
+    // Commit A's POST on the server but withhold its HTTP response. B can
+    // already see the accepted text via SSE and edit at positions that
+    // do not exist in A's last confirmed document.
+    let delayNextPost = true;
+    await pageA.route(`**/api/docs/${id}/events`, async (route) => {
+      if (route.request().method() !== "POST" || !delayNextPost) {
+        await route.continue();
+        return;
+      }
+      delayNextPost = false;
+      const response = await route.fetch();
+      await responseGate;
+      await route.fulfill({ response });
+    });
+    await pageA.evaluate(() => {
+      const view = (window as unknown as { __pmView: import("prosemirror-view").EditorView }).__pmView;
+      view.dispatch(view.state.tr.insertText("AAAA", 1));
+    });
+    await expectEditorContains(pageB, "AAAA");
+    await pageB.evaluate(() => {
+      const view = (window as unknown as { __pmView: import("prosemirror-view").EditorView }).__pmView;
+      view.dispatch(view.state.tr.insertText("B", 5));
+    });
+    await waitForServerVersion(pageB, id, 2);
+    await expect.poll(() => pageA.evaluate(() =>
+      (window as unknown as { __paperUpdateVersion: number }).__paperUpdateVersion,
+    )).toBe(2);
+    releaseResponse();
+
+    for (const page of [pageA, pageB]) {
+      await expect.poll(() => page.evaluate(() =>
+        (window as unknown as { __pmView: import("prosemirror-view").EditorView }).__pmView.state.doc.textContent,
+      )).toBe("AAAAB");
+      await expect(page.locator(".status-step-error")).toHaveCount(0);
+    }
+    // Another edit verifies the session can still save after convergence.
+    await pageA.evaluate(() => {
+      const view = (window as unknown as { __pmView: import("prosemirror-view").EditorView }).__pmView;
+      view.dispatch(view.state.tr.insertText("C", 6));
+    });
+    await expectEditorContains(pageB, "AAAABC");
+    await waitForServerVersion(pageA, id, 3);
+    expect(errors).toEqual([]);
+    await pageA.reload();
+    await expectEditorContains(pageA, "AAAABC");
+  } finally {
+    releaseResponse();
+    await ctxA.close();
+    await ctxB.close();
+  }
+});
+
 test("paper list page shows newly-created paper", async ({ page }) => {
   const { name } = await createPaper(page);
   await page.goto("/-/paper/");

@@ -295,6 +295,12 @@ interface SendableResult {
   clientID: number | string;
 }
 
+interface StepBatch {
+  steps: Step[];
+  clientIDs: Array<number | string>;
+  version: number;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // Fence-language tokens that must never tag a `code_block`: they collide with
@@ -992,6 +998,15 @@ export class EditorConnection {
   // Tracks in-flight send so we don't double-send
   private sending: boolean = false;
 
+  // POST responses and SSE messages travel independently. A remote batch
+  // can depend on our accepted POST before its response reaches us.
+  private pendingUpdates: StepBatch[] = [];
+  // True from (re)opening the stream until its `ready` event: sends wait
+  // for the catch-up backlog so they go out at the caught-up version.
+  // Only `ready` or start() clears it, which relies on the server and
+  // bundle shipping together.
+  private waitingForSync: boolean = false;
+
   // Bumped by each start() and by close(), so a bootstrap GET that resolves
   // after the connection was closed (or superseded) is discarded.
   private generation: number = 0;
@@ -1105,9 +1120,9 @@ export class EditorConnection {
       this.closeStream();
       if (this.comm !== "detached" && this.view) {
         this.comm = "loaded";
+        this.waitingForSync = true;
         this.openStream();
-        // Flush any unconfirmed steps queued during the offline period.
-        if (sendableSteps(this.view.state)) this._send();
+        // The stream's ready event flushes edits after its backlog lands.
       }
     };
     this.pageHideHandler = () => {
@@ -1200,6 +1215,8 @@ export class EditorConnection {
     const generation = ++this.generation;
     this.comm = "start";
     this.stepError = null;
+    this.pendingUpdates = [];
+    this.waitingForSync = false;
     // A retry that's now running supersedes any pending one.
     if (this.bootstrapTimer !== null) {
       clearTimeout(this.bootstrapTimer);
@@ -1697,7 +1714,7 @@ export class EditorConnection {
     this.eventSource = es;
 
     const handleMessage = (evt: MessageEvent) => {
-      if (!this.view) return;
+      if (!this.view || this.eventSource !== es) return;
       let data: {
         steps?: Array<Record<string, unknown>>;
         clientIDs?: Array<number | string>;
@@ -1750,13 +1767,19 @@ export class EditorConnection {
       // whole construct + dispatch in a try so a single bad remote step
       // doesn't crash the page — surface the failure and stay subscribed.
       try {
-        const steps = data.steps.map((s) => Step.fromJSON(schema, s));
-        const tr = receiveTransaction(
-          this.view.state,
-          steps,
-          data.clientIDs ?? [],
-        );
-        this.view.dispatch(tr);
+        const batch: StepBatch = {
+          steps: data.steps.map((s) => Step.fromJSON(schema, s)),
+          clientIDs: data.clientIDs ?? [],
+          version: data.version ?? getVersion(this.view.state) + data.steps.length,
+        };
+        if (this.sending) {
+          this.pendingUpdates.push(batch);
+        } else if (!this.receiveBatch(batch)) {
+          // A gap must be filled from server history before these positions
+          // can be used. Never apply a future batch to an older document.
+          this.waitingForSync = true;
+          this.openStream();
+        }
       } catch (err) {
         // `version` in the SSE envelope is the post-batch server version.
         // Use it directly for the error report so the user / repair tool
@@ -1775,8 +1798,16 @@ export class EditorConnection {
     es.addEventListener("message", handleMessage);
     es.addEventListener("update", handleMessage as EventListener);
 
+    es.addEventListener("ready", () => {
+      if (this.eventSource !== es || !this.view) return;
+      this.waitingForSync = false;
+      this.backOff = 0;
+      this.report.success();
+      this._send();
+    });
+
     const handlePresence = (evt: MessageEvent) => {
-      if (!this.view) return;
+      if (!this.view || this.eventSource !== es) return;
       try {
         const data = JSON.parse(evt.data) as { users: RemoteUser[] };
         if (Array.isArray(data.users)) {
@@ -1789,6 +1820,7 @@ export class EditorConnection {
     es.addEventListener("presence", handlePresence as EventListener);
 
     const handleStateChanged = (evt: MessageEvent) => {
+      if (this.eventSource !== es) return;
       try {
         const data = JSON.parse(evt.data) as Partial<DocStatePayload>;
         if (data.state !== "active" && data.state !== "archived" && data.state !== "trashed") {
@@ -1807,6 +1839,7 @@ export class EditorConnection {
     es.addEventListener("state-changed", handleStateChanged as EventListener);
 
     const handleRenamed = (evt: MessageEvent) => {
+      if (this.eventSource !== es) return;
       try {
         const data = JSON.parse(evt.data) as {
           name?: unknown;
@@ -1824,6 +1857,7 @@ export class EditorConnection {
     es.addEventListener("renamed", handleRenamed as EventListener);
 
     const handlePermissionsChanged = (evt: MessageEvent) => {
+      if (this.eventSource !== es) return;
       // Server pushes ``{canEdit, locked}`` after a lock/unlock; merge
       // into the cached full block and re-fire so PaperApp's
       // ``onPermissions`` handler flips the editor into the right mode
@@ -1847,6 +1881,7 @@ export class EditorConnection {
     );
 
     es.addEventListener("error", () => {
+      if (this.eventSource !== es) return;
       this.closeStream();
       if (this.comm !== "detached") {
         this.recover(new Error("SSE stream error"));
@@ -1858,6 +1893,45 @@ export class EditorConnection {
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
+    }
+  }
+
+  /** Apply only the unconfirmed suffix of a server version interval. Both
+   * reconnect backlogs and POST receipts may overlap steps already seen. */
+  private receiveBatch(batch: StepBatch): boolean {
+    if (!this.view || this.stepError) return true;
+    const version = getVersion(this.view.state);
+    const fromVersion = batch.version - batch.steps.length;
+    if (fromVersion > version) return false;
+    const skip = version - fromVersion;
+    if (skip < batch.steps.length) {
+      this.view.dispatch(receiveTransaction(
+        this.view.state,
+        batch.steps.slice(skip),
+        batch.clientIDs.slice(skip),
+      ));
+    }
+    return true;
+  }
+
+  private drainPendingUpdates(): void {
+    const updates = this.pendingUpdates;
+    this.pendingUpdates = [];
+    for (const batch of updates) {
+      try {
+        if (!this.receiveBatch(batch)) {
+          this.waitingForSync = true;
+          this.openStream();
+          return;
+        }
+      } catch (err) {
+        this.reportStepError({
+          version: batch.version,
+          phase: "sse",
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return;
+      }
     }
   }
 
@@ -1880,7 +1954,9 @@ export class EditorConnection {
     if (
       sendableSteps(newState) &&
       !this.sending &&
-      this.comm !== "detached"
+      this.comm === "loaded" &&
+      !this.waitingForSync &&
+      !this.stepError
     ) {
       this._send();
     }
@@ -1933,8 +2009,10 @@ export class EditorConnection {
   }
 
   private async _send(): Promise<void> {
-    if (!this.view || this.sending) return;
+    if (!this.view || this.sending || this.waitingForSync || this.stepError || this.comm !== "loaded") return;
 
+    const view = this.view;
+    const version = getVersion(view.state);
     const sendable = sendableSteps(this.view.state) as SendableResult | null;
     if (!sendable) return;
 
@@ -1945,8 +2023,7 @@ export class EditorConnection {
 
     try {
       const resp = await this.postJson("/events", body);
-
-      this.sending = false;
+      if (this.view !== view || this.isDetached()) return;
 
       if (resp.ok) {
         // 200 — clear unconfirmed buffer
@@ -1960,37 +2037,33 @@ export class EditorConnection {
           actor: this.selfActor,
           at: new Date().toISOString(),
         });
-        if (this.view) {
-          const tr = receiveTransaction(
-            this.view.state,
-            sendable.steps,
-            new Array(sendable.steps.length).fill(sendable.clientID)
-          );
-          this.view.dispatch(tr);
-          this.comm = "loaded";
-
-          // If more steps queued up while we were sending, send again
-          if (sendableSteps(this.view.state)) {
-            this._send();
-          }
-        }
-      // @feat collab-sse: 409 stale: reopen stream, deferred resend at new version
+        this.receiveBatch({
+          steps: sendable.steps,
+          clientIDs: new Array(sendable.steps.length).fill(sendable.clientID),
+          version: version + sendable.steps.length,
+        });
+        // Keep sends blocked until every queued remote step has been
+        // rebased. Dispatching the acknowledgement can itself create more
+        // sendable steps, but those must use the final confirmed version.
+        this.drainPendingUpdates();
+        this.sending = false;
+        this.comm = "loaded";
+        // A stream failure may have started recovery while this POST was
+        // pending. Its timer must not be the only way to reopen now that
+        // the successful response has moved us out of `recover`.
+        if (!this.eventSource && !this.stepError) this.openStream();
+        this._send();
+      // @feat collab-sse: 409 stale: catch up fully before resending at the new version
       } else if (resp.status === 409) {
-        // Version conflict — reopen stream to catch up. Retry send on the
-        // next animation frame: by then prior in-flight SSE broadcasts will
-        // have applied (advancing local version), so the retried POST sends
-        // at the correct version. Without this, broadcasts that arrived
-        // during the in-flight POST were skipped (sending=true), leaving
-        // the unconfirmed steps stuck after 409 fired.
+        this.drainPendingUpdates();
+        this.sending = false;
         this.backOff = 0;
         this.comm = "loaded";
+        // A zero-delay retry can beat (and repeatedly cancel) the backlog.
+        // The server's ready event is the barrier, including when the
+        // queued updates already brought us up to date.
+        this.waitingForSync = true;
         this.openStream();
-        if (this.view && sendableSteps(this.view.state)) {
-          // Defer one tick so any pending SSE messages flush first.
-          setTimeout(() => {
-            if (this.view && sendableSteps(this.view.state)) this._send();
-          }, 0);
-        }
       } else if (resp.status === 410) {
         // Document replaced — full restart
         this.restart();
@@ -2006,8 +2079,11 @@ export class EditorConnection {
         } catch {
           // Fall through with empty info.
         }
+        if (this.view !== view || this.isDetached()) return;
+        this.sending = false;
+        this.pendingUpdates = [];
         this.reportStepError({
-          version: getVersion(this.view!.state) + (info.step_index ?? 0) + 1,
+          version: version + (info.step_index ?? 0) + 1,
           phase: "send",
           message: info.message ?? "invalid step",
         });
@@ -2018,13 +2094,17 @@ export class EditorConnection {
           ),
         );
       } else {
+        this.sending = false;
+        this.pendingUpdates = [];
         // Other server error — backoff
         const err = new Error("Send failed: " + resp.status);
         (err as Error & { status: number }).status = resp.status;
         this.recover(err);
       }
     } catch (err) {
+      if (this.view !== view || this.isDetached()) return;
       this.sending = false;
+      this.pendingUpdates = [];
       this.recover(err instanceof Error ? err : new Error(String(err)));
     }
   }
@@ -2035,12 +2115,14 @@ export class EditorConnection {
    * Exponential backoff, then reopen the SSE stream.
    */
   recover(err: Error): void {
+    if (this.isDetached()) return;
     const newBackOff = this.backOff ? Math.min(this.backOff * 2, 6e4) : 200;
     if (newBackOff > 1000 && this.backOff < 1000) {
       this.report.delay(err);
     }
     this.backOff = newBackOff;
     this.comm = "recover";
+    this.waitingForSync = true;
     this.closeStream();
 
     setTimeout(() => {
@@ -2060,6 +2142,7 @@ export class EditorConnection {
   // ── Restart ───────────────────────────────────────────────────────────────
 
   restart(): void {
+    if (this.isDetached()) return;
     this.closeStream();
     this.sending = false;
     if (this.view) {
@@ -2096,6 +2179,7 @@ export class EditorConnection {
   close(): void {
     this.generation++;
     this.comm = "detached";
+    this.pendingUpdates = [];
     this.closeStream();
     this.removeNetworkListeners();
     if (this.snapshotTimer !== null) {
