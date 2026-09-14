@@ -37,10 +37,10 @@ def _observations(generator):
     return [observation.value for observation in generator]
 
 
-def test_gauge_callbacks_yield_nothing_with_no_registry():
-    assert _observations(telemetry.observe_live_instances()) == []
-    # The summed gauges always yield one observation; with no registries
-    # the sum is zero.
+def test_gauge_callbacks_yield_zero_with_no_registry():
+    # Every gauge yields exactly one observation; with no registries the
+    # sum (or max) is zero.
+    assert _observations(telemetry.observe_live_instances()) == [0]
     assert _observations(telemetry.observe_open_streams()) == [0]
     assert _observations(telemetry.observe_queue_depth_max()) == [0]
     assert _observations(telemetry.observe_tail_max()) == [0]
@@ -67,11 +67,23 @@ async def test_db_query_duration_records_per_helper(ds_with_doc, otel_metrics):
 
 def test_register_instance_registry_is_weak():
     registry = InstanceRegistry()
+    registry._instances[1] = object()  # the gauge only reads len()
     telemetry.register_instance_registry(registry)
-    assert _observations(telemetry.observe_live_instances()) == [0]
+    assert _observations(telemetry.observe_live_instances()) == [1]
     del registry
     gc.collect()
-    assert _observations(telemetry.observe_live_instances()) == []
+    assert _observations(telemetry.observe_live_instances()) == [0]
+
+
+def test_live_instances_gauge_sums_registries():
+    # @feat telemetry: one summed observation — per-registry observations
+    # with identical attributes would collapse to the last one.
+    registries = [InstanceRegistry(), InstanceRegistry()]
+    for count, registry in zip((2, 3), registries):
+        for doc_id in range(count):
+            registry._instances[doc_id] = object()
+        telemetry.register_instance_registry(registry)
+    assert _observations(telemetry.observe_live_instances()) == [5]
 
 
 # --- Ticket 03: submit pipeline metrics -----------------------------------

@@ -351,9 +351,14 @@ def observe_queue_depth_max(options=None):
 
 
 def observe_live_instances(options=None):
-    "Hydrated Instance objects per registry."
-    for registry in _registries():
-        yield otel_metrics.Observation(len(registry._instances), {})
+    """Hydrated Instance objects, summed over live registries.
+
+    One observation, like its siblings: one per registry with identical
+    empty attributes would collide, and only the last would survive when
+    a process holds more than one Datasette.
+    """
+    total = sum(len(registry._instances) for registry in _registries())
+    yield otel_metrics.Observation(total, {})
 
 
 def observe_tail_max(options=None):
@@ -394,7 +399,7 @@ instances_live_gauge = meter.create_observable_gauge(
     M_INSTANCES_LIVE,
     callbacks=[observe_live_instances],
     unit=M_INSTANCES_LIVE.unit,
-    description="Hydrated Instance objects in the registry",
+    description="Hydrated Instance objects summed over live registries",
 )
 
 steps_tail_max_gauge = meter.create_observable_gauge(

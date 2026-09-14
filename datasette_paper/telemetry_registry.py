@@ -351,8 +351,8 @@ M_INSTANCES_LIVE = MetricName(
     "paper.instances.live",
     GAUGE,
     "{instance}",
-    "Hydrated ``Instance`` objects in the registry — occupancy against "
-    "``MAX_INSTANCES``.",
+    "Hydrated ``Instance`` objects, summed over the process's instance "
+    "registries (one per Datasette) — occupancy against ``MAX_INSTANCES``.",
 )
 M_STEPS_TAIL_MAX = MetricName(
     "paper.steps_tail.max",
