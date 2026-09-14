@@ -304,6 +304,7 @@ EXPECTED_SPANS = {
 
 EXPECTED_METRICS = {
     "paper.sse.streams.open",
+    "paper.sse.queue_depth.max",
     "paper.instances.live",
     "paper.steps_tail.max",
     "paper.instances.poisoned",

@@ -58,6 +58,7 @@ from .telemetry_registry import (
     M_REINDEX_FAILURES,
     M_SNAPSHOTS_WRITTEN,
     M_SSE_BACKLOG_GONE,
+    M_SSE_QUEUE_DEPTH_MAX,
     M_SSE_STREAM_DURATION,
     M_SSE_STREAMS_CLOSED,
     M_SSE_STREAMS_OPEN,
@@ -332,6 +333,23 @@ def observe_open_streams(options=None):
     yield otel_metrics.Observation(total, {})
 
 
+def observe_queue_depth_max(options=None):
+    """The deepest SSE subscriber queue over live instances.
+
+    @feat telemetry: queues are unbounded — this is the stalled-client
+    signal. ``qsize()`` is a plain ``len()`` of the queue's deque, no lock.
+    """
+    deepest = max(
+        (
+            queue.qsize()
+            for instance in _instances()
+            for queue in list(instance.subscribers)
+        ),
+        default=0,
+    )
+    yield otel_metrics.Observation(deepest, {})
+
+
 def observe_live_instances(options=None):
     "Hydrated Instance objects per registry."
     for registry in _registries():
@@ -363,6 +381,13 @@ sse_streams_open_gauge = meter.create_observable_gauge(
     callbacks=[observe_open_streams],
     unit=M_SSE_STREAMS_OPEN.unit,
     description="Open SSE subscriber queues over live instances",
+)
+
+sse_queue_depth_max_gauge = meter.create_observable_gauge(
+    M_SSE_QUEUE_DEPTH_MAX,
+    callbacks=[observe_queue_depth_max],
+    unit=M_SSE_QUEUE_DEPTH_MAX.unit,
+    description="Deepest SSE subscriber queue over live instances",
 )
 
 instances_live_gauge = meter.create_observable_gauge(

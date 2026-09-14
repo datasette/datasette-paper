@@ -331,6 +331,15 @@ M_SSE_STREAMS_OPEN = MetricName(
     "Open SSE subscriber queues, summed over live instances. The first "
     "question about a collab server.",
 )
+M_SSE_QUEUE_DEPTH_MAX = MetricName(
+    "paper.sse.queue_depth.max",
+    GAUGE,
+    "{event}",
+    "The deepest SSE subscriber queue over live instances (0 with none). "
+    "Queues are unbounded, so a stalled client grows memory — and pins its "
+    "instance against eviction — with nothing else to show for it. Max "
+    "rather than per-stream to keep it attribute-free.",
+)
 M_INSTANCES_LIVE = MetricName(
     "paper.instances.live",
     GAUGE,
@@ -510,6 +519,7 @@ M_SSE_STREAM_DURATION = MetricName(
 
 METRICS = (
     M_SSE_STREAMS_OPEN,
+    M_SSE_QUEUE_DEPTH_MAX,
     M_INSTANCES_LIVE,
     M_STEPS_TAIL_MAX,
     M_INSTANCES_POISONED,
