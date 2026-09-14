@@ -265,7 +265,9 @@ REINDEX = SpanName(
     "One derived-index rebuild (``reindex_links`` / ``reindex_tags`` / "
     "``reindex_tasks``) — three per write. Status ``ERROR`` when the "
     "swallowed exception path fires (the write still succeeds; the log "
-    "line stays).",
+    "line stays), with an ``exception`` event carrying only "
+    "``exception.type`` — never the message or stacktrace, which can echo "
+    "doc content.",
     (DOC_ID, INDEX),
 )
 SNAPSHOT = SpanName(

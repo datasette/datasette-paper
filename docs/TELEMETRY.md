@@ -97,7 +97,7 @@ The subscriber fan-out loop in `_persist_and_broadcast`. `put_nowait` is cheap; 
 
 ### `paper.reindex`
 
-One derived-index rebuild (`reindex_links` / `reindex_tags` / `reindex_tasks`) — three per write. Status `ERROR` when the swallowed exception path fires (the write still succeeds; the log line stays).
+One derived-index rebuild (`reindex_links` / `reindex_tags` / `reindex_tasks`) — three per write. Status `ERROR` when the swallowed exception path fires (the write still succeeds; the log line stays), with an `exception` event carrying only `exception.type` — never the message or stacktrace, which can echo doc content.
 
 - `paper.doc_id` — The document's integer id. Bounded by the instance's doc table, not by request input. Rides on spans only — **never on a metric**, where a per-doc dimension would be an unbounded series per document.
 - `paper.index` — Which derived index a reindex pass rebuilt. One of: `links`, `tags`, `tasks`.

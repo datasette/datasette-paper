@@ -549,10 +549,33 @@ async def test_reindex_failure_is_error_span_and_counted(
         if span.attributes["paper.index"] == "tags"
     ]
     assert tags_span.status.status_code == StatusCode.ERROR
-    assert any(event.name == "exception" for event in tags_span.events)
+    (event,) = [event for event in tags_span.events if event.name == "exception"]
+    assert dict(event.attributes) == {"exception.type": "RuntimeError"}
     otel_metrics.collect()
     point = otel_metrics.point("paper.reindex.failures", {"paper.index": "tags"})
     assert point.value == 1
+
+
+@pytest.mark.asyncio
+async def test_reindex_failure_message_is_not_recorded(ds_with_doc, otel_spans):
+    # @feat telemetry: a reindex exception's message can echo doc content;
+    # only its class name may reach a span.
+    from datasette_paper.instance import get_registry
+    from datasette_paper.util import paper_db
+
+    ds, _paper, doc_id = ds_with_doc
+    instance = await get_registry(ds).get(paper_db(ds), doc_id)
+    sentinel = "SENTINEL-tag-slug-4a8e"
+
+    async def explode(**kwargs):
+        raise RuntimeError(f"bad tag {sentinel}")
+
+    instance.db.replace_inline_tags = explode
+    otel_spans.clear()
+    assert (await _post_step(ds, doc_id)).status_code == 200
+    finished = otel_spans.get_finished_spans()
+    assert any(span.status.status_code == StatusCode.ERROR for span in finished)
+    assert_no_forbidden_values({sentinel}, finished_spans=finished)
 
 
 @pytest.mark.asyncio

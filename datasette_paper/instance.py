@@ -765,8 +765,14 @@ class Instance:
         The existing ``logger.exception`` at the call site stays — spans
         do not replace logs; without this counter nothing but the log
         surfaces these.
+
+        @feat telemetry: a redacted ``exception`` event — the class name
+        only. ``span.record_exception`` would record ``str(exc)`` and the
+        stacktrace, and a reindex error message can echo doc content (a
+        tag slug, task text); the full exception is in the log line.
         """
-        span.record_exception(exc)
+        if span.is_recording():
+            span.add_event("exception", {"exception.type": type(exc).__qualname__})
         span.set_status(Status(StatusCode.ERROR))
         telemetry.reindex_failures.add(1, {INDEX: index})
 
