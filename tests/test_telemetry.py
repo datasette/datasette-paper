@@ -425,6 +425,37 @@ async def test_sse_enriches_request_span_when_recording(
 
 
 @pytest.mark.asyncio
+async def test_sse_reset_enriches_request_span(ds_with_doc, otel_spans):
+    from conftest import plant_snapshot
+    from test_sse_events import SSEStream
+
+    ds, _paper, doc_id = ds_with_doc
+    await plant_snapshot(
+        ds,
+        doc_id,
+        {"type": "doc", "content": [{"type": "paragraph"}]},
+        version=5,
+        replace=True,
+    )
+    otel_spans.clear()
+    signed = ds.sign({"a": {"id": "alice"}}, "actor")
+    stream = SSEStream(
+        ds.app(),
+        f"/-/paper/api/docs/{doc_id}/events?version=1&clientID=7",
+        cookie_header=f"ds_actor={signed}".encode(),
+    )
+    await asyncio.wait_for(stream.run(), 5)
+    assert stream.status == 200
+    (request,) = [
+        span
+        for span in otel_spans.get_finished_spans()
+        if span.kind == SpanKind.SERVER
+        and span.attributes.get("paper.doc_id") == doc_id
+    ]
+    assert request.attributes["paper.gone_response"] == "reset"
+
+
+@pytest.mark.asyncio
 async def test_sse_route_opens_no_paper_spans(ds_with_doc, otel_spans, monkeypatch):
     # @feat telemetry: pins the design decision — the streaming route gets
     # no spans of its own, ever (the request span would hold them open for

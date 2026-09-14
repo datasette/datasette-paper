@@ -175,6 +175,14 @@ CLOSE_REASON = Attribute(
     "Datasette's request span and on the SSE close metrics.",
     values={"client_disconnect", "revoked", "send_error", "cancelled"},
 )
+GONE_RESPONSE = Attribute(
+    "paper.gone_response",
+    "How an SSE subscribe at history that fell off the step tail was "
+    "answered: ``status`` (HTTP 410, callers without a ``clientID``) or "
+    "``reset`` (a 200 stream carrying one in-band ``reset`` event — every "
+    "browser editor, since native EventSource hides status codes).",
+    values={"status", "reset"},
+)
 ERROR_TYPE = Attribute(
     "error.type",
     "The exception class name when a timed query helper failed; absent on "
@@ -205,6 +213,7 @@ ATTRIBUTES = (
     MARKDOWN_BYTES,
     TAIL_TRIMMED,
     CLOSE_REASON,
+    GONE_RESPONSE,
     ERROR_TYPE,
 )
 
@@ -356,9 +365,9 @@ M_EVENTS_SUBMITTED = MetricName(
     "paper.events.submitted",
     COUNTER,
     "{batch}",
-    "Step-batch submissions by outcome and origin. The 409 rate is "
-    "contention, the 410 rate is eviction, the 422 rate is a client bug "
-    "or abuse.",
+    "Step-batch submissions by outcome and origin. ``conflict`` (409) is "
+    "contention, ``gone`` (410) is a client that fell behind the step tail, "
+    "``invalid_step`` (422) is a client bug or abuse.",
     (OUTCOME, ORIGIN),
 )
 M_INSTANCES_HYDRATED = MetricName(
@@ -386,8 +395,10 @@ M_SSE_BACKLOG_GONE = MetricName(
     "paper.sse.backlog.gone",
     COUNTER,
     "{request}",
-    "410s on the SSE subscribe — the requested version fell off the step "
-    "tail. Distinct from the POST outcome counter.",
+    "SSE subscribes whose requested version fell off the step tail, by "
+    "how they were answered — a 410 or an in-band ``reset`` event. "
+    "Distinct from the POST outcome counter.",
+    (GONE_RESPONSE,),
 )
 M_REINDEX_FAILURES = MetricName(
     "paper.reindex.failures",

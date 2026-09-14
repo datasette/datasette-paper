@@ -127,7 +127,7 @@ instances_evicted = _counter(
 )
 sse_streams_closed = _counter(M_SSE_STREAMS_CLOSED, "SSE streams closed, by reason")
 sse_backlog_gone = _counter(
-    M_SSE_BACKLOG_GONE, "410s on the SSE subscribe (history fell off the tail)"
+    M_SSE_BACKLOG_GONE, "SSE subscribes at history that fell off the tail"
 )
 reindex_failures = _counter(
     M_REINDEX_FAILURES, "Derived-index rebuild failures, by index"

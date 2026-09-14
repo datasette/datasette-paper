@@ -335,7 +335,17 @@ async def test_stream_closed_counter_revoked(ds_with_doc, otel_metrics, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_backlog_gone_counter(ds_with_doc, otel_metrics):
+@pytest.mark.parametrize(
+    "query,status,gone_response",
+    [("", 410, "status"), ("&clientID=7", 200, "reset")],
+)
+async def test_backlog_gone_counter(
+    ds_with_doc, otel_metrics, query, status, gone_response
+):
+    # @feat telemetry: both "history gone" answers count — the 410 for
+    # callers without a clientID, the in-band reset for browser editors.
+    import asyncio
+
     from conftest import plant_snapshot
     from test_sse_events import SSEStream
 
@@ -350,18 +360,19 @@ async def test_backlog_gone_counter(ds_with_doc, otel_metrics):
         replace=True,
     )
     otel_metrics.reader.get_metrics_data()
-    import asyncio
-
     signed = ds.sign({"a": {"id": "alice"}}, "actor")
     stream = SSEStream(
         ds.app(),
-        f"/-/paper/api/docs/{doc_id}/events?version=1",
+        f"/-/paper/api/docs/{doc_id}/events?version=1{query}",
         cookie_header=f"ds_actor={signed}".encode(),
     )
     await asyncio.wait_for(stream.run(), 5)
-    assert stream.status == 410
+    assert stream.status == status
     otel_metrics.collect()
-    assert otel_metrics.point("paper.sse.backlog.gone").value == 1
+    point = otel_metrics.point(
+        "paper.sse.backlog.gone", {"paper.gone_response": gone_response}
+    )
+    assert point.value == 1
 
 
 # --- Ticket 06: write-tail counters + size histograms ---------------------
