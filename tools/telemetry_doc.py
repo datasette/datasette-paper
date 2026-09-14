@@ -76,7 +76,8 @@ page, Known caveats). Paper follows that page's recommended shape:
 concurrent-stream gauges, close-reason counters/histograms, and
 enrichment of the request span itself (`paper.doc_id`,
 `paper.close_reason`, and a `paper.sse.backlog` span event carrying the
-flushed step count).
+flushed step count; or `paper.doc_id` + `paper.gone_response` when the
+requested history is gone).
 
 **Nesting.** `paper.*` spans nest under Datasette's request span (and
 paper's DB work under core's `db.query` spans) only on a Datasette

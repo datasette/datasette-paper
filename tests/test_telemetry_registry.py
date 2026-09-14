@@ -179,7 +179,7 @@ async def exercise(monkeypatch):
     assert stream.status == 200
     stream.disconnect()
     await asyncio.wait_for(stream._task, 5)
-    # ...and one subscribe at evicted history (410 → backlog.gone).
+    # ...one subscribe at evicted history (410 → backlog.gone)...
     gone_id = await create_doc(ds, SENTINEL_DOC_NAME, actor_id=SENTINEL_ACTOR)
     await plant_snapshot(
         ds,
@@ -196,6 +196,15 @@ async def exercise(monkeypatch):
     )
     await asyncio.wait_for(gone_stream.run(), 5)
     assert gone_stream.status == 410
+    # ...and the same stale subscribe from a browser editor (clientID →
+    # in-band reset event, backlog.gone{gone_response=reset}).
+    reset_stream = SSEStream(
+        ds.app(),
+        f"/-/paper/api/docs/{gone_id}/events?version=1&clientID=7",
+        cookie_header=f"ds_actor={signed}".encode(),
+    )
+    await asyncio.wait_for(reset_stream.run(), 5)
+    assert reset_stream.status == 200
 
     # Poisoned history: a planted step that cannot apply, so
     # paper.poisoned=True is actually observed (the case that matters).
@@ -325,6 +334,7 @@ EXPECTED_ATTRIBUTES = {
     "paper.markdown_bytes",
     "paper.tail_trimmed",
     "paper.close_reason",
+    "paper.gone_response",
     "error.type",
 }
 

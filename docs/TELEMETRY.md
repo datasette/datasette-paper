@@ -52,7 +52,8 @@ page, Known caveats). Paper follows that page's recommended shape:
 concurrent-stream gauges, close-reason counters/histograms, and
 enrichment of the request span itself (`paper.doc_id`,
 `paper.close_reason`, and a `paper.sse.backlog` span event carrying the
-flushed step count).
+flushed step count; or `paper.doc_id` + `paper.gone_response` when the
+requested history is gone).
 
 **Nesting.** `paper.*` spans nest under Datasette's request span (and
 paper's DB work under core's `db.query` spans) only on a Datasette
@@ -177,7 +178,7 @@ Presence entries summed over live instances — clients with a live cursor on so
 
 *Counter, unit `{batch}`.*
 
-Step-batch submissions by outcome and origin. The 409 rate is contention, the 410 rate is eviction, the 422 rate is a client bug or abuse.
+Step-batch submissions by outcome and origin. `conflict` (409) is contention, `gone` (410) is a client that fell behind the step tail, `invalid_step` (422) is a client bug or abuse.
 
 - `paper.outcome` — How the submit pipeline ended. `conflict` / `bad_version` / `gone` / `invalid_step` are the protocol working, not errors; only `error` (an unexpected exception) sets span status `ERROR`. Clamped at the call site: anything unrecognised becomes `error`. One of: `bad_version`, `conflict`, `empty`, `error`, `gone`, `invalid_step`, `ok`.
 - `paper.origin` — Where the write entered: `collab` (browser step POST), `api` (the markdown append route), `agent` (datasette-agent tools). Passed by the caller, never inferred. One of: `agent`, `api`, `collab`.
@@ -206,7 +207,9 @@ SSE streams closed, by reason — separates flaky clients from revocations and s
 
 *Counter, unit `{request}`.*
 
-410s on the SSE subscribe — the requested version fell off the step tail. Distinct from the POST outcome counter.
+SSE subscribes whose requested version fell off the step tail, by how they were answered — a 410 or an in-band `reset` event. Distinct from the POST outcome counter.
+
+- `paper.gone_response` — How an SSE subscribe at history that fell off the step tail was answered: `status` (HTTP 410, callers without a `clientID`) or `reset` (a 200 stream carrying one in-band `reset` event — every browser editor, since native EventSource hides status codes). One of: `reset`, `status`.
 
 ### `paper.reindex.failures`
 

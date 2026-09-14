@@ -10,7 +10,7 @@ from datasette_plugin_router import Body
 
 from .. import telemetry
 from ..router import router
-from ..telemetry_registry import CLOSE_REASON, DOC_ID, STEP_COUNT
+from ..telemetry_registry import CLOSE_REASON, DOC_ID, GONE_RESPONSE, STEP_COUNT
 from ..instance import get_registry
 from ..errors import (
     BadVersionError,
@@ -91,6 +91,16 @@ async def sse_events(datasette, request, send, receive):
         )
     except (GoneError, BadVersionError) as exc:
         if isinstance(exc, GoneError):
+            # @feat telemetry: the requested version fell off the step
+            # tail — counted separately from POST outcomes, split by how
+            # the client is told (410 vs in-band reset), and stamped on the
+            # request span like the streaming path's enrichment.
+            gone_response = "reset" if client_id is not None else "status"
+            telemetry.sse_backlog_gone.add(1, {GONE_RESPONSE: gone_response})
+            span = request_span(request.scope)
+            if span is not None:
+                span.set_attribute(DOC_ID, doc_id)
+                span.set_attribute(GONE_RESPONSE, gone_response)
             if client_id is not None:
                 # Native EventSource hides HTTP failure status codes, so a
                 # stale idle editor would retry the same evicted version
@@ -114,9 +124,6 @@ async def sse_events(datasette, request, send, receive):
                     }
                 )
             else:
-                # @feat telemetry: a 410 here means the requested version fell
-                # off the step tail — counted separately from POST outcomes.
-                telemetry.sse_backlog_gone.add(1)
                 await _send_status(send, 410, b"History gone")
         else:
             await _send_status(send, 400, b"Invalid version")
