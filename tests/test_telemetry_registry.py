@@ -234,11 +234,23 @@ async def exercise(monkeypatch):
         )
     ).status_code == 200
 
-    # LRU eviction churn.
+    # Two concurrent misses for one doc: the second joins the in-flight
+    # hydrate (paper.instances.hydrate_joined).
+    join_id = await create_doc(ds, SENTINEL_DOC_NAME, actor_id=SENTINEL_ACTOR)
+    registry._instances.pop(join_id, None)
+    await asyncio.gather(
+        registry.get(paper_db(ds), join_id), registry.get(paper_db(ds), join_id)
+    )
+
+    # LRU eviction churn...
     monkeypatch.setattr(instance_mod, "MAX_INSTANCES", 2)
     for name in ("evict-a", "evict-b", "evict-c"):
         extra_id = await create_doc(ds, name, actor_id=SENTINEL_ACTOR)
         await registry.get(paper_db(ds), extra_id)
+    # ...which evicted the main doc while `instance` still holds it, so the
+    # next miss hands it back (paper.instances.reclaimed).
+    assert doc_id not in registry._instances
+    assert await registry.get(paper_db(ds), doc_id) is instance
 
     # Presence, so the presence gauge reads something real.
     await ds.client.post(
@@ -298,6 +310,8 @@ EXPECTED_METRICS = {
     "paper.presence.clients",
     "paper.events.submitted",
     "paper.instances.hydrated",
+    "paper.instances.hydrate_joined",
+    "paper.instances.reclaimed",
     "paper.instances.evicted",
     "paper.sse.streams.closed",
     "paper.sse.backlog.gone",

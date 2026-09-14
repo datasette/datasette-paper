@@ -48,9 +48,11 @@ from .telemetry_registry import (
     M_EVENTS_SUBMITTED,
     M_HYDRATE_DURATION,
     M_INSTANCES_EVICTED,
+    M_INSTANCES_HYDRATE_JOINED,
     M_INSTANCES_HYDRATED,
     M_INSTANCES_LIVE,
     M_INSTANCES_POISONED,
+    M_INSTANCES_RECLAIMED,
     M_MATERIALIZE_DURATION,
     M_PRESENCE_CLIENTS,
     M_REINDEX_FAILURES,
@@ -121,7 +123,13 @@ def _counter(entry, description):
 events_submitted = _counter(
     M_EVENTS_SUBMITTED, "Step-batch submissions by outcome and origin"
 )
-instances_hydrated = _counter(M_INSTANCES_HYDRATED, "Instance cache misses")
+instances_hydrated = _counter(M_INSTANCES_HYDRATED, "Real instance hydrates")
+instances_hydrate_joined = _counter(
+    M_INSTANCES_HYDRATE_JOINED, "Registry misses that joined an in-flight hydrate"
+)
+instances_reclaimed = _counter(
+    M_INSTANCES_RECLAIMED, "Evicted instances handed back instead of rehydrated"
+)
 instances_evicted = _counter(
     M_INSTANCES_EVICTED, "LRU evictions from the instance registry"
 )
