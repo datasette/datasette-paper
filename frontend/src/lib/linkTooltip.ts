@@ -24,7 +24,7 @@
  * destroy so a stale timer doesn't fire into a torn-down view.
  */
 
-import { Plugin } from "prosemirror-state";
+import { Plugin, PluginKey } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import type { Mark, MarkType, ResolvedPos } from "prosemirror-model";
 import { isSafeHref } from "./safeHref";
@@ -37,6 +37,8 @@ interface LinkSpan {
   href: string;
   text: string;
 }
+
+const linkEditKey = new PluginKey<LinkSpan | null>("linkEdit");
 
 /**
  * Contiguous range of the link mark covering `$pos`, plus the mark itself.
@@ -357,6 +359,7 @@ class LinkTooltipView {
     const span = findLinkSpan(this.view, this.currentLink);
     if (!span) return;
     this.editSpan = span;
+    this.view.dispatch(this.view.state.tr.setMeta(linkEditKey, span));
     this.labelInput.value = span.text;
     this.urlInput.value = span.href;
     this.errEl.textContent = "";
@@ -432,10 +435,13 @@ class LinkTooltipView {
     this.view.dispatch(tr);
   }
 
-  private closeEditor(): void {
+  private closeEditor(clearState = true): void {
     this.dialog.style.display = "none";
     this.editSpan = null;
     document.removeEventListener("mousedown", this.onOutsideMouseDown, true);
+    if (clearState && !this.view.isDestroyed && linkEditKey.getState(this.view.state)) {
+      this.view.dispatch(this.view.state.tr.setMeta(linkEditKey, null));
+    }
   }
 
   private scheduleHide(): void {
@@ -459,6 +465,11 @@ class LinkTooltipView {
   }
 
   update(): void {
+    if (this.editSpan) {
+      this.editSpan = linkEditKey.getState(this.view.state) ?? null;
+      if (!this.editSpan) this.closeEditor(false);
+    }
+    if (this.currentLink && !this.view.dom.contains(this.currentLink)) this.hide();
     // If the view flipped to read-only while the tooltip/dialog was open
     // (rare but possible), close them.
     if (!this.view.editable) {
@@ -469,7 +480,7 @@ class LinkTooltipView {
 
   destroy(): void {
     this.cancelHide();
-    this.closeEditor();
+    this.closeEditor(false);
     for (const { target, type, fn } of this.listeners) {
       target.removeEventListener(type, fn);
     }
@@ -479,8 +490,31 @@ class LinkTooltipView {
   }
 }
 
-export function linkTooltipPlugin(): Plugin {
-  return new Plugin({
+export function linkTooltipPlugin(): Plugin<LinkSpan | null> {
+  return new Plugin<LinkSpan | null>({
+    key: linkEditKey,
+    state: {
+      init: () => null,
+      apply(tr, span) {
+        const meta = tr.getMeta(linkEditKey) as LinkSpan | null | undefined;
+        if (meta !== undefined) return meta;
+        if (!span || !tr.docChanged) return span;
+        // Dialog inputs live outside the editor. Map their target through
+        // remote steps so Save cannot replace unrelated text at old offsets.
+        const from = tr.mapping.map(span.from, 1);
+        const to = tr.mapping.map(span.to, -1);
+        if (from >= to) return null;
+        const range = markRange(tr.doc.resolve(from), tr.doc.type.schema.marks.link);
+        // If the link itself changed, dismiss the stale form rather than
+        // overwriting the collaborator's text or URL when it is saved.
+        if (
+          !range || range.from !== from || range.to !== to ||
+          range.mark.attrs.href !== span.href ||
+          tr.doc.textBetween(from, to) !== span.text
+        ) return null;
+        return { ...span, from, to };
+      },
+    },
     view(editorView) {
       return new LinkTooltipView(editorView);
     },

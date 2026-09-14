@@ -277,6 +277,56 @@ describe("linkTooltipPlugin", () => {
     conn.close();
   });
 
+  function openEditDialog(host: HTMLElement, a: HTMLAnchorElement) {
+    a.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    (tooltipRoot(host)!.querySelector("button.pm-link-tooltip-edit") as HTMLButtonElement).click();
+    const dialog = editDialog(host)!;
+    const [labelInput, urlInput] = Array.from(
+      dialog.querySelectorAll(".pm-link-edit-input"),
+    ) as HTMLInputElement[];
+    const save = () => (dialog.querySelector(".pm-link-edit-save") as HTMLButtonElement).click();
+    return { dialog, labelInput, urlInput, save };
+  }
+
+  it("Save targets the same link after a collaborator's edit shifts it", async () => {
+    const host = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection({ docId: "test-doc", place: host });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    const a = buildLinkDoc(conn, "old text", "https://old.test/a");
+    const { labelInput, urlInput, save } = openEditDialog(host, a);
+    // Stand-in for a remote step landing while the dialog is open.
+    view.dispatch(view.state.tr.insertText("XYZ ", 1));
+    labelInput.value = "new text";
+    urlInput.value = "https://new.test/b";
+    save();
+
+    expect(view.state.doc.textContent).toBe("XYZ new text");
+    expect(firstLink(conn)).toEqual({ text: "new text", href: "https://new.test/b" });
+    conn.close();
+  });
+
+  it("closes the dialog instead of overwriting a link a collaborator changed", async () => {
+    const host = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection({ docId: "test-doc", place: host });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    const a = buildLinkDoc(conn, "old text", "https://old.test/a");
+    const { dialog, urlInput, save } = openEditDialog(host, a);
+    const linkMark = schema.marks.link.create({ href: "https://theirs.test" });
+    view.dispatch(view.state.tr.removeMark(1, 9, schema.marks.link).addMark(1, 9, linkMark));
+    urlInput.value = "https://mine.test";
+    save();
+
+    expect(dialog.style.display).toBe("none");
+    expect(firstLink(conn)).toEqual({ text: "old text", href: "https://theirs.test" });
+    conn.close();
+  });
+
   it("Edit rejects an unsafe URL and leaves the doc unchanged", async () => {
     const host = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
