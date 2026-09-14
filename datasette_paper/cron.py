@@ -47,7 +47,7 @@ async def sweep_trashed(datasette) -> int:
     registry = get_registry(datasette)
     deleted = 0
     for row in rows:
-        instance = registry._instances.pop(row.id, None)
+        instance = registry.discard(row.id)
         if instance is not None:
             # Same sentinel ``revoke_unauthorized`` uses — the SSE loop
             # exits cleanly and clients see EventSource close.

@@ -46,6 +46,7 @@ import collections
 import json
 import logging
 import time
+import weakref
 from typing import Optional
 
 from .db import PaperDB
@@ -1022,22 +1023,65 @@ class InstanceRegistry:
 
     def __init__(self) -> None:
         self._instances: collections.OrderedDict = collections.OrderedDict()
+        # A cache miss awaits two DB reads. Concurrent misses for the same
+        # doc share one in-flight hydrate so they can't publish independent
+        # instances with separate write locks and subscriber lists.
+        self._hydrating: dict[int, asyncio.Task] = {}
+        # An evicted instance may still be held by a suspended request that
+        # hasn't taken its write lock yet. Hand that same object back on the
+        # next miss instead of hydrating a second authority, without keeping
+        # otherwise-unused docs alive.
+        self._evicted: weakref.WeakValueDictionary[int, Instance] = (
+            weakref.WeakValueDictionary()
+        )
+
+    def discard(self, doc_id: int) -> Optional[Instance]:
+        """Forget a doc entirely, including a weakly-held evicted instance.
+
+        Permanent deletion must use this rather than popping ``_instances``:
+        SQLite can reuse the deleted rowid for a different document.
+        """
+        instance = self._instances.pop(doc_id, None)
+        evicted = self._evicted.pop(doc_id, None)
+        return instance if instance is not None else evicted
 
     async def get(self, db: PaperDB, doc_id: int) -> Instance:
         key = doc_id
 
-        if key in self._instances:
-            self._instances.move_to_end(key)
-            inst = self._instances[key]
-            inst.last_active = time.monotonic()
-            return inst
+        if key not in self._instances:
+            inst = self._evicted.pop(key, None)
+            if inst is None:
+                task = self._hydrating.get(key)
+                if task is None:
+                    task = asyncio.ensure_future(Instance.hydrate(db, doc_id))
+                    self._hydrating[key] = task
+                    # Clears on failure too, so the next request retries
+                    # instead of awaiting a poisoned task.
+                    task.add_done_callback(
+                        lambda _t, key=key: self._hydrating.pop(key, None)
+                    )
+                # Shield: one cancelled request (client disconnect) must not
+                # cancel the hydrate other requests are awaiting.
+                inst = await asyncio.shield(task)
+            # First completer stores it; late awaiters reuse that object.
+            self._instances.setdefault(key, inst)
 
-        inst = await Instance.hydrate(db, doc_id)
-        self._instances[key] = inst
+        self._instances.move_to_end(key)
+        inst = self._instances[key]
+        inst.last_active = time.monotonic()
 
-        # Evict LRU if over limit
-        while len(self._instances) > MAX_INSTANCES:
-            self._instances.popitem(last=False)
+        # An active instance is the doc's authority, not merely a read
+        # cache: dropping it strands its SSE subscribers and bypasses its
+        # write lock. Treat the cap as soft while docs are active, and prune
+        # on cache hits too so disconnected docs get reclaimed. Never evict
+        # the instance being returned.
+        for candidate, cached in list(self._instances.items()):
+            if len(self._instances) <= MAX_INSTANCES:
+                break
+            if candidate == key or cached.subscribers or cached._write_lock.locked():
+                continue
+            self._evicted[candidate] = cached
+            del self._instances[candidate]
 
         return inst
 
