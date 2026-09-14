@@ -70,6 +70,7 @@ from .telemetry_registry import (
     SNAPSHOT,
     SNAPSHOT_BYTES,
     SNAPSHOT_VERSION,
+    SKIPPED,
     STEP_COUNT,
     STEPS_APPLIED,
     SUBSCRIBERS,
@@ -658,6 +659,7 @@ class Instance:
                 live_json = self.materialize_live_doc()
                 if self._materialization_error is not None:
                     return
+                self._mark_reindex_ran(span)
                 from .tags import extract_tags
 
                 tags: dict[str, int] = {}
@@ -695,6 +697,7 @@ class Instance:
                 live_json = self.materialize_live_doc()
                 if self._materialization_error is not None:
                     return
+                self._mark_reindex_ran(span)
                 from .markdown import extract_tasks
 
                 rows = task_assignment_rows(extract_tasks(live_json))
@@ -728,6 +731,7 @@ class Instance:
                 live_json = self.materialize_live_doc()
                 if self._materialization_error is not None:
                     return
+                self._mark_reindex_ran(span)
                 from .links import extract_links
 
                 edges: dict[int, int] = {}
@@ -747,8 +751,10 @@ class Instance:
     def _reindex_span(self, index: str):
         """One ``paper.reindex`` span, attributed by index kind.
 
-        The early returns (poisoned history, already indexed at this
-        version) end the span with no further attributes.
+        @feat telemetry: ``paper.skipped`` starts True, so the early
+        returns (poisoned history, already indexed at this version) end the
+        span marked skipped; ``_mark_reindex_ran`` flips it to False once
+        a rebuild actually runs.
         """
         with telemetry.tracer.start_as_current_span(REINDEX) as span:
             if span.is_recording():
@@ -756,7 +762,14 @@ class Instance:
                 # index is one of the three code literals; the registry
                 # enum + conformance test enforce membership.
                 span.set_attribute(INDEX, index)
+                span.set_attribute(SKIPPED, True)
             yield span
+
+    @staticmethod
+    def _mark_reindex_ran(span) -> None:
+        "Past the early returns: this reindex pass rebuilds the index."
+        if span.is_recording():
+            span.set_attribute(SKIPPED, False)
 
     @staticmethod
     def _record_reindex_failure(span, index: str, exc: Exception) -> None:

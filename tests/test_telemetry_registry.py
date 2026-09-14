@@ -342,6 +342,7 @@ EXPECTED_ATTRIBUTES = {
     "paper.cache_hit",
     "paper.steps_applied",
     "paper.poisoned",
+    "paper.skipped",
     "paper.tail_length",
     "paper.snapshot_version",
     "paper.snapshot_bytes",

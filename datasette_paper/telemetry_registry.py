@@ -143,6 +143,12 @@ POISONED = Attribute(
     "``materialize_live_doc`` never raises; the "
     "``paper.instances.poisoned`` gauge is the alert.",
 )
+SKIPPED = Attribute(
+    "paper.skipped",
+    "True when a reindex pass returned early without rebuilding — the "
+    "history is poisoned, or the index is already current at this "
+    "version; False when the rebuild ran (including one that failed).",
+)
 TAIL_LENGTH = Attribute(
     "paper.tail_length",
     "Steps loaded into the in-memory tail on hydrate.",
@@ -206,6 +212,7 @@ ATTRIBUTES = (
     CACHE_HIT,
     STEPS_APPLIED,
     POISONED,
+    SKIPPED,
     TAIL_LENGTH,
     SNAPSHOT_VERSION,
     SNAPSHOT_BYTES,
@@ -268,7 +275,7 @@ REINDEX = SpanName(
     "line stays), with an ``exception`` event carrying only "
     "``exception.type`` — never the message or stacktrace, which can echo "
     "doc content.",
-    (DOC_ID, INDEX),
+    (DOC_ID, INDEX, SKIPPED),
 )
 SNAPSHOT = SpanName(
     "paper.snapshot",
