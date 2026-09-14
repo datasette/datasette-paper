@@ -161,7 +161,7 @@ The deepest SSE subscriber queue over live instances (0 with none). Queues are u
 
 *Observable gauge, unit `{instance}`.*
 
-Hydrated `Instance` objects in the registry — occupancy against `MAX_INSTANCES`.
+Hydrated `Instance` objects, summed over the process's instance registries (one per Datasette) — occupancy against `MAX_INSTANCES`.
 
 ### `paper.steps_tail.max`
 
