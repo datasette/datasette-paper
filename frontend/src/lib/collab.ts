@@ -992,6 +992,10 @@ export class EditorConnection {
   // Tracks in-flight send so we don't double-send
   private sending: boolean = false;
 
+  // Bumped by each start() and by close(), so a bootstrap GET that resolves
+  // after the connection was closed (or superseded) is discarded.
+  private generation: number = 0;
+
   // Unique client ID for this session (random integer)
   private clientID: number;
 
@@ -1192,6 +1196,8 @@ export class EditorConnection {
    * the SSE stream.
    */
   async start(): Promise<void> {
+    if (this.isDetached()) return;
+    const generation = ++this.generation;
     this.comm = "start";
     this.stepError = null;
     // A retry that's now running supersedes any pending one.
@@ -1207,13 +1213,14 @@ export class EditorConnection {
         throw err;
       }
       const boot: BootstrapData = await resp.json();
+      if (generation !== this.generation || this.isDetached()) return;
       this.report.success();
       this.backOff = 0;
       this._loaded(boot);
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       // close() raced the in-flight GET — stay torn down, don't reschedule.
-      if (this.isDetached()) return;
+      if (generation !== this.generation || this.isDetached()) return;
       const status = (e as Error & { status?: number }).status;
       // 4xx (other than 408/429) are permanent client errors — not-found,
       // forbidden, bad request — so retrying just fails the same way. Surface
@@ -2087,6 +2094,7 @@ export class EditorConnection {
 
   /** Tear down cleanly. Idempotent. */
   close(): void {
+    this.generation++;
     this.comm = "detached";
     this.closeStream();
     this.removeNetworkListeners();
