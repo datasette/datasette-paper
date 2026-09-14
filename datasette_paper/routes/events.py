@@ -135,6 +135,21 @@ async def sse_events(datasette, request, send, receive):
                 }
             )
 
+        # Catch-up barrier: always follows the backlog, even an empty one,
+        # so editors can hold pending sends until they're caught up instead
+        # of racing the backlog. Use the version captured at subscribe time
+        # — a write may already have advanced instance.version, and that
+        # batch is queued to arrive after this event.
+        await send(
+            {
+                "type": "http.response.body",
+                "body": format_event(
+                    "ready", {"version": backlog["version"] if backlog else version}
+                ),
+                "more_body": True,
+            }
+        )
+
         # Send the current presence snapshot once so the new subscriber sees
         # everyone already on the doc.
         if instance.presence:

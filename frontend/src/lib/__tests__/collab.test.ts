@@ -443,6 +443,136 @@ describe("send() 200 response", () => {
   });
 });
 
+describe("collaboration request ordering", () => {
+  function deferredResponse() {
+    let resolve!: (response: Response) => void;
+    const promise = new Promise<Response>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
+
+  function response(status: number) {
+    return { ok: status === 200, status, json: async () => ({}) } as Response;
+  }
+
+  function insert(from: number, text: string) {
+    return {
+      stepType: "replace", from, to: from,
+      slice: { content: [{ type: "text", text }] },
+    };
+  }
+
+  async function session() {
+    const pending = deferredResponse();
+    const posts: Array<{ version: number; clientID: number; steps: unknown[] }> = [];
+    globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith("/events") && init?.method === "POST") {
+        posts.push(JSON.parse(init.body as string));
+        return posts.length === 1 ? pending.promise : new Promise(() => {});
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => BOOTSTRAP });
+    });
+    const errors: StepApplyError[] = [];
+    const conn = new EditorConnection({ ...makeOpts(makeEl()), onStepError: (e) => errors.push(e) });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    return { conn, pending, posts, errors };
+  }
+
+  it("waits for our confirmation before applying a collaborator's dependent step", async () => {
+    const { conn, pending, errors } = await session();
+    try {
+      const view = conn.view!;
+      // Server accepts HelloAAAA at v6. Another editor then appends B at
+      // position 10, which does not exist in our confirmed v5 document.
+      view.dispatch(view.state.tr.insertText("AAAA", 6));
+      MockEventSource.instances[0].dispatchEvent("update", JSON.stringify({
+        version: 7, steps: [insert(10, "B")], clientIDs: [99999],
+      }));
+      pending.resolve(response(200));
+      await waitFor(() => expect(getVersion(view.state)).toBe(7));
+      expect(errors).toEqual([]);
+      expect(view.state.doc.textContent).toBe("HelloAAAAB");
+      expect(sendableSteps(view.state)).toBeNull();
+    } finally { conn.close(); }
+  });
+
+  it.each(["before", "after"])("confirms a replayed own batch only once when backlog arrives %s the POST reply", async (order) => {
+    const { conn, pending, posts, errors } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      conn.openStream();
+      const es = MockEventSource.instances.at(-1)!;
+      const backlog = () => es.dispatchEvent("update", JSON.stringify({
+        version: 7,
+        steps: [...posts[0].steps, insert(7, "B")],
+        clientIDs: [posts[0].clientID, 99999],
+      }));
+      if (order === "before") backlog();
+      pending.resolve(response(200));
+      if (order === "after") {
+        await waitFor(() => expect(getVersion(view.state)).toBe(6));
+        backlog();
+      }
+      await waitFor(() => expect(getVersion(view.state)).toBe(7));
+      expect(errors).toEqual([]);
+      expect(view.state.doc.textContent).toBe("HelloAB");
+      expect(sendableSteps(view.state)).toBeNull();
+    } finally { conn.close(); }
+  });
+
+  it("waits for catch-up after 409 instead of repeatedly cancelling the stream", async () => {
+    const { conn, pending, posts } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      pending.resolve(response(409));
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      // Ordinary local typing and presence updates must also respect the
+      // catch-up barrier while the server is still sending its backlog.
+      view.dispatch(view.state.tr.insertText("C", 7));
+      await new Promise((done) => setTimeout(done, 20));
+      expect(posts).toHaveLength(1);
+      const es = MockEventSource.instances[1];
+      es.dispatchEvent("update", JSON.stringify({
+        version: 6, steps: [insert(6, "B")], clientIDs: [99999],
+      }));
+      es.dispatchEvent("ready", JSON.stringify({ version: 6 }));
+      expect(posts).toHaveLength(2);
+      expect(posts[1].version).toBe(6);
+      expect(view.state.doc.textContent).toBe("HelloBAC");
+    } finally { conn.close(); }
+  });
+
+  it("retries an unsaved edit after reconnect even when there is no backlog", async () => {
+    const { conn, pending, posts } = await session();
+    try {
+      conn.view!.dispatch(conn.view!.state.tr.insertText("A", 6));
+      pending.resolve(response(503));
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      MockEventSource.instances[1].dispatchEvent("ready", JSON.stringify({ version: 5 }));
+      expect(posts).toHaveLength(2);
+      expect(posts[1].version).toBe(5);
+    } finally { conn.close(); }
+  });
+
+  it("reopens the stream if it fails while an accepted POST is awaiting its response", async () => {
+    const { conn, pending, posts } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      MockEventSource.instances[0].dispatchEvent("error");
+      pending.resolve(response(200));
+      await waitFor(() => expect(getVersion(view.state)).toBe(6));
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      view.dispatch(view.state.tr.insertText("B", 7));
+      MockEventSource.instances[1].dispatchEvent("ready", JSON.stringify({ version: 6 }));
+      expect(posts).toHaveLength(2);
+      expect(posts[1].version).toBe(6);
+    } finally { conn.close(); }
+  });
+
+});
+
 describe("bootstrap after close", () => {
   it("does not resurrect an editor when a bootstrap response arrives after close", async () => {
     let resolve!: (response: Response) => void;
