@@ -227,55 +227,34 @@ dev *flags:
             -s settings.max_post_body_bytes 13631488 \
             {{flags}}
 
-# The dev server with OpenTelemetry export to a local Jaeger, via the
-# datasette-otel-otlp-exporter plugin, plus datasette-otel-viewer for the
-# in-Datasette span browser at /-/otel/traces.
+# The dev server with datasette-otel-viewer: it installs its own
+# TracerProvider + MeterProvider and stores what paper and core emit, so
+# traces and metrics are browsable in-instance at /-/otel — no collector,
+# no Jaeger, no OTEL_* env vars.
 #
-# The other dev plugins come from the `dev` dependency group, but these
-# two stay on `--with ../` sibling paths: neither is on PyPI, and neither
-# repo can be resolved from a pyproject source today (the exporter repo
-# is not public; the viewer's pushed metadata still says
-# `datasette-otel-receiver`). That matters because uv locks *every*
-# dependency group, so an unresolvable path or git source in pyproject.toml
-# fails plain `uv run` — it would break `just test` and CI for anyone
-# without the sibling checkouts, not just this recipe. A failing `--with`
-# only breaks this recipe. Once both are published, move them into the
-# `dev` group and drop these two flags.
+# The other dev plugins come from the `dev` dependency group, but the
+# viewer stays on a `--with ../` sibling path: it isn't on PyPI, and uv
+# locks *every* dependency group, so an unresolvable path or git source in
+# pyproject.toml would fail plain `uv run` — breaking `just test` and CI
+# for anyone without the sibling checkout. A failing `--with` only breaks
+# this recipe. Once the viewer is published, move it into the `dev` group.
 #
-# No `opentelemetry-instrument`, no OTEL_* env vars: the plugin's whole
-# point is that one `-s plugins.datasette-otel-otlp-exporter.endpoint` flag.
-#
-# Flow: `just jaeger` in one terminal, `just dev-otel` in another, then
-# open a doc and type — the POST /events trace (paper.events.submit →
-# write_lock.wait / validate_steps / db.query with
-# `datasette.callback: insert_steps` / broadcast / reindex ×3) shows up
-# at http://localhost:16686 under service "datasette-paper".
-#
-# Traces only: the plugin installs a TracerProvider, not a MeterProvider,
-# and Jaeger ingests traces only — paper's paper.* metrics stay no-op
-# here. To collect metrics too, run under `opentelemetry-instrument` with
-# an OTLP metrics backend instead (see docs/TELEMETRY.md).
+# Flow: `just dev-otel`, open a doc and type, then /-/otel/traces — the
+# POST /events trace (paper.events.submit → write_lock.wait /
+# validate_steps / db.query with `datasette.callback: insert_steps` /
+# broadcast / reindex ×3) is there, and the paper.* metrics too.
 dev-otel *flags:
     DATASETTE_SECRET=abc123 uv run --prerelease=allow \
-        --with ../datasette-otel-otlp-exporter \
         --with ../datasette-otel-viewer \
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
             --plugins-dir tests/sample-plugin \
-            -s plugins.datasette-otel-otlp-exporter.endpoint http://localhost:4318 \
-            -s plugins.datasette-otel-otlp-exporter.service_name datasette-paper \
             -s permissions.datasette-otel-viewer true \
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
             -s permissions.profile_access true \
             -s settings.max_post_body_bytes 13631488 \
             {{flags}}
-
-# Jaeger from its own binary — no Docker. UI on http://localhost:16686
-jaeger:
-    @command -v jaeger >/dev/null || { echo "No jaeger binary on PATH. Grab one from https://www.jaegertracing.io/download/"; exit 1; }
-    @echo "UI: http://localhost:16686 — the OTLP ingest port :4318 has no UI"
-    jaeger
 
 dev-with-hmr *flags:
     watchexec \
