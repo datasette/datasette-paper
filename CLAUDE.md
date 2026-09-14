@@ -5,7 +5,10 @@ stored in Datasette's internal database as an append-only step log +
 periodic snapshots. Mirrors the sibling `datasette-sheets`; diverges from
 the ProseMirror reference collab server by replacing long-poll with SSE,
 so 409 = stale version (catch up + retry), 410 = history evicted (full
-re-bootstrap), 400 = bad version.
+re-bootstrap), 400 = bad version. The SSE GET adds in-band events on top:
+`ready` after the catch-up backlog (clients hold sends until it arrives)
+and, when a `clientID` is given, a `reset` event instead of the 410
+(native EventSource hides status codes).
 
 ## Where things live
 

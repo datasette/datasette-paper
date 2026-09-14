@@ -322,6 +322,30 @@ async def test_sse_stale_version_410(ds_paper):
 
 
 @pytest.mark.asyncio
+# @feat collab-sse: test: idle browser with evicted history receives an actionable reset event
+async def test_sse_stale_browser_receives_reset(ds_paper, monkeypatch):
+    ds, paper_db = ds_paper
+    monkeypatch.setattr(instance_module, "SNAPSHOT_THRESHOLD", 1)
+    doc_id = await _create_doc(ds)
+    await _post_step(ds, doc_id, version=0)
+    inst = await get_registry(ds).get(paper_db, doc_id)
+    assert inst.snapshot_version == 1
+    assert not inst.steps_tail
+
+    # No POST is needed from this stale editor: the SSE response itself
+    # must carry the recovery signal visible to native EventSource.
+    stream = await _sse_get(
+        ds, f"/-/paper/api/docs/{doc_id}/events?version=0&clientID=7"
+    )
+    assert stream.status == 200
+    assert (b"content-type", b"text/event-stream") in stream._headers
+    reset = await asyncio.wait_for(stream.read_one_event("reset"), timeout=5)
+    assert reset == {"reason": "history_gone"}
+    await asyncio.wait_for(stream._task, timeout=5)
+    assert not inst.subscribers
+
+
+@pytest.mark.asyncio
 async def test_sse_heartbeat(ds, monkeypatch):
     monkeypatch.setattr(sse_module, "HEARTBEAT_SECONDS", 0.05)
 

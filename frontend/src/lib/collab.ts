@@ -164,8 +164,9 @@ export interface StepApplyError {
    * - `bootstrap`: replaying history on initial mount.
    * - `sse`: applying a step batch broadcast from the server.
    * - `send`: server rejected a POST /events with 422 (invalid_step).
+   * - `reset`: server history expired while this editor had unsaved edits.
    */
-  phase: "bootstrap" | "sse" | "send";
+  phase: "bootstrap" | "sse" | "send" | "reset";
   /** Error message from ProseMirror (or "StepResult.failed" text). */
   message: string;
 }
@@ -1804,6 +1805,22 @@ export class EditorConnection {
       this.backOff = 0;
       this.report.success();
       this._send();
+    });
+    es.addEventListener("reset", () => {
+      if (this.eventSource !== es || !this.view) return;
+      if (sendableSteps(this.view.state)) {
+        // History needed to rebase this draft is gone. Keep it available
+        // for copying instead of silently destroying it during bootstrap.
+        this.closeStream();
+        this.pendingUpdates = [];
+        this.reportStepError({
+          version: getVersion(this.view.state),
+          phase: "reset",
+          message: "This document changed while you were disconnected. Copy your unsaved changes before reloading.",
+        });
+      } else {
+        this.restart();
+      }
     });
 
     const handlePresence = (evt: MessageEvent) => {

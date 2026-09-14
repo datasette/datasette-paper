@@ -555,6 +555,31 @@ describe("collaboration request ordering", () => {
     } finally { conn.close(); }
   });
 
+  it("rebootstraps an idle editor when the server signals compacted history", async () => {
+    const { conn } = await session();
+    try {
+      const oldView = conn.view;
+      MockEventSource.instances[0].dispatchEvent("reset", JSON.stringify({ reason: "history_gone" }));
+      await waitFor(() => {
+        expect(conn.view).not.toBeNull();
+        expect(conn.view).not.toBe(oldView);
+      });
+    } finally { conn.close(); }
+  });
+
+  it("preserves an unsaved draft when the history needed to rebase it has expired", async () => {
+    const { conn, errors } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("my unsaved work", 6));
+      MockEventSource.instances[0].dispatchEvent("reset", JSON.stringify({ reason: "history_gone" }));
+      expect(conn.view).toBe(view);
+      expect(view.state.doc.textContent).toBe("Hellomy unsaved work");
+      expect(view.editable).toBe(false);
+      expect(errors).toEqual([expect.objectContaining({ phase: "reset", message: expect.stringContaining("Copy your unsaved changes") })]);
+    } finally { conn.close(); }
+  });
+
   it("reopens the stream if it fails while an accepted POST is awaiting its response", async () => {
     const { conn, pending, posts } = await session();
     try {
