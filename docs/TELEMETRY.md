@@ -101,6 +101,7 @@ One derived-index rebuild (`reindex_links` / `reindex_tags` / `reindex_tasks`) �
 
 - `paper.doc_id` — The document's integer id. Bounded by the instance's doc table, not by request input. Rides on spans only — **never on a metric**, where a per-doc dimension would be an unbounded series per document.
 - `paper.index` — Which derived index a reindex pass rebuilt. One of: `links`, `tags`, `tasks`.
+- `paper.skipped` — True when a reindex pass returned early without rebuilding — the history is poisoned, or the index is already current at this version; False when the rebuild ran (including one that failed).
 
 ### `paper.snapshot`
 

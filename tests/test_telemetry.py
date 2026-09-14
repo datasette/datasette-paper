@@ -521,6 +521,28 @@ async def test_reindex_emits_three_spans_per_write(ds_with_doc, otel_spans):
     }
     for span in reindex:
         assert span.attributes["paper.doc_id"] == doc_id
+        assert span.attributes["paper.skipped"] is False
+
+
+@pytest.mark.asyncio
+async def test_reindex_early_returns_are_marked_skipped(ds_with_doc, otel_spans):
+    from datasette_paper.instance import get_registry
+    from datasette_paper.util import paper_db
+
+    ds, paper, doc_id = ds_with_doc
+    assert (await _post_step(ds, doc_id)).status_code == 200
+    instance = await get_registry(ds).get(paper_db(ds), doc_id)
+    otel_spans.clear()
+    await instance.reindex_links()  # already indexed at this version
+    (span,) = _spans_named(otel_spans, "paper.reindex")
+    assert span.attributes["paper.skipped"] is True
+
+    poisoned = await _poisoned_instance(paper)
+    poisoned.materialize_live_doc()
+    otel_spans.clear()
+    await poisoned.reindex_tags()
+    (span,) = _spans_named(otel_spans, "paper.reindex")
+    assert span.attributes["paper.skipped"] is True
 
 
 @pytest.mark.asyncio
