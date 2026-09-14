@@ -304,6 +304,39 @@ async def test_sse_heartbeat(ds, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("failure_at", ["headers", "update", "presence"])
+# @feat collab-sse: test: failed initial writes release subscriber queues
+async def test_sse_unsubscribes_when_initial_send_fails(
+    ds_paper, monkeypatch, failure_at
+):
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+    await _post_step(ds, doc_id, version=0)
+    inst = await get_registry(ds).get(paper_db, doc_id)
+    inst.update_presence(client_id=8, actor_id=None, anchor=1, head=1)
+
+    failed = asyncio.Event()
+    original_send = SSEStream._send
+
+    async def failing_send(self, message):
+        await original_send(self, message)
+        is_headers = message["type"] == "http.response.start"
+        if (failure_at == "headers" and is_headers) or message.get(
+            "body", b""
+        ).startswith(f"event: {failure_at}\n".encode()):
+            failed.set()
+            raise ConnectionError("Client disconnected during initial response")
+
+    monkeypatch.setattr(SSEStream, "_send", failing_send)
+    stream = await _sse_get(
+        ds, f"/-/paper/api/docs/{doc_id}/events?version=0&clientID=7"
+    )
+    await asyncio.wait_for(stream._task, timeout=5)
+    assert failed.is_set()
+    assert not inst.subscribers
+
+
+@pytest.mark.asyncio
 async def test_sse_unsubscribe_on_disconnect(ds_paper):
     ds, paper_db = ds_paper
     doc_id = await _create_doc(ds)
