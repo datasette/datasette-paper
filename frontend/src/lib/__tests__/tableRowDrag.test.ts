@@ -128,6 +128,13 @@ describe("buildReorderTr", () => {
     expect(buildReorderTr(state, tablePos, 1, 2)).toBeNull();
   });
 
+  it("returns null for a stale table pos past the end of a shortened doc", () => {
+    // A collaborator deleted content mid-drag: the stored pos now points
+    // beyond the doc. Must not throw a RangeError out of pointerup.
+    const { state } = buildState([row(cell("a")), row(cell("b"))]);
+    expect(buildReorderTr(state, state.doc.content.size + 20, 0, 2)).toBeNull();
+  });
+
   it("preserves the table's name attr through reorder", () => {
     const headerRow = row(header("h"));
     const rows = [headerRow, row(cell("a")), row(cell("b"))];
