@@ -42,6 +42,7 @@ def test_gauge_callbacks_yield_nothing_with_no_registry():
     # The summed gauges always yield one observation; with no registries
     # the sum is zero.
     assert _observations(telemetry.observe_open_streams()) == [0]
+    assert _observations(telemetry.observe_queue_depth_max()) == [0]
     assert _observations(telemetry.observe_tail_max()) == [0]
     assert _observations(telemetry.observe_poisoned()) == [0]
     assert _observations(telemetry.observe_presence_clients()) == [0]
@@ -302,6 +303,26 @@ async def test_open_streams_gauge_counts_subscribers(ds_with_doc):
     assert _observations(telemetry.observe_open_streams()) == [2]
     instance.unsubscribe(q1)
     assert _observations(telemetry.observe_open_streams()) == [1]
+
+
+@pytest.mark.asyncio
+async def test_queue_depth_max_gauge_tracks_deepest_queue(ds_with_doc):
+    from datasette_paper.instance import get_registry
+    from datasette_paper.util import paper_db
+
+    ds, _paper, doc_id = ds_with_doc
+    registry = get_registry(ds)
+    telemetry.register_instance_registry(registry)  # weakset was drained
+    instance = await registry.get(paper_db(ds), doc_id)
+    stalled, _ = await instance.subscribe_with_backlog(0, client_id=1, actor_id="a")
+    reading, _ = await instance.subscribe_with_backlog(0, client_id=2, actor_id="a")
+    assert _observations(telemetry.observe_queue_depth_max()) == [0]
+    for n in range(3):
+        stalled.put_nowait({"kind": "update", "n": n})
+    reading.put_nowait({"kind": "update", "n": 0})
+    assert _observations(telemetry.observe_queue_depth_max()) == [3]
+    instance.unsubscribe(stalled)
+    assert _observations(telemetry.observe_queue_depth_max()) == [1]
 
 
 @pytest.mark.asyncio

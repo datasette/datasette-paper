@@ -150,6 +150,12 @@ Duration histograms are in seconds on Datasette's shared `DURATION_BUCKETS` boun
 
 Open SSE subscriber queues, summed over live instances. The first question about a collab server.
 
+### `paper.sse.queue_depth.max`
+
+*Observable gauge, unit `{event}`.*
+
+The deepest SSE subscriber queue over live instances (0 with none). Queues are unbounded, so a stalled client grows memory — and pins its instance against eviction — with nothing else to show for it. Max rather than per-stream to keep it attribute-free.
+
 ### `paper.instances.live`
 
 *Observable gauge, unit `{instance}`.*
