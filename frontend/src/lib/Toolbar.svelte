@@ -636,8 +636,8 @@
     <div class="tb-menu-wrap" bind:this={highlightRoot}>
       <button
         type="button"
-        class="tb-btn tb-trigger tb-trigger-icon"
-        class:active={openMenu === "highlight" || highlightColor !== null}
+        class="tb-btn"
+        class:active={openMenu === "highlight"}
         aria-pressed={highlightColor !== null}
         aria-haspopup="menu"
         aria-expanded={openMenu === "highlight"}
@@ -645,17 +645,26 @@
         title="Highlight (⌘⇧H)"
         onclick={() => toggleMenu("highlight")}
       >
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
-          {@html TOOLBAR_ICONS["highlighter"]}
-        </svg>
-        <svg class="tb-trigger-chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-          <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
-          {@html TOOLBAR_ICONS["chevronDown"]}
-        </svg>
+        <!-- The trigger glyph is a swatch dot, and the dot is the state: it fills
+             with the selection's color, or shows the slashed "none" dot when
+             nothing is highlighted. So there's no pressed background. -->
+        <span
+          class="tb-hl-swatch tb-hl-trigger-dot"
+          class:tb-hl-none={highlightColor === null}
+          data-color={highlightColor ?? undefined}
+          aria-hidden="true"
+        ></span>
       </button>
       {#if openMenu === "highlight"}
         <div class="tb-hl-menu" role="menu" aria-label="Highlight color">
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-hl-swatch tb-hl-none"
+            aria-label="Remove highlight"
+            title="Remove highlight"
+            onclick={() => chooseHighlight(null)}
+          ></button>
           {#each HIGHLIGHT_COLORS as color, i (color)}
             <button
               type="button"
@@ -669,14 +678,6 @@
               onclick={() => chooseHighlight(color)}
             ></button>
           {/each}
-          <button
-            type="button"
-            role="menuitem"
-            class="tb-hl-swatch tb-hl-none"
-            aria-label="Remove highlight"
-            title="Remove highlight"
-            onclick={() => chooseHighlight(null)}
-          ></button>
         </div>
       {/if}
     </div>
@@ -1021,7 +1022,19 @@
     outline: 2px solid var(--pp-accent);
     outline-offset: 1px;
   }
-  /* "Remove highlight": an empty dot with a diagonal slash. */
+  /* Smaller, non-interactive swatch used as the Highlight ▾ trigger glyph
+     (same footprint as the 16px icons in neighboring buttons). */
+  .tb-hl-trigger-dot {
+    width: 15px;
+    height: 15px;
+    cursor: inherit;
+    flex: 0 0 auto;
+  }
+  .tb-btn:hover .tb-hl-trigger-dot {
+    transform: none;
+  }
+  /* "Remove highlight" (and the no-highlight trigger): an empty dot with a
+     diagonal slash. */
   .tb-hl-none {
     position: relative;
     overflow: hidden;
