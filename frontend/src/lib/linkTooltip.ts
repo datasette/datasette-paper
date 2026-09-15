@@ -435,11 +435,19 @@ class LinkTooltipView {
     this.view.dispatch(tr);
   }
 
-  private closeEditor(clearState = true): void {
+  /** Hide the edit dialog without touching editor state. For paths where
+   * the plugin state is already cleared (a remote edit invalidated the
+   * span) or can no longer be dispatched to (teardown). */
+  private dismissDialog(): void {
     this.dialog.style.display = "none";
     this.editSpan = null;
     document.removeEventListener("mousedown", this.onOutsideMouseDown, true);
-    if (clearState && !this.view.isDestroyed && linkEditKey.getState(this.view.state)) {
+  }
+
+  /** Close the edit dialog and clear the tracked span from plugin state. */
+  private closeEditor(): void {
+    this.dismissDialog();
+    if (!this.view.isDestroyed && linkEditKey.getState(this.view.state)) {
       this.view.dispatch(this.view.state.tr.setMeta(linkEditKey, null));
     }
   }
@@ -467,7 +475,7 @@ class LinkTooltipView {
   update(): void {
     if (this.editSpan) {
       this.editSpan = linkEditKey.getState(this.view.state) ?? null;
-      if (!this.editSpan) this.closeEditor(false);
+      if (!this.editSpan) this.dismissDialog();
     }
     if (this.currentLink && !this.view.dom.contains(this.currentLink)) this.hide();
     // If the view flipped to read-only while the tooltip/dialog was open
@@ -480,7 +488,7 @@ class LinkTooltipView {
 
   destroy(): void {
     this.cancelHide();
-    this.closeEditor(false);
+    this.dismissDialog();
     for (const { target, type, fn } of this.listeners) {
       target.removeEventListener(type, fn);
     }
