@@ -1195,6 +1195,9 @@ def _strip_task_checkbox(inline_token) -> bool:
 # The toggle-list marker, in the checkbox-marker slot `- [ ]` / `- [x]` already
 # occupy. Mirrors `_render_list`'s lead in datasette_paper/markdown.py.
 _TOGGLE_MARKER = "[>] "
+# Same marker with the trailing space already trimmed by markdown-it, which is
+# how an empty toggle summary reaches us. Matched only as the whole run.
+_TOGGLE_MARKER_BARE = "[>]"
 
 
 def _strip_toggle_marker(inline_token) -> bool:
@@ -1211,16 +1214,26 @@ def _strip_toggle_marker(inline_token) -> bool:
     from silently becoming a toggle on the round-trip. ``[>]`` mid-paragraph is
     likewise not a marker — the prefix must be at the very start.
     """
-    if not (inline_token.content or "").startswith(_TOGGLE_MARKER):
+    raw = inline_token.content or ""
+    if raw.startswith(_TOGGLE_MARKER):
+        marker = _TOGGLE_MARKER
+    elif raw == _TOGGLE_MARKER_BARE:
+        # An empty summary: the serializer emits `- [>] `, but markdown-it
+        # trims the trailing space before we see it, so the prefix check above
+        # misses it. Worth handling — an empty summary is the state an item is
+        # in for as long as it takes to type into a freshly inserted toggle.
+        # Only an exact match counts, so `[>]x` stays ordinary text.
+        marker = _TOGGLE_MARKER_BARE
+    else:
         return False
     children = list(inline_token.children or [])
     if not (
         children
         and children[0].type == "text"
-        and children[0].content.startswith(_TOGGLE_MARKER)
+        and children[0].content.startswith(marker)
     ):
         return False
-    children[0].content = children[0].content[len(_TOGGLE_MARKER) :]
+    children[0].content = children[0].content[len(marker) :]
     if not children[0].content:
         children = children[1:]
     inline_token.children = children

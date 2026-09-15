@@ -4,6 +4,7 @@
   - nested child
   - another child
 - [>] toggle with no children
+- [>]
 - plain bullet sibling
 - [>] outer toggle
   - [>] nested toggle

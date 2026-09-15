@@ -240,9 +240,15 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
       // deliberately not serialized (plans/toggle-list/design.md).
       // @feat toggle-list: client serializer emits `- [>] ` for a toggle item
       bullet_list(state, node) {
-        state.renderList(node, "  ", (i) =>
-          node.child(i).attrs.kind === "toggle" ? "- [>] " : "- ",
-        );
+        state.renderList(node, "  ", (i) => {
+          const item = node.child(i);
+          if (item.attrs.kind !== "toggle") return "- ";
+          // An empty summary would leave the lead's trailing space dangling at
+          // end-of-line, so drop it there — same rule as `_render_list`, and
+          // the golden fixture pins the two serializers to each other.
+          const summary = item.firstChild;
+          return summary && summary.content.size === 0 ? "- [>]" : "- [>] ";
+        });
       },
       // GFM-style `- [ ] foo` / `- [x] foo`. The checkbox is part of the
       // *marker* (not written as item content): renderList only indents

@@ -586,7 +586,12 @@ def _render_list(node: dict, ordered: bool) -> str:
         rendered = _render_block(item).rstrip("\n")
         first, *rest = rendered.split("\n")
         indent = " " * len(marker)  # 2 for bullets — `[>] ` is content, not marker
-        out.append(marker + lead + first)
+        # An empty summary would leave the lead's trailing space dangling at
+        # end-of-line. Strip it only in that case — a non-empty line may end
+        # in the two significant spaces of a markdown hard break.
+        out.append(
+            (marker + lead).rstrip() if (lead and not first) else marker + lead + first
+        )
         for line in rest:
             out.append((indent + line) if line else "")
     return "\n".join(out) + "\n"

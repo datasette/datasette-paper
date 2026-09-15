@@ -82,6 +82,18 @@
           "type": "list_item"
         },
         {
+          "attrs": {
+            "kind": "toggle"
+          },
+          "content": [
+            {
+              "content": [],
+              "type": "paragraph"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
           "content": [
             {
               "content": [

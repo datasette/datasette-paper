@@ -1361,6 +1361,35 @@ class TestToggleLists:
             "collapsed": False,
         }
 
+    # @feat toggle-list: an empty summary survives the round-trip as a bare `[>]`
+    def test_empty_summary_is_still_a_toggle(self):
+        """`- [>] ` with nothing after it reaches the parser as a bare `[>]`,
+        because markdown-it trims the trailing space. It has to keep its
+        toggle-ness: an empty summary is the state a freshly inserted toggle
+        is in until someone types into it."""
+        doc = parse_and_validate("- [>]\n")
+        item = doc["content"][0]["content"][0]
+        assert item["attrs"]["kind"] == "toggle"
+        assert item["content"] == [{"type": "paragraph", "content": []}]
+
+    def test_empty_toggle_serializes_without_a_trailing_space(self):
+        """The `[>] ` lead's space must not dangle at end-of-line, and the
+        result has to be a fixed point of md -> doc -> md."""
+        md = "- [>]\n- [>] after\n"
+        assert doc_to_markdown(markdown_to_doc(md)) == md
+
+    def test_bare_marker_only_matches_the_whole_run(self):
+        """`[>]` with anything glued to it is ordinary text, not a marker."""
+        item = parse_and_validate("- [>]x\n")["content"][0]["content"][0]
+        assert (item.get("attrs") or {}).get("kind", "bullet") == "bullet"
+        assert item["content"][0]["content"][0]["text"] == "[>]x"
+
+    def test_escaped_bare_marker_stays_literal(self):
+        """The escaped form of an otherwise-empty `[>]` line stays a bullet."""
+        item = parse_and_validate("- \\[>\\]\n")["content"][0]["content"][0]
+        assert (item.get("attrs") or {}).get("kind", "bullet") == "bullet"
+        assert item["content"][0]["content"][0]["text"] == "[>]"
+
 
 class TestTaskLists:
     def test_task_list_open_and_closed(self):
