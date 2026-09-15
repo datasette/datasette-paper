@@ -35,7 +35,7 @@ test.describe("highlight mark", () => {
     // Select "world".
     for (let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowLeft");
 
-    await app.getByLabel("Highlight (⌘⇧H)").click();
+    await app.getByRole("button", { name: "Highlight", exact: true }).click();
     await app.getByLabel("Highlight color 2").click();
     await expect(app.locator(".tb-hl-menu")).toHaveCount(0);
 
@@ -68,7 +68,7 @@ test.describe("highlight mark", () => {
       const Sel = view.state.selection.constructor;
       view.dispatch(tr.setSelection(Sel.create(doc, 7, 12)));
     });
-    await app.getByLabel("Highlight (⌘⇧H)").click();
+    await app.getByRole("button", { name: "Highlight", exact: true }).click();
     await app.getByLabel("Remove highlight").click();
     await expect(app.locator(".ProseMirror mark.pp-hl")).toHaveCount(0);
     await expect

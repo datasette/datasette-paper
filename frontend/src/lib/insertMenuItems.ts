@@ -6,7 +6,9 @@
  * so the toolbar can derive it (RAF `tick` style, since PM transactions don't
  * rerender Svelte) and tests can assert it without a DOM / EditorView.
  *
- * The `styling` group is deliberately excluded — Text ▾ / List ▾ cover it.
+ * The `styling` group is deliberately excluded — Text ▾ / List ▾ cover it —
+ * except for commands that opt in via `insertMenuGroup` (divider, date), which
+ * land in that section after its native rows.
  */
 import type { EditorState } from "prosemirror-state";
 import { SLASH_GROUPS, type SlashCommand, type SlashGroupKey } from "./slashMenu";
@@ -30,7 +32,8 @@ export interface InsertMenuGroup {
 /**
  * The Insert menu contents: `commands` filtered to `INSERT_GROUPS` and bucketed
  * into one `InsertMenuGroup` per non-empty group, ordered by `SLASH_GROUPS`.
- * Within a group, registration (array) order is preserved.
+ * Within a group, registration (array) order is preserved: the group's own
+ * commands first, then commands opted in via `insertMenuGroup`.
  *
  * `disabled` comes from each command's `enabled?(state)` predicate — so the
  * `/`-menu gating (`canInsertTable`, `canDate`, …) is honoured for free. With a
@@ -42,12 +45,14 @@ export function insertMenuGroups(
 ): InsertMenuGroup[] {
   const allow = new Set<SlashGroupKey>(INSERT_GROUPS);
   return SLASH_GROUPS.filter((g) => allow.has(g.key)).flatMap((g) => {
-    const rows: InsertMenuRow[] = commands
-      .filter((c) => c.group === g.key)
-      .map((command) => ({
-        command,
-        disabled: state ? !(command.enabled ? command.enabled(state) : true) : false,
-      }));
+    const native = commands.filter((c) => c.group === g.key);
+    const optedIn = commands.filter(
+      (c) => c.group !== g.key && !allow.has(c.group) && c.insertMenuGroup === g.key,
+    );
+    const rows: InsertMenuRow[] = [...native, ...optedIn].map((command) => ({
+      command,
+      disabled: state ? !(command.enabled ? command.enabled(state) : true) : false,
+    }));
     return rows.length ? [{ key: g.key, label: g.label, rows }] : [];
   });
 }

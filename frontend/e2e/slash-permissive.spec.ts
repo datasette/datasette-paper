@@ -72,7 +72,7 @@ test.describe("permissive slash trigger", () => {
     ).toHaveCount(0);
     await expect(menu.locator(".pm-slash-item", { hasText: "SQL query" })).toHaveCount(0);
     // …while inline atoms stay available.
-    await expect(menu.locator(".pm-slash-item", { hasText: /^Today$/ })).toHaveCount(1);
+    await expect(menu.locator(".pm-slash-item", { hasText: /^Today/ })).toHaveCount(1);
     await page.keyboard.press("Escape");
   });
 });

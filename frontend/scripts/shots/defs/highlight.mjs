@@ -17,7 +17,7 @@ export default defineShot({
     const mark = app.locator('.ProseMirror mark.pp-hl[data-color="hl2"]');
     await mark.waitFor({ state: "visible", timeout: 10_000 });
     await mark.click();
-    await app.getByLabel("Highlight (⌘⇧H)").click();
+    await app.getByRole("button", { name: "Highlight", exact: true }).click();
     await app
       .locator('.tb-hl-swatch.current[data-color="hl2"]')
       .waitFor({ state: "visible", timeout: 10_000 });

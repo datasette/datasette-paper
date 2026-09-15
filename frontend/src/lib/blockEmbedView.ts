@@ -1323,8 +1323,16 @@ export class BlockEmbedView implements NodeView {
     if (wrap && !wrap.contains(e.target as Node)) this.closeMenu();
   };
 
+  // Claim Escape so PM doesn't also selectParentNode and window listeners
+  // (the Sidebar) don't close too — see tocView.ts onKeydown. Refocus the editor
+  // if focus was on a (now hidden) menu control.
   private onKeydown = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") this.closeMenu();
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const hadFocus = !!this.menuEl?.contains(document.activeElement);
+    this.closeMenu();
+    if (hadFocus) this.view.focus();
   };
 
   /**

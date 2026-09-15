@@ -16,7 +16,7 @@
  * <select> outside it (see the e2e-baseline notes).
  */
 import { test, expect } from "@playwright/test";
-import { createPaper, gotoPaper, insertViaMenu } from "./helpers";
+import { createPaper, gotoPaper, insertViaMenu, openInsertMenu } from "./helpers";
 
 test.describe("toolbar embed dropdown", () => {
   test("toolbar control opens the picker and inserts a Datasette embed", async ({
@@ -49,5 +49,29 @@ test.describe("toolbar embed dropdown", () => {
         message: "embed never rendered table rows",
       })
       .toContain("Vendor 1");
+  });
+});
+
+test.describe("toolbar Insert menu: styling opt-ins", () => {
+  test("divider and date rows show shortcut hints and insert", async ({ page }) => {
+    // @feat shortcuts: e2e — Insert menu divider / Today rows render registry hints
+    const host = await createPaper(page);
+    await gotoPaper(page, host.url);
+    const app = page.locator("#app-root");
+    await app.locator(".ProseMirror").click();
+
+    const menu = await openInsertMenu(page);
+    const row = (label: string) =>
+      menu.getByRole("menuitem").filter({
+        has: page.locator(".tb-menu-label", { hasText: new RegExp(`^${label}$`) }),
+      });
+    // Hint glyphs are platform-formatted, so match the key, not the modifier.
+    await expect(row("Divider").locator(".tb-menu-hint")).toContainText("_");
+    await expect(row("Today").locator(".tb-menu-hint")).toContainText(";");
+    await expect(row("Tomorrow").locator(".tb-menu-hint")).toContainText(";");
+    await expect(row("Date")).toBeVisible();
+
+    await row("Divider").click();
+    await expect(app.locator(".ProseMirror hr")).toHaveCount(1);
   });
 });

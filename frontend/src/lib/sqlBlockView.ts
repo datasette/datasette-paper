@@ -36,6 +36,7 @@ import { codeFocusKey } from "./codeFocusPlugin";
 import { CmTextSurface } from "./cmTextSurface";
 import { type CmCore, type LanguageSupport } from "./cmCore";
 import { guardChromeMousedown } from "./caretGuard";
+import { SHORTCUTS, ariaKeyshortcuts, titleWithShortcut } from "./shortcuts";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 100];
 const DEFAULT_PAGE_SIZE = 10;
@@ -183,7 +184,7 @@ export class SqlBlockView implements NodeView {
       node: this.node,
       core,
       support,
-      extraKeys: [{ key: "Mod-Enter", run: () => this.runFromKeymap() }],
+      extraKeys: [{ key: SHORTCUTS.runQuery.key, run: () => this.runFromKeymap() }],
       extraExtensions: [core.completion()],
     });
     this.contentDOM = undefined;
@@ -240,6 +241,9 @@ export class SqlBlockView implements NodeView {
     this.runBtn.className = "pm-sql-block-run";
     this.runBtn.appendChild(this.svgIcon("play"));
     this.runBtn.append("Run");
+    // Accessible name stays the text "Run"; the chord lives in title + aria.
+    this.runBtn.title = titleWithShortcut("Run", "runQuery");
+    this.runBtn.setAttribute("aria-keyshortcuts", ariaKeyshortcuts(SHORTCUTS.runQuery.key));
     this.runBtn.addEventListener("click", (e) => {
       e.preventDefault();
       void this.run(true); // explicit Run bypasses the cache (force refresh)
@@ -324,8 +328,16 @@ export class SqlBlockView implements NodeView {
     if (wrap && !wrap.contains(e.target as Node)) this.closeMenu();
   };
 
+  // Claim Escape so PM doesn't also selectParentNode and window listeners
+  // (the Sidebar) don't close too — see tocView.ts onKeydown. Refocus the editor
+  // if focus was on a (now hidden) menu control.
   private onKeydown = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") this.closeMenu();
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const hadFocus = !!this.menuEl?.contains(document.activeElement);
+    this.closeMenu();
+    if (hadFocus) this.view.focus();
   };
 
   // ── Export ─────────────────────────────────────────────────────────────────

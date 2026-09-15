@@ -207,6 +207,14 @@ describe("SqlBlockView", () => {
     expect(JSON.parse(writeText.mock.calls[0][0])).toEqual([{ id: 1 }]);
   });
 
+  it("Run button keeps its text name and shows the registry chord (non-mac)", async () => {
+    const { view } = await build("select 1", { ok: true, columns: ["n"], rows: [[1]] });
+    const run = view.dom.querySelector<HTMLButtonElement>(".pm-sql-block-run")!;
+    expect(run.textContent).toBe("Run");
+    expect(run.title).toBe("Run (Ctrl+Enter)");
+    expect(run.getAttribute("aria-keyshortcuts")).toBe("Control+Enter");
+  });
+
   it("mutes the Run button in sync and lights it up when the SQL is edited", async () => {
     const { view } = await build("select 1", { ok: true, columns: ["n"], rows: [[1]] });
     const run = () => view.dom.querySelector(".pm-sql-block-run")!;

@@ -22,6 +22,7 @@
  */
 
 import { TextSelection, type Command } from "prosemirror-state";
+import { IS_MAC } from "./platform";
 
 /**
  * @feat line-boundary: move the caret (or extend the selection) to the visual
@@ -69,12 +70,6 @@ export function moveToLineBoundary(dir: -1 | 1, extend: boolean): Command {
     return true;
   };
 }
-
-// Same platform sniff prosemirror-keymap uses to expand `Mod`. navigator is
-// absent under SSR/tests → treat as non-mac.
-const IS_MAC =
-  typeof navigator !== "undefined" &&
-  /Mac|iP(hone|[oa]d)/.test(navigator.platform);
 
 /**
  * Keymap for line-boundary motion. Registered ahead of `baseKeymap` so it

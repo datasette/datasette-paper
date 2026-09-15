@@ -384,8 +384,19 @@ export class TocView implements NodeView {
     if (wrap && !wrap.contains(e.target as Node)) this.closeMenu();
   };
 
+  // Claim Escape: without preventDefault PM also runs selectParentNode (focus
+  // in editor content, e.g. WebKit doesn't focus the clicked ⋮ button), and
+  // without stopPropagation window listeners (the Sidebar) close too when
+  // focus is on the ⋮ button. Closing hides the menu, so if focus was on one of
+  // its controls it would be stranded on a hidden element — hand it back to
+  // the editor (same as valueView.ts).
   private onKeydown = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") this.closeMenu();
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const hadFocus = !!this.menuEl?.contains(document.activeElement);
+    this.closeMenu();
+    if (hadFocus) this.view.focus();
   };
 
   /** Scroll the editor to the heading at `pos` and place the cursor in it. */

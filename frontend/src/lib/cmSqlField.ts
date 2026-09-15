@@ -13,6 +13,7 @@
  */
 import { loadCmCore, type CmCore, type EditorView as CmView, type LanguageSupport } from "./cmCore";
 import { resolveLanguage } from "./languages";
+import { SHORTCUTS } from "./shortcuts";
 
 export interface CmSqlFieldConfig {
   /** Element the editor mounts into. */
@@ -36,7 +37,9 @@ export class CmSqlField {
     const keymap = cfg.onSubmit
       ? [
           {
-            key: "Mod-Enter",
+            // Same chord + surface as the SQL block's Run (registry `runQuery`);
+            // the Test probe has no hint UI, so reusing the entry is enough.
+            key: SHORTCUTS.runQuery.key,
             run: (): boolean => {
               cfg.onSubmit?.();
               return true;

@@ -108,4 +108,18 @@ describe("insertMenuGroups", () => {
     const groups = insertMenuGroups([cmd("image", "media")], null);
     expect(groups.map((g) => g.key)).toEqual(["media"]);
   });
+
+  it("appends styling commands that opt in via insertMenuGroup after native rows", () => {
+    const groups = insertMenuGroups(
+      [
+        cmd("h1", "styling"),
+        cmd("divider", "styling", { insertMenuGroup: "media" }),
+        cmd("table", "media"),
+        cmd("image", "media"),
+      ],
+      null,
+    );
+    expect(groups.map((g) => g.key)).toEqual(["media"]);
+    expect(groups[0].rows.map((r) => r.command.id)).toEqual(["table", "image", "divider"]);
+  });
 });

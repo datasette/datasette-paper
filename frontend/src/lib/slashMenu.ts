@@ -28,6 +28,7 @@ import { wrapInList } from "prosemirror-schema-list";
 import type { NodeType } from "prosemirror-model";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
+import { SHORTCUTS, formatShortcut, type ShortcutId } from "./shortcuts";
 import { insertTable, findTable } from "./tables";
 import { insertToc } from "./tocView";
 import { insertSqlBlock, insertSource } from "./sqlQuery";
@@ -67,6 +68,12 @@ export interface SlashCommand {
   group: SlashGroupKey;
   run: (view: EditorView) => void;
   enabled?: (state: EditorState) => boolean;
+  /** Registry chord that runs the same command outside the popup; rendered as
+   *  a hint on the `/` row and the Insert menu row. */
+  shortcut?: ShortcutId;
+  /** Opt a `styling`-group command into the toolbar's ＋ Insert menu, under
+   *  this Insert section. The `/` menu ignores it (grouping/order unchanged). */
+  insertMenuGroup?: SlashGroupKey;
 }
 
 export interface SlashState {
@@ -356,6 +363,13 @@ class SlashPopupView {
       icon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">${TOOLBAR_ICONS[command.icon as keyof typeof TOOLBAR_ICONS] ?? ""}</svg>`;
       item.appendChild(icon);
       item.appendChild(document.createTextNode(command.label));
+      if (command.shortcut) {
+        // @feat shortcuts: slash row hint, platform-formatted from the registry
+        const hint = document.createElement("span");
+        hint.className = "pm-slash-hint";
+        hint.textContent = formatShortcut(SHORTCUTS[command.shortcut].key);
+        item.appendChild(hint);
+      }
       item.addEventListener("mousedown", (e) => {
         e.preventDefault(); // keep editor focus for the commit transaction
         const ssNow = slashKey.getState(this.view.state);
@@ -483,6 +497,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
   const commands: SlashCommand[] = [
     {
       id: "h1",
+      shortcut: "heading1",
       label: "Heading 1",
       keywords: ["title", "h1", "heading"],
       icon: "h1",
@@ -492,6 +507,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
     {
       id: "h2",
+      shortcut: "heading2",
       label: "Heading 2",
       keywords: ["h2", "heading", "subtitle"],
       icon: "h2",
@@ -501,6 +517,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
     {
       id: "h3",
+      shortcut: "heading3",
       label: "Heading 3",
       keywords: ["h3", "heading"],
       icon: "h3",
@@ -510,6 +527,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
     {
       id: "bullet_list",
+      shortcut: "bulletList",
       label: "Bullet list",
       keywords: ["ul", "unordered", "list", "bullet"],
       icon: "listUl",
@@ -519,6 +537,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
     {
       id: "ordered_list",
+      shortcut: "orderedList",
       label: "Numbered list",
       keywords: ["ol", "ordered", "numbered", "list"],
       icon: "listOl",
@@ -528,6 +547,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
     {
       id: "task_list",
+      shortcut: "taskList",
       label: "Task list",
       keywords: ["todo", "checklist", "task", "checkbox"],
       icon: "taskList",
@@ -537,6 +557,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
     {
       id: "blockquote",
+      shortcut: "blockquote",
       label: "Quote",
       keywords: ["blockquote", "quote", "citation"],
       icon: "quote",
@@ -573,23 +594,28 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       keywords: ["date", "day", "calendar", "due", "deadline", "when", "time"],
       icon: "calendarEvent",
       group: "styling",
+      insertMenuGroup: "media",
       run: (view) => insertDateAndEdit(view),
     },
     {
       // @feat date: quick-insert entries resolve directly (no popup)
       id: "date_today",
+      shortcut: "dateToday",
       label: "Today",
       keywords: ["today", "date", "now", "current"],
       icon: "calendarEvent",
       group: "styling",
+      insertMenuGroup: "media",
       run: (view) => insertRelativeDate(view, 0),
     },
     {
       id: "date_tomorrow",
+      shortcut: "dateTomorrow",
       label: "Tomorrow",
       keywords: ["tomorrow", "date", "next", "day"],
       icon: "calendarEvent",
       group: "styling",
+      insertMenuGroup: "media",
       run: (view) => insertRelativeDate(view, 1),
     },
     {
@@ -602,6 +628,7 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
     {
       id: "code_block",
+      shortcut: "codeBlock",
       label: "Code block",
       keywords: ["code", "pre", "monospace"],
       icon: "codeBlock",
@@ -687,10 +714,12 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
     },
     {
       id: "divider",
+      shortcut: "divider",
       label: "Divider",
       keywords: ["hr", "rule", "separator", "divider", "line"],
       icon: "hr",
       group: "styling",
+      insertMenuGroup: "media",
       run: (view) => {
         view.dispatch(
           view.state.tr.replaceSelectionWith(horizontal_rule.create()).scrollIntoView(),

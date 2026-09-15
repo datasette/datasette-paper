@@ -23,6 +23,7 @@ import {
   type SlashGroupKey,
 } from "../slashMenu";
 import { setProviderManifest, _resetProvidersForTest } from "../embedProviders";
+import { SHORTCUTS } from "../shortcuts";
 
 const commands = buildSlashCommands();
 
@@ -629,5 +630,38 @@ describe("popup renders non-interactive section headers (real EditorView)", () =
       (h) => h.textContent,
     );
     expect(labels).toEqual(["Styling", "Media", "Datasette"]);
+  });
+
+  it("renders a platform-formatted shortcut hint on rows that name one", () => {
+    // @feat shortcuts: test — slash rows show the registry hint (non-mac under jsdom)
+    view.dispatch(view.state.tr.insertText("/to"));
+    const rows = [...menu().querySelectorAll<HTMLElement>(".pm-slash-item")];
+    const today = rows.find((r) => r.firstChild?.nextSibling?.textContent === "Today");
+    expect(today).toBeTruthy();
+    expect(today!.querySelector(".pm-slash-hint")?.textContent).toBe("Ctrl+;");
+    const toc = rows.find((r) => r.textContent === "Table of contents");
+    expect(toc?.querySelector(".pm-slash-hint")).toBeNull();
+  });
+});
+
+describe("slash command shortcuts", () => {
+  it("every command's shortcut is a registry id", () => {
+    const withShortcut = buildSlashCommands().filter((c) => c.shortcut !== undefined);
+    expect(withShortcut.map((c) => c.id).sort()).toEqual(
+      [
+        "blockquote",
+        "bullet_list",
+        "code_block",
+        "date_today",
+        "date_tomorrow",
+        "divider",
+        "h1",
+        "h2",
+        "h3",
+        "ordered_list",
+        "task_list",
+      ],
+    );
+    for (const c of withShortcut) expect(Object.hasOwn(SHORTCUTS, c.shortcut!)).toBe(true);
   });
 });

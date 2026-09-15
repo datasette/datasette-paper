@@ -1564,6 +1564,16 @@ mark.pp-hl[data-color="hl4"] {
   display: inline-flex;
   color: var(--pp-fg-muted);
 }
+/* Keyboard-shortcut hint, right-aligned; matches Toolbar's .tb-menu-hint. */
+.editor-host .pm-slash-hint {
+  margin-left: auto;
+  padding-left: 16px;
+  /* Clear the overlay scrollbar, which otherwise sits on top of the hint. */
+  margin-right: 8px;
+  font-size: 11px;
+  color: var(--pp-fg-subtle);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
 .editor-host .pm-slash-empty {
   padding: 5px 12px;
   color: var(--pp-fg-subtle);

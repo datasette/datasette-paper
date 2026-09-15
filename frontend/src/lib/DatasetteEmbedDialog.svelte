@@ -185,9 +185,15 @@
   }
 </script>
 
+<!-- Escape: the native <dialog> closes itself (don't preventDefault — that
+     cancels the close), but stop the keydown there so page-level window
+     listeners (the Sidebar panel) don't close as well. -->
 <dialog
   bind:this={dialogEl}
   class="ds-embed-dialog"
+  onkeydown={(e) => {
+    if (e.key === "Escape") e.stopPropagation();
+  }}
   onclose={() => {
     open = false;
     reset();

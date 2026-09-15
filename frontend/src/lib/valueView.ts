@@ -379,8 +379,17 @@ export class ValueView implements NodeView {
     if (!this.dom.contains(e.target as Node)) this.closePopover();
   };
 
+  // Claim Escape: the chip mousedown keeps focus in editor content, so without
+  // preventDefault PM also runs selectParentNode (selecting the paragraph).
+  // Closing removes the popover, so if focus was in one of its fields it would
+  // be stranded on a detached control — hand it back to the editor.
   private onPopoverKeydown = (e: KeyboardEvent): void => {
-    if (e.key === "Escape") this.closePopover();
+    if (e.key !== "Escape") return;
+    e.preventDefault();
+    e.stopPropagation();
+    const hadFocus = !!this.popoverEl?.contains(document.activeElement);
+    this.closePopover();
+    if (hadFocus) this.view.focus();
   };
 
   private commit(source: string | null, column: string | null, format: ValueFormat): void {

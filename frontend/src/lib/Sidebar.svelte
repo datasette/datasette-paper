@@ -57,6 +57,10 @@
   });
 
   function onKeydown(e: KeyboardEvent): void {
+    // An inner interaction already claimed this Escape (link edit dialog, row
+    // drag): innermost wins, leave the panel open. Same idiom as collab.ts's
+    // view.dom keydown guard.
+    if (e.defaultPrevented) return;
     if (e.key === "Escape" && (active || menuOpen)) {
       active = null;
       menuOpen = false;

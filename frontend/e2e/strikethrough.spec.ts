@@ -46,6 +46,13 @@ test("toolbar strikethrough button strikes the selection and it persists", async
   const editor = app.locator(".ProseMirror");
   const button = app.locator('.paper-toolbar button[aria-label^="Strikethrough"]');
 
+  // Toolbar accessible names are plain; the chord lives in aria-keyshortcuts
+  // (Meta on mac dev, Control on Linux CI).
+  await expect(app.getByRole("button", { name: "Bold", exact: true })).toHaveAttribute(
+    "aria-keyshortcuts",
+    /^(Meta|Control)\+B$/,
+  );
+
   await editor.click();
   // "beta" sits at doc positions 7..11 (paragraph content starts at 1).
   await selectRange(page, 7, 11);

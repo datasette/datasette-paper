@@ -1,8 +1,9 @@
 <script lang="ts">
   import type { EditorView } from "prosemirror-view";
   import type { MarkType, NodeType } from "prosemirror-model";
-  import { toggleMark, setBlockType, wrapIn, lift, chainCommands } from "prosemirror-commands";
-  import { wrapInList, liftListItem, sinkListItem } from "prosemirror-schema-list";
+  import { toggleMark, setBlockType, wrapIn, lift } from "prosemirror-commands";
+  import { wrapInList } from "prosemirror-schema-list";
+  import { indentListSelection, dedentListSelection } from "./listCommands";
   import { undo, redo, undoDepth, redoDepth } from "prosemirror-history";
   import { schema, HIGHLIGHT_COLORS, type HighlightColor } from "./schema";
   import { activeHighlightColor, clearHighlight, setHighlight } from "./highlight";
@@ -12,6 +13,13 @@
   import { wrapSelectionInCallout, unwrapCallout } from "./callout";
   import type { SlashCommand } from "./slashMenu";
   import { insertMenuGroups } from "./insertMenuItems";
+  import {
+    SHORTCUTS,
+    formatShortcut,
+    ariaKeyshortcuts,
+    titleWithShortcut,
+    type ShortcutId,
+  } from "./shortcuts";
   // The in-table action bar (add/delete row/col, name input) is owned
   // by tableInsertTooltipPlugin (see tableInsertTooltip.ts). No table-mode
   // controls live in the toolbar.
@@ -231,17 +239,9 @@
     return () => run(wrapInList(node));
   }
 
-  // Indent / outdent for the List ▾ menu. Unlike the old single-command
-  // buttons, these chain task_item then list_item so they work in task lists
-  // too — matching the Tab / Shift-Tab keymap in collab.ts.
-  const sinkList = chainCommands(
-    sinkListItem(schema.nodes.task_item),
-    sinkListItem(schema.nodes.list_item),
-  );
-  const liftList = chainCommands(
-    liftListItem(schema.nodes.task_item),
-    liftListItem(schema.nodes.list_item),
-  );
+  // Indent / outdent for the List ▾ menu use the shared task-aware
+  // `indentListSelection` / `dedentListSelection` (listCommands.ts) — the same
+  // commands as the Tab / Shift-Tab and Mod-] / Mod-[ keymap in collab.ts.
 
   // Text ▾ menu rows: close the menu, then run the block-type command. Kept
   // generic (takes the action thunk) so every row reads the same.
@@ -477,14 +477,16 @@
   );
 </script>
 
-{#snippet btn(name: ToolbarIconName, title: string, onclick: () => void, pressed: boolean | undefined = undefined, disabled = false)}
+<!-- @feat shortcuts: toolbar button — plain aria-label, registry chord in title + aria-keyshortcuts -->
+{#snippet btn(name: ToolbarIconName, label: string, onclick: () => void, pressed: boolean | undefined = undefined, disabled = false, shortcut: ShortcutId | undefined = undefined)}
   <button
     type="button"
     class="tb-btn"
     class:active={pressed}
     aria-pressed={pressed}
-    aria-label={title}
-    {title}
+    aria-label={label}
+    title={shortcut ? titleWithShortcut(label, shortcut) : label}
+    aria-keyshortcuts={shortcut ? ariaKeyshortcuts(SHORTCUTS[shortcut].key) : undefined}
     {disabled}
     {onclick}
   >
@@ -512,12 +514,17 @@
   {/if}
 {/snippet}
 
+<!-- @feat shortcuts: menu-row hint text, platform-formatted from the registry -->
+{#snippet hint(id: ShortcutId)}
+  <span class="tb-menu-hint">{formatShortcut(SHORTCUTS[id].key)}</span>
+{/snippet}
+
 <div class="paper-toolbar" role="toolbar" aria-label="Editor toolbar" style={mobileBottomStyle}>
-  {@render btn("undo", "Undo", () => run(undo), undefined, !canUndo)}
-  <!-- Redo is dropped from the mobile strip (space; ⌘⇧Z and the iOS three-finger
+  {@render btn("undo", "Undo", () => run(undo), undefined, !canUndo, "undo")}
+  <!-- Redo is dropped from the mobile strip (space; Shift-Mod-z and the iOS three-finger
        gesture cover it — design.md §Mobile). Undo stays. -->
   {#if !isMobile}
-    {@render btn("redo", "Redo", () => run(redo), undefined, !canRedo)}
+    {@render btn("redo", "Redo", () => run(redo), undefined, !canRedo, "redo")}
   {/if}
   <span class="tb-sep" aria-hidden="true"></span>
   <!-- Text ▾ — block-type "turn into" dropdown; trigger label doubles as the
@@ -547,9 +554,11 @@
           class="tb-menu-item"
           class:active={blockLabel === "Text"}
           onclick={chooseBlock(() => run(setBlockType(schema.nodes.paragraph)))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.paragraph.key)}
         >
           {@render menuIcon("paragraph")}
           <span class="tb-menu-label">Text</span>
+          {@render hint("paragraph")}
         </button>
         <button
           type="button"
@@ -557,10 +566,11 @@
           class="tb-menu-item"
           class:active={isH1}
           onclick={chooseBlock(setHeading(1))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading1.key)}
         >
           {@render menuIcon("h1")}
           <span class="tb-menu-label">Heading 1</span>
-          <span class="tb-menu-hint">⇧⌃1</span>
+          {@render hint("heading1")}
         </button>
         <button
           type="button"
@@ -568,10 +578,11 @@
           class="tb-menu-item"
           class:active={isH2}
           onclick={chooseBlock(setHeading(2))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading2.key)}
         >
           {@render menuIcon("h2")}
           <span class="tb-menu-label">Heading 2</span>
-          <span class="tb-menu-hint">⇧⌃2</span>
+          {@render hint("heading2")}
         </button>
         <button
           type="button"
@@ -579,10 +590,11 @@
           class="tb-menu-item"
           class:active={isH3}
           onclick={chooseBlock(setHeading(3))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading3.key)}
         >
           {@render menuIcon("h3")}
           <span class="tb-menu-label">Heading 3</span>
-          <span class="tb-menu-hint">⇧⌃3</span>
+          {@render hint("heading3")}
         </button>
         <span class="tb-menu-sep" role="separator"></span>
         <button
@@ -591,10 +603,11 @@
           class="tb-menu-item"
           class:active={isBlockquote}
           onclick={chooseBlock(() => run(isBlockquote ? lift : wrapIn(schema.nodes.blockquote)))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.blockquote.key)}
         >
           {@render menuIcon("quote")}
           <span class="tb-menu-label">Quote</span>
-          <span class="tb-menu-hint">⌃&gt;</span>
+          {@render hint("blockquote")}
         </button>
         <!-- @feat callout: Text ▾ row wraps selection as a Note / unwraps when active -->
         <button
@@ -613,24 +626,25 @@
           class="tb-menu-item"
           class:active={isCodeBlock}
           onclick={chooseBlock(() => run(setBlockType(schema.nodes.code_block)))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.codeBlock.key)}
         >
           {@render menuIcon("codeBlock")}
           <span class="tb-menu-label">Code block</span>
-          <span class="tb-menu-hint">⇧⌃\</span>
+          {@render hint("codeBlock")}
         </button>
       </div>
     {/if}
   </div>
   <span class="tb-sep" aria-hidden="true"></span>
-  {@render btn("bold", "Bold (⌘B)", toggle(schema.marks.strong), isBold)}
-  {@render btn("italic", "Italic (⌘I)", toggle(schema.marks.em), isItalic)}
+  {@render btn("bold", "Bold", toggle(schema.marks.strong), isBold, false, "bold")}
+  {@render btn("italic", "Italic", toggle(schema.marks.em), isItalic, false, "italic")}
   <!-- S and Highlight ▾ are desktop-only: the mobile strip has no room, and
        `~~` / `==` input rules cover them on a soft keyboard (design.md §Mobile). -->
   {#if !isMobile}
     <!-- @feat strikethrough: toolbar button toggles strike, pressed while the mark is active -->
-    {@render btn("strikethrough", "Strikethrough (⌘⇧X)", toggle(schema.marks.strike), isStrike)}
+    {@render btn("strikethrough", "Strikethrough", toggle(schema.marks.strike), isStrike, false, "strike")}
   {/if}
-  {@render btn("code", "Inline code (⌘`)", toggle(schema.marks.code), isCode)}
+  {@render btn("code", "Inline code", toggle(schema.marks.code), isCode, false, "code")}
   {#if !isMobile}
     <!-- @feat highlight: toolbar button + swatch popover (4 color slots + remove) -->
     <div class="tb-menu-wrap" bind:this={highlightRoot}>
@@ -641,8 +655,9 @@
         aria-pressed={highlightColor !== null}
         aria-haspopup="menu"
         aria-expanded={openMenu === "highlight"}
-        aria-label="Highlight (⌘⇧H)"
-        title="Highlight (⌘⇧H)"
+        aria-label="Highlight"
+        title={titleWithShortcut("Highlight", "highlight")}
+        aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.highlight.key)}
         onclick={() => toggleMenu("highlight")}
       >
         <!-- The trigger glyph is a swatch dot, and the dot is the state: it fills
@@ -712,10 +727,11 @@
           class="tb-menu-item"
           class:active={isLink}
           onclick={chooseBlock(toggleLink)}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.link.key)}
         >
           {@render menuIcon("link")}
           <span class="tb-menu-label">Link</span>
-          <span class="tb-menu-hint">⌘K</span>
+          {@render hint("link")}
         </button>
         <button
           type="button"
@@ -761,9 +777,11 @@
           class="tb-menu-item"
           class:active={activeList === "bullet_list"}
           onclick={chooseBlock(wrapList(schema.nodes.bullet_list))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.bulletList.key)}
         >
           {@render menuIcon("listUl")}
           <span class="tb-menu-label">Bullet list</span>
+          {@render hint("bulletList")}
         </button>
         <button
           type="button"
@@ -771,9 +789,11 @@
           class="tb-menu-item"
           class:active={activeList === "ordered_list"}
           onclick={chooseBlock(wrapList(schema.nodes.ordered_list))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.orderedList.key)}
         >
           {@render menuIcon("listOl")}
           <span class="tb-menu-label">Numbered list</span>
+          {@render hint("orderedList")}
         </button>
         <button
           type="button"
@@ -781,31 +801,34 @@
           class="tb-menu-item"
           class:active={activeList === "task_list"}
           onclick={chooseBlock(wrapList(schema.nodes.task_list))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.taskList.key)}
         >
           {@render menuIcon("taskList")}
           <span class="tb-menu-label">Task list</span>
-          <span class="tb-menu-hint">⌘⇧7</span>
+          {@render hint("taskList")}
         </button>
         <span class="tb-menu-sep" role="separator"></span>
         <button
           type="button"
           role="menuitem"
           class="tb-menu-item"
-          onclick={chooseBlock(() => run(sinkList))}
+          onclick={chooseBlock(() => run(indentListSelection))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.indent.key)}
         >
           {@render menuIcon("indent")}
           <span class="tb-menu-label">Indent</span>
-          <span class="tb-menu-hint">⌘]</span>
+          {@render hint("indent")}
         </button>
         <button
           type="button"
           role="menuitem"
           class="tb-menu-item"
-          onclick={chooseBlock(() => run(liftList))}
+          onclick={chooseBlock(() => run(dedentListSelection))}
+          aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.outdent.key)}
         >
           {@render menuIcon("outdent")}
           <span class="tb-menu-label">Outdent</span>
-          <span class="tb-menu-hint">⌘[</span>
+          {@render hint("outdent")}
         </button>
       </div>
     {/if}
@@ -853,10 +876,16 @@
                 title={row.disabled
                   ? `${row.command.label} — not available here`
                   : row.command.label}
+                aria-keyshortcuts={row.command.shortcut
+                  ? ariaKeyshortcuts(SHORTCUTS[row.command.shortcut].key)
+                  : undefined}
                 onclick={() => runInsertCommand(row.command)}
               >
                 {@render menuIcon(row.command.icon)}
                 <span class="tb-menu-label">{row.command.label}</span>
+                {#if row.command.shortcut}
+                  {@render hint(row.command.shortcut)}
+                {/if}
               </button>
             {/each}
           </div>

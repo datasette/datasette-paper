@@ -53,12 +53,7 @@ import {
   wrappingInputRule,
   textblockTypeInputRule,
 } from "prosemirror-inputrules";
-import {
-  wrapInList,
-  splitListItem,
-  sinkListItem,
-  liftListItem,
-} from "prosemirror-schema-list";
+import { wrapInList, splitListItem } from "prosemirror-schema-list";
 import type { Command } from "prosemirror-state";
 import type { Attrs, MarkType } from "prosemirror-model";
 import { lastHighlightColor, toggleHighlight } from "./highlight";
@@ -110,6 +105,8 @@ import {
   type SlashCommand,
   type EmbedKindFilter,
 } from "./slashMenu";
+import { SHORTCUTS } from "./shortcuts";
+import { indentListSelection, dedentListSelection } from "./listCommands";
 import {
   cursorReporterPlugin,
   remoteCursorsPlugin,
@@ -719,7 +716,9 @@ function createCodeBlockOnEnter(): Command {
  * (e.g. an only-child item with no preceding sibling to nest under).
  *
  * Outside any list item, returns false so Tab falls through to the
- * browser default — keeps the editor reachable from the keyboard.
+ * browser default — keeps the editor reachable from the keyboard. Also
+ * returns false when a `table_cell` / `table_header` is nearer than the
+ * nearest list item (innermost wins), so the table keymap moves cells.
  */
 function consumeTabInList(inner: Command): Command {
   return (state, dispatch, view) => {
@@ -727,6 +726,12 @@ function consumeTabInList(inner: Command): Command {
     let inList = false;
     for (let d = $from.depth; d > 0; d--) {
       const t = $from.node(d).type;
+      // Innermost wins: a table cell closer than any list item means the
+      // cursor is in a table nested inside a list — leave Tab to the table
+      // keymap's cell navigation.
+      if (t === schema.nodes.table_cell || t === schema.nodes.table_header) {
+        break;
+      }
       if (t === schema.nodes.task_item || t === schema.nodes.list_item) {
         inList = true;
         break;
@@ -1466,16 +1471,26 @@ export class EditorConnection {
         //   `/`   — slash command menu (also drives Tab while open).
         keymap(slashKeymap(this.slashCommands)),
         keymap({
-          "Mod-k": toggleLinkCommand(),
+          // Paper-owned chords read their key from the display registry
+          // (shortcuts.ts), so the hint and the binding can't drift.
+          [SHORTCUTS.link.key]: toggleLinkCommand(),
           // @feat strikethrough: Cmd/Ctrl-Shift-X toggles the strike mark
-          "Mod-Shift-x": toggleMark(schema.marks.strike),
+          [SHORTCUTS.strike.key]: toggleMark(schema.marks.strike),
           // @feat highlight: Mod-Shift-h toggles highlight with the last-used color
-          "Mod-Shift-h": toggleHighlight,
-          "Mod-Shift-7": wrapInList(schema.nodes.task_list),
+          [SHORTCUTS.highlight.key]: toggleHighlight,
+          [SHORTCUTS.taskList.key]: wrapInList(schema.nodes.task_list),
           // @feat date: Cmd/Ctrl-; inserts today's date chip, Cmd/Ctrl-Shift-;
           // tomorrow's — no popup (falls through in code blocks).
-          "Mod-;": insertRelativeDateCommand(0),
-          "Mod-Shift-;": insertRelativeDateCommand(1),
+          [SHORTCUTS.dateToday.key]: insertRelativeDateCommand(0),
+          [SHORTCUTS.dateTomorrow.key]: insertRelativeDateCommand(1),
+          // Indent / outdent the list item (task-aware). These shadow
+          // buildKeymap's list_item-only `Mod-]` / `Mod-[`; outside a list
+          // both return false and the key falls through. Deliberately NOT
+          // wrapped in consumeTabInList — that trap is for Tab focus only.
+          // (buildKeymap's `Mod-BracketLeft` → lift is dead: w3c-keyname never
+          // emits "BracketLeft" as a key name, so don't "fix" it into a clash.)
+          [SHORTCUTS.indent.key]: indentListSelection,
+          [SHORTCUTS.outdent.key]: dedentListSelection,
           // Move the cursor's enclosing list_item / task_item up or
           // down within its parent list. Falls through at boundaries
           // so Opt+Arrow still moves the caret out of the list.
@@ -1504,18 +1519,8 @@ export class EditorConnection {
           // list — even when sink / lift can't make progress — and falls
           // through to browser focus-navigation when the cursor is not in
           // any list item.
-          Tab: consumeTabInList(
-            chainCommands(
-              sinkListItem(schema.nodes.task_item),
-              sinkListItem(schema.nodes.list_item),
-            ),
-          ),
-          "Shift-Tab": consumeTabInList(
-            chainCommands(
-              liftListItem(schema.nodes.task_item),
-              liftListItem(schema.nodes.list_item),
-            ),
-          ),
+          Tab: consumeTabInList(indentListSelection),
+          "Shift-Tab": consumeTabInList(dedentListSelection),
         }),
         // Tab navigates between cells when the cursor is inside a table.
         // At the bottom-right cell, Tab appends a new row (tabOrAddRow).
@@ -1526,9 +1531,12 @@ export class EditorConnection {
         // contents (which is what baseKeymap's deleteSelection does on
         // a CellSelection). Returns false outside that case so normal
         // editing keystrokes pass through.
-        // Registered separately from the indent/outdent keymap so cell
-        // navigation wins inside tables; outside, both return false and
-        // the indent keymap gets its turn.
+        // Innermost wins between tables and lists: the indent keymap above
+        // runs first, but `consumeTabInList` declines when the nearest
+        // enclosing cell is closer than the nearest list item (a table nested
+        // in a list item), so Tab reaches this cell navigation. A list nested
+        // inside a table cell indents instead. Outside both, everything
+        // returns false and Tab reaches the browser.
         keymap({
           Tab: tabOrAddRow(),
           "Shift-Tab": goToNextCell(-1),

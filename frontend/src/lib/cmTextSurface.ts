@@ -22,8 +22,9 @@
 import { NodeSelection, Selection, TextSelection } from "prosemirror-state";
 import type { Node as PMNode } from "prosemirror-model";
 import type { EditorView } from "prosemirror-view";
-import { redo, undo } from "prosemirror-history";
+import type { Command } from "prosemirror-state";
 import { schema } from "./schema";
+import { cmNavBindings } from "./cmNavBindings";
 import { computeChange } from "./codeBlockView";
 import {
   type CmCore,
@@ -161,19 +162,14 @@ export class CmTextSurface {
   // ── Nav keymap (arrows/Escape exit, PM-owned undo/redo) ───────────────────
 
   private navKeymap(): KeyBinding[] {
-    return [
-      { key: "ArrowUp", run: () => this.maybeEscape("line", -1) },
-      { key: "ArrowLeft", run: () => this.maybeEscape("char", -1) },
-      { key: "ArrowDown", run: () => this.maybeEscape("line", 1) },
-      { key: "ArrowRight", run: () => this.maybeEscape("char", 1) },
-      { key: "Escape", run: () => this.selectBlockNode() },
-      { key: "Mod-z", run: () => this.runPm(undo) },
-      { key: "Mod-y", run: () => this.runPm(redo), mac: "Cmd-y" },
-      { key: "Mod-Shift-z", run: () => this.runPm(redo) },
-    ];
+    return cmNavBindings({
+      maybeEscape: (unit, dir) => this.maybeEscape(unit, dir),
+      selectBlockNode: () => this.selectBlockNode(),
+      runPm: (command) => this.runPm(command),
+    });
   }
 
-  private runPm(command: typeof undo): boolean {
+  private runPm(command: Command): boolean {
     const ran = command(this.view.state, this.view.dispatch);
     if (ran) this.view.focus();
     return ran;
