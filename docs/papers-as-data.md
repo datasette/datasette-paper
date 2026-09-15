@@ -5,13 +5,8 @@ Paper data lives in Datasette's internal database under tables prefixed
 to the [permissions](permissions/index.md) model — these tables aren't
 exposed for arbitrary SQL browsing by default).
 
-:::{note}
-`README.md`'s "Papers as data" section lists a `_datasette_paper_share` table
-for per-actor grants. That table was dropped by migration `m004` — sharing
-moved to [datasette-acl](https://github.com/datasette/datasette-acl)'s own
-grant tables. The list below reflects the current schema
-(`datasette_paper/migrations.py`).
-:::
+Sharing grants aren't stored here — they live in
+[datasette-acl](https://github.com/datasette/datasette-acl)'s own tables.
 
 ## Tables
 

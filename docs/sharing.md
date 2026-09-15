@@ -24,11 +24,9 @@ effect immediately, including for anyone with the paper open right now: a
 revoked or downgraded collaborator's live connection is disconnected.
 
 :::{note}
-`README.md`'s Sharing section describes three `visibility` levels
-(`private` / `link-view` / `link-edit`) plus a dedicated share table. That
-model was replaced — sharing is now owned by
-[datasette-acl](https://github.com/datasette/datasette-acl), granting the
-Viewer/Editor/Manager roles above instead. See
-[Permissions](permissions/index.md) for the full, current model, including
-how an old deployment's `visibility` values map onto the new roles.
+Older versions used per-paper `visibility` levels (`private` / `link-view` /
+`link-edit`). Sharing is now owned by
+[datasette-acl](https://github.com/datasette/datasette-acl); see
+[Permissions](permissions/index.md) for how old `visibility` values map onto
+the roles above.
 :::
