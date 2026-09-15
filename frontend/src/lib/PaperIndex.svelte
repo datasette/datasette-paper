@@ -1399,6 +1399,9 @@
   }
   .last-editor {
     color: var(--pp-fg-muted);
+    /* Svelte trims the whitespace before this span inside the {#if}, so
+     * "2 hours ago" and "by …" would otherwise run together. */
+    margin-left: 0.3em;
   }
   .tag-filter {
     display: flex;
@@ -1452,10 +1455,13 @@
     color: var(--pp-accent-fg);
     border-color: var(--pp-accent);
   }
+  /* Block-level flex (not inline-flex): an inline-flex box baselines on
+   * the avatar's bottom edge, lifting the name above the row's text. */
   .creator {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 0.4em;
+    white-space: nowrap;
   }
   .creator-avatar {
     width: 1.4em;
@@ -1511,6 +1517,10 @@
       content: attr(data-label) ": ";
       color: var(--pp-fg-muted);
       font-size: 0.85em;
+    }
+    /* Stay inline so it follows the "Created by: " label on one line. */
+    .creator {
+      display: inline-flex;
     }
     td.actions {
       position: absolute;
