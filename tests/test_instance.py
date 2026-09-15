@@ -338,3 +338,245 @@ async def test_registry_evicts_lru(ds_paper, monkeypatch):
     assert doc1.id not in registry._instances
     assert doc2.id in registry._instances
     assert doc3.id in registry._instances
+
+
+@pytest.mark.asyncio
+async def test_concurrent_registry_loads_share_instance_and_write_lock(
+    ds_paper, monkeypatch
+):
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Concurrent load")
+    registry = InstanceRegistry()
+    hydrate_started = asyncio.Event()
+    release_hydrate = asyncio.Event()
+    second_started = asyncio.Event()
+    original_hydrate = Instance.hydrate
+
+    async def paused_hydrate(cls, db, doc_id):
+        hydrate_started.set()
+        await release_hydrate.wait()
+        return await original_hydrate(db, doc_id)
+
+    monkeypatch.setattr(Instance, "hydrate", classmethod(paused_hydrate))
+    first_load = asyncio.create_task(registry.get(db, doc.id))
+    await hydrate_started.wait()
+
+    async def second_load():
+        second_started.set()
+        return await registry.get(db, doc.id)
+
+    second_load_task = asyncio.create_task(second_load())
+    await second_started.wait()
+    release_hydrate.set()
+    first, second = await asyncio.gather(first_load, second_load_task)
+    assert first is second
+
+    # Simultaneous writers must check the same live version under one lock.
+    # Independent instances would both accept steps positioned at version 0.
+    subscriber = await first.subscribe()
+    results = await asyncio.gather(
+        first.add_events(0, 1, "alice", [insert_at(1, "A")]),
+        second.add_events(0, 2, "bob", [insert_at(1, "B")]),
+        return_exceptions=True,
+    )
+    assert sum(isinstance(result, ConflictError) for result in results) == 1
+    assert first.version == 1
+    assert subscriber.qsize() == 1
+    rehydrated = await Instance.hydrate(db, doc.id)
+    assert rehydrated.materialize_live_doc() == first.materialize_live_doc()
+
+
+@pytest.mark.asyncio
+async def test_registry_preserves_live_subscribers_under_cache_pressure(
+    ds_paper, monkeypatch
+):
+    monkeypatch.setattr(instance_module, "MAX_INSTANCES", 1)
+    _, db = ds_paper
+    doc1 = await db.insert_doc(name="Open editor")
+    doc2 = await db.insert_doc(name="Another document")
+    registry = InstanceRegistry()
+    first = await registry.get(db, doc1.id)
+    subscriber = await first.subscribe(client_id=1)
+
+    await registry.get(db, doc2.id)
+    writer = await registry.get(db, doc1.id)
+    await writer.add_events(0, 2, "bob", [insert_at(1, "B")])
+
+    assert subscriber.qsize() == 1
+    assert writer is first
+    assert subscriber.get_nowait()["version"] == 1
+
+    # Once the editor disconnects, the document is eligible for eviction.
+    first.unsubscribe(subscriber)
+    await registry.get(db, doc2.id)
+    assert doc1.id not in registry._instances
+    assert len(registry._instances) == 1
+
+
+@pytest.mark.asyncio
+async def test_registry_preserves_inflight_writes_under_cache_pressure(
+    ds_paper, monkeypatch
+):
+    monkeypatch.setattr(instance_module, "MAX_INSTANCES", 1)
+    _, db = ds_paper
+    doc1 = await db.insert_doc(name="Write in flight")
+    doc2 = await db.insert_doc(name="Another document")
+    registry = InstanceRegistry()
+    first = await registry.get(db, doc1.id)
+    write_started = asyncio.Event()
+    release_write = asyncio.Event()
+    original_write = first._persist_and_broadcast
+
+    async def paused_write(*args):
+        write_started.set()
+        await release_write.wait()
+        return await original_write(*args)
+
+    monkeypatch.setattr(first, "_persist_and_broadcast", paused_write)
+    writer = asyncio.create_task(first.add_events(0, 1, "alice", [insert_at(1, "A")]))
+    await write_started.wait()
+    try:
+        await registry.get(db, doc2.id)
+        second = await registry.get(db, doc1.id)
+        assert second is first
+    finally:
+        release_write.set()
+        await writer
+
+    with pytest.raises(ConflictError):
+        await second.add_events(0, 2, "bob", [insert_at(1, "B")])
+
+
+@pytest.mark.asyncio
+async def test_registry_reuses_evicted_instance_still_held_by_a_caller(
+    ds_paper, monkeypatch
+):
+    monkeypatch.setattr(instance_module, "MAX_INSTANCES", 1)
+    _, db = ds_paper
+    doc1 = await db.insert_doc(name="Caller about to write")
+    doc2 = await db.insert_doc(name="Another document")
+    registry = InstanceRegistry()
+    first = await registry.get(db, doc1.id)
+    await registry.get(db, doc2.id)
+    assert doc1.id not in registry._instances
+
+    # A caller can retain an instance without holding its write lock yet.
+    # Reusing the doc while that caller is suspended must not create a
+    # second authority that lets its stale version-0 write through later.
+    second = await registry.get(db, doc1.id)
+    await second.add_events(0, 2, "bob", [insert_at(1, "B")])
+    with pytest.raises(ConflictError):
+        await first.add_events(0, 1, "alice", [insert_at(1, "A")])
+    assert first.materialize_live_doc() == second.materialize_live_doc()
+
+
+@pytest.mark.asyncio
+async def test_registry_retries_after_failed_hydrate(ds_paper, monkeypatch):
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Flaky hydrate")
+    registry = InstanceRegistry()
+    original_hydrate = Instance.hydrate
+    calls = 0
+
+    async def flaky_hydrate(cls, db, doc_id):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("db hiccup")
+        return await original_hydrate(db, doc_id)
+
+    monkeypatch.setattr(Instance, "hydrate", classmethod(flaky_hydrate))
+    with pytest.raises(RuntimeError):
+        await registry.get(db, doc.id)
+    # The failed in-flight hydrate must not be memoized.
+    inst = await registry.get(db, doc.id)
+    assert inst.doc_id == doc.id
+    assert not registry._hydrating
+
+
+@pytest.mark.asyncio
+async def test_registry_cancelled_caller_does_not_cancel_shared_hydrate(
+    ds_paper, monkeypatch
+):
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Cancelled caller")
+    registry = InstanceRegistry()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    original_hydrate = Instance.hydrate
+
+    async def paused_hydrate(cls, db, doc_id):
+        started.set()
+        await release.wait()
+        return await original_hydrate(db, doc_id)
+
+    monkeypatch.setattr(Instance, "hydrate", classmethod(paused_hydrate))
+    doomed = asyncio.create_task(registry.get(db, doc.id))
+    await started.wait()
+    survivor = asyncio.create_task(registry.get(db, doc.id))
+    await asyncio.sleep(0)
+    # A client disconnect cancels one request mid-hydrate.
+    doomed.cancel()
+    release.set()
+    inst = await asyncio.wait_for(survivor, timeout=5)
+    assert inst.doc_id == doc.id
+    assert registry._instances[doc.id] is inst
+
+
+@pytest.mark.asyncio
+async def test_registry_discard_cancels_inflight_hydrate(ds_paper, monkeypatch):
+    """A permanent delete mid-hydrate must not publish the doomed instance.
+
+    SQLite can hand the deleted rowid to a new document, so a hydrate that
+    lands after ``discard`` would serve the old doc under the new id.
+    """
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Deleted while loading")
+    registry = InstanceRegistry()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    original_hydrate = Instance.hydrate
+
+    async def paused_hydrate(cls, db, doc_id):
+        started.set()
+        await release.wait()
+        return await original_hydrate(db, doc_id)
+
+    monkeypatch.setattr(Instance, "hydrate", classmethod(paused_hydrate))
+    loader = asyncio.create_task(registry.get(db, doc.id))
+    await started.wait()
+
+    assert registry.discard(doc.id) is None
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await loader
+    assert doc.id not in registry._instances
+    assert not registry._hydrating
+
+    # The next request for the id hydrates afresh.
+    monkeypatch.setattr(Instance, "hydrate", original_hydrate)
+    fresh = await registry.get(db, doc.id)
+    assert fresh.doc_id == doc.id
+
+
+@pytest.mark.asyncio
+async def test_registry_peek_never_hydrates(ds_paper):
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Peek")
+    registry = InstanceRegistry()
+    assert registry.peek(doc.id) is None
+    assert not registry._hydrating
+    inst = await registry.get(db, doc.id)
+    assert registry.peek(doc.id) is inst
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [(ConflictError, 409), (BadVersionError, 400), (GoneError, 410)],
+)
+def test_protocol_errors_carry_http_status(error, status):
+    exc = error("detail")
+    assert exc.status == status
+    assert str(exc) == "detail"
+    assert str(error()) == error.reason
+    assert InvalidStepError(2, "boom").status == 422

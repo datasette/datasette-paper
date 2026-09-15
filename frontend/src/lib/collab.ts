@@ -156,19 +156,33 @@ export interface DocStatePayload {
  * violation. Carries the failing step's 1-based version and the
  * underlying error message. See `EditorConnectionOpts.onStepError`.
  */
-export interface StepApplyError {
-  /** Server-assigned version of the step that failed. */
-  version: number;
+/** A step the editor could not apply. The doc stays at the last good
+ * version and is read-only until the history is repaired. */
+export interface StepFailure {
   /** Where the failure happened.
    *
    * - `bootstrap`: replaying history on initial mount.
    * - `sse`: applying a step batch broadcast from the server.
-   * - `send`: server rejected a POST /events with 422 (invalid_step).
+   * - `send`: server rejected a POST /events with 422 (invalid_step), or
+   *   our accepted batch could not be confirmed locally.
    */
   phase: "bootstrap" | "sse" | "send";
+  /** Server-assigned version of the step that failed. */
+  version: number;
   /** Error message from ProseMirror (or "StepResult.failed" text). */
   message: string;
 }
+
+/** Server history expired while this editor had unsaved edits, so they
+ * can't be rebased. Nothing failed to apply, so there is no version. */
+export interface HistoryGone {
+  phase: "reset";
+  /** User-facing instruction shown in the banner. */
+  message: string;
+}
+
+/** Why the editor locked itself read-only. Narrow on `phase`. */
+export type StepApplyError = StepFailure | HistoryGone;
 
 export interface ConnectionOpts {
   /** Document ID (used in API URL path). */
@@ -293,6 +307,53 @@ interface BootstrapData {
 interface SendableResult {
   steps: Step[];
   clientID: number | string;
+}
+
+interface StepBatch {
+  steps: Step[];
+  clientIDs: Array<number | string>;
+  version: number;
+}
+
+/** What `receiveBatch` did with a server version interval.
+ * - `applied`: the unseen suffix was dispatched.
+ * - `skipped`: nothing to do (already seen, or the editor is locked).
+ * - `gap`: the batch starts past our version; history must be fetched
+ *   before its positions mean anything. */
+type ReceiveOutcome = "applied" | "skipped" | "gap";
+
+/** Event names on the SSE stream. Mirrors `SSEEvent` in
+ * `datasette_paper/sse.py` — change both sides together. */
+export const SSE_EVENT = {
+  update: "update",
+  ready: "ready",
+  reset: "reset",
+  presence: "presence",
+  stateChanged: "state-changed",
+  renamed: "renamed",
+  permissionsChanged: "permissions-changed",
+} as const;
+
+/** `update` envelope: a step batch and/or ride-along metadata. */
+interface UpdateEvent {
+  steps?: Array<Record<string, unknown>>;
+  clientIDs?: Array<number | string>;
+  /** Server version after this batch. Required to place the batch
+   * against our confirmed doc; a batch without it is dropped. */
+  version: number;
+  users?: number;
+  lastActor?: string | null;
+  lastEditedAt?: string;
+}
+
+/** `ready`: the catch-up backlog (if any) has been flushed. */
+interface ReadyEvent {
+  version: number;
+}
+
+/** `reset`: the requested version fell off the server's step tail. */
+interface ResetEvent {
+  reason: "history_gone";
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -992,6 +1053,19 @@ export class EditorConnection {
   // Tracks in-flight send so we don't double-send
   private sending: boolean = false;
 
+  // POST responses and SSE messages travel independently. A remote batch
+  // can depend on our accepted POST before its response reaches us.
+  private pendingUpdates: StepBatch[] = [];
+  // True from (re)opening the stream until its `ready` event: sends wait
+  // for the catch-up backlog so they go out at the caught-up version.
+  // Only `ready` or start() clears it, which relies on the server and
+  // bundle shipping together.
+  private waitingForSync: boolean = false;
+
+  // Bumped by each start() and by close(), so a bootstrap GET that resolves
+  // after the connection was closed (or superseded) is discarded.
+  private generation: number = 0;
+
   // Unique client ID for this session (random integer)
   private clientID: number;
 
@@ -1101,9 +1175,9 @@ export class EditorConnection {
       this.closeStream();
       if (this.comm !== "detached" && this.view) {
         this.comm = "loaded";
+        this.waitingForSync = true;
         this.openStream();
-        // Flush any unconfirmed steps queued during the offline period.
-        if (sendableSteps(this.view.state)) this._send();
+        // The stream's ready event flushes edits after its backlog lands.
       }
     };
     this.pageHideHandler = () => {
@@ -1192,8 +1266,12 @@ export class EditorConnection {
    * the SSE stream.
    */
   async start(): Promise<void> {
+    if (this.isDetached()) return;
+    const generation = ++this.generation;
     this.comm = "start";
     this.stepError = null;
+    this.pendingUpdates = [];
+    this.waitingForSync = false;
     // A retry that's now running supersedes any pending one.
     if (this.bootstrapTimer !== null) {
       clearTimeout(this.bootstrapTimer);
@@ -1207,13 +1285,14 @@ export class EditorConnection {
         throw err;
       }
       const boot: BootstrapData = await resp.json();
+      if (generation !== this.generation || this.isDetached()) return;
       this.report.success();
       this.backOff = 0;
       this._loaded(boot);
     } catch (err) {
       const e = err instanceof Error ? err : new Error(String(err));
       // close() raced the in-flight GET — stay torn down, don't reschedule.
-      if (this.isDetached()) return;
+      if (generation !== this.generation || this.isDetached()) return;
       const status = (e as Error & { status?: number }).status;
       // 4xx (other than 408/429) are permanent client errors — not-found,
       // forbidden, bad request — so retrying just fails the same way. Surface
@@ -1689,22 +1768,8 @@ export class EditorConnection {
     const es = new EventSource(url);
     this.eventSource = es;
 
-    const handleMessage = (evt: MessageEvent) => {
+    const handleUpdate = (data: UpdateEvent) => {
       if (!this.view) return;
-      let data: {
-        steps?: Array<Record<string, unknown>>;
-        clientIDs?: Array<number | string>;
-        version?: number;
-        users?: number;
-        lastActor?: string | null;
-        lastEditedAt?: string;
-      };
-      try {
-        data = JSON.parse(evt.data);
-      } catch {
-        // Malformed envelope — drop.
-        return;
-      }
 
       // A well-formed message proves the stream reconnected and is healthy.
       // This is the confirmed-reconnect signal that clears the recover
@@ -1738,112 +1803,136 @@ export class EditorConnection {
       if (this.stepError) return;
 
       if (!data.steps || data.steps.length === 0) return;
+      // The server stamps every batch with its post-batch version. Without
+      // it the batch can't be placed: a deferred batch would be guessed
+      // against a doc that moves before it is applied. Drop rather than
+      // guess — the next reconnect backlog carries the same steps.
+      if (typeof data.version !== "number") return;
 
       // `receiveTransaction` builds a single tr from all steps. Wrap the
       // whole construct + dispatch in a try so a single bad remote step
       // doesn't crash the page — surface the failure and stay subscribed.
       try {
-        const steps = data.steps.map((s) => Step.fromJSON(schema, s));
-        const tr = receiveTransaction(
-          this.view.state,
-          steps,
-          data.clientIDs ?? [],
-        );
-        this.view.dispatch(tr);
+        const batch: StepBatch = {
+          steps: data.steps.map((s) => Step.fromJSON(schema, s)),
+          clientIDs: data.clientIDs ?? [],
+          version: data.version,
+        };
+        if (this.sending) {
+          this.pendingUpdates.push(batch);
+        } else if (this.receiveBatch(batch) === "gap") {
+          // A gap must be filled from server history before these positions
+          // can be used. Never apply a future batch to an older document.
+          this.waitingForSync = true;
+          this.openStream();
+        }
       } catch (err) {
         // `version` in the SSE envelope is the post-batch server version.
         // Use it directly for the error report so the user / repair tool
         // can find the offending step.
         this.reportStepError({
-          version:
-            typeof data.version === "number"
-              ? data.version
-              : getVersion(this.view.state) + (data.steps.length ?? 0),
+          version: data.version,
           phase: "sse",
           message: err instanceof Error ? err.message : String(err),
         });
       }
     };
 
-    es.addEventListener("message", handleMessage);
-    es.addEventListener("update", handleMessage as EventListener);
+    // Unnamed `message` frames are treated as updates too.
+    this.listen<UpdateEvent>(es, "message", handleUpdate);
+    this.listen<UpdateEvent>(es, SSE_EVENT.update, handleUpdate);
 
-    const handlePresence = (evt: MessageEvent) => {
+    this.listen<ReadyEvent>(es, SSE_EVENT.ready, () => {
       if (!this.view) return;
-      try {
-        const data = JSON.parse(evt.data) as { users: RemoteUser[] };
-        if (Array.isArray(data.users)) {
-          setRemoteUsers(this.view, data.users, this.clientID, this.selfActor);
-        }
-      } catch {
-        // ignore malformed
-      }
-    };
-    es.addEventListener("presence", handlePresence as EventListener);
-
-    const handleStateChanged = (evt: MessageEvent) => {
-      try {
-        const data = JSON.parse(evt.data) as Partial<DocStatePayload>;
-        if (data.state !== "active" && data.state !== "archived" && data.state !== "trashed") {
-          return;
-        }
-        this.opts.onDocState?.({
-          state: data.state,
-          archived_at: data.archived_at ?? null,
-          trashed_at: data.trashed_at ?? null,
-          delete_at: data.delete_at ?? null,
+      this.waitingForSync = false;
+      this.backOff = 0;
+      this.report.success();
+      this._send();
+    });
+    this.listen<ResetEvent>(es, SSE_EVENT.reset, () => {
+      if (!this.view) return;
+      if (sendableSteps(this.view.state)) {
+        // History needed to rebase this draft is gone. Keep it available
+        // for copying instead of silently destroying it during bootstrap.
+        this.closeStream();
+        this.pendingUpdates = [];
+        this.reportStepError({
+          phase: "reset",
+          message: "This document changed while you were disconnected. Copy your unsaved changes before reloading.",
         });
-      } catch {
-        // ignore malformed
+      } else {
+        this.restart();
       }
-    };
-    es.addEventListener("state-changed", handleStateChanged as EventListener);
+    });
 
-    const handleRenamed = (evt: MessageEvent) => {
-      try {
-        const data = JSON.parse(evt.data) as {
-          name?: unknown;
-          updated_at?: unknown;
-        };
-        if (typeof data.name !== "string" || !data.name) return;
-        this.opts.onRenamed?.(
-          data.name,
-          typeof data.updated_at === "string" ? data.updated_at : "",
-        );
-      } catch {
-        // ignore malformed
+    this.listen<{ users?: unknown }>(es, SSE_EVENT.presence, (data) => {
+      if (!this.view) return;
+      if (Array.isArray(data.users)) {
+        setRemoteUsers(this.view, data.users as RemoteUser[], this.clientID, this.selfActor);
       }
-    };
-    es.addEventListener("renamed", handleRenamed as EventListener);
+    });
 
-    const handlePermissionsChanged = (evt: MessageEvent) => {
+    this.listen<Partial<DocStatePayload>>(es, SSE_EVENT.stateChanged, (data) => {
+      if (data.state !== "active" && data.state !== "archived" && data.state !== "trashed") {
+        return;
+      }
+      this.opts.onDocState?.({
+        state: data.state,
+        archived_at: data.archived_at ?? null,
+        trashed_at: data.trashed_at ?? null,
+        delete_at: data.delete_at ?? null,
+      });
+    });
+
+    this.listen<{ name?: unknown; updated_at?: unknown }>(es, SSE_EVENT.renamed, (data) => {
+      if (typeof data.name !== "string" || !data.name) return;
+      this.opts.onRenamed?.(
+        data.name,
+        typeof data.updated_at === "string" ? data.updated_at : "",
+      );
+    });
+
+    this.listen<Partial<BootstrapPermissions>>(es, SSE_EVENT.permissionsChanged, (data) => {
       // Server pushes ``{canEdit, locked}`` after a lock/unlock; merge
       // into the cached full block and re-fire so PaperApp's
       // ``onPermissions`` handler flips the editor into the right mode
       // without a reconnect.
       if (!this.lastPermissions) return;
-      try {
-        const data = JSON.parse(evt.data) as Partial<BootstrapPermissions>;
-        const merged: BootstrapPermissions = {
-          ...this.lastPermissions,
-          ...data,
-        };
-        this.lastPermissions = merged;
-        this.opts.onPermissions?.(merged);
-      } catch {
-        // ignore malformed
-      }
-    };
-    es.addEventListener(
-      "permissions-changed",
-      handlePermissionsChanged as EventListener,
-    );
+      const merged: BootstrapPermissions = {
+        ...this.lastPermissions,
+        ...data,
+      };
+      this.lastPermissions = merged;
+      this.opts.onPermissions?.(merged);
+    });
 
     es.addEventListener("error", () => {
+      if (this.eventSource !== es) return;
       this.closeStream();
       if (this.comm !== "detached") {
         this.recover(new Error("SSE stream error"));
       }
+    });
+  }
+
+  /**
+   * Register a JSON-payload listener on `es`. Events from a stream that
+   * has since been replaced are ignored (each reopen creates a new
+   * EventSource; the old one may still fire while closing), and a
+   * malformed envelope is dropped rather than thrown into the page.
+   */
+  private listen<T>(es: EventSource, name: string, handler: (data: T) => void): void {
+    es.addEventListener(name, (evt) => {
+      if (this.eventSource !== es) return;
+      let data: unknown;
+      try {
+        data = JSON.parse((evt as MessageEvent).data);
+      } catch {
+        return;
+      }
+      // `null` or a bare scalar parses fine but has no fields to read.
+      if (data === null || typeof data !== "object") return;
+      handler(data as T);
     });
   }
 
@@ -1852,6 +1941,78 @@ export class EditorConnection {
       this.eventSource.close();
       this.eventSource = null;
     }
+  }
+
+  /** Apply only the unconfirmed suffix of a server version interval. Both
+   * reconnect backlogs and POST receipts may overlap steps already seen. */
+  private receiveBatch(batch: StepBatch): ReceiveOutcome {
+    if (!this.view || this.stepError) return "skipped";
+    const version = getVersion(this.view.state);
+    const fromVersion = batch.version - batch.steps.length;
+    if (fromVersion > version) return "gap";
+    const skip = version - fromVersion;
+    if (skip >= batch.steps.length) return "skipped";
+    this.view.dispatch(receiveTransaction(
+      this.view.state,
+      batch.steps.slice(skip),
+      batch.clientIDs.slice(skip),
+    ));
+    return "applied";
+  }
+
+  /** Apply batches held while a POST was in flight. Returns true when a
+   * gap made it reopen the stream, so callers don't open a second one. */
+  private drainPendingUpdates(): boolean {
+    const updates = this.pendingUpdates;
+    this.pendingUpdates = [];
+    for (const batch of updates) {
+      try {
+        if (this.receiveBatch(batch) === "gap") {
+          this.waitingForSync = true;
+          this.openStream();
+          return true;
+        }
+      } catch (err) {
+        this.reportStepError({
+          version: batch.version,
+          phase: "sse",
+          message: err instanceof Error ? err.message : String(err),
+        });
+        return false;
+      }
+    }
+    return false;
+  }
+
+  /** True when a new POST /events may go out now. */
+  private canSend(): boolean {
+    return (
+      this.view !== null &&
+      !this.sending &&
+      this.comm === "loaded" &&
+      !this.waitingForSync &&
+      !this.stepError
+    );
+  }
+
+  /**
+   * Leave the in-flight state of `_send`. Every response path goes through
+   * here exactly once, choosing what happens to remote batches held behind
+   * the POST: `drain` rebases them (the server accepted or conflicted, so
+   * they still apply); `drop` discards them (a reconnect backlog will
+   * resend them). Draining runs BEFORE `sending` clears so dispatches from
+   * the drain can't start a nested send at a half-rebased version.
+   * Returns whether the drain reopened the stream.
+   */
+  private endSend(pending: "drain" | "drop"): boolean {
+    let reopened = false;
+    if (pending === "drain") {
+      reopened = this.drainPendingUpdates();
+    } else {
+      this.pendingUpdates = [];
+    }
+    this.sending = false;
+    return reopened;
   }
 
   // ── Transaction dispatch ───────────────────────────────────────────────────
@@ -1870,11 +2031,7 @@ export class EditorConnection {
     if (tr.docChanged) this.sourceStore.sync(newState.doc);
 
     // If there are pending steps and we're not already sending, kick off send
-    if (
-      sendableSteps(newState) &&
-      !this.sending &&
-      this.comm !== "detached"
-    ) {
+    if (sendableSteps(newState) && this.canSend()) {
       this._send();
     }
 
@@ -1926,9 +2083,11 @@ export class EditorConnection {
   }
 
   private async _send(): Promise<void> {
-    if (!this.view || this.sending) return;
+    if (!this.canSend()) return;
 
-    const sendable = sendableSteps(this.view.state) as SendableResult | null;
+    const view = this.view!;
+    const version = getVersion(view.state);
+    const sendable = sendableSteps(view.state) as SendableResult | null;
     if (!sendable) return;
 
     this.sending = true;
@@ -1938,8 +2097,7 @@ export class EditorConnection {
 
     try {
       const resp = await this.postJson("/events", body);
-
-      this.sending = false;
+      if (this.view !== view || this.isDetached()) return;
 
       if (resp.ok) {
         // 200 — clear unconfirmed buffer
@@ -1953,37 +2111,48 @@ export class EditorConnection {
           actor: this.selfActor,
           at: new Date().toISOString(),
         });
-        if (this.view) {
-          const tr = receiveTransaction(
-            this.view.state,
-            sendable.steps,
-            new Array(sendable.steps.length).fill(sendable.clientID)
-          );
-          this.view.dispatch(tr);
+        const ack: StepBatch = {
+          steps: sendable.steps,
+          clientIDs: new Array(sendable.steps.length).fill(sendable.clientID),
+          version: version + sendable.steps.length,
+        };
+        try {
+          this.receiveBatch(ack);
+        } catch (err) {
+          // The server accepted the batch but confirming it locally
+          // failed. Letting this fall into the transport `catch` would
+          // `recover()` and resend the same steps at a stale version
+          // forever (409 → backlog → same throw). Lock the editor like
+          // any other unapplicable step instead.
+          this.endSend("drop");
           this.comm = "loaded";
-
-          // If more steps queued up while we were sending, send again
-          if (sendableSteps(this.view.state)) {
-            this._send();
-          }
+          this.reportStepError({
+            version: ack.version,
+            phase: "send",
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return;
         }
-      // @feat collab-sse: 409 stale: reopen stream, deferred resend at new version
+        // Keep sends blocked until every queued remote step has been
+        // rebased. Dispatching the acknowledgement can itself create more
+        // sendable steps, but those must use the final confirmed version.
+        this.endSend("drain");
+        this.comm = "loaded";
+        // A stream failure may have started recovery while this POST was
+        // pending. Its timer must not be the only way to reopen now that
+        // the successful response has moved us out of `recover`.
+        if (!this.eventSource && !this.stepError) this.openStream();
+        this._send();
+      // @feat collab-sse: 409 stale: catch up fully before resending at the new version
       } else if (resp.status === 409) {
-        // Version conflict — reopen stream to catch up. Retry send on the
-        // next animation frame: by then prior in-flight SSE broadcasts will
-        // have applied (advancing local version), so the retried POST sends
-        // at the correct version. Without this, broadcasts that arrived
-        // during the in-flight POST were skipped (sending=true), leaving
-        // the unconfirmed steps stuck after 409 fired.
+        const reopened = this.endSend("drain");
         this.backOff = 0;
         this.comm = "loaded";
-        this.openStream();
-        if (this.view && sendableSteps(this.view.state)) {
-          // Defer one tick so any pending SSE messages flush first.
-          setTimeout(() => {
-            if (this.view && sendableSteps(this.view.state)) this._send();
-          }, 0);
-        }
+        // A zero-delay retry can beat (and repeatedly cancel) the backlog.
+        // The server's ready event is the barrier, including when the
+        // queued updates already brought us up to date.
+        this.waitingForSync = true;
+        if (!reopened) this.openStream();
       } else if (resp.status === 410) {
         // Document replaced — full restart
         this.restart();
@@ -1999,8 +2168,10 @@ export class EditorConnection {
         } catch {
           // Fall through with empty info.
         }
+        if (this.view !== view || this.isDetached()) return;
+        this.endSend("drop");
         this.reportStepError({
-          version: getVersion(this.view!.state) + (info.step_index ?? 0) + 1,
+          version: version + (info.step_index ?? 0) + 1,
           phase: "send",
           message: info.message ?? "invalid step",
         });
@@ -2011,13 +2182,15 @@ export class EditorConnection {
           ),
         );
       } else {
+        this.endSend("drop");
         // Other server error — backoff
         const err = new Error("Send failed: " + resp.status);
         (err as Error & { status: number }).status = resp.status;
         this.recover(err);
       }
     } catch (err) {
-      this.sending = false;
+      if (this.view !== view || this.isDetached()) return;
+      this.endSend("drop");
       this.recover(err instanceof Error ? err : new Error(String(err)));
     }
   }
@@ -2028,12 +2201,14 @@ export class EditorConnection {
    * Exponential backoff, then reopen the SSE stream.
    */
   recover(err: Error): void {
+    if (this.isDetached()) return;
     const newBackOff = this.backOff ? Math.min(this.backOff * 2, 6e4) : 200;
     if (newBackOff > 1000 && this.backOff < 1000) {
       this.report.delay(err);
     }
     this.backOff = newBackOff;
     this.comm = "recover";
+    this.waitingForSync = true;
     this.closeStream();
 
     setTimeout(() => {
@@ -2053,6 +2228,7 @@ export class EditorConnection {
   // ── Restart ───────────────────────────────────────────────────────────────
 
   restart(): void {
+    if (this.isDetached()) return;
     this.closeStream();
     this.sending = false;
     if (this.view) {
@@ -2087,7 +2263,9 @@ export class EditorConnection {
 
   /** Tear down cleanly. Idempotent. */
   close(): void {
+    this.generation++;
     this.comm = "detached";
+    this.pendingUpdates = [];
     this.closeStream();
     this.removeNetworkListeners();
     if (this.snapshotTimer !== null) {

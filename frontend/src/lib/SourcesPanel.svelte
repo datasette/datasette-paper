@@ -13,6 +13,7 @@
    */
   import { untrack } from "svelte";
   import type { EditorView } from "prosemirror-view";
+  import type { Node as PMNode } from "prosemirror-model";
   import { schema } from "./schema";
   import { normalizeSourceName } from "./sourceBlockView";
   import { listQueryableDatabases, runSqlQuery, type SqlResult } from "./sqlQuery";
@@ -37,7 +38,21 @@
     sourceStore?: SourceStore | null;
   } = $props();
 
-  type Row = { name: string | null; db: string | null; sql: string; pos: number };
+  type Row = { name: string | null; db: string | null; sql: string; node: PMNode; key: string };
+
+  // Row keys follow the source node, not its position, so an edit above a
+  // source doesn't remount every row below it. PM may reuse one node object
+  // at several positions, so the occurrence index keeps keys unique.
+  const nodeIds = new WeakMap<PMNode, number>();
+  let nextNodeId = 0;
+  function nodeId(node: PMNode): number {
+    let id = nodeIds.get(node);
+    if (id === undefined) {
+      id = nextNodeId++;
+      nodeIds.set(node, id);
+    }
+    return id;
+  }
 
   // Capture the host's initial preference once; toggling is local thereafter.
   // Embedded: always open (the rail owns visibility, so there's no toggle here).
@@ -73,13 +88,19 @@
     void tick;
     if (!view) return [];
     const out: Row[] = [];
-    view.state.doc.descendants((node, pos) => {
+    // Scratch counter rebuilt on every derive; never read reactively.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const seen = new Map<PMNode, number>();
+    view.state.doc.descendants((node) => {
       if (node.type.name === "source") {
+        const occurrence = seen.get(node) ?? 0;
+        seen.set(node, occurrence + 1);
         out.push({
           name: node.attrs.name ?? null,
           db: node.attrs.db ?? null,
           sql: node.textContent,
-          pos,
+          node,
+          key: `${nodeId(node)}:${occurrence}`,
         });
         return false;
       }
@@ -151,17 +172,18 @@
     return `${cols} value${cols === 1 ? "" : "s"}, ${usedPart}`;
   }
 
-  // Inline editor state. `editingPos === null` while adding; a number while
-  // editing an existing source; `undefined` when the form is closed.
-  let editingPos = $state<number | null | undefined>(undefined);
+  // PM nodes are immutable: keep the original node so unrelated edits can
+  // move it, and edits to the source itself invalidate this draft's target.
+  // null means adding; undefined means the form is closed.
+  let editingSource = $state.raw<PMNode | null | undefined>(undefined);
+  let saveError = $state("");
   let draftName = $state("");
   let draftDb = $state<string>("");
   let draftSql = $state("");
   let probe = $state<SqlResult | null>(null);
   let probing = $state(false);
-  // Deleting is two-step: the trash icon arms a per-row confirmation (holds the
-  // source's pos) rather than deleting immediately.
-  let confirmDeletePos = $state<number | null>(null);
+  // Keep confirmation attached to the source even if other edits shift rows.
+  let confirmDeleteSource = $state.raw<PMNode | null>(null);
 
   // @feat source: the panel's SQL field upgrades from a textarea to a
   // standalone CM editor once the lazy CM chunk resolves; the draft survives
@@ -208,29 +230,32 @@
   }
 
   function openAdd(): void {
-    editingPos = null;
+    editingSource = null;
+    saveError = "";
     draftName = "";
     draftDb = dbs[0] ?? "";
     draftSql = "";
     probe = null;
-    confirmDeletePos = null;
+    confirmDeleteSource = null;
     // The mount effect keys on the host element, so switching rows while the
     // form stays open doesn't recreate the field — push the new draft in.
     sqlField?.setValue(draftSql);
   }
 
   function openEdit(s: Row): void {
-    editingPos = s.pos;
+    editingSource = s.node;
+    saveError = "";
     draftName = s.name ?? "";
     draftDb = s.db ?? "";
     draftSql = s.sql;
     probe = null;
-    confirmDeletePos = null;
+    confirmDeleteSource = null;
     sqlField?.setValue(draftSql);
   }
 
   function closeForm(): void {
-    editingPos = undefined;
+    editingSource = undefined;
+    saveError = "";
     probe = null;
   }
 
@@ -241,22 +266,22 @@
   }
 
   function save(): void {
-    if (!view) return;
+    if (!view || editingSource === undefined) return;
     const name = normalizeSourceName(draftName) || null;
     const db = draftDb || null;
     const content = draftSql ? [schema.text(draftSql)] : [];
     const node = schema.nodes.source.create({ name, db }, content);
     const { state } = view;
-    if (editingPos == null) {
+    if (editingSource === null) {
       // Append a new source at the end of the doc.
       view.dispatch(state.tr.insert(state.doc.content.size, node).scrollIntoView());
     } else {
-      const existing = state.doc.nodeAt(editingPos);
-      if (existing && existing.type.name === "source") {
-        view.dispatch(
-          state.tr.replaceWith(editingPos, editingPos + existing.nodeSize, node),
-        );
+      const pos = currentSourcePos(editingSource);
+      if (pos === null) {
+        saveError = "This source changed or was removed. Reopen it to edit the latest version.";
+        return;
       }
+      view.dispatch(state.tr.replaceWith(pos, pos + editingSource.nodeSize, node));
     }
     view.focus();
     closeForm();
@@ -265,13 +290,24 @@
   function del(s: Row): void {
     if (!view) return;
     const { state } = view;
-    const node = state.doc.nodeAt(s.pos);
-    if (node && node.type.name === "source") {
-      view.dispatch(state.tr.delete(s.pos, s.pos + node.nodeSize));
+    const pos = currentSourcePos(s.node);
+    if (pos !== null) {
+      view.dispatch(state.tr.delete(pos, pos + s.node.nodeSize));
       view.focus();
     }
-    confirmDeletePos = null;
-    if (editingPos === s.pos) closeForm();
+    confirmDeleteSource = null;
+    if (editingSource === s.node) closeForm();
+  }
+
+  function currentSourcePos(source: PMNode): number | null {
+    const matches: number[] = [];
+    view?.state.doc.descendants((node, pos) => {
+      if (node === source) matches.push(pos);
+      return node.type.name !== "source";
+    });
+    // Reused node objects can occur more than once; never guess which copy
+    // was intended. A changed/deleted source also has no unambiguous target.
+    return matches.length === 1 ? matches[0] : null;
   }
 </script>
 
@@ -317,7 +353,7 @@
         </div>
       {:else}
         <ul class="sources-panel-list">
-          {#each sources as s (s.pos)}
+          {#each sources as s (s.key)}
             <li class="sources-panel-item">
               <div class="sources-panel-item-head">
                 <span class="sources-panel-name" title={s.name ?? "(unnamed)"}>
@@ -339,7 +375,7 @@
                     class="icon-btn"
                     aria-label="Delete source"
                     title="Delete source"
-                    onclick={() => (confirmDeletePos = s.pos)}>{@render icon("trash3")}</button
+                    onclick={() => (confirmDeleteSource = s.node)}>{@render icon("trash3")}</button
                   >
                 </span>
               </div>
@@ -353,10 +389,10 @@
               <span class="sources-panel-usage" class:is-unused={isUnused(s)}
                 >{usageLabel(s)}</span
               >
-              {#if confirmDeletePos === s.pos}
+              {#if confirmDeleteSource === s.node}
                 <div class="sources-panel-confirm">
                   <span class="sources-panel-confirm-text">Delete this source?</span>
-                  <button type="button" onclick={() => (confirmDeletePos = null)}>Cancel</button>
+                  <button type="button" onclick={() => (confirmDeleteSource = null)}>Cancel</button>
                   <button type="button" class="danger" onclick={() => del(s)}>Delete</button>
                 </div>
               {/if}
@@ -365,7 +401,7 @@
         </ul>
       {/if}
 
-      {#if editingPos === undefined}
+      {#if editingSource === undefined}
         <button type="button" class="sources-panel-add" onclick={openAdd}>+ Add source</button>
       {:else}
         <div class="sources-panel-form">
@@ -399,6 +435,9 @@
             <button type="button" onclick={closeForm}>Cancel</button>
             <button type="button" class="primary" onclick={save}>Save</button>
           </div>
+          {#if saveError}
+            <div class="sources-panel-probe is-error" role="alert">{saveError}</div>
+          {/if}
           {#if probe}
             <div class="sources-panel-probe" class:is-error={probe.status !== "ok"}>
               {#if probe.status === "ok"}

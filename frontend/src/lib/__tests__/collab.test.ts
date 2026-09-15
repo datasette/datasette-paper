@@ -443,6 +443,213 @@ describe("send() 200 response", () => {
   });
 });
 
+describe("collaboration request ordering", () => {
+  function deferredResponse() {
+    let resolve!: (response: Response) => void;
+    const promise = new Promise<Response>((done) => { resolve = done; });
+    return { promise, resolve };
+  }
+
+  function response(status: number) {
+    return { ok: status === 200, status, json: async () => ({}) } as Response;
+  }
+
+  function insert(from: number, text: string) {
+    return {
+      stepType: "replace", from, to: from,
+      slice: { content: [{ type: "text", text }] },
+    };
+  }
+
+  async function session() {
+    const pending = deferredResponse();
+    const posts: Array<{ version: number; clientID: number; steps: unknown[] }> = [];
+    globalThis.fetch = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url.endsWith("/events") && init?.method === "POST") {
+        posts.push(JSON.parse(init.body as string));
+        return posts.length === 1 ? pending.promise : new Promise(() => {});
+      }
+      return Promise.resolve({ ok: true, status: 200, json: async () => BOOTSTRAP });
+    });
+    const errors: StepApplyError[] = [];
+    const conn = new EditorConnection({ ...makeOpts(makeEl()), onStepError: (e) => errors.push(e) });
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    return { conn, pending, posts, errors };
+  }
+
+  it("waits for our confirmation before applying a collaborator's dependent step", async () => {
+    const { conn, pending, errors } = await session();
+    try {
+      const view = conn.view!;
+      // Server accepts HelloAAAA at v6. Another editor then appends B at
+      // position 10, which does not exist in our confirmed v5 document.
+      view.dispatch(view.state.tr.insertText("AAAA", 6));
+      MockEventSource.instances[0].dispatchEvent("update", JSON.stringify({
+        version: 7, steps: [insert(10, "B")], clientIDs: [99999],
+      }));
+      pending.resolve(response(200));
+      await waitFor(() => expect(getVersion(view.state)).toBe(7));
+      expect(errors).toEqual([]);
+      expect(view.state.doc.textContent).toBe("HelloAAAAB");
+      expect(sendableSteps(view.state)).toBeNull();
+    } finally { conn.close(); }
+  });
+
+  it("locks the editor when confirming an accepted batch fails, instead of resending it", async () => {
+    const { conn, pending, posts, errors } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      expect(posts).toHaveLength(1);
+      // Stand-in for a confirmation transaction that cannot be applied.
+      // Before the fix this fell into the transport catch → recover() →
+      // resend at the stale version → 409 → backlog → same throw, forever.
+      vi.spyOn(view, "dispatch").mockImplementationOnce(() => {
+        throw new Error("ack boom");
+      });
+      pending.resolve(response(200));
+      await waitFor(() => expect(errors).toHaveLength(1));
+      expect(errors[0]).toEqual({ version: 6, phase: "send", message: "ack boom" });
+      expect(view.editable).toBe(false);
+      view.dispatch(view.state.tr.insertText("B", 7));
+      await new Promise((done) => setTimeout(done, 20));
+      expect(posts).toHaveLength(1);
+    } finally { conn.close(); }
+  });
+
+  it.each(["before", "after"])("confirms a replayed own batch only once when backlog arrives %s the POST reply", async (order) => {
+    const { conn, pending, posts, errors } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      conn.openStream();
+      const es = MockEventSource.instances.at(-1)!;
+      const backlog = () => es.dispatchEvent("update", JSON.stringify({
+        version: 7,
+        steps: [...posts[0].steps, insert(7, "B")],
+        clientIDs: [posts[0].clientID, 99999],
+      }));
+      if (order === "before") backlog();
+      pending.resolve(response(200));
+      if (order === "after") {
+        await waitFor(() => expect(getVersion(view.state)).toBe(6));
+        backlog();
+      }
+      await waitFor(() => expect(getVersion(view.state)).toBe(7));
+      expect(errors).toEqual([]);
+      expect(view.state.doc.textContent).toBe("HelloAB");
+      expect(sendableSteps(view.state)).toBeNull();
+    } finally { conn.close(); }
+  });
+
+  it("waits for catch-up after 409 instead of repeatedly cancelling the stream", async () => {
+    const { conn, pending, posts } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      pending.resolve(response(409));
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      // Ordinary local typing and presence updates must also respect the
+      // catch-up barrier while the server is still sending its backlog.
+      view.dispatch(view.state.tr.insertText("C", 7));
+      await new Promise((done) => setTimeout(done, 20));
+      expect(posts).toHaveLength(1);
+      const es = MockEventSource.instances[1];
+      es.dispatchEvent("update", JSON.stringify({
+        version: 6, steps: [insert(6, "B")], clientIDs: [99999],
+      }));
+      es.dispatchEvent("ready", JSON.stringify({ version: 6 }));
+      expect(posts).toHaveLength(2);
+      expect(posts[1].version).toBe(6);
+      expect(view.state.doc.textContent).toBe("HelloBAC");
+    } finally { conn.close(); }
+  });
+
+  it("opens a single catch-up stream when a 409 drain already hit a gap", async () => {
+    const { conn, pending } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      // Held behind the in-flight POST, and starting past our v5 doc.
+      MockEventSource.instances[0].dispatchEvent("update", JSON.stringify({
+        version: 9, steps: [insert(1, "B")], clientIDs: [99999],
+      }));
+      pending.resolve(response(409));
+      await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(1));
+      await new Promise((done) => setTimeout(done, 20));
+      expect(MockEventSource.instances).toHaveLength(2);
+    } finally { conn.close(); }
+  });
+
+  it("retries an unsaved edit after reconnect even when there is no backlog", async () => {
+    const { conn, pending, posts } = await session();
+    try {
+      conn.view!.dispatch(conn.view!.state.tr.insertText("A", 6));
+      pending.resolve(response(503));
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      MockEventSource.instances[1].dispatchEvent("ready", JSON.stringify({ version: 5 }));
+      expect(posts).toHaveLength(2);
+      expect(posts[1].version).toBe(5);
+    } finally { conn.close(); }
+  });
+
+  it("rebootstraps an idle editor when the server signals compacted history", async () => {
+    const { conn } = await session();
+    try {
+      const oldView = conn.view;
+      MockEventSource.instances[0].dispatchEvent("reset", JSON.stringify({ reason: "history_gone" }));
+      await waitFor(() => {
+        expect(conn.view).not.toBeNull();
+        expect(conn.view).not.toBe(oldView);
+      });
+    } finally { conn.close(); }
+  });
+
+  it("preserves an unsaved draft when the history needed to rebase it has expired", async () => {
+    const { conn, errors } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("my unsaved work", 6));
+      MockEventSource.instances[0].dispatchEvent("reset", JSON.stringify({ reason: "history_gone" }));
+      expect(conn.view).toBe(view);
+      expect(view.state.doc.textContent).toBe("Hellomy unsaved work");
+      expect(view.editable).toBe(false);
+      expect(errors).toEqual([expect.objectContaining({ phase: "reset", message: expect.stringContaining("Copy your unsaved changes") })]);
+    } finally { conn.close(); }
+  });
+
+  it("reopens the stream if it fails while an accepted POST is awaiting its response", async () => {
+    const { conn, pending, posts } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      MockEventSource.instances[0].dispatchEvent("error");
+      pending.resolve(response(200));
+      await waitFor(() => expect(getVersion(view.state)).toBe(6));
+      await waitFor(() => expect(MockEventSource.instances).toHaveLength(2));
+      view.dispatch(view.state.tr.insertText("B", 7));
+      MockEventSource.instances[1].dispatchEvent("ready", JSON.stringify({ version: 6 }));
+      expect(posts).toHaveLength(2);
+      expect(posts[1].version).toBe(6);
+    } finally { conn.close(); }
+  });
+
+});
+
+describe("bootstrap after close", () => {
+  it("does not resurrect an editor when a bootstrap response arrives after close", async () => {
+    let resolve!: (response: Response) => void;
+    const pending = new Promise<Response>((done) => { resolve = done; });
+    globalThis.fetch = vi.fn().mockReturnValue(pending);
+    const conn = new EditorConnection(makeOpts(makeEl()));
+    conn.close();
+    resolve({ ok: true, status: 200, json: async () => BOOTSTRAP } as Response);
+    await new Promise((done) => setTimeout(done, 0));
+    expect(conn.view).toBeNull();
+    expect(MockEventSource.instances).toHaveLength(0);
+  });
+});
+
 // ─── Test: onLastEdited attribution ──────────────────────────────────────────
 // @feat last-edited-indicator: onLastEdited fires from the SSE update
 // ride-along (lastActor/lastEditedAt) and from our own send confirm.
@@ -3252,7 +3459,7 @@ describe("step-apply error handling", () => {
     // The error callback was called exactly once for the bad step.
     expect(errors).toHaveLength(1);
     expect(errors[0].phase).toBe("bootstrap");
-    expect(errors[0].version).toBe(1);
+    expect(errors[0]).toMatchObject({ version: 1 });
     expect(errors[0].message).toMatch(/list_item/i);
 
     // The view is forced read-only — even though the bootstrap permissions
@@ -3329,7 +3536,7 @@ describe("step-apply error handling", () => {
     expect(para.textContent).toBe("dcba");
 
     expect(errors).toHaveLength(1);
-    expect(errors[0].version).toBe(4);
+    expect(errors[0]).toMatchObject({ version: 4 });
     expect(errors[0].phase).toBe("bootstrap");
 
     conn.close();
@@ -3404,7 +3611,7 @@ describe("step-apply error handling", () => {
     // The handler captured the error rather than letting it escape.
     expect(errors).toHaveLength(1);
     expect(errors[0].phase).toBe("sse");
-    expect(errors[0].version).toBe(BOOTSTRAP.version + 1);
+    expect(errors[0]).toMatchObject({ version: BOOTSTRAP.version + 1 });
 
     // EventSource is still open — we only `close()` on explicit teardown.
     expect(es.readyState).not.toBe(2);

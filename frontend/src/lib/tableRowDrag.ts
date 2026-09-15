@@ -22,11 +22,9 @@
  * Drag state is keyed by table pos + row index, NOT the live `<tr>` DOM
  * element — PM may re-render the table mid-drag (e.g. when the
  * pointerdown's focus change triggers a selection-cleared transaction)
- * and detach the original TR. The position+index pair stays valid as
- * long as no intervening edit restructures the table, which suffices
- * for the single-user case; collab edits could shift indices, in which
- * case the drop applies to whichever row is at that index now (or
- * silently no-ops if the index is no longer valid).
+ * and detach the original TR. Document changes cancel the drag because
+ * collaborator edits can invalidate the stored table position or row
+ * index. Selection-only updates leave the drag intact.
  */
 
 import { Plugin } from "prosemirror-state";
@@ -68,6 +66,7 @@ export function leadingHeaderCount(table: PMNode): number {
  * removed it, or the cursor is outside the editor entirely).
  */
 function resolveRow(view: EditorView, tr: HTMLElement): RowResolved | null {
+  if (!view.dom.contains(tr)) return null;
   const pos = view.posAtDOM(tr, 0);
   if (pos < 0) return null;
   const $pos = view.state.doc.resolve(pos);
@@ -98,6 +97,7 @@ export function buildReorderTr(
   fromIdx: number,
   toIdx: number,
 ): ReturnType<EditorState["tr"]["replaceWith"]> | null {
+  if (tablePos < 0 || tablePos >= state.doc.content.size) return null;
   const table = state.doc.nodeAt(tablePos);
   if (!table || table.type !== schema.nodes.table) return null;
   if (fromIdx < 0 || fromIdx >= table.childCount) return null;
@@ -406,17 +406,22 @@ class TableRowDragView {
 
   // ── PM plugin lifecycle ──────────────────────────────────────────────────
 
-  update(view: EditorView, _prev: EditorState) {
+  update(view: EditorView, prev: EditorState) {
+    // Stored coordinates no longer identify the same row after a content
+    // edit. Cancel before pointerup can reorder a different row or resolve
+    // a position beyond the end of a remotely shortened document.
+    if (this.drag && !view.state.doc.eq(prev.doc)) this.cleanupDrag();
     // If the doc changed and the hovered row's DOM is gone, hide the
     // handle so it doesn't point at thin air.
     if (this.hoverTr && !view.dom.contains(this.hoverTr)) {
       this.hideHandle();
+      this.hoverTr = null;
     }
     // Deliberately do NOT cancel drag here based on DOM containment —
     // PM regularly re-renders the table TR (e.g. focus-change selection
     // updates), detaching `sourceTrAtStart` mid-drag. drag state is
     // referenced by table-pos + row-index, not the live DOM, so this
-    // is fine. Drag is canceled on Escape, pointercancel, or destroy().
+    // is fine while the document is unchanged.
   }
 
   destroy() {

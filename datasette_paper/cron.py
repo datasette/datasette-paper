@@ -12,6 +12,7 @@ import datetime
 import logging
 
 from .instance import get_registry
+from .sse import SSEEvent
 from .util import paper_db
 
 
@@ -47,12 +48,12 @@ async def sweep_trashed(datasette) -> int:
     registry = get_registry(datasette)
     deleted = 0
     for row in rows:
-        instance = registry._instances.pop(row.id, None)
+        instance = registry.discard(row.id)
         if instance is not None:
             # Same sentinel ``revoke_unauthorized`` uses — the SSE loop
             # exits cleanly and clients see EventSource close.
             for q in list(instance.subscribers):
-                q.put_nowait({"kind": "closed"})
+                q.put_nowait({"kind": SSEEvent.CLOSED})
             instance.subscribers.clear()
         await db.hard_delete_doc(doc_id=row.id)
         deleted += 1

@@ -118,7 +118,7 @@ class SSEStream:
                 break
             yield chunk
 
-    async def read_one_update_event(self, timeout: float = 5.0) -> dict:
+    async def read_one_event(self, event_type: str, timeout: float = 5.0) -> dict:
         buf = ""
         deadline = asyncio.get_event_loop().time() + timeout
         async for chunk in self.chunks():
@@ -132,11 +132,14 @@ class SSEStream:
                         ev_type = line[len("event:") :].strip()
                     elif line.startswith("data:"):
                         data_str = line[len("data:") :].strip()
-                if ev_type == "update" and data_str is not None:
+                if ev_type == event_type and data_str is not None:
                     return json.loads(data_str)
             if asyncio.get_event_loop().time() > deadline:
-                raise TimeoutError("Timed out reading SSE update event")
-        raise EOFError("SSE stream ended without an update event")
+                raise TimeoutError(f"Timed out reading SSE {event_type} event")
+        raise EOFError(f"SSE stream ended without a {event_type} event")
+
+    async def read_one_update_event(self, timeout: float = 5.0) -> dict:
+        return await self.read_one_event("update", timeout=timeout)
 
 
 async def _sse_get(
@@ -238,6 +241,69 @@ async def test_sse_backlog_replay(ds):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("backlog_steps", [0, 2])
+# @feat collab-sse: test: ready marks the subscribed version after backlog, before live steps
+async def test_sse_ready_marks_catchup_before_live_steps(
+    ds, monkeypatch, backlog_steps
+):
+    doc_id = await _create_doc(ds)
+    for version in range(backlog_steps):
+        await _post_step(ds, doc_id, version=version)
+
+    # Pause sending after subscription but before the backlog/ready frames.
+    # A concurrent write must appear after the ready barrier, whose version
+    # still describes the backlog (or the requested version if it was empty).
+    release_response = asyncio.Event()
+    original_send = SSEStream._send
+
+    async def paused_send(self, message):
+        await original_send(self, message)
+        if message["type"] == "http.response.start":
+            await release_response.wait()
+
+    monkeypatch.setattr(SSEStream, "_send", paused_send)
+    stream = await _sse_get(
+        ds, f"/-/paper/api/docs/{doc_id}/events?version=0&clientID=7"
+    )
+    try:
+        assert stream.status == 200
+        await _post_step(ds, doc_id, version=backlog_steps, client_id=8)
+        release_response.set()
+
+        if backlog_steps:
+            backlog = await asyncio.wait_for(stream.read_one_update_event(), timeout=5)
+            assert backlog["version"] == backlog_steps
+            assert len(backlog["steps"]) == backlog_steps
+
+        ready = await asyncio.wait_for(stream.read_one_event("ready"), timeout=5)
+        assert ready == {"version": backlog_steps}
+        live = await asyncio.wait_for(stream.read_one_update_event(), timeout=5)
+        assert live["version"] == backlog_steps + 1
+        assert len(live["steps"]) == 1
+        assert live["clientIDs"] == [8]
+    finally:
+        release_response.set()
+        stream.disconnect()
+        stream._task.cancel()
+        try:
+            await stream._task
+        except asyncio.CancelledError:
+            pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query", ["version=abc", "version=0&clientID=abc", "version=0&clientID=1.5"]
+)
+async def test_sse_rejects_malformed_query_params(ds, query):
+    # A malformed clientID used to degrade silently to "no clientID", which
+    # also switched history-gone from the in-band reset to an invisible 410.
+    doc_id = await _create_doc(ds)
+    stream = await _sse_get(ds, f"/-/paper/api/docs/{doc_id}/events?{query}")
+    assert stream.status == 400
+
+
+@pytest.mark.asyncio
 # @feat collab-sse: test: evicted-history SSE subscribe returns 410
 async def test_sse_stale_version_410(ds_paper):
     import collections
@@ -265,6 +331,30 @@ async def test_sse_stale_version_410(ds_paper):
     stream = await _sse_get(ds, path)
     await asyncio.sleep(0.05)
     assert stream.status == 410
+
+
+@pytest.mark.asyncio
+# @feat collab-sse: test: idle browser with evicted history receives an actionable reset event
+async def test_sse_stale_browser_receives_reset(ds_paper, monkeypatch):
+    ds, paper_db = ds_paper
+    monkeypatch.setattr(instance_module, "SNAPSHOT_THRESHOLD", 1)
+    doc_id = await _create_doc(ds)
+    await _post_step(ds, doc_id, version=0)
+    inst = await get_registry(ds).get(paper_db, doc_id)
+    assert inst.snapshot_version == 1
+    assert not inst.steps_tail
+
+    # No POST is needed from this stale editor: the SSE response itself
+    # must carry the recovery signal visible to native EventSource.
+    stream = await _sse_get(
+        ds, f"/-/paper/api/docs/{doc_id}/events?version=0&clientID=7"
+    )
+    assert stream.status == 200
+    assert (b"content-type", b"text/event-stream") in stream._headers
+    reset = await asyncio.wait_for(stream.read_one_event("reset"), timeout=5)
+    assert reset == {"reason": "history_gone"}
+    await asyncio.wait_for(stream._task, timeout=5)
+    assert not inst.subscribers
 
 
 @pytest.mark.asyncio
@@ -301,6 +391,39 @@ async def test_sse_heartbeat(ds, monkeypatch):
             pass
 
     assert heartbeat_found, f"No heartbeat found in: {buf!r}"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_at", ["headers", "update", "presence"])
+# @feat collab-sse: test: failed initial writes release subscriber queues
+async def test_sse_unsubscribes_when_initial_send_fails(
+    ds_paper, monkeypatch, failure_at
+):
+    ds, paper_db = ds_paper
+    doc_id = await _create_doc(ds)
+    await _post_step(ds, doc_id, version=0)
+    inst = await get_registry(ds).get(paper_db, doc_id)
+    inst.update_presence(client_id=8, actor_id=None, anchor=1, head=1)
+
+    failed = asyncio.Event()
+    original_send = SSEStream._send
+
+    async def failing_send(self, message):
+        await original_send(self, message)
+        is_headers = message["type"] == "http.response.start"
+        if (failure_at == "headers" and is_headers) or message.get(
+            "body", b""
+        ).startswith(f"event: {failure_at}\n".encode()):
+            failed.set()
+            raise ConnectionError("Client disconnected during initial response")
+
+    monkeypatch.setattr(SSEStream, "_send", failing_send)
+    stream = await _sse_get(
+        ds, f"/-/paper/api/docs/{doc_id}/events?version=0&clientID=7"
+    )
+    await asyncio.wait_for(stream._task, timeout=5)
+    assert failed.is_set()
+    assert not inst.subscribers
 
 
 @pytest.mark.asyncio

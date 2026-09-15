@@ -5,31 +5,29 @@ from typing import Annotated
 
 from datasette import Response
 from datasette_plugin_router import Body
+from pydantic import ValidationError
 
 from ..router import router
 from ..instance import get_registry
 from ..errors import (
     BadVersionError,
-    ConflictError,
     GoneError,
     InvalidStepError,
+    PaperProtocolError,
 )
 from ..permissions import can_paper_view, ensure_paper_edit, ensure_paper_view
-from ..schemas import EventsBody, PresenceBody
+from ..schemas import EventsBody, EventsQuery, PresenceBody
 from ..util import actor_id, paper_db
 from .. import sse
-from ..sse import format_event, format_heartbeat
-
-
-async def _send_status(send, status: int, body: bytes) -> None:
-    await send(
-        {
-            "type": "http.response.start",
-            "status": status,
-            "headers": [(b"content-type", b"text/plain")],
-        }
-    )
-    await send({"type": "http.response.body", "body": body, "more_body": False})
+from ..sse import (
+    ResetReason,
+    SSEEvent,
+    format_event,
+    format_heartbeat,
+    send_event,
+    send_status,
+    start_event_stream,
+)
 
 
 # @feat collab-sse: raw-ASGI SSE route: backlog + live broadcast, 410/400/403
@@ -41,38 +39,30 @@ async def sse_events(datasette, request, send, receive):
     ``ensure_permission`` raising Forbidden won't be caught by the
     streaming-response middleware.
     """
-    doc_id_str = request.url_vars["doc_id"]
     try:
-        doc_id = int(doc_id_str)
-        version = int(request.args.get("version", "0"))
-    except (TypeError, ValueError):
-        await _send_status(send, 400, b"Invalid query params")
+        doc_id = int(request.url_vars["doc_id"])
+        query = EventsQuery.model_validate(dict(request.args))
+    except (TypeError, ValueError, ValidationError):
+        await send_status(send, 400, b"Invalid query params")
         return
+    version = query.version
+    client_id = query.client_id
 
     if not await can_paper_view(datasette, request.actor, doc_id):
-        await _send_status(send, 403, b"Permission denied")
+        await send_status(send, 403, b"Permission denied")
         return
-
-    # Optional clientID — when present, the broadcast loop skips this
-    # subscriber for batches it originated, so the client doesn't re-apply
-    # its own already-acknowledged steps.
-    client_id_raw = request.args.get("clientID")
-    try:
-        client_id = int(client_id_raw) if client_id_raw is not None else None
-    except (TypeError, ValueError):
-        client_id = None
 
     db = paper_db(datasette)
     doc = await db.select_doc_by_id(doc_id)
     if doc is None:
-        await _send_status(send, 404, b"Not found")
+        await send_status(send, 404, b"Not found")
         return
 
     registry = get_registry(datasette)
     instance = await registry.get(db, doc_id)
 
     if version < 0 or version > instance.version:
-        await _send_status(send, 400, b"Invalid version")
+        await send_status(send, BadVersionError.status, BadVersionError.reason.encode())
         return
 
     # Subscribe + snapshot the backlog atomically under the instance
@@ -85,50 +75,25 @@ async def sse_events(datasette, request, send, receive):
             client_id=client_id,
             actor_id=actor_id(request),
         )
-    except (GoneError, BadVersionError) as exc:
-        if isinstance(exc, GoneError):
-            await _send_status(send, 410, b"History gone")
-        else:
-            await _send_status(send, 400, b"Invalid version")
+    except GoneError as exc:
+        if client_id is None:
+            await send_status(send, exc.status, exc.reason.encode())
+            return
+        # Native EventSource hides HTTP failure status codes, so a stale
+        # idle editor would retry the same evicted version forever. Tell
+        # browser editors in-band to re-bootstrap; keep HTTP 410 for
+        # callers without a clientID.
+        await start_event_stream(send)
+        await send_event(
+            send,
+            SSEEvent.RESET,
+            {"reason": ResetReason.HISTORY_GONE},
+            more_body=False,
+        )
         return
-
-    # --- Open the SSE stream ---
-    await send(
-        {
-            "type": "http.response.start",
-            "status": 200,
-            "headers": [
-                (b"content-type", b"text/event-stream"),
-                (b"cache-control", b"no-cache"),
-                (b"x-accel-buffering", b"no"),
-            ],
-        }
-    )
-
-    # Flush any backlog before reading from the queue. The backlog
-    # covers versions up to instance.version as observed at subscribe
-    # time; any later ``add_events`` enqueued to ``queue`` for us, so
-    # the order on the wire is (backlog, then live broadcasts) with no
-    # overlap.
-    if backlog is not None:
-        await send(
-            {
-                "type": "http.response.body",
-                "body": format_event("update", backlog),
-                "more_body": True,
-            }
-        )
-
-    # Send the current presence snapshot once so the new subscriber sees
-    # everyone already on the doc.
-    if instance.presence:
-        await send(
-            {
-                "type": "http.response.body",
-                "body": format_event("presence", instance._presence_payload()),
-                "more_body": True,
-            }
-        )
+    except BadVersionError as exc:
+        await send_status(send, exc.status, exc.reason.encode())
+        return
 
     disconnected = asyncio.Event()
 
@@ -144,13 +109,42 @@ async def sse_events(datasette, request, send, receive):
 
     watcher = asyncio.create_task(watch_disconnect())
     try:
+        # The initial writes sit inside the try so a client that drops
+        # during headers/backlog still hits the ``finally`` unsubscribe —
+        # otherwise its queue keeps collecting every later edit.
+        await start_event_stream(send)
+
+        # Flush any backlog before reading from the queue. The backlog
+        # covers versions up to instance.version as observed at subscribe
+        # time; any later ``add_events`` enqueued to ``queue`` for us, so
+        # the order on the wire is (backlog, then live broadcasts) with no
+        # overlap.
+        if backlog is not None:
+            await send_event(send, SSEEvent.UPDATE, backlog)
+
+        # Catch-up barrier: always follows the backlog, even an empty one,
+        # so editors can hold pending sends until they're caught up instead
+        # of racing the backlog. Use the version captured at subscribe time
+        # — a write may already have advanced instance.version, and that
+        # batch is queued to arrive after this event.
+        await send_event(
+            send,
+            SSEEvent.READY,
+            {"version": backlog["version"] if backlog else version},
+        )
+
+        # Send the current presence snapshot once so the new subscriber sees
+        # everyone already on the doc.
+        if instance.presence:
+            await send_event(send, SSEEvent.PRESENCE, instance._presence_payload())
+
         while not disconnected.is_set():
             try:
                 payload = await asyncio.wait_for(
                     queue.get(), timeout=sse.HEARTBEAT_SECONDS
                 )
-                event_name = payload.get("kind", "update")
-                if event_name == "closed":
+                event_name = payload.get("kind", SSEEvent.UPDATE)
+                if event_name == SSEEvent.CLOSED:
                     # Server-initiated close — emitted by
                     # Instance.revoke_unauthorized when an actor's
                     # access is removed mid-session.
@@ -170,7 +164,10 @@ async def sse_events(datasette, request, send, receive):
                 )
             except Exception:
                 break
-    except (asyncio.CancelledError, ConnectionError, OSError):
+    except (ConnectionError, OSError):
+        # The peer went away mid-write; ``finally`` releases the
+        # subscription. CancelledError deliberately propagates so the
+        # server's own teardown sees it.
         pass
     finally:
         instance.unsubscribe(queue)
@@ -232,12 +229,6 @@ async def post_events(
             actor_id=actor_id(request),
             steps=body.steps,
         )
-    except ConflictError:
-        return Response("Version not current", status=409)
-    except BadVersionError:
-        return Response("Invalid version", status=400)
-    except GoneError:
-        return Response("History gone", status=410)
     except InvalidStepError as exc:
         # The batch was rejected before any write — the doc's
         # _datasette_paper_step table is untouched. Return enough
@@ -249,6 +240,10 @@ async def post_events(
                 "step_index": exc.step_index,
                 "message": exc.message,
             },
-            status=422,
+            status=exc.status,
         )
+    except PaperProtocolError as exc:
+        # Conflict / BadVersion / Gone → 409 / 400 / 410, each error
+        # carrying its own status and reason.
+        return Response(exc.reason, status=exc.status)
     return Response.json({"version": new_version})
