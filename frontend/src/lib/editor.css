@@ -79,6 +79,32 @@ mark.pp-hl[data-color="hl4"] {
   line-height: 1.3;
   margin: 0.8em 0 0.3em;
 }
+/* h4–h6 step down below h3 without dropping into fine print. Datasette's
+ * base app.css styles these as underlined / italic / regular-weight (h4 and
+ * h6 at 400), so reset those explicitly. h5/h6 lean on muted color (and
+ * uppercase tracking for h6) to stay distinct from bold body text. */
+.editor-host .ProseMirror h4,
+.editor-host .ProseMirror h5,
+.editor-host .ProseMirror h6 {
+  font-weight: 700;
+  font-style: normal;
+  text-decoration: none;
+  line-height: 1.35;
+  margin: 0.8em 0 0.3em;
+}
+.editor-host .ProseMirror h4 {
+  font-size: 1.05em;
+}
+.editor-host .ProseMirror h5 {
+  font-size: 1em;
+  color: var(--pp-fg-muted);
+}
+.editor-host .ProseMirror h6 {
+  font-size: 0.85em;
+  color: var(--pp-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 /* Code blocks — distinct slab so users can tell at a glance it's a block,
  * not inline code. The inner <code> inherits font-family from <pre>; null
  * out any background it might have so styling doesn't double up. */
