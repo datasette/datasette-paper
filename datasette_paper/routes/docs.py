@@ -1089,7 +1089,7 @@ async def rename_doc(
     # @feat breadcrumbs: tell live collaborators about the new name (header
     # title + crumb + document.title). No hot Instance → nobody is connected,
     # and later bootstraps pick the name up from the page render.
-    instance = get_registry(datasette)._instances.get(doc_id)
+    instance = get_registry(datasette).peek(doc_id)
     if instance is not None:
         instance.broadcast_renamed(doc.name, doc.updated_at)
     return Response.json(
@@ -1178,7 +1178,7 @@ async def sweep_subscribers(datasette, request, doc_id: int):
 
     revoked = 0
     registry = get_registry(datasette)
-    instance = registry._instances.get(doc_id)
+    instance = registry.peek(doc_id)
     if instance is not None:
         revoked = await instance.revoke_unauthorized(datasette)
     return Response.json({"revoked": revoked})
@@ -1229,7 +1229,7 @@ async def _state_response(datasette, doc_id: int):
 
     payload = _doc_state_payload(doc)
     registry = get_registry(datasette)
-    instance = registry._instances.get(doc_id)
+    instance = registry.peek(doc_id)
     if instance is not None:
         instance.broadcast_state_changed(payload)
 
@@ -1361,7 +1361,7 @@ async def _lock_response(datasette, doc_id: int):
         return Response.json({"error": "Document not found"}, status=404)
 
     registry = get_registry(datasette)
-    instance = registry._instances.get(doc_id)
+    instance = registry.peek(doc_id)
     if instance is not None:
         await instance.broadcast_permissions_changed(datasette, bool(doc.locked))
 

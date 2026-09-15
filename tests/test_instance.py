@@ -523,6 +523,53 @@ async def test_registry_cancelled_caller_does_not_cancel_shared_hydrate(
     assert registry._instances[doc.id] is inst
 
 
+@pytest.mark.asyncio
+async def test_registry_discard_cancels_inflight_hydrate(ds_paper, monkeypatch):
+    """A permanent delete mid-hydrate must not publish the doomed instance.
+
+    SQLite can hand the deleted rowid to a new document, so a hydrate that
+    lands after ``discard`` would serve the old doc under the new id.
+    """
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Deleted while loading")
+    registry = InstanceRegistry()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    original_hydrate = Instance.hydrate
+
+    async def paused_hydrate(cls, db, doc_id):
+        started.set()
+        await release.wait()
+        return await original_hydrate(db, doc_id)
+
+    monkeypatch.setattr(Instance, "hydrate", classmethod(paused_hydrate))
+    loader = asyncio.create_task(registry.get(db, doc.id))
+    await started.wait()
+
+    assert registry.discard(doc.id) is None
+    release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await loader
+    assert doc.id not in registry._instances
+    assert not registry._hydrating
+
+    # The next request for the id hydrates afresh.
+    monkeypatch.setattr(Instance, "hydrate", original_hydrate)
+    fresh = await registry.get(db, doc.id)
+    assert fresh.doc_id == doc.id
+
+
+@pytest.mark.asyncio
+async def test_registry_peek_never_hydrates(ds_paper):
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Peek")
+    registry = InstanceRegistry()
+    assert registry.peek(doc.id) is None
+    assert not registry._hydrating
+    inst = await registry.get(db, doc.id)
+    assert registry.peek(doc.id) is inst
+
+
 @pytest.mark.parametrize(
     ("error", "status"),
     [(ConflictError, 409), (BadVersionError, 400), (GoneError, 410)],
