@@ -67,6 +67,7 @@ import { codeFocusPlugin } from "./codeFocusPlugin";
 import { TocView, tocPlugin } from "./tocView";
 import { Reporter } from "./reporter";
 import { TaskItemView } from "./taskItemView";
+import { ListItemView } from "./listItemView";
 import { CodeBlockView } from "./codeBlockView";
 import { CalloutView } from "./calloutView";
 import {
@@ -1649,6 +1650,10 @@ export class EditorConnection {
       nodeViews: {
         task_item: (node, view, getPos) =>
           new TaskItemView(node, view, getPos as () => number | undefined),
+        // @feat toggle-list: NodeView registration — chevron + fold for
+        // `kind: "toggle"`; bullets take the bare-<li> fast path inside it
+        list_item: (node, view, getPos) =>
+          new ListItemView(node, view, getPos as () => number | undefined),
         code_block: (node, view, getPos) =>
           new CodeBlockView(node, view, getPos as () => number | undefined),
         // @feat callout: NodeView registration — bordered admonition + kind picker
