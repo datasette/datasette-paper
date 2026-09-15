@@ -29,7 +29,10 @@ dev = [
     "datasette-debug-gotham>=0.1.0a3",
     "pytest",
     "pytest-asyncio",
-    "ruff>=0.15.12",
+    # Pinned: ruff 0.16 formats code blocks in markdown and enables new
+    # lint rules by default, and uv.lock is not committed, so CI would
+    # otherwise pick up whatever ruff is newest. Bump deliberately.
+    "ruff==0.15.12",
     "solite>=0.0.1a36",
 ]
 
