@@ -322,6 +322,7 @@ export class DateView implements NodeView {
       radio.addEventListener("change", () => {
         this.selectedFormat = preset.format;
         this.refreshPreview();
+        this.applyFormat(preset.format);
       });
 
       const desc = document.createElement("span");
@@ -435,6 +436,18 @@ export class DateView implements NodeView {
     // reflow so re-adding the class restarts the animation
     void this.popupEl.offsetWidth;
     this.popupEl.classList.add("pm-date-popup--shake");
+  }
+
+  /** Live-apply a preset format to the chip while the popup stays open. Only
+   *  `format` changes — the stored date/time/tz are kept, so an uncommitted
+   *  edit in the date field still needs Enter. `update()` re-renders the label
+   *  in place without touching the popup. */
+  private applyFormat(format: string | null): void {
+    const pos = this.getPos();
+    if (pos == null || (this.attrs.format ?? null) === format) return;
+    this.view.dispatch(
+      this.view.state.tr.setNodeMarkup(pos, undefined, { ...this.attrs, format }),
+    );
   }
 
   private commit(parsed: ParsedDate): void {

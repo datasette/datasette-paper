@@ -384,6 +384,24 @@ describe("DateView popup", () => {
     expect(view.state.doc.firstChild!.firstChild!.attrs.format).toBe("%Y-%m-%d");
   });
 
+  it("clicking a format preset applies it to the chip immediately, popup stays open", () => {
+    const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const input = chip.querySelector(".pm-date-popup-input") as HTMLInputElement;
+    // An uncommitted date edit must NOT be applied by the format click.
+    input.value = "2026-09-09";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    const longRow = chip.querySelector<HTMLElement>('.pm-date-format[data-format="%B %-d, %Y"]')!;
+    const radio = longRow.querySelector<HTMLInputElement>(".pm-date-format-radio")!;
+    radio.checked = true;
+    radio.dispatchEvent(new Event("change", { bubbles: true }));
+    const attrs = view.state.doc.firstChild!.firstChild!.attrs;
+    expect(attrs.format).toBe("%B %-d, %Y");
+    expect(attrs.date).toBe("2026-07-20");
+    expect(chip.querySelector(".pm-date-label")?.textContent).toBe("July 20, 2026");
+    expect(chip.querySelector(".pm-date-popup")).not.toBeNull();
+  });
+
   it("a custom strftime string commits verbatim", () => {
     const { view, chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
     chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
