@@ -409,7 +409,8 @@ export function buildPaperStructuralRules(): InputRule[] {
     // upgrades the quote to a callout in place. Typing the literal GitHub
     // syntax `> [!warning] ` chains the two rules (the `> ` rule above makes
     // the quote, this one converts it). One transaction (delete + upgrade) so
-    // `undoInputRule` (Cmd-Z) reverts it back to the plain typed text.
+    // `undoInputRule` (Backspace, per example-setup's buildKeymap) reverts it
+    // back to the plain typed text.
     // @feat callout: `[!kind] ` input rule upgrades a blockquote to a callout
     new InputRule(
       /^\[!(note|tip|important|warning|caution)\]\s$/i,
@@ -439,7 +440,7 @@ export function buildPaperStructuralRules(): InputRule[] {
     // toggle. Far cheaper than `taskListInputRule` below, which has to rebuild
     // the whole list because it changes node *types* — here only an attr
     // moves, so it is a delete + one `setNodeMarkup`. One transaction, so
-    // `undoInputRule` (Cmd-Z) puts the literal `[>] ` back. Deliberately no
+    // `undoInputRule` (Backspace) puts the literal `[>] ` back. Deliberately no
     // `>`-prefixed variant: `> ` is blockquote's, above.
     // @feat toggle-list: `[>] ` at the start of a list item makes it a toggle
     new InputRule(/^\[>\]\s$/, (state, _match, start, end) => {
