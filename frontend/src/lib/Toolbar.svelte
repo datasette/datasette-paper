@@ -4,7 +4,8 @@
   import { toggleMark, setBlockType, wrapIn, lift, chainCommands } from "prosemirror-commands";
   import { wrapInList, liftListItem, sinkListItem } from "prosemirror-schema-list";
   import { undo, redo, undoDepth, redoDepth } from "prosemirror-history";
-  import { schema } from "./schema";
+  import { schema, HIGHLIGHT_COLORS, type HighlightColor } from "./schema";
+  import { activeHighlightColor, clearHighlight, setHighlight } from "./highlight";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { blockTypeLabel } from "./blockTypeLabel";
   import { activeListType } from "./activeListType";
@@ -36,12 +37,13 @@
   // navigation over that menu's `[role=menuitem]` rows. Deliberately generic:
   // the ＋ Insert menu (with the template placeholder section folded in) is the
   // "insert" key.
-  type MenuName = "text" | "link" | "list" | "insert";
+  type MenuName = "text" | "highlight" | "link" | "list" | "insert";
   let openMenu = $state<MenuName | null>(null);
 
   // Wrapper element per menu (trigger + popup), so a click on the trigger reads
   // as "inside" and doesn't trip the outside-click close.
   let textRoot: HTMLDivElement | undefined = $state();
+  let highlightRoot: HTMLDivElement | undefined = $state();
   let linkRoot: HTMLDivElement | undefined = $state();
   let listRoot: HTMLDivElement | undefined = $state();
   let insertRoot: HTMLDivElement | undefined = $state();
@@ -50,6 +52,8 @@
     switch (name) {
       case "text":
         return textRoot;
+      case "highlight":
+        return highlightRoot;
       case "link":
         return linkRoot;
       case "list":
@@ -241,6 +245,12 @@
 
   // Text ▾ menu rows: close the menu, then run the block-type command. Kept
   // generic (takes the action thunk) so every row reads the same.
+  // Highlight ▾ swatch row: a slot color, or null for "Remove highlight".
+  function chooseHighlight(color: HighlightColor | null) {
+    closeMenu();
+    run(color ? setHighlight(color) : clearHighlight);
+  }
+
   function chooseBlock(action: () => void) {
     return () => {
       closeMenu();
@@ -317,9 +327,17 @@
     void tick;
     return markActive(schema.marks.em);
   });
+  const isStrike = $derived.by(() => {
+    void tick;
+    return markActive(schema.marks.strike);
+  });
   const isCode = $derived.by(() => {
     void tick;
     return markActive(schema.marks.code);
+  });
+  const highlightColor = $derived.by(() => {
+    void tick;
+    return view ? activeHighlightColor(view.state) : null;
   });
   const isH1 = $derived.by(() => {
     void tick;
@@ -606,7 +624,63 @@
   <span class="tb-sep" aria-hidden="true"></span>
   {@render btn("bold", "Bold (⌘B)", toggle(schema.marks.strong), isBold)}
   {@render btn("italic", "Italic (⌘I)", toggle(schema.marks.em), isItalic)}
+  <!-- S and Highlight ▾ are desktop-only: the mobile strip has no room, and
+       `~~` / `==` input rules cover them on a soft keyboard (design.md §Mobile). -->
+  {#if !isMobile}
+    <!-- @feat strikethrough: toolbar button toggles strike, pressed while the mark is active -->
+    {@render btn("strikethrough", "Strikethrough (⌘⇧X)", toggle(schema.marks.strike), isStrike)}
+  {/if}
   {@render btn("code", "Inline code (⌘`)", toggle(schema.marks.code), isCode)}
+  {#if !isMobile}
+    <!-- @feat highlight: toolbar button + swatch popover (4 color slots + remove) -->
+    <div class="tb-menu-wrap" bind:this={highlightRoot}>
+      <button
+        type="button"
+        class="tb-btn tb-trigger tb-trigger-icon"
+        class:active={openMenu === "highlight" || highlightColor !== null}
+        aria-pressed={highlightColor !== null}
+        aria-haspopup="menu"
+        aria-expanded={openMenu === "highlight"}
+        aria-label="Highlight (⌘⇧H)"
+        title="Highlight (⌘⇧H)"
+        onclick={() => toggleMenu("highlight")}
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+          {@html TOOLBAR_ICONS["highlighter"]}
+        </svg>
+        <svg class="tb-trigger-chevron" xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+          {@html TOOLBAR_ICONS["chevronDown"]}
+        </svg>
+      </button>
+      {#if openMenu === "highlight"}
+        <div class="tb-hl-menu" role="menu" aria-label="Highlight color">
+          {#each HIGHLIGHT_COLORS as color, i (color)}
+            <button
+              type="button"
+              role="menuitem"
+              class="tb-hl-swatch"
+              class:active={highlightColor === color}
+              class:current={highlightColor === color}
+              data-color={color}
+              aria-label={`Highlight color ${i + 1}`}
+              title={`Highlight color ${i + 1}`}
+              onclick={() => chooseHighlight(color)}
+            ></button>
+          {/each}
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-hl-swatch tb-hl-none"
+            aria-label="Remove highlight"
+            title="Remove highlight"
+            onclick={() => chooseHighlight(null)}
+          ></button>
+        </div>
+      {/if}
+    </div>
+  {/if}
   <!-- Link ▾ — merges the URL-link and wiki-link buttons; trigger active when
        the selection carries a link mark (isLink). -->
   <div class="tb-menu-wrap" bind:this={linkRoot}>
@@ -909,6 +983,58 @@
   .tb-trigger-icon {
     gap: 2px;
     padding: 0 4px;
+  }
+  .tb-hl-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px var(--pp-shadow);
+    padding: 6px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .tb-hl-swatch {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--pp-border-strong);
+    cursor: pointer;
+    background: var(--pp-bg);
+  }
+  .tb-hl-swatch[data-color="hl1"] { background: var(--pp-hl-1-swatch); }
+  .tb-hl-swatch[data-color="hl2"] { background: var(--pp-hl-2-swatch); }
+  .tb-hl-swatch[data-color="hl3"] { background: var(--pp-hl-3-swatch); }
+  .tb-hl-swatch[data-color="hl4"] { background: var(--pp-hl-4-swatch); }
+  /* `.sel` is the shared $effect's keyboard roving position (it starts on the
+     `.active` swatch); `.current` outlines the selection's color. */
+  .tb-hl-swatch:hover,
+  .tb-hl-swatch:global(.sel) {
+    transform: scale(1.15);
+  }
+  .tb-hl-swatch.current {
+    outline: 2px solid var(--pp-accent);
+    outline-offset: 1px;
+  }
+  /* "Remove highlight": an empty dot with a diagonal slash. */
+  .tb-hl-none {
+    position: relative;
+    overflow: hidden;
+  }
+  .tb-hl-none::after {
+    content: "";
+    position: absolute;
+    left: calc(50% - 0.75px);
+    top: -2px;
+    bottom: -2px;
+    width: 1.5px;
+    background: var(--pp-fg-muted);
+    transform: rotate(45deg);
   }
   .tb-menu {
     position: absolute;
