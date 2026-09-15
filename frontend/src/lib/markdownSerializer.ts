@@ -116,6 +116,18 @@ function escapeDateLabel(label: string): string {
   return out;
 }
 
+// prosemirror-markdown's `esc` backslash-escapes EVERY `~`; markdown.py only
+// escapes runs of two or more (a lone `~` is never a GFM strikethrough
+// delimiter). Undo the escape on lone tildes so the two stay byte-identical.
+// Input is `esc` output, where every literal `\` and `~` is already escaped, so
+// matching `\\` pairs first keeps an escaped backslash from being misread.
+// @feat strikethrough: client twin of markdown.py's doubled-`~` text escaping
+export function unescapeSingleTildes(escaped: string): string {
+  return escaped.replace(/(\\\\)|((?:\\~)+)/g, (m: string, bs: string | undefined) =>
+    bs ? m : m.length === 2 ? "~" : m,
+  );
+}
+
 /**
  * Build the paper `MarkdownSerializer` from a loaded `prosemirror-markdown`
  * module. Cheap to call — no caching needed. Serialize with
@@ -197,6 +209,23 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
   const serializer = new MarkdownSerializer(
     {
       ...defaultMarkdownSerializer.nodes,
+      // Default text rule, but with markdown.py's `~` escaping (see
+      // `unescapeSingleTildes`). `esc` is shadowed on the instance only for
+      // this call; deleting it restores the prototype method.
+      text(state, node) {
+        if ((state as MarkdownSerializerState & { inAutolink?: boolean }).inAutolink) {
+          state.text(node.text ?? "", false);
+          return;
+        }
+        const esc = state.esc;
+        state.esc = (str: string, startOfLine?: boolean) =>
+          unescapeSingleTildes(esc.call(state, str, startOfLine));
+        try {
+          state.text(node.text ?? "", true);
+        } finally {
+          delete (state as { esc?: unknown }).esc;
+        }
+      },
       // Our code_block carries `language`, not the default schema's `params`.
       // @feat code-language: copy keeps the fence language (reserved/unsafe tokens clamp to plain)
       code_block(state, node) {
@@ -374,7 +403,11 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
         state.renderContent(node);
       },
     },
-    defaultMarkdownSerializer.marks,
+    {
+      ...defaultMarkdownSerializer.marks,
+      // @feat strikethrough: client mark rule — GFM `~~…~~`, same bytes as markdown.py
+      strike: { open: "~~", close: "~~", mixable: true, expelEnclosingWhitespace: true },
+    },
   );
   return serializer;
 }

@@ -3,7 +3,7 @@
 Pairs with ``datasette_paper.markdown.doc_to_markdown`` for the reverse
 direction. Round-trip stable for the schema's supported node set;
 intentionally lossy for content outside ``pm_schema`` (raw HTML renders
-as plain text, strikethrough is dropped, etc.).
+as plain text, unknown inline kinds drop, etc.).
 
 Schema lock-step group: this module, ``datasette_paper.pm_schema``,
 ``datasette_paper.markdown``, and ``frontend/src/lib/schema.ts`` must
@@ -60,6 +60,8 @@ def _video_embed_from_paragraph(para: dict) -> dict | None:
 _MARK_OPEN_CLOSE = {
     "strong_open": ("strong_close", "strong"),
     "em_open": ("em_close", "em"),
+    # @feat strikethrough: GFM `~~…~~` (markdown-it `s_open`/`s_close`) → strike mark
+    "s_open": ("s_close", "strike"),
     "link_open": ("link_close", "link"),
 }
 
@@ -110,11 +112,14 @@ _CALLOUT_MARKER_RE = re.compile(
 
 
 def _build_md() -> MarkdownIt:
-    # ``commonmark`` preset + tables (GFM) + tasklists. ``html=False`` keeps
+    # ``commonmark`` preset + tables + strikethrough (GFM) + tasklists. ``html=False`` keeps
     # raw HTML from sneaking into the doc — anything that looks like HTML
     # falls back to plain text, which is safe for our schema.
     return (
-        MarkdownIt("commonmark", {"html": False}).enable("table").use(tasklists_plugin)
+        MarkdownIt("commonmark", {"html": False})
+        .enable("table")
+        .enable("strikethrough")
+        .use(tasklists_plugin)
     )
 
 
@@ -627,8 +632,8 @@ def _children_to_pm(children) -> list[dict]:
             else:
                 mark_stack.append({"type": mark_name})
 
-        elif t in ("strong_close", "em_close", "link_close"):
-            wanted = t.replace("_close", "")
+        elif t in ("strong_close", "em_close", "s_close", "link_close"):
+            wanted = "strike" if t == "s_close" else t.replace("_close", "")
             for j in range(len(mark_stack) - 1, -1, -1):
                 m = mark_stack[j]
                 if wanted == "link" and m.get("_drop"):

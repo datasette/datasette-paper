@@ -1409,6 +1409,14 @@ export class EditorConnection {
               schema.marks.em,
               1,
             ),
+            // `~~text~~` → strike (GFM). Same whitespace-or-start guard, so
+            // it doesn't fire mid-word.
+            // @feat strikethrough: `~~text~~` input rule applies the strike mark
+            delimiterMarkRule(
+              /(?:^|\s)~~([^\s~][^~]*?[^\s~]|[^\s~])~~$/,
+              schema.marks.strike,
+              2,
+            ),
             // `` `text` `` → code.
             delimiterMarkRule(
               /(?:^|\s)`([^\s`][^`]*?[^\s`]|[^\s`])`$/,
@@ -1442,6 +1450,8 @@ export class EditorConnection {
         keymap(slashKeymap(this.slashCommands)),
         keymap({
           "Mod-k": toggleLinkCommand(),
+          // @feat strikethrough: Cmd/Ctrl-Shift-X toggles the strike mark
+          "Mod-Shift-x": toggleMark(schema.marks.strike),
           "Mod-Shift-7": wrapInList(schema.nodes.task_list),
           // @feat date: Cmd/Ctrl-; inserts today's date chip, Cmd/Ctrl-Shift-;
           // tomorrow's — no popup (falls through in code blocks).

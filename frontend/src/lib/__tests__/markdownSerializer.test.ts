@@ -278,3 +278,20 @@ describe("table markdown serialization", () => {
     expect(md(callout)).toBe("> [!NOTE] T\n> | h |\n> | --- |");
   });
 });
+
+// @feat strikethrough: client serializer emits `~~…~~` and escapes only doubled `~` runs (markdown.py twin)
+describe("strike mark + tilde escaping", () => {
+  const strike = (s: string) => schema.text(s, [schema.marks.strike.create()]);
+
+  it("wraps struck text in `~~`", () => {
+    expect(md(n.paragraph.create(null, [text("a "), strike("b"), text(" c")]))).toBe("a ~~b~~ c");
+  });
+
+  it("escapes doubled `~` runs but leaves a lone `~` bare", () => {
+    expect(md(p("~~x~~ ~5 a ~ b ~~~"))).toBe("\\~\\~x\\~\\~ ~5 a ~ b \\~\\~\\~");
+  });
+
+  it("keeps an escaped backslash before a lone `~` intact", () => {
+    expect(md(p("a\\~b"))).toBe("a\\\\~b");
+  });
+});
