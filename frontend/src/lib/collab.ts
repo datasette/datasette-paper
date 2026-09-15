@@ -302,6 +302,40 @@ interface StepBatch {
   version: number;
 }
 
+/** Event names on the SSE stream. Mirrors `SSEEvent` in
+ * `datasette_paper/sse.py` — change both sides together. */
+export const SSE_EVENT = {
+  update: "update",
+  ready: "ready",
+  reset: "reset",
+  presence: "presence",
+  stateChanged: "state-changed",
+  renamed: "renamed",
+  permissionsChanged: "permissions-changed",
+} as const;
+
+/** `update` envelope: a step batch and/or ride-along metadata. */
+interface UpdateEvent {
+  steps?: Array<Record<string, unknown>>;
+  clientIDs?: Array<number | string>;
+  /** Server version after this batch. Required to place the batch
+   * against our confirmed doc; a batch without it is dropped. */
+  version: number;
+  users?: number;
+  lastActor?: string | null;
+  lastEditedAt?: string;
+}
+
+/** `ready`: the catch-up backlog (if any) has been flushed. */
+interface ReadyEvent {
+  version: number;
+}
+
+/** `reset`: the requested version fell off the server's step tail. */
+interface ResetEvent {
+  reason: "history_gone";
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 // Fence-language tokens that must never tag a `code_block`: they collide with
@@ -1714,22 +1748,8 @@ export class EditorConnection {
     const es = new EventSource(url);
     this.eventSource = es;
 
-    const handleMessage = (evt: MessageEvent) => {
-      if (!this.view || this.eventSource !== es) return;
-      let data: {
-        steps?: Array<Record<string, unknown>>;
-        clientIDs?: Array<number | string>;
-        version?: number;
-        users?: number;
-        lastActor?: string | null;
-        lastEditedAt?: string;
-      };
-      try {
-        data = JSON.parse(evt.data);
-      } catch {
-        // Malformed envelope — drop.
-        return;
-      }
+    const handleUpdate = (data: UpdateEvent) => {
+      if (!this.view) return;
 
       // A well-formed message proves the stream reconnected and is healthy.
       // This is the confirmed-reconnect signal that clears the recover
@@ -1763,6 +1783,11 @@ export class EditorConnection {
       if (this.stepError) return;
 
       if (!data.steps || data.steps.length === 0) return;
+      // The server stamps every batch with its post-batch version. Without
+      // it the batch can't be placed: a deferred batch would be guessed
+      // against a doc that moves before it is applied. Drop rather than
+      // guess — the next reconnect backlog carries the same steps.
+      if (typeof data.version !== "number") return;
 
       // `receiveTransaction` builds a single tr from all steps. Wrap the
       // whole construct + dispatch in a try so a single bad remote step
@@ -1771,7 +1796,7 @@ export class EditorConnection {
         const batch: StepBatch = {
           steps: data.steps.map((s) => Step.fromJSON(schema, s)),
           clientIDs: data.clientIDs ?? [],
-          version: data.version ?? getVersion(this.view.state) + data.steps.length,
+          version: data.version,
         };
         if (this.sending) {
           this.pendingUpdates.push(batch);
@@ -1786,28 +1811,26 @@ export class EditorConnection {
         // Use it directly for the error report so the user / repair tool
         // can find the offending step.
         this.reportStepError({
-          version:
-            typeof data.version === "number"
-              ? data.version
-              : getVersion(this.view.state) + (data.steps.length ?? 0),
+          version: data.version,
           phase: "sse",
           message: err instanceof Error ? err.message : String(err),
         });
       }
     };
 
-    es.addEventListener("message", handleMessage);
-    es.addEventListener("update", handleMessage as EventListener);
+    // Unnamed `message` frames are treated as updates too.
+    this.listen<UpdateEvent>(es, "message", handleUpdate);
+    this.listen<UpdateEvent>(es, SSE_EVENT.update, handleUpdate);
 
-    es.addEventListener("ready", () => {
-      if (this.eventSource !== es || !this.view) return;
+    this.listen<ReadyEvent>(es, SSE_EVENT.ready, () => {
+      if (!this.view) return;
       this.waitingForSync = false;
       this.backOff = 0;
       this.report.success();
       this._send();
     });
-    es.addEventListener("reset", () => {
-      if (this.eventSource !== es || !this.view) return;
+    this.listen<ResetEvent>(es, SSE_EVENT.reset, () => {
+      if (!this.view) return;
       if (sendableSteps(this.view.state)) {
         // History needed to rebase this draft is gone. Keep it available
         // for copying instead of silently destroying it during bootstrap.
@@ -1823,79 +1846,46 @@ export class EditorConnection {
       }
     });
 
-    const handlePresence = (evt: MessageEvent) => {
-      if (!this.view || this.eventSource !== es) return;
-      try {
-        const data = JSON.parse(evt.data) as { users: RemoteUser[] };
-        if (Array.isArray(data.users)) {
-          setRemoteUsers(this.view, data.users, this.clientID, this.selfActor);
-        }
-      } catch {
-        // ignore malformed
+    this.listen<{ users?: unknown }>(es, SSE_EVENT.presence, (data) => {
+      if (!this.view) return;
+      if (Array.isArray(data.users)) {
+        setRemoteUsers(this.view, data.users as RemoteUser[], this.clientID, this.selfActor);
       }
-    };
-    es.addEventListener("presence", handlePresence as EventListener);
+    });
 
-    const handleStateChanged = (evt: MessageEvent) => {
-      if (this.eventSource !== es) return;
-      try {
-        const data = JSON.parse(evt.data) as Partial<DocStatePayload>;
-        if (data.state !== "active" && data.state !== "archived" && data.state !== "trashed") {
-          return;
-        }
-        this.opts.onDocState?.({
-          state: data.state,
-          archived_at: data.archived_at ?? null,
-          trashed_at: data.trashed_at ?? null,
-          delete_at: data.delete_at ?? null,
-        });
-      } catch {
-        // ignore malformed
+    this.listen<Partial<DocStatePayload>>(es, SSE_EVENT.stateChanged, (data) => {
+      if (data.state !== "active" && data.state !== "archived" && data.state !== "trashed") {
+        return;
       }
-    };
-    es.addEventListener("state-changed", handleStateChanged as EventListener);
+      this.opts.onDocState?.({
+        state: data.state,
+        archived_at: data.archived_at ?? null,
+        trashed_at: data.trashed_at ?? null,
+        delete_at: data.delete_at ?? null,
+      });
+    });
 
-    const handleRenamed = (evt: MessageEvent) => {
-      if (this.eventSource !== es) return;
-      try {
-        const data = JSON.parse(evt.data) as {
-          name?: unknown;
-          updated_at?: unknown;
-        };
-        if (typeof data.name !== "string" || !data.name) return;
-        this.opts.onRenamed?.(
-          data.name,
-          typeof data.updated_at === "string" ? data.updated_at : "",
-        );
-      } catch {
-        // ignore malformed
-      }
-    };
-    es.addEventListener("renamed", handleRenamed as EventListener);
+    this.listen<{ name?: unknown; updated_at?: unknown }>(es, SSE_EVENT.renamed, (data) => {
+      if (typeof data.name !== "string" || !data.name) return;
+      this.opts.onRenamed?.(
+        data.name,
+        typeof data.updated_at === "string" ? data.updated_at : "",
+      );
+    });
 
-    const handlePermissionsChanged = (evt: MessageEvent) => {
-      if (this.eventSource !== es) return;
+    this.listen<Partial<BootstrapPermissions>>(es, SSE_EVENT.permissionsChanged, (data) => {
       // Server pushes ``{canEdit, locked}`` after a lock/unlock; merge
       // into the cached full block and re-fire so PaperApp's
       // ``onPermissions`` handler flips the editor into the right mode
       // without a reconnect.
       if (!this.lastPermissions) return;
-      try {
-        const data = JSON.parse(evt.data) as Partial<BootstrapPermissions>;
-        const merged: BootstrapPermissions = {
-          ...this.lastPermissions,
-          ...data,
-        };
-        this.lastPermissions = merged;
-        this.opts.onPermissions?.(merged);
-      } catch {
-        // ignore malformed
-      }
-    };
-    es.addEventListener(
-      "permissions-changed",
-      handlePermissionsChanged as EventListener,
-    );
+      const merged: BootstrapPermissions = {
+        ...this.lastPermissions,
+        ...data,
+      };
+      this.lastPermissions = merged;
+      this.opts.onPermissions?.(merged);
+    });
 
     es.addEventListener("error", () => {
       if (this.eventSource !== es) return;
@@ -1903,6 +1893,25 @@ export class EditorConnection {
       if (this.comm !== "detached") {
         this.recover(new Error("SSE stream error"));
       }
+    });
+  }
+
+  /**
+   * Register a JSON-payload listener on `es`. Events from a stream that
+   * has since been replaced are ignored (each reopen creates a new
+   * EventSource; the old one may still fire while closing), and a
+   * malformed envelope is dropped rather than thrown into the page.
+   */
+  private listen<T>(es: EventSource, name: string, handler: (data: T) => void): void {
+    es.addEventListener(name, (evt) => {
+      if (this.eventSource !== es) return;
+      let data: T;
+      try {
+        data = JSON.parse((evt as MessageEvent).data);
+      } catch {
+        return;
+      }
+      handler(data);
     });
   }
 
