@@ -639,6 +639,21 @@ def _clamp_callout_kind(kind) -> str:
     return kind if isinstance(kind, str) and kind in _CALLOUT_KINDS else "note"
 
 
+# The list-item marker kinds — mirrors LIST_ITEM_KINDS in
+# frontend/src/lib/schema.ts. An open set by design: a later kind (todo — see
+# plans/list-kinds) only widens it, which is replay-safe precisely because an
+# older peer clamps the unknown value instead of failing.
+_LIST_ITEM_KINDS = frozenset({"bullet", "toggle"})
+
+
+def _clamp_list_item_kind(kind) -> str:
+    """Clamp an arbitrary ``list_item.kind`` attr value to a known kind,
+    defaulting to "bullet". Never raises — same materializer contract as
+    ``_clamp_callout_kind``; mirrors ``clampListItemKind`` in
+    frontend/src/lib/schema.ts."""
+    return kind if isinstance(kind, str) and kind in _LIST_ITEM_KINDS else "bullet"
+
+
 # Block node for a GitHub-style admonition — mirrors the JS schema in
 # frontend/src/lib/schema.ts. Deliberately NOT in the `block` group;
 # `_doc_spec` below overrides `doc`'s content to `(block | callout)+`, making
@@ -690,9 +705,36 @@ _callout_title_spec = {
 # @feat callout: doc content override — the no-nesting mechanism (mirrors schema.ts)
 _doc_spec = {**_list_nodes["doc"], "content": "(block | callout)+"}
 
+# `add_list_nodes` ships `list_item` with no attrs. Splice the toggle-list pair
+# onto its spec — `kind` picks the marker ("bullet" | "toggle"), `collapsed` is
+# the shared fold state — the same way `_doc_spec` overrides `doc` above.
+# Both attrs have defaults, so steps and snapshots authored before they existed
+# still deserialize (the replay constraint; plans/toggle-list/design.md).
+# toDOM is never rendered server-side but is kept in lock-step with schema.ts:
+# a bullet emits a bare `<li>`, so existing documents' HTML is byte-identical.
+# @feat toggle-list: server list_item spec — kind/collapsed attrs (mirrors schema.ts)
+_list_item_spec = {
+    **_list_nodes["list_item"],
+    "attrs": {"kind": {"default": "bullet"}, "collapsed": {"default": False}},
+    "parseDOM": [{"tag": "li"}],
+    "toDOM": lambda node: [
+        "li",
+        {
+            **(
+                {"data-kind": _clamp_list_item_kind(node.attrs.get("kind"))}
+                if _clamp_list_item_kind(node.attrs.get("kind")) != "bullet"
+                else {}
+            ),
+            **({"data-collapsed": "true"} if node.attrs.get("collapsed") else {}),
+        },
+        0,
+    ],
+}
+
 _nodes = {
     **_list_nodes,
     "doc": _doc_spec,
+    "list_item": _list_item_spec,
     "callout": _callout_spec,
     "callout_title": _callout_title_spec,
     "image": _image_spec,

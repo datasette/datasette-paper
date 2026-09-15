@@ -318,6 +318,21 @@ def _tokens_to_doc(tokens) -> dict:
             ):
                 checked = _strip_task_checkbox(tok)
                 stack[-2]["attrs"]["checked"] = checked
+            # @feat toggle-list: a leading literal `[>] ` marks the item as a
+            # toggle — stripped here the way the task checkbox is above. The
+            # tasklists plugin only knows `[ ]`/`[x]`, so `[>]` arrives as
+            # ordinary text.
+            elif (
+                current.get("type") == "paragraph"
+                and len(stack) >= 2
+                and stack[-2].get("type") == "list_item"
+                and not current.get("content")
+                and _strip_toggle_marker(tok)
+            ):
+                stack[-2]["attrs"] = {
+                    **(stack[-2].get("attrs") or {}),
+                    "kind": "toggle",
+                }
             inline_nodes = _inline_to_pm(tok)
             if inline_nodes:
                 current.setdefault("content", []).extend(inline_nodes)
@@ -1175,6 +1190,54 @@ def _strip_task_checkbox(inline_token) -> bool:
                 children = children[1:]
     inline_token.children = children
     return checked
+
+
+# The toggle-list marker, in the checkbox-marker slot `- [ ]` / `- [x]` already
+# occupy. Mirrors `_render_list`'s lead in datasette_paper/markdown.py.
+_TOGGLE_MARKER = "[>] "
+# Same marker with the trailing space already trimmed by markdown-it, which is
+# how an empty toggle summary reaches us. Matched only as the whole run.
+_TOGGLE_MARKER_BARE = "[>]"
+
+
+def _strip_toggle_marker(inline_token) -> bool:
+    """Pull a leading literal ``[>] `` out of a list_item's first paragraph.
+
+    Mutates ``inline_token.children`` in place and returns whether the marker
+    was there — the caller sets ``kind: "toggle"`` on the enclosing item.
+
+    The raw ``content`` is what's tested, not the parsed children: by the time
+    inline parsing finishes, markdown-it has merged the escaped form's tokens
+    back into one plain text run, so ``\\[>] `` and ``[>] `` look identical in
+    ``children`` and only the source tells them apart. That keeps the escape
+    the serializer emits for a bullet whose text really starts with ``[>] ``
+    from silently becoming a toggle on the round-trip. ``[>]`` mid-paragraph is
+    likewise not a marker — the prefix must be at the very start.
+    """
+    raw = inline_token.content or ""
+    if raw.startswith(_TOGGLE_MARKER):
+        marker = _TOGGLE_MARKER
+    elif raw == _TOGGLE_MARKER_BARE:
+        # An empty summary: the serializer emits `- [>] `, but markdown-it
+        # trims the trailing space before we see it, so the prefix check above
+        # misses it. Worth handling — an empty summary is the state an item is
+        # in for as long as it takes to type into a freshly inserted toggle.
+        # Only an exact match counts, so `[>]x` stays ordinary text.
+        marker = _TOGGLE_MARKER_BARE
+    else:
+        return False
+    children = list(inline_token.children or [])
+    if not (
+        children
+        and children[0].type == "text"
+        and children[0].content.startswith(marker)
+    ):
+        return False
+    children[0].content = children[0].content[len(marker) :]
+    if not children[0].content:
+        children = children[1:]
+    inline_token.children = children
+    return True
 
 
 def _ensure_block_content(node: dict) -> None:

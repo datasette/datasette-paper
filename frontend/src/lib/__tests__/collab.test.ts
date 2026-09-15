@@ -2388,6 +2388,244 @@ describe("task list", () => {
   });
 });
 
+// ─── Test: toggle list ─────────────────────────────────────────────────────
+
+// @feat toggle-list: test — `[>] ` input rule + Enter never yields a pre-collapsed item
+describe("toggle list", () => {
+  /** Replace the bootstrap doc with `blocks` and drop the cursor at `pos`. */
+  function setDoc(view: EditorView, blocks: PMNode[], pos: number) {
+    view.dispatch(
+      view.state.tr.replaceWith(0, view.state.doc.content.size, blocks),
+    );
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)),
+    );
+  }
+
+  /** A bullet_list whose single item's paragraph holds `text`. */
+  function bulletWith(text: string): PMNode {
+    return schema.nodes.bullet_list.create(
+      null,
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text(text)),
+      ),
+    );
+  }
+
+  /** Fire the input rule by "typing" the trailing space at `pos`. */
+  function typeSpace(view: EditorView, pos: number): boolean {
+    return (
+      view.someProp("handleTextInput", (fn) =>
+        fn(view, pos, pos, " ", () => view.state.tr),
+      ) === true
+    );
+  }
+
+  it("`[>] ` at the start of a list item flips it to a toggle and strips the marker", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    // `- [>]` with the cursor after the `]`, about to type the space.
+    setDoc(view, [bulletWith("[>]")], 6);
+    expect(typeSpace(view, 6)).toBe(true);
+
+    const list = view.state.doc.firstChild!;
+    expect(list.type.name).toBe("bullet_list");
+    expect(list.childCount).toBe(1);
+    const item = list.child(0);
+    expect(item.type.name).toBe("list_item");
+    expect(item.attrs.kind).toBe("toggle");
+    expect(item.attrs.collapsed).toBe(false);
+    // Marker stripped, and the space was never inserted.
+    expect(item.firstChild!.textContent).toBe("");
+
+    conn.close();
+  });
+
+  it("keeps the rest of the line when the marker is typed in front of it", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    // `- [>]summary`, cursor between `]` and `s` (parentOffset 3).
+    setDoc(view, [bulletWith("[>]summary")], 6);
+    expect(typeSpace(view, 6)).toBe(true);
+
+    const item = view.state.doc.firstChild!.child(0);
+    expect(item.attrs.kind).toBe("toggle");
+    expect(item.firstChild!.textContent).toBe("summary");
+
+    conn.close();
+  });
+
+  it("retypes an ordered container to bullet_list, like /toggle does", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    // A chevron can't replace a number, so typing the marker inside a numbered
+    // item must land in the same state `/toggle` would produce there — not a
+    // toggle stranded inside an ordered_list with its number hidden by CSS.
+    const ordered = schema.nodes.ordered_list.create(
+      null,
+      schema.nodes.list_item.create(
+        null,
+        schema.nodes.paragraph.create(null, schema.text("[>]")),
+      ),
+    );
+    setDoc(view, [ordered], 6);
+    expect(typeSpace(view, 6)).toBe(true);
+
+    const list = view.state.doc.firstChild!;
+    expect(list.type.name).toBe("bullet_list");
+    expect(list.child(0).attrs.kind).toBe("toggle");
+
+    conn.close();
+  });
+
+  it("does NOT fire mid-paragraph", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    // `- foo[>]` — the marker must be at column 0 of the summary.
+    setDoc(view, [bulletWith("foo[>]")], 9);
+    expect(typeSpace(view, 9)).toBe(false);
+    expect(view.state.doc.firstChild!.child(0).attrs.kind).toBe("bullet");
+
+    conn.close();
+  });
+
+  it("does NOT fire outside a list", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    setDoc(view, [schema.nodes.paragraph.create(null, schema.text("[>]"))], 4);
+    expect(typeSpace(view, 4)).toBe(false);
+    expect(view.state.doc.firstChild!.type.name).toBe("paragraph");
+    expect(view.state.doc.firstChild!.textContent).toBe("[>]");
+
+    conn.close();
+  });
+
+  it("one undo puts the literal `[>] ` text back", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    setDoc(view, [bulletWith("[>]")], 6);
+    expect(typeSpace(view, 6)).toBe(true);
+    expect(view.state.doc.firstChild!.child(0).attrs.kind).toBe("toggle");
+
+    // buildKeymap binds Backspace to `undoInputRule`; the rule ran as a
+    // single transaction, so it reverts in one go to what was typed.
+    const evt = new KeyboardEvent("keydown", { key: "Backspace" });
+    expect(view.someProp("handleKeyDown", (fn) => fn(view, evt))).toBe(true);
+
+    const item = view.state.doc.firstChild!.child(0);
+    expect(item.attrs.kind).toBe("bullet");
+    expect(item.firstChild!.textContent).toBe("[>] ");
+
+    conn.close();
+  });
+
+  it("Enter at the end of a toggle summary spawns another toggle", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    // The resolved decision (plans/toggle-list design.md, open decision 1):
+    // splitListItem's attr copy makes the new item a toggle too. Pinned here
+    // so changing it later is deliberate.
+    const list = schema.nodes.bullet_list.create(
+      null,
+      schema.nodes.list_item.create(
+        { kind: "toggle", collapsed: false },
+        schema.nodes.paragraph.create(null, schema.text("summary")),
+      ),
+    );
+    setDoc(view, [list], 1);
+    const $inside = view.state.doc.resolve(4);
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, $inside.end()),
+      ),
+    );
+
+    const evt = new KeyboardEvent("keydown", { key: "Enter" });
+    expect(view.someProp("handleKeyDown", (fn) => fn(view, evt))).toBe(true);
+
+    const after = view.state.doc.firstChild!;
+    expect(after.childCount).toBe(2);
+    expect(after.child(0).attrs.kind).toBe("toggle");
+    expect(after.child(1).attrs.kind).toBe("toggle");
+    expect(after.child(1).attrs.collapsed).toBe(false);
+
+    conn.close();
+  });
+
+  it("Enter inside a COLLAPSED toggle leaves the new item expanded", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+    const view = conn.view!;
+
+    // Stock `splitListItem` copies every attr AND moves the subtree into the
+    // new item, so without the fix the children would land pre-hidden.
+    const list = schema.nodes.bullet_list.create(
+      null,
+      schema.nodes.list_item.create({ kind: "toggle", collapsed: true }, [
+        schema.nodes.paragraph.create(null, schema.text("summary")),
+        schema.nodes.bullet_list.create(
+          null,
+          schema.nodes.list_item.create(
+            null,
+            schema.nodes.paragraph.create(null, schema.text("child")),
+          ),
+        ),
+      ]),
+    );
+    setDoc(view, [list], 1);
+    const $inside = view.state.doc.resolve(4);
+    view.dispatch(
+      view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, $inside.end()),
+      ),
+    );
+
+    const evt = new KeyboardEvent("keydown", { key: "Enter" });
+    expect(view.someProp("handleKeyDown", (fn) => fn(view, evt))).toBe(true);
+
+    const after = view.state.doc.firstChild!;
+    expect(after.childCount).toBe(2);
+    // The item the user was on keeps its own fold state...
+    expect(after.child(0).attrs.collapsed).toBe(true);
+    // ...but the new one (which the split handed the children to) is open.
+    expect(after.child(1).attrs.kind).toBe("toggle");
+    expect(after.child(1).attrs.collapsed).toBe(false);
+
+    conn.close();
+  });
+});
+
 // ─── Test: Enter exits a trailing code_block ───────────────────────────────
 
 describe("Enter inside a code_block at end of doc", () => {
@@ -3541,8 +3779,13 @@ describe("step-apply error handling", () => {
     await waitFor(() => expect(conn.view).not.toBeNull());
 
     // Editor mounted with the snapshot doc — the bad step at version 1
-    // was skipped, no later steps to attempt.
-    expect(conn.view!.state.doc.toJSON()).toEqual(BAD_STEP_BOOT.doc);
+    // was skipped, no later steps to attempt. Compared through the schema so
+    // the assertion tracks attr defaults (a bootstrap payload authored before
+    // an attr existed mounts with the default filled in — e.g. `list_item`'s
+    // toggle-list `kind`/`collapsed`).
+    expect(conn.view!.state.doc.toJSON()).toEqual(
+      schema.nodeFromJSON(BAD_STEP_BOOT.doc).toJSON(),
+    );
 
     // The error callback was called exactly once for the bad step.
     expect(errors).toHaveLength(1);

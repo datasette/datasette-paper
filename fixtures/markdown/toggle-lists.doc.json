@@ -1,0 +1,243 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Toggle lists",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "attrs": {
+            "kind": "toggle"
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "toggle with children",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "nested child",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "list_item"
+                },
+                {
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "another child",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "list_item"
+                }
+              ],
+              "type": "bullet_list"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "attrs": {
+            "kind": "toggle"
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "toggle with no children",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "attrs": {
+            "kind": "toggle"
+          },
+          "content": [
+            {
+              "content": [],
+              "type": "paragraph"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "plain bullet sibling",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "attrs": {
+            "kind": "toggle"
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "outer toggle",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "attrs": {
+                    "kind": "toggle"
+                  },
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "nested toggle",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    },
+                    {
+                      "content": [
+                        {
+                          "content": [
+                            {
+                              "content": [
+                                {
+                                  "text": "deep child",
+                                  "type": "text"
+                                }
+                              ],
+                              "type": "paragraph"
+                            }
+                          ],
+                          "type": "list_item"
+                        }
+                      ],
+                      "type": "bullet_list"
+                    }
+                  ],
+                  "type": "list_item"
+                }
+              ],
+              "type": "bullet_list"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "attrs": {
+            "kind": "toggle"
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "toggle holding a task list",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            },
+            {
+              "content": [
+                {
+                  "attrs": {
+                    "checked": false
+                  },
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "open task",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "task_item"
+                },
+                {
+                  "attrs": {
+                    "checked": true
+                  },
+                  "content": [
+                    {
+                      "content": [
+                        {
+                          "text": "done task",
+                          "type": "text"
+                        }
+                      ],
+                      "type": "paragraph"
+                    }
+                  ],
+                  "type": "task_item"
+                }
+              ],
+              "type": "task_list"
+            }
+          ],
+          "type": "list_item"
+        },
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "[>] literal marker, not a toggle",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "list_item"
+        }
+      ],
+      "type": "bullet_list"
+    }
+  ],
+  "type": "doc"
+}

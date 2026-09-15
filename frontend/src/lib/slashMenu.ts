@@ -33,6 +33,7 @@ import { insertTable, findTable } from "./tables";
 import { insertToc } from "./tocView";
 import { insertSqlBlock, insertSource } from "./sqlQuery";
 import { insertCallout } from "./callout";
+import { setListItemKind } from "./listCommands";
 import { insertDateAndEdit, insertRelativeDate } from "./dateView";
 import { embedInsertSources, type EmbedInsertSource } from "./embedProviders";
 
@@ -554,6 +555,18 @@ export function buildSlashCommands(cb: SlashCommandCallbacks = {}): SlashCommand
       group: "styling",
       run: runCommand(wrapInList(task_list)),
       enabled: (state) => wrapInList(task_list)(state),
+    },
+    {
+      // @feat toggle-list: slash entry converts/creates a collapsible list item
+      // `styling` keeps it out of ＋ Insert (INSERT_GROUPS excludes the group),
+      // matching the three list entries above. No `shortcut:` — none in v1.
+      id: "toggle_list",
+      label: "Toggle list",
+      keywords: ["toggle", "collapse", "fold", "details", "accordion"],
+      icon: "chevronRight",
+      group: "styling",
+      run: runCommand(setListItemKind("toggle")),
+      enabled: (state) => setListItemKind("toggle")(state),
     },
     {
       id: "blockquote",

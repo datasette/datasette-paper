@@ -556,15 +556,42 @@ def _render_task_list(node: dict) -> str:
 
 
 def _render_list(node: dict, ordered: bool) -> str:
+    """Bullet / ordered list. A `kind: "toggle"` item takes a `[>] ` lead.
+
+    The lead is *content*, not part of the marker — exactly like a GFM
+    checkbox (see `_render_task_list`'s docstring). Continuation lines still
+    indent by ``len(marker)`` (2 for a bullet); widening the indent to the
+    full ``- [>] `` width pushes nested blocks 4 columns past the item's
+    content column, where CommonMark reads them as an indented code block
+    instead of a child list.
+
+    Ordered items ignore `kind` — a chevron can't replace a number, and the
+    client command retypes the container to `bullet_list` first. A bullet
+    whose text happens to start with a literal `[>] ` is safe without special
+    handling: `_escape_text` already backslash-escapes `[` and `]`, so it
+    round-trips as `\\[>\\] ` and never re-parses as a marker.
+    """
     items = node.get("content") or []
     start = _int_attr((node.get("attrs") or {}).get("order"), 1, lo=1) if ordered else 1
     out: List[str] = []
     for i, item in enumerate(items):
         marker = f"{start + i}. " if ordered else "- "
+        # @feat toggle-list: a toggle item serializes as `- [>] ` (fold state
+        # is deliberately NOT serialized — see plans/toggle-list/design.md)
+        lead = (
+            "[>] "
+            if not ordered and (item.get("attrs") or {}).get("kind") == "toggle"
+            else ""
+        )
         rendered = _render_block(item).rstrip("\n")
         first, *rest = rendered.split("\n")
-        indent = " " * len(marker)
-        out.append(marker + first)
+        indent = " " * len(marker)  # 2 for bullets — `[>] ` is content, not marker
+        # An empty summary would leave the lead's trailing space dangling at
+        # end-of-line. Strip it only in that case — a non-empty line may end
+        # in the two significant spaces of a markdown hard break.
+        out.append(
+            (marker + lead).rstrip() if (lead and not first) else marker + lead + first
+        )
         for line in rest:
             out.append((indent + line) if line else "")
     return "\n".join(out) + "\n"

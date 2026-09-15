@@ -1281,6 +1281,116 @@ class TestLists:
         assert doc["content"][0]["type"] == "bullet_list"
 
 
+class TestToggleLists:
+    """`- [>] ` in the checkbox-marker slot flips a list_item to a toggle."""
+
+    # @feat toggle-list: `- [>] ` parses to kind="toggle" with the marker stripped
+    def test_toggle_marker_sets_kind_and_strips_text(self):
+        doc = parse_and_validate("- [>] summary\n- plain\n")
+        ul = doc["content"][0]
+        assert ul["type"] == "bullet_list"
+        toggle, plain = ul["content"]
+        assert toggle["type"] == "list_item"
+        assert toggle["attrs"]["kind"] == "toggle"
+        assert toggle["content"][0]["content"][0]["text"] == "summary"
+        # The sibling stays a plain bullet — no attrs written.
+        assert plain.get("attrs", {}).get("kind", "bullet") == "bullet"
+
+    def test_toggle_keeps_its_nested_children(self):
+        doc = parse_and_validate("- [>] summary\n  - child\n")
+        item = doc["content"][0]["content"][0]
+        assert item["attrs"]["kind"] == "toggle"
+        assert [c["type"] for c in item["content"]] == ["paragraph", "bullet_list"]
+
+    def test_escaped_marker_stays_literal(self):
+        doc = parse_and_validate("- \\[>\\] not a toggle\n")
+        item = doc["content"][0]["content"][0]
+        assert item.get("attrs", {}).get("kind", "bullet") == "bullet"
+        assert item["content"][0]["content"][0]["text"] == "[>] not a toggle"
+
+    def test_marker_mid_paragraph_is_not_a_marker(self):
+        doc = parse_and_validate("- summary [>] middle\n")
+        item = doc["content"][0]["content"][0]
+        assert item.get("attrs", {}).get("kind", "bullet") == "bullet"
+        assert item["content"][0]["content"][0]["text"] == "summary [>] middle"
+
+    def test_marker_in_a_plain_paragraph_is_not_a_marker(self):
+        doc = parse_and_validate("[>] just text\n")
+        para = doc["content"][0]
+        assert para["type"] == "paragraph"
+        assert para["content"][0]["text"] == "[>] just text"
+
+    def test_checkbox_path_is_untouched(self):
+        """`- [ ]` still produces task_item — the toggle branch only fires on
+        a `list_item`, and the tasklists plugin owns the checkbox forms."""
+        doc = parse_and_validate("- [ ] open\n- [x] done\n")
+        tl = doc["content"][0]
+        assert tl["type"] == "task_list"
+        assert [c["type"] for c in tl["content"]] == ["task_item", "task_item"]
+
+    def test_roundtrip_canonicalises_collapsed_to_false(self):
+        """Fold state is presentation and never serializes, so a collapsed
+        toggle exported and re-imported comes back expanded (by omission —
+        the schema default). Stated as expected behaviour in
+        plans/toggle-list/design.md."""
+        doc = {
+            "type": "doc",
+            "content": [
+                {
+                    "type": "bullet_list",
+                    "content": [
+                        {
+                            "type": "list_item",
+                            "attrs": {"kind": "toggle", "collapsed": True},
+                            "content": [
+                                {
+                                    "type": "paragraph",
+                                    "content": [{"type": "text", "text": "s"}],
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+        again = markdown_to_doc(doc_to_markdown(doc))
+        item = again["content"][0]["content"][0]
+        assert item["attrs"] == {"kind": "toggle"}
+        assert schema.node_from_json(again).content.child(0).content.child(0).attrs == {
+            "kind": "toggle",
+            "collapsed": False,
+        }
+
+    # @feat toggle-list: an empty summary survives the round-trip as a bare `[>]`
+    def test_empty_summary_is_still_a_toggle(self):
+        """`- [>] ` with nothing after it reaches the parser as a bare `[>]`,
+        because markdown-it trims the trailing space. It has to keep its
+        toggle-ness: an empty summary is the state a freshly inserted toggle
+        is in until someone types into it."""
+        doc = parse_and_validate("- [>]\n")
+        item = doc["content"][0]["content"][0]
+        assert item["attrs"]["kind"] == "toggle"
+        assert item["content"] == [{"type": "paragraph", "content": []}]
+
+    def test_empty_toggle_serializes_without_a_trailing_space(self):
+        """The `[>] ` lead's space must not dangle at end-of-line, and the
+        result has to be a fixed point of md -> doc -> md."""
+        md = "- [>]\n- [>] after\n"
+        assert doc_to_markdown(markdown_to_doc(md)) == md
+
+    def test_bare_marker_only_matches_the_whole_run(self):
+        """`[>]` with anything glued to it is ordinary text, not a marker."""
+        item = parse_and_validate("- [>]x\n")["content"][0]["content"][0]
+        assert (item.get("attrs") or {}).get("kind", "bullet") == "bullet"
+        assert item["content"][0]["content"][0]["text"] == "[>]x"
+
+    def test_escaped_bare_marker_stays_literal(self):
+        """The escaped form of an otherwise-empty `[>]` line stays a bullet."""
+        item = parse_and_validate("- \\[>\\]\n")["content"][0]["content"][0]
+        assert (item.get("attrs") or {}).get("kind", "bullet") == "bullet"
+        assert item["content"][0]["content"][0]["text"] == "[>]"
+
+
 class TestTaskLists:
     def test_task_list_open_and_closed(self):
         doc = parse_and_validate("- [ ] open\n- [x] done\n")

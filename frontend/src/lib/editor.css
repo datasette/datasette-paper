@@ -544,6 +544,57 @@ mark.pp-hl[data-color="hl4"] {
   color: var(--pp-fg-subtle);
 }
 
+/* Toggle list items (`kind: "toggle"`, rendered by ListItemView). The chevron
+ * replaces the native marker and the shared/local fold hides the item's child
+ * lists — the item's own paragraph stays visible.
+ *
+ * Alignment: `ul`/`ol` above set `padding-left: 1.5em`, and with the default
+ * `list-style-position: outside` a bullet's disc is painted in that gutter,
+ * outside the <li>'s content box. So the chevron is absolutely positioned into
+ * the same gutter and takes no inline space: a toggle and a bullet sibling
+ * keep an identical text left edge without any per-kind indent hack. */
+/* @feat toggle-list: chevron in the marker slot + collapsed children hidden */
+.editor-host .ProseMirror li[data-kind="toggle"] {
+  position: relative;
+  list-style: none;
+}
+.editor-host .ProseMirror li[data-kind="toggle"] > .pm-list-toggle {
+  position: absolute;
+  left: -1.25em;
+  top: 0.25em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--pp-fg-subtle);
+  cursor: pointer;
+}
+.editor-host .ProseMirror li[data-kind="toggle"] > .pm-list-toggle:hover,
+.editor-host .ProseMirror li[data-kind="toggle"] > .pm-list-toggle:focus-visible {
+  background: var(--pp-surface-2);
+  color: var(--pp-fg);
+}
+/* The content wrapper is chrome-free: match the `li > p` rhythm rule above,
+ * which no longer reaches these paragraphs. */
+.editor-host .ProseMirror li[data-kind="toggle"] > .pm-list-item-content > p {
+  margin: 0;
+}
+/* Collapsed: hide every nested list (including a legacy `ul[data-task-list]`,
+ * which is a `ul`). Display-only — the children stay in the PM-managed
+ * contentDOM. */
+.editor-host
+  .ProseMirror
+  li[data-kind="toggle"][data-collapsed="true"]
+  > .pm-list-item-content
+  > :is(ul, ol) {
+  display: none;
+}
+
 /* paper_link inline atom — rendered by PaperLinkView, resolved live via
  * the LinkResolver. Base looks like a link; modifier classes mute /
  * decorate by resolution state. */

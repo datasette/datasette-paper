@@ -205,6 +205,45 @@ describe("sibling block separators (backend markdown.py mirror)", () => {
   });
 });
 
+// @feat toggle-list: client serializer emits `- [>] `, keeps the 2-col indent,
+// and leaves no trace of the fold state (mirrors markdown.py's _render_list,
+// pinned with the SAME strings in tests/test_markdown.py)
+describe("toggle list items", () => {
+  const item = (attrs: Record<string, unknown> | null, ...blocks: PMNode[]) =>
+    n.list_item.create(attrs, blocks);
+  const toggle = (...blocks: PMNode[]) => item({ kind: "toggle" }, ...blocks);
+
+  it("emits the `[>] ` lead only for toggle items", () => {
+    const list = n.bullet_list.create(null, [toggle(p("summary")), item(null, p("plain"))]);
+    expect(md(list)).toBe("- [>] summary\n- plain");
+  });
+
+  it("indents a toggle's nested list by 2, not by the `- [>] ` width", () => {
+    // 6 columns would put the child past the item's content column, where
+    // CommonMark reads an indented code block instead of a child list.
+    const child = n.bullet_list.create(null, [item(null, p("child"))]);
+    const list = n.bullet_list.create(null, [toggle(p("summary"), child)]);
+    expect(md(list)).toBe("- [>] summary\n  - child");
+  });
+
+  it("never serializes `collapsed`", () => {
+    const folded = n.bullet_list.create(null, [
+      item({ kind: "toggle", collapsed: true }, p("summary")),
+    ]);
+    expect(md(folded)).toBe("- [>] summary");
+  });
+
+  it("escapes a bullet whose text starts with the literal marker", () => {
+    const list = n.bullet_list.create(null, [item(null, p("[>] not a toggle"))]);
+    expect(md(list)).toBe("- \\[>\\] not a toggle");
+  });
+
+  it("ignores `kind` on an ordered list", () => {
+    const list = n.ordered_list.create(null, [item({ kind: "toggle" }, p("one"))]);
+    expect(md(list)).toBe("1. one");
+  });
+});
+
 // @feat copy-markdown: parity guard — every schema node/mark has a serializer rule
 describe("schema ↔ serializer parity", () => {
   // prosemirror-markdown throws at serialize time on any node type with no

@@ -233,8 +233,22 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
       },
       // The backend serializes bullets as `- `; prosemirror-markdown's
       // default is `*`. Same 2-col continuation indent either way.
+      // A `kind: "toggle"` item adds the `[>] ` lead (mirrors `_render_list`
+      // in markdown.py). Like the task checkbox below, that lead is item
+      // *content* as far as CommonMark is concerned — the delim stays "  ", so
+      // nested blocks keep the 2-col indent of the `- ` marker. `collapsed` is
+      // deliberately not serialized (plans/toggle-list/design.md).
+      // @feat toggle-list: client serializer emits `- [>] ` for a toggle item
       bullet_list(state, node) {
-        state.renderList(node, "  ", () => "- ");
+        state.renderList(node, "  ", (i) => {
+          const item = node.child(i);
+          if (item.attrs.kind !== "toggle") return "- ";
+          // An empty summary would leave the lead's trailing space dangling at
+          // end-of-line, so drop it there — same rule as `_render_list`, and
+          // the golden fixture pins the two serializers to each other.
+          const summary = item.firstChild;
+          return summary && summary.content.size === 0 ? "- [>]" : "- [>] ";
+        });
       },
       // GFM-style `- [ ] foo` / `- [x] foo`. The checkbox is part of the
       // *marker* (not written as item content): renderList only indents

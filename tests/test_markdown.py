@@ -441,6 +441,142 @@ def test_task_list_renders_gfm_checkboxes():
     assert "- [x] ship feature" in md
 
 
+# ---------------------------------------------------------------------------
+# toggle-list: `kind` / `collapsed` on list_item
+# ---------------------------------------------------------------------------
+
+
+def _kind_item(*inlines, kind=None, extra_blocks=(), collapsed=None):
+    node = {"type": "list_item", "content": [_para(*inlines), *extra_blocks]}
+    attrs = {}
+    if kind is not None:
+        attrs["kind"] = kind
+    if collapsed is not None:
+        attrs["collapsed"] = collapsed
+    if attrs:
+        node["attrs"] = attrs
+    return node
+
+
+def _kind_ul(*items):
+    return {"type": "bullet_list", "content": list(items)}
+
+
+# @feat toggle-list: tests the `- [>] ` marker the serializer emits
+def test_toggle_item_renders_marker():
+    md = doc_to_markdown(
+        _doc(
+            _kind_ul(
+                _kind_item(_text("summary"), kind="toggle"), _kind_item(_text("plain"))
+            )
+        )
+    )
+    assert md == "- [>] summary\n- plain\n"
+
+
+# @feat toggle-list: the `[>] ` lead is item content — continuation lines stay
+# at the 2-col `- ` marker indent, or CommonMark reads them as a code block
+def test_toggle_item_nested_list_indents_by_two_not_marker_width():
+    md = doc_to_markdown(
+        _doc(
+            _kind_ul(
+                _kind_item(
+                    _text("summary"),
+                    kind="toggle",
+                    extra_blocks=[_kind_ul(_kind_item(_text("child")))],
+                )
+            )
+        )
+    )
+    assert md == "- [>] summary\n  - child\n"
+    # Spelled out: the child line is indented by exactly 2, not by len("- [>] ").
+    child_line = md.splitlines()[1]
+    assert len(child_line) - len(child_line.lstrip(" ")) == 2
+
+
+def test_toggle_item_nested_list_reparses_as_a_child_list():
+    """The indent regression is only visible on the way back: a 6-col indent
+    would re-parse as an indented code block, not a nested list."""
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    md = doc_to_markdown(
+        _doc(
+            _kind_ul(
+                _kind_item(
+                    _text("summary"),
+                    kind="toggle",
+                    extra_blocks=[_kind_ul(_kind_item(_text("child")))],
+                )
+            )
+        )
+    )
+    item = markdown_to_doc(md)["content"][0]["content"][0]
+    assert item["attrs"]["kind"] == "toggle"
+    assert [b["type"] for b in item["content"]] == ["paragraph", "bullet_list"]
+
+
+# @feat toggle-list: fold state is presentation — it never reaches the markdown
+def test_collapsed_attr_leaves_no_trace_in_markdown():
+    expanded = doc_to_markdown(_doc(_kind_ul(_kind_item(_text("s"), kind="toggle"))))
+    collapsed = doc_to_markdown(
+        _doc(_kind_ul(_kind_item(_text("s"), kind="toggle", collapsed=True)))
+    )
+    assert collapsed == expanded == "- [>] s\n"
+
+
+def test_bullet_text_starting_with_the_marker_is_escaped():
+    """A bullet whose text genuinely starts with `[>] ` must not round-trip
+    into a toggle. `_escape_text` already backslash-escapes `[` and `]`, so
+    this needs no special case in `_render_list` — pinned here because the
+    absence of the escape would be a silent semantic change."""
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    md = doc_to_markdown(_doc(_kind_ul(_kind_item(_text("[>] not a toggle")))))
+    assert md == "- \\[>\\] not a toggle\n"
+    item = markdown_to_doc(md)["content"][0]["content"][0]
+    assert item.get("attrs", {}).get("kind", "bullet") == "bullet"
+    assert item["content"][0]["content"][0]["text"] == "[>] not a toggle"
+
+
+def test_ordered_list_ignores_toggle_kind():
+    """Defensive: the client command retypes an ordered container to
+    `bullet_list` before setting the kind, so a numbered toggle shouldn't
+    exist — if one does, the number wins and no `[>] ` is emitted."""
+    md = doc_to_markdown(
+        _doc(
+            {
+                "type": "ordered_list",
+                "content": [_kind_item(_text("one"), kind="toggle")],
+            }
+        )
+    )
+    assert md == "1. one\n"
+
+
+def test_extract_tasks_depth_under_a_toggle_item():
+    """`NESTING` needs no new entry: a toggle is still a `list_item`, so a
+    task nested under one reports the same depth as under a plain bullet."""
+    from datasette_paper.markdown import extract_tasks
+
+    def tree(kind):
+        return _doc(
+            _kind_ul(
+                _kind_item(
+                    _text("summary"),
+                    kind=kind,
+                    extra_blocks=[
+                        {"type": "task_list", "content": [_task_item("nested")]}
+                    ],
+                )
+            )
+        )
+
+    toggled = extract_tasks(tree("toggle"))
+    bulleted = extract_tasks(tree(None))
+    assert toggled == bulleted
+    assert [t["text"] for t in toggled] == ["nested"]
+
+
 def test_extract_tasks_returns_text_and_state():
     from datasette_paper.markdown import extract_tasks
 

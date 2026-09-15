@@ -272,6 +272,113 @@ def test_callout_kind_flip_step_applies_over_snapshot():
 
 
 # ---------------------------------------------------------------------------
+# toggle-list: `kind` / `collapsed` on list_item
+# ---------------------------------------------------------------------------
+
+
+def _bullet_list(*items):
+    return {"type": "bullet_list", "content": list(items)}
+
+
+def _list_item(text: str, attrs: dict | None = None):
+    node = {
+        "type": "list_item",
+        "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}],
+    }
+    if attrs is not None:
+        node["attrs"] = attrs
+    return node
+
+
+# @feat toggle-list: a toggle list_item materializes over a snapshot
+def test_list_item_with_toggle_attrs_materializes():
+    doc = _materialize(
+        _bullet_list(_list_item("summary", {"kind": "toggle", "collapsed": True}))
+    )
+    item = doc.content.child(0).content.child(0)
+    assert item.type.name == "list_item"
+    assert item.attrs["kind"] == "toggle"
+    assert item.attrs["collapsed"] is True
+
+
+# @feat toggle-list: a pre-attrs snapshot still materializes (defaults fill in)
+def test_list_item_without_attrs_applies_defaults():
+    # Every list item authored before the attrs existed has no `attrs` key —
+    # ProseMirror fills the defaults, which is why no step-log migration is
+    # needed (plans/toggle-list/design.md, "the constraint that drives
+    # everything: step replay").
+    doc = _materialize(_bullet_list(_list_item("plain")))
+    item = doc.content.child(0).content.child(0)
+    assert item.attrs == {"kind": "bullet", "collapsed": False}
+
+
+def test_unknown_list_item_kind_clamps_instead_of_raising():
+    # A crafted step or a kind authored by a newer client must degrade to a
+    # plain bullet, never take the doc down.
+    from datasette_paper.pm_schema import _clamp_list_item_kind
+
+    assert _clamp_list_item_kind("todo") == "bullet"
+    assert _clamp_list_item_kind(None) == "bullet"
+    assert _clamp_list_item_kind(17) == "bullet"
+    assert _clamp_list_item_kind("toggle") == "toggle"
+
+    doc = _materialize(_bullet_list(_list_item("weird", {"kind": "todo"})))
+    item = doc.content.child(0).content.child(0)
+    dom = schema.nodes["list_item"].spec["toDOM"](item)
+    assert dom[0] == "li"
+    assert dom[1] == {}  # clamped to bullet → a bare <li>, no data-attrs
+
+
+def test_bullet_list_item_todom_is_a_bare_li():
+    # Existing documents' rendered HTML must stay byte-identical, so only a
+    # non-bullet kind / a folded item emits data-attrs.
+    doc = _materialize(_bullet_list(_list_item("plain")))
+    spec = schema.nodes["list_item"].spec["toDOM"]
+    assert spec(doc.content.child(0).content.child(0))[1] == {}
+
+    folded = _materialize(
+        _bullet_list(_list_item("s", {"kind": "toggle", "collapsed": True}))
+    )
+    assert spec(folded.content.child(0).content.child(0))[1] == {
+        "data-kind": "toggle",
+        "data-collapsed": "true",
+    }
+
+
+# @feat toggle-list: an AttrStep flipping `collapsed` applies over a snapshot
+def test_list_item_collapsed_flip_step_applies_over_snapshot():
+    # Server-side twin of the NodeView's `setNodeMarkup` collapse dispatch
+    # (ticket 02): the fold rides the collab step log like any other edit.
+    from prosemirror.model import Fragment, Node, Slice
+    from prosemirror.transform import AttrStep, ReplaceStep
+
+    start_doc = Node.from_json(
+        schema, {"type": "doc", "content": [{"type": "paragraph"}]}
+    )
+    lst = Node.from_json(
+        schema,
+        _bullet_list(_list_item("summary", {"kind": "toggle"})),
+    )
+    step = ReplaceStep(
+        start_doc.content.size,
+        start_doc.content.size,
+        Slice(Fragment.from_array([lst]), 0, 0),
+    )
+    result = step.apply(start_doc)
+    assert not result.failed
+    result.doc.check()
+
+    # Position right before the spliced-in list's first item.
+    pos = result.doc.content.size - lst.node_size + 1
+    flip = AttrStep(pos, "collapsed", True)
+    result2 = flip.apply(result.doc)
+    assert not result2.failed
+    result2.doc.check()
+    item = result2.doc.content.child(1).content.child(0)
+    assert item.attrs == {"kind": "toggle", "collapsed": True}
+
+
+# ---------------------------------------------------------------------------
 # Link / image href sanitization (stored-XSS fix, blockers-0629/01).
 # Mirrors frontend/src/lib/__tests__/safeHref.test.ts — keep the allowlist in
 # lock-step with frontend/src/lib/safeHref.ts.

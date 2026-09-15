@@ -3,13 +3,14 @@
   import type { MarkType, NodeType } from "prosemirror-model";
   import { toggleMark, setBlockType, wrapIn, lift } from "prosemirror-commands";
   import { wrapInList } from "prosemirror-schema-list";
-  import { indentListSelection, dedentListSelection } from "./listCommands";
+  import { indentListSelection, dedentListSelection, setListItemKind } from "./listCommands";
   import { undo, redo, undoDepth, redoDepth } from "prosemirror-history";
   import { schema, HIGHLIGHT_COLORS, type HighlightColor } from "./schema";
   import { activeHighlightColor, clearHighlight, setHighlight } from "./highlight";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { blockTypeLabel } from "./blockTypeLabel";
   import { activeListType } from "./activeListType";
+  import { activeListItemKind } from "./activeListItemKind";
   import { wrapSelectionInCallout, unwrapCallout } from "./callout";
   import type { SlashCommand } from "./slashMenu";
   import { insertMenuGroups } from "./insertMenuItems";
@@ -388,6 +389,13 @@
   const activeList = $derived.by(() => {
     void tick;
     return view ? activeListType(view.state) : null;
+  });
+  // List ▾ Toggle-list active marker. The container-level `activeList` can't
+  // answer this — toggle-ness is an attr on the item, not on the list.
+  // @feat toggle-list: List ▾ row active state follows the item's kind
+  const activeItemKind = $derived.by(() => {
+    void tick;
+    return view ? activeListItemKind(view.state) : null;
   });
   // Text ▾ trigger label — current block type at the cursor.
   const blockLabel = $derived.by(() => {
@@ -806,6 +814,19 @@
           {@render menuIcon("taskList")}
           <span class="tb-menu-label">Task list</span>
           {@render hint("taskList")}
+        </button>
+        <!-- @feat toggle-list: List ▾ row converts the item(s) to a toggle.
+             No aria-keyshortcuts / hint — no registry shortcut in v1 (the
+             Text ▾ Callout row is the precedent for a shortcut-less row). -->
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-menu-item"
+          class:active={activeItemKind === "toggle"}
+          onclick={chooseBlock(() => run(setListItemKind("toggle")))}
+        >
+          {@render menuIcon("chevronRight")}
+          <span class="tb-menu-label">Toggle list</span>
         </button>
         <span class="tb-menu-sep" role="separator"></span>
         <button
