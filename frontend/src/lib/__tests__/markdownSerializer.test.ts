@@ -26,6 +26,38 @@ function md(...children: PMNode[]): string {
   return serializeDoc(serializer, n.doc.create(null, children));
 }
 
+// @feat highlight: client serializer — <mark data-color> bytes match markdown.py (clamp + escape)
+describe("highlight markdown serialization", () => {
+  const hl = (color: unknown) => schema.marks.highlight.create({ color });
+  const inP = (...inline: PMNode[]) => md(n.paragraph.create(null, inline));
+
+  it("emits the tag form for every slot", () => {
+    for (const c of ["hl1", "hl2", "hl3", "hl4"]) {
+      expect(inP(text("a "), schema.text("hi", [hl(c)]))).toBe(
+        `a <mark data-color="${c}">hi</mark>`,
+      );
+    }
+  });
+
+  it("clamps a bogus color to hl1", () => {
+    expect(inP(schema.text("hi", [hl("red")]))).toBe('<mark data-color="hl1">hi</mark>');
+    expect(inP(schema.text("hi", [hl('"><x>')]))).toBe('<mark data-color="hl1">hi</mark>');
+  });
+
+  it("keeps an overlapping strong inside the open highlight (matches markdown.py)", () => {
+    expect(
+      inP(schema.text("a ", [hl("hl2")]), schema.text("b", [hl("hl2"), schema.marks.strong.create()])),
+    ).toBe('<mark data-color="hl2">a **b**</mark>');
+  });
+
+  it("escapes a literal <mark / </mark in text, leaving other < alone", () => {
+    expect(inP(text('x <mark data-color="hl1">y</mark> <b>'))).toBe(
+      'x \\<mark data-color="hl1">y\\</mark> <b>',
+    );
+    expect(inP(text("a < b <marker> <b>"))).toBe("a < b <marker> <b>");
+  });
+});
+
 describe("callout markdown serialization", () => {
   it("serializes kind (UPPERCASE) + title onto the marker line, body `> `-quoted", () => {
     const callout = n.callout.create({ kind: "warning" }, [

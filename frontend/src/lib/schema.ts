@@ -99,7 +99,42 @@ const baseMarks = basic.spec.marks
       { style: "text-decoration-line=line-through" },
     ],
     toDOM: () => ["s", 0],
-  });
+  })
+  .addToEnd("highlight", highlightMark());
+
+// The four highlight color slots. Stored as neutral slot keys (never hex) so a
+// later palette config only has to remap the `--pp-hl-*` CSS tokens. Mirrors
+// `HIGHLIGHT_COLORS` in datasette_paper/pm_schema.py.
+export const HIGHLIGHT_COLORS = ["hl1", "hl2", "hl3", "hl4"] as const;
+export type HighlightColor = (typeof HIGHLIGHT_COLORS)[number];
+
+// Clamp an untrusted attr value (a crafted collab step can carry any string)
+// to a known slot, defaulting to "hl1". Applied at every sink: toDOM here and
+// in pm_schema.py, and both markdown serializers.
+export function clampHighlightColor(color: unknown): HighlightColor {
+  return typeof color === "string" && (HIGHLIGHT_COLORS as readonly string[]).includes(color)
+    ? (color as HighlightColor)
+    : "hl1";
+}
+
+// Color highlight mark. Same-type marks exclude each other by default, so
+// applying hl2 over hl1 replaces the color — no `excludes` override. A
+// function declaration (hoisted) because `baseMarks` above is built first.
+// @feat highlight: client MarkSpec with clamped color slot attr (mirrors pm_schema.py)
+function highlightMark(): MarkSpec {
+  return {
+    attrs: { color: { default: "hl1" } },
+    parseDOM: [
+      {
+        tag: "mark",
+        getAttrs: (el) => ({
+          color: clampHighlightColor((el as HTMLElement).getAttribute("data-color")),
+        }),
+      },
+    ],
+    toDOM: (mark) => ["mark", { class: "pp-hl", "data-color": clampHighlightColor(mark.attrs.color) }, 0],
+  };
+}
 
 // Inline atom for template placeholders — e.g. {today}, {actor}. Only
 // authored inside templates; substituted server-side at

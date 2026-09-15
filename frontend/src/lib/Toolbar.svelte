@@ -4,7 +4,8 @@
   import { toggleMark, setBlockType, wrapIn } from "prosemirror-commands";
   import { wrapInList, liftListItem, sinkListItem } from "prosemirror-schema-list";
   import { undo, redo, undoDepth, redoDepth } from "prosemirror-history";
-  import { schema } from "./schema";
+  import { schema, HIGHLIGHT_COLORS, type HighlightColor } from "./schema";
+  import { activeHighlightColor, clearHighlight, setHighlight } from "./highlight";
   import { TOOLBAR_ICONS, type ToolbarIconName } from "./icons";
   import { wrapSelectionInCallout, unwrapCallout } from "./callout";
   import { canInsertTable, insertTable } from "./tables";
@@ -74,6 +75,33 @@
     };
     const onKey = (evt: KeyboardEvent) => {
       if (evt.key === "Escape") embedOpen = false;
+    };
+    window.addEventListener("click", onClick);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("click", onClick);
+      window.removeEventListener("keydown", onKey);
+    };
+  });
+
+  // ─── highlight popover ─────────────────────────────────────────────────────
+  // Four color swatches + "Remove highlight". Same outside-click / Escape
+  // close behavior as the embed dropdown above.
+  let highlightOpen = $state(false);
+  let highlightRoot: HTMLDivElement | undefined = $state();
+
+  function chooseHighlight(color: HighlightColor | null) {
+    highlightOpen = false;
+    run(color ? setHighlight(color) : clearHighlight);
+  }
+
+  $effect(() => {
+    if (!highlightOpen) return;
+    const onClick = (evt: MouseEvent) => {
+      if (highlightRoot && !highlightRoot.contains(evt.target as Node)) highlightOpen = false;
+    };
+    const onKey = (evt: KeyboardEvent) => {
+      if (evt.key === "Escape") highlightOpen = false;
     };
     window.addEventListener("click", onClick);
     window.addEventListener("keydown", onKey);
@@ -264,6 +292,10 @@
     void tick;
     return markActive(schema.marks.code);
   });
+  const highlightColor = $derived.by(() => {
+    void tick;
+    return view ? activeHighlightColor(view.state) : null;
+  });
   const isH1 = $derived.by(() => {
     void tick;
     return nodeActive(schema.nodes.heading, { level: 1 });
@@ -408,6 +440,49 @@
   <!-- @feat strikethrough: toolbar button toggles strike, pressed while the mark is active -->
   {@render btn("strikethrough", "Strikethrough (⌘⇧X)", toggle(schema.marks.strike), isStrike)}
   {@render btn("code", "Inline code (⌘`)", toggle(schema.marks.code), isCode)}
+  <!-- @feat highlight: toolbar button + swatch popover (4 color slots + remove) -->
+  <div class="tb-embed-wrap" bind:this={highlightRoot}>
+    <button
+      type="button"
+      class="tb-btn"
+      class:active={highlightColor !== null || highlightOpen}
+      aria-pressed={highlightColor !== null}
+      aria-haspopup="menu"
+      aria-expanded={highlightOpen}
+      aria-label="Highlight (⌘⇧H)"
+      title="Highlight (⌘⇧H)"
+      onclick={() => (highlightOpen = !highlightOpen)}
+    >
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
+        {@html TOOLBAR_ICONS["highlighter"]}
+      </svg>
+    </button>
+    {#if highlightOpen}
+      <div class="tb-hl-menu" role="menu" aria-label="Highlight color">
+        {#each HIGHLIGHT_COLORS as color, i (color)}
+          <button
+            type="button"
+            role="menuitem"
+            class="tb-hl-swatch"
+            class:current={highlightColor === color}
+            data-color={color}
+            aria-label={`Highlight color ${i + 1}`}
+            title={`Highlight color ${i + 1}`}
+            onclick={() => chooseHighlight(color)}
+          ></button>
+        {/each}
+        <button
+          type="button"
+          role="menuitem"
+          class="tb-hl-swatch tb-hl-none"
+          aria-label="Remove highlight"
+          title="Remove highlight"
+          onclick={() => chooseHighlight(null)}
+        ></button>
+      </div>
+    {/if}
+  </div>
   {@render btn("link", "Link (⌘K)", toggleLink, isLink)}
   {@render btn("wikilink", "Link to a page ([[)", startWikiLink)}
   <span class="tb-sep" aria-hidden="true"></span>
@@ -631,6 +706,55 @@
   .tb-embed-item svg {
     flex: 0 0 auto;
     color: var(--pp-fg-muted);
+  }
+  .tb-hl-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    z-index: 20;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border);
+    border-radius: 8px;
+    box-shadow: 0 4px 14px var(--pp-shadow);
+    padding: 6px;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .tb-hl-swatch {
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--pp-border-strong);
+    cursor: pointer;
+    background: var(--pp-bg);
+  }
+  .tb-hl-swatch[data-color="hl1"] { background: var(--pp-hl-1-swatch); }
+  .tb-hl-swatch[data-color="hl2"] { background: var(--pp-hl-2-swatch); }
+  .tb-hl-swatch[data-color="hl3"] { background: var(--pp-hl-3-swatch); }
+  .tb-hl-swatch[data-color="hl4"] { background: var(--pp-hl-4-swatch); }
+  .tb-hl-swatch:hover {
+    transform: scale(1.1);
+  }
+  .tb-hl-swatch.current {
+    outline: 2px solid var(--pp-accent);
+    outline-offset: 1px;
+  }
+  /* "Remove highlight": an empty dot with a diagonal slash. */
+  .tb-hl-none {
+    position: relative;
+    overflow: hidden;
+  }
+  .tb-hl-none::after {
+    content: "";
+    position: absolute;
+    left: calc(50% - 0.75px);
+    top: -2px;
+    bottom: -2px;
+    width: 1.5px;
+    background: var(--pp-fg-muted);
+    transform: rotate(45deg);
   }
   .tb-placeholder-wrap {
     position: relative;

@@ -121,6 +121,50 @@ def test_code_block_language_step_applies_over_snapshot():
     assert result.doc.content.child(1).attrs["language"] == "rust"
 
 
+# @feat highlight: AddMarkStep with a color applies over a snapshot; new color replaces old
+def test_highlight_addmark_step_applies_over_snapshot():
+    from prosemirror.transform import AddMarkStep
+
+    start_doc = Node.from_json(
+        schema,
+        {
+            "type": "doc",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}
+            ],
+        },
+    )
+    hl = schema.marks["highlight"]
+    result = AddMarkStep(1, 6, hl.create({"color": "hl3"})).apply(start_doc)
+    assert not result.failed
+    result.doc.check()
+    marks = result.doc.content.child(0).content.child(0).marks
+    assert [(m.type.name, m.attrs["color"]) for m in marks] == [("highlight", "hl3")]
+
+    # Same-type marks exclude each other: a second color replaces the first.
+    result2 = AddMarkStep(1, 6, hl.create({"color": "hl2"})).apply(result.doc)
+    assert not result2.failed
+    marks = result2.doc.content.child(0).content.child(0).marks
+    assert [(m.type.name, m.attrs["color"]) for m in marks] == [("highlight", "hl2")]
+
+
+def test_highlight_step_json_without_attrs_defaults_to_hl1():
+    from prosemirror.transform import Step
+
+    step = Step.from_json(
+        schema,
+        {"stepType": "addMark", "from": 1, "to": 3, "mark": {"type": "highlight"}},
+    )
+    assert step.mark.attrs["color"] == "hl1"
+
+
+@pytest.mark.parametrize("bogus", ["red", None, 7, '"><x>'])
+def test_highlight_todom_clamps_bogus_color(bogus):
+    hl = schema.marks["highlight"]
+    dom = hl.spec["toDOM"](hl.create({"color": bogus}))
+    assert dom == ["mark", {"class": "pp-hl", "data-color": "hl1"}, 0]
+
+
 # ---------------------------------------------------------------------------
 # callout (ticket 01 — schema + markdown round-trip)
 # ---------------------------------------------------------------------------

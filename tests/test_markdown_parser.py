@@ -541,6 +541,70 @@ class TestMarks:
             {"type": "text", "text": "~a~ and ~~b~~"}
         ]
 
+    # @feat highlight: parser maps <mark data-color="hlN"> tags to the highlight mark
+    @pytest.mark.parametrize("color", ["hl1", "hl2", "hl3", "hl4"])
+    def test_highlight_each_color(self, color):
+        doc = parse_and_validate(f'a <mark data-color="{color}">hi</mark> b\n')
+        content = doc["content"][0]["content"]
+        assert content == [
+            {"type": "text", "text": "a "},
+            {
+                "type": "text",
+                "text": "hi",
+                "marks": [{"type": "highlight", "attrs": {"color": color}}],
+            },
+            {"type": "text", "text": " b"},
+        ]
+
+    def test_highlight_nested_with_strong(self):
+        doc = parse_and_validate('<mark data-color="hl2">a **b**</mark>\n')
+        content = doc["content"][0]["content"]
+        hl = {"type": "highlight", "attrs": {"color": "hl2"}}
+        assert content == [
+            {"type": "text", "text": "a ", "marks": [hl]},
+            {"type": "text", "text": "b", "marks": [hl, {"type": "strong"}]},
+        ]
+
+    @pytest.mark.parametrize(
+        "md",
+        [
+            '<mark data-color="red">x</mark>',  # unknown color
+            '<mark data-color="hl5">x</mark>',
+            "<mark>x</mark>",  # no color attr
+            '<mark class="a" data-color="hl1">x</mark>',  # extra attrs
+            "<mark data-color='hl1'>x</mark>",  # single quotes
+        ],
+    )
+    def test_highlight_unknown_form_stays_literal(self, md):
+        doc = parse_and_validate(md + "\n")
+        assert doc["content"][0]["content"] == [{"type": "text", "text": md}]
+
+    @pytest.mark.parametrize(
+        "md",
+        [
+            '<mark data-color="hl1">never closed',
+            "stray </mark> close",
+            '</mark><mark data-color="hl1">backwards',
+        ],
+    )
+    def test_highlight_unbalanced_stays_literal(self, md):
+        doc = parse_and_validate(md + "\n")
+        assert doc["content"][0]["content"] == [{"type": "text", "text": md}]
+
+    def test_highlight_other_html_stays_literal(self):
+        doc = parse_and_validate("<b>x</b> <span>y</span>\n")
+        assert doc["content"][0]["content"] == [
+            {"type": "text", "text": "<b>x</b> <span>y</span>"}
+        ]
+
+    def test_highlight_escaped_tag_is_literal_and_roundtrips(self):
+        md = 'a \\<mark data-color="hl1">b\\</mark>\n'
+        doc = parse_and_validate(md)
+        assert doc["content"][0]["content"] == [
+            {"type": "text", "text": 'a <mark data-color="hl1">b</mark>'}
+        ]
+        assert doc_to_markdown(doc) == md
+
     def test_em(self):
         doc = parse_and_validate("*em*\n")
         text_node = doc["content"][0]["content"][0]

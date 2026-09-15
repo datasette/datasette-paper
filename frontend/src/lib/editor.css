@@ -22,6 +22,28 @@
 .editor-host .ProseMirror p {
   margin: 0 0 0.75em;
 }
+/* @feat highlight: mark.pp-hl background per color slot (--pp-hl-N tokens)
+ * Color highlight mark. Text keeps the surrounding color; only the background
+ * changes per slot. The `.pp-hl` class is specific enough to leave unscoped.
+ * `print-color-adjust: exact` keeps the wash when printing. */
+mark.pp-hl {
+  color: inherit;
+  border-radius: 2px;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+mark.pp-hl[data-color="hl1"] {
+  background: var(--pp-hl-1);
+}
+mark.pp-hl[data-color="hl2"] {
+  background: var(--pp-hl-2);
+}
+mark.pp-hl[data-color="hl3"] {
+  background: var(--pp-hl-3);
+}
+mark.pp-hl[data-color="hl4"] {
+  background: var(--pp-hl-4);
+}
 /* Keep a large pasted/inserted image from overflowing the document. The
  * image node is inline; constrain to the content width and preserve aspect
  * ratio. */

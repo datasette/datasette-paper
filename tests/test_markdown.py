@@ -901,6 +901,46 @@ def test_markup_chars_in_text_are_escaped():
     assert md == "a \\* b \\_ c \\[d\\]\n"
 
 
+def _hl(color):
+    return {"type": "highlight", "attrs": {"color": color}}
+
+
+# @feat highlight: serializer emits <mark data-color> for every slot, clamping bogus colors
+@pytest.mark.parametrize("color", ["hl1", "hl2", "hl3", "hl4"])
+def test_highlight_mark_emits_mark_tag(color):
+    md = doc_to_markdown(_doc(_para(_text("a "), _text("hi", _hl(color)))))
+    assert md == f'a <mark data-color="{color}">hi</mark>\n'
+
+
+@pytest.mark.parametrize("bogus", ["red", "hl5", "", None, 3, '"><script>'])
+def test_highlight_bogus_color_clamps_to_hl1(bogus):
+    md = doc_to_markdown(_doc(_para(_text("hi", _hl(bogus)))))
+    assert md == '<mark data-color="hl1">hi</mark>\n'
+
+
+def test_highlight_missing_attrs_clamps_to_hl1():
+    md = doc_to_markdown(_doc(_para(_text("hi", {"type": "highlight"}))))
+    assert md == '<mark data-color="hl1">hi</mark>\n'
+
+
+def test_highlight_overlapping_strong_stays_open():
+    md = doc_to_markdown(
+        _doc(_para(_text("a ", _hl("hl2")), _text("b", _hl("hl2"), "strong")))
+    )
+    assert md == '<mark data-color="hl2">a **b**</mark>\n'
+
+
+def test_literal_mark_tag_in_text_is_escaped():
+    md = doc_to_markdown(_doc(_para(_text('x <mark data-color="hl1">y</mark> <b>'))))
+    assert md == 'x \\<mark data-color="hl1">y\\</mark> <b>\n'
+
+
+def test_plain_angle_brackets_not_escaped():
+    # Only a `<mark` / `</mark` is escaped — every other `<` stays byte-identical.
+    md = doc_to_markdown(_doc(_para(_text("a < b <marker> <b>"))))
+    assert md == "a < b <marker> <b>\n"
+
+
 def test_backslash_in_text_is_escaped():
     assert doc_to_markdown(_doc(_para(_text("a \\ b")))) == "a \\\\ b\n"
 

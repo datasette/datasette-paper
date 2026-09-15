@@ -87,6 +87,19 @@
   --pp-callout-important: #8250df;
   --pp-callout-warning: #9a6700;
   --pp-callout-caution: #cf222e;
+  /* @feat highlight: color-slot tokens — hl1..hl4 marks resolve here (Catppuccin Latte)
+   * Highlight mark background per color slot (editor.css `mark.pp-hl`), a
+   * translucent wash of the base so text keeps --pp-fg; `-swatch` is the
+   * full-strength base for the toolbar color dots. The doc stores only the
+   * slot key, so a future palette config just remaps these. */
+  --pp-hl-1: color-mix(in srgb, #df8e1d 30%, transparent);
+  --pp-hl-2: color-mix(in srgb, #40a02b 24%, transparent);
+  --pp-hl-3: color-mix(in srgb, #1e66f5 20%, transparent);
+  --pp-hl-4: color-mix(in srgb, #ea76cb 30%, transparent);
+  --pp-hl-1-swatch: #df8e1d;
+  --pp-hl-2-swatch: #40a02b;
+  --pp-hl-3-swatch: #1e66f5;
+  --pp-hl-4-swatch: #ea76cb;
 }
 
 /* Dark theme. Values serve the SAME roles as the light block above (read
@@ -150,6 +163,15 @@
   --pp-callout-important: #ab7df8;
   --pp-callout-warning: #d29922;
   --pp-callout-caution: #f85149;
+  /* Highlight slots (see light role) — Catppuccin Mocha counterparts. */
+  --pp-hl-1: color-mix(in srgb, #f9e2af 30%, transparent);
+  --pp-hl-2: color-mix(in srgb, #a6e3a1 28%, transparent);
+  --pp-hl-3: color-mix(in srgb, #89b4fa 30%, transparent);
+  --pp-hl-4: color-mix(in srgb, #f5c2e7 32%, transparent);
+  --pp-hl-1-swatch: #f9e2af;
+  --pp-hl-2-swatch: #a6e3a1;
+  --pp-hl-3-swatch: #89b4fa;
+  --pp-hl-4-swatch: #f5c2e7;
 }
 
 /* "System" = the explicit data-theme="system" opt-in: follow the OS. An unset
@@ -197,6 +219,14 @@
     --pp-callout-important: #ab7df8;
     --pp-callout-warning: #d29922;
     --pp-callout-caution: #f85149;
+    --pp-hl-1: color-mix(in srgb, #f9e2af 30%, transparent);
+    --pp-hl-2: color-mix(in srgb, #a6e3a1 28%, transparent);
+    --pp-hl-3: color-mix(in srgb, #89b4fa 30%, transparent);
+    --pp-hl-4: color-mix(in srgb, #f5c2e7 32%, transparent);
+    --pp-hl-1-swatch: #f9e2af;
+    --pp-hl-2-swatch: #a6e3a1;
+    --pp-hl-3-swatch: #89b4fa;
+    --pp-hl-4-swatch: #f5c2e7;
   }
 }
 

@@ -16,7 +16,7 @@ from urllib.parse import quote
 from datasette.utils import tilde_encode
 
 from .date_atom import render_date_atom
-from .pm_schema import is_safe_href, is_safe_image_src
+from .pm_schema import clamp_highlight_color, is_safe_href, is_safe_image_src
 from .youtube import is_valid_video_id, youtube_watch_url
 
 # A resource-URL resolver: given (ref_type, value) it returns
@@ -757,6 +757,14 @@ _ESCAPE_RE = re.compile(r"([\\`*_\[\]])")
 _TILDE_RUN_RE = re.compile(r"~{2,}")
 
 
+# A literal `<mark` / `</mark` in plain text would re-parse as a highlight
+# mark (the parser's narrow `<mark data-color="hlN">` / `</mark>` rule), so
+# backslash-escape just that `<`. Scoped to the mark tag so every other `<`
+# stays byte-identical. Mirrored by `escapeExtraCharacters` in
+# frontend/src/lib/markdownSerializer.ts.
+_MARK_TAG_ESCAPE_RE = re.compile(r"<(?=/?mark\b)", re.ASCII)  # ASCII \b = JS \b
+
+
 def _escape_text(text: str) -> str:
     """Backslash-escape inline markup characters in a plain-text run.
 
@@ -766,7 +774,9 @@ def _escape_text(text: str) -> str:
     by the block renderers, not here.
     """
     text = _ESCAPE_RE.sub(r"\\\1", text)
-    return _TILDE_RUN_RE.sub(lambda m: "\\~" * len(m.group(0)), text)
+    text = _TILDE_RUN_RE.sub(lambda m: "\\~" * len(m.group(0)), text)
+    # @feat highlight: escape a literal <mark / </mark so it can't re-parse as a mark
+    return _MARK_TAG_ESCAPE_RE.sub(r"\\<", text)
 
 
 # A run of `\r`/`\n` in an image src or alt — used to neutralize both before
@@ -877,6 +887,12 @@ def _mark_delims(mark: dict) -> tuple[str, str]:
         title = attrs.get("title")
         close = f']({href} "{title}")' if title else f"]({href})"
         return "[", close
+    if t == "highlight":
+        # @feat highlight: serialize as <mark data-color="hlN">…</mark> (color clamped)
+        # Every color — hl1 included — uses the tag form; there is no `==`
+        # markdown syntax. The color attr is untrusted, so clamp it here too.
+        color = clamp_highlight_color((mark.get("attrs") or {}).get("color"))
+        return f'<mark data-color="{color}">', "</mark>"
     return "", ""
 
 

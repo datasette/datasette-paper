@@ -1,0 +1,255 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Highlights",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "text": "Four slots: ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl1"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": "first",
+          "type": "text"
+        },
+        {
+          "text": ", ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl2"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": "second",
+          "type": "text"
+        },
+        {
+          "text": ", ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl3"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": "third",
+          "type": "text"
+        },
+        {
+          "text": " and ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl4"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": "fourth",
+          "type": "text"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "text": "A ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl2"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": "highlight with ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl2"
+              },
+              "type": "highlight"
+            },
+            {
+              "type": "strong"
+            }
+          ],
+          "text": "bold",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl2"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": " and ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl2"
+              },
+              "type": "highlight"
+            },
+            {
+              "type": "em"
+            }
+          ],
+          "text": "emphasis",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "color": "hl2"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": " inside",
+          "type": "text"
+        },
+        {
+          "text": " the sentence.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "strong"
+            },
+            {
+              "attrs": {
+                "color": "hl3"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": "bold highlight",
+          "type": "text"
+        },
+        {
+          "text": " and ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://example.com"
+              },
+              "type": "link"
+            },
+            {
+              "attrs": {
+                "color": "hl4"
+              },
+              "type": "highlight"
+            }
+          ],
+          "text": "linked highlight",
+          "type": "text"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "list item with ",
+                  "type": "text"
+                },
+                {
+                  "marks": [
+                    {
+                      "attrs": {
+                        "color": "hl1"
+                      },
+                      "type": "highlight"
+                    }
+                  ],
+                  "text": "a highlight",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "list_item"
+        }
+      ],
+      "type": "bullet_list"
+    },
+    {
+      "content": [
+        {
+          "text": "Literal <mark data-color=\"hl1\"> and </mark> stay plain text, as does <b>other</b> HTML.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    }
+  ],
+  "type": "doc"
+}

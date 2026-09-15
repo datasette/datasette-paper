@@ -60,7 +60,8 @@ import {
   liftListItem,
 } from "prosemirror-schema-list";
 import type { Command } from "prosemirror-state";
-import type { MarkType } from "prosemirror-model";
+import type { Attrs, MarkType } from "prosemirror-model";
+import { lastHighlightColor, toggleHighlight } from "./highlight";
 
 import { schema } from "./schema";
 import { buildMarkdownSerializer, serializeDoc } from "./markdownSerializer";
@@ -542,11 +543,15 @@ function taskListInputRule(): InputRule {
  * `**`); both delimiters must be the same length. The captured group
  * `match[1]` is the inner text — kept verbatim, no leading/trailing
  * whitespace allowed.
+ *
+ * `attrs` (optional) is read when the rule fires, so a mark whose attrs are
+ * dynamic (the highlight's last-used color) picks up the current value.
  */
 function delimiterMarkRule(
   regex: RegExp,
   markType: MarkType,
   delimiterLen: number,
+  attrs?: () => Attrs,
 ): InputRule {
   return new InputRule(regex, (state, match, start, end) => {
     const text = match[1];
@@ -556,7 +561,7 @@ function delimiterMarkRule(
     const tr = state.tr;
     // Right-to-left so positions stay valid through deletes.
     tr.delete(innerEnd, end);
-    tr.addMark(innerStart, innerEnd, markType.create());
+    tr.addMark(innerStart, innerEnd, markType.create(attrs?.()));
     tr.delete(start + leadingLen, innerStart);
     return tr.removeStoredMark(markType);
   });
@@ -1423,6 +1428,15 @@ export class EditorConnection {
               schema.marks.code,
               1,
             ),
+            // @feat highlight: `==text==` input rule applies the last-used highlight color
+            // Editor shortcut only — the markdown form is always the
+            // `<mark data-color>` tag, never `==`.
+            delimiterMarkRule(
+              /(?:^|\s)==([^\s=][^=]*?[^\s=]|[^\s=])==$/,
+              schema.marks.highlight,
+              2,
+              () => ({ color: lastHighlightColor() }),
+            ),
             linkInputRule(),
             autoLinkInputRule(),
           ],
@@ -1452,6 +1466,8 @@ export class EditorConnection {
           "Mod-k": toggleLinkCommand(),
           // @feat strikethrough: Cmd/Ctrl-Shift-X toggles the strike mark
           "Mod-Shift-x": toggleMark(schema.marks.strike),
+          // @feat highlight: Mod-Shift-h toggles highlight with the last-used color
+          "Mod-Shift-h": toggleHighlight,
           "Mod-Shift-7": wrapInList(schema.nodes.task_list),
           // @feat date: Cmd/Ctrl-; inserts today's date chip, Cmd/Ctrl-Shift-;
           // tomorrow's — no popup (falls through in code blocks).

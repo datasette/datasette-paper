@@ -14,6 +14,7 @@ import type { Node as PMNode } from "prosemirror-model";
 import { EditorConnection, preloadMarkdownParser } from "../collab";
 import type { ConnectionOpts, StepApplyError } from "../collab";
 import { schema } from "../schema";
+import { resetLastHighlightColor, setHighlight } from "../highlight";
 
 // ─── Mock EventSource ────────────────────────────────────────────────────────
 
@@ -1561,6 +1562,82 @@ describe("inline mark input rules", () => {
     expect(handled).not.toBe(true);
     // And no strong mark should be present on `bar`.
     expect(view.state.doc.rangeHasMark(1, 9, schema.marks.strong)).toBe(false);
+
+    conn.close();
+  });
+
+  // @feat highlight: `==a==` input rule + Mod-Shift-h keymap use the last-used color
+  it("`==a==` autoformats as a highlight with the last-used color", async () => {
+    resetLastHighlightColor();
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("==a=")));
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 5, 5, "=", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+    const para = view.state.doc.firstChild!;
+    expect(para.textContent).toBe("a");
+    const mark = schema.marks.highlight.isInSet(para.firstChild!.marks);
+    expect(mark?.attrs.color).toBe("hl1");
+
+    // After a toolbar pick of hl3 (dispatch discarded — only the last-used
+    // color side effect matters here) the rule uses hl3.
+    view.dispatch(view.state.tr.replaceWith(1, 2, schema.text("==b=")));
+    setHighlight("hl3")(view.state, () => {});
+    view.someProp("handleTextInput", (fn) => fn(view, 5, 5, "=", () => view.state.tr));
+    const mark2 = schema.marks.highlight.isInSet(view.state.doc.firstChild!.firstChild!.marks);
+    expect(mark2?.attrs.color).toBe("hl3");
+    resetLastHighlightColor();
+
+    conn.close();
+  });
+
+  it("the highlight rule does not fire mid-word", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("a==b=")));
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 6, 6, "=", () => view.state.tr),
+    );
+    expect(handled).not.toBe(true);
+    expect(view.state.doc.rangeHasMark(1, 6, schema.marks.highlight)).toBe(false);
+
+    conn.close();
+  });
+
+  it("Mod-Shift-h toggles a highlight on the selection", async () => {
+    resetLastHighlightColor();
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 6)));
+    const press = () =>
+      view.someProp("handleKeyDown", (fn) =>
+        fn(
+          view,
+          new KeyboardEvent("keydown", { key: "H", keyCode: 72, ctrlKey: true, shiftKey: true }),
+        ),
+      );
+    // jsdom isn't a Mac, so "Mod" resolves to Ctrl.
+    expect(press()).toBe(true);
+    expect(view.state.doc.rangeHasMark(1, 6, schema.marks.highlight)).toBe(true);
+    press();
+    expect(view.state.doc.rangeHasMark(1, 6, schema.marks.highlight)).toBe(false);
 
     conn.close();
   });
