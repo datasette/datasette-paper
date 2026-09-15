@@ -1125,8 +1125,15 @@
     gap: 4px;
     padding: 0 8px;
   }
+  /* Insert is the rightmost control, so the menu hangs from its right edge and
+     grows leftward over the doc column instead of past the viewport edge. Tall
+     registries (many embed providers) scroll rather than run off-screen. */
   .tb-insert-menu {
-    min-width: 300px;
+    left: auto;
+    right: 0;
+    min-width: 220px;
+    max-height: min(480px, calc(100vh - 120px));
+    overflow-y: auto;
   }
   .tb-insert-header {
     padding: 6px 10px 2px;
@@ -1136,18 +1143,17 @@
     letter-spacing: 0.04em;
     color: var(--pp-fg-subtle);
   }
-  /* Two-column grid ≥641px; collapses to one below (design.md §＋ Insert). */
+  /* One column on desktop, like the `/` menu: labels (incl. long provider
+     embed names) never truncate. Mobile swaps to the 4-col sheet grid below. */
   .tb-insert-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 1px;
   }
   .tb-insert-item {
     min-width: 0;
   }
   .tb-insert-item .tb-menu-label {
-    overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
   /* Disabled row: the command's enabled(state) gate rejected the context
