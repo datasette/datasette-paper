@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>datasette-paper — collaborative documents for Datasette</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <span class="brand">datasette<b>-paper</b></span>
+    <nav>
+      <a href="#features">Features</a>
+      <a href="#data">Papers as data</a>
+      <a href="docs/">Docs</a>
+      <a href="https://github.com/datasette/datasette-paper">GitHub</a>
+      <a href="https://pypi.org/project/datasette-paper/">PyPI</a>
+    </nav>
+  </div>
+</header>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="wrap">
+    <p class="kicker">A Datasette plugin</p>
+    <h1>Collaborative documents, right inside your Datasette</h1>
+    <p class="sub">A real-time, rich-text editor whose pages can pull live data
+      straight out of your SQLite databases — queries, values and embeds that
+      stay in sync with the data underneath.</p>
+    <div class="cta">
+      <span class="cmd">datasette install datasette-paper
+        <button class="copy" onclick="navigator.clipboard?.writeText('datasette install datasette-paper')">copy</button>
+      </span>
+      <a class="btn primary" href="docs/">Read the docs</a>
+      <a class="btn ghost" href="https://github.com/datasette/datasette-paper">View on GitHub →</a>
+    </div>
+    <div class="hero-shot">
+      <img class="shot" src="assets/editor.png"
+        alt="The paper editor showing a document called Q3 Planning with headings, a bulleted goals list, a budget table and a launch checklist, a formatting toolbar above it, and a header showing the author, edit time and number of users online.">
+    </div>
+  </div>
+</div>
+
+<main id="features">
+
+  <!-- COLLAB -->
+  <section class="feat">
+    <div class="wrap"><div class="row">
+      <div class="copy">
+        <p class="kicker">Real-time collaboration</p>
+        <h2>Write together, live</h2>
+        <p>Everyone edits the same document at once. See who's online in the
+          header and watch changes stream in instantly over Server-Sent Events —
+          no refresh, no merge conflicts.</p>
+        <a class="more" href="docs/editor/">See the editor guide</a>
+      </div>
+      <img class="shot" src="assets/editor.png"
+        alt="A paper's editor header showing the author, the time it was last edited, and the number of users currently online.">
+    </div></div>
+  </section>
+
+  <!-- SQL SOURCES (differentiator) -->
+  <section class="feat">
+    <div class="wrap"><div class="row flip">
+      <div class="copy">
+        <p class="kicker">SQL sources</p>
+        <h2>Query your database from inside the doc</h2>
+        <p>Define a named SQL query as a <code>source</code> block against any
+          attached database, right in the editor. The result lives in the
+          page — a live card you can edit and reference from anywhere below
+          it.</p>
+        <a class="more" href="docs/sources-and-values/">Learn about sources and values</a>
+      </div>
+      <img class="shot" src="assets/sql-block.png"
+        alt="A SQL query block in a paper named Q2 vendor report, with an editable SQL statement and a live, paginated results table below it.">
+    </div></div>
+  </section>
+
+  <!-- INLINE VALUES (differentiator) -->
+  <section class="feat">
+    <div class="wrap"><div class="row">
+      <div class="copy">
+        <p class="kicker">Live values</p>
+        <h2>Numbers that update with your data</h2>
+        <p>Drop a single result inline with <code>${{source.column}}</code>.
+          "We currently track <b>30</b> vendors" stays true because it
+          <i>is</i> the query — recomputed from the database, not
+          copy-pasted.</p>
+        <a class="more" href="docs/sources-and-values/">Learn about sources and values</a>
+      </div>
+      <img class="shot" src="assets/inline-value.png"
+        alt="An inline value pill referencing a named SQL source, embedded in a sentence about vendor and region counts that update automatically.">
+    </div></div>
+  </section>
+
+  <!-- EMBEDS (differentiator) -->
+  <section class="feat">
+    <div class="wrap"><div class="row flip">
+      <div class="copy">
+        <p class="kicker">Data embeds</p>
+        <h2>Embed a database, table, or row</h2>
+        <p>Paste a Datasette link and it becomes a rich embed — an inline pill or
+          a full block card — rendered live against Datasette's JSON API. Other
+          plugins can supply their own embeds too, for anything from maps to
+          spreadsheets.</p>
+        <a class="more" href="docs/embeds/">Learn about embeds</a>
+      </div>
+      <img class="shot" src="assets/block-embed-table.png"
+        alt="A block embed card titled Vendors table showing a live Datasette table with id, name and region columns rendered inside a paper document.">
+    </div></div>
+  </section>
+
+  <!-- LINKS -->
+  <section class="feat">
+    <div class="wrap"><div class="row">
+      <div class="copy">
+        <p class="kicker">A connected knowledge base</p>
+        <h2>Link papers with <code>[[</code></h2>
+        <p>Type <code>[[</code> to autocomplete and link to any other paper.
+          Mention people with <code>@</code>, and drop <code>#tags</code>
+          anywhere — every tag gets its own backlinks page.</p>
+        <a class="more" href="docs/links-mentions-tags/">Learn about links, mentions and tags</a>
+      </div>
+      <img class="shot" src="assets/wiki-links.png"
+        alt="Typing two square brackets inside a heading opens an autocomplete popup listing other papers to link to, including an option to create a new one.">
+    </div></div>
+  </section>
+
+  <!-- LINK GRAPH -->
+  <section class="feat">
+    <div class="wrap"><div class="row flip">
+      <div class="copy">
+        <p class="kicker">Link graph</p>
+        <h2>See the whole workspace at once</h2>
+        <p>Every <code>[[wiki link]]</code> feeds a force-directed graph of
+          your papers, colored and filterable by tag, state or kind. Open any
+          paper's own ego view to see just its neighbourhood, sliceable to an
+          adjustable link depth.</p>
+        <a class="more" href="docs/links-mentions-tags/">Learn about links, mentions and tags</a>
+      </div>
+      <img class="shot" src="assets/link-graph.png"
+        alt="The link graph modal: a force-directed graph of papers colored by tag, with a legend filter, a search box, and a metadata panel showing the selected paper's kind, state, links and tags.">
+    </div></div>
+  </section>
+
+  <!-- TASK ASSIGNMENT -->
+  <section class="feat">
+    <div class="wrap"><div class="row">
+      <div class="copy">
+        <p class="kicker">Task assignment</p>
+        <h2>Turn checklists into a shared TODO list</h2>
+        <p><code>@mention</code> someone inside a task item and it's assigned
+          to them; add a date and it's the due date. No separate task
+          tracker — the dedicated TODOs page collects everyone's assigned
+          work across every paper they can see, bucketed by due date.</p>
+        <a class="more" href="docs/editor/">See the editor guide</a>
+      </div>
+      <img class="shot" src="assets/todos.png"
+        alt="The TODOs page listing a person's assigned tasks grouped into Overdue, Today, This week, Later and No due date, each with a checkbox, assignee chips, a due-date chip and the paper it lives in.">
+    </div></div>
+  </section>
+
+  <!-- SHARING -->
+  <section class="feat">
+    <div class="wrap"><div class="row flip">
+      <div class="copy">
+        <p class="kicker">Sharing &amp; permissions</p>
+        <h2>Control who sees what</h2>
+        <p>Grant people Viewer, Editor, or Manager roles on each paper, or
+          open it to everyone signed in with general access — all enforced
+          through Datasette's own permission system.</p>
+        <a class="more" href="docs/sharing/">Learn about sharing</a>
+      </div>
+      <img class="shot" src="assets/share.png"
+        alt="The share dialog for a paper called Q3 Planning, showing the owner with a Manager role and a general access setting of Restricted.">
+    </div></div>
+  </section>
+
+  <!-- mini grid: the rest -->
+  <section class="feat">
+    <div class="wrap">
+      <p class="kicker" style="text-align:center">And the basics, done right</p>
+      <h2 style="text-align:center;font-size:1.7rem">Everything you expect from a modern editor</h2>
+      <div class="grid">
+        <div class="card">
+          <img src="assets/tables.png" alt="A table in the editor with a floating action bar for adding rows and columns, resizing, and naming the table for the API.">
+          <div class="body"><h3>Tables &amp; task lists</h3>
+            <p>Resizable tables and checkable task lists, named for the API.</p>
+            <a class="more" href="docs/editor/">Editor guide</a></div>
+        </div>
+        <div class="card">
+          <img src="assets/slash-menu.png" alt="The slash command menu open in the editor, listing headings, lists, a quote, a callout and a date among the insertable blocks.">
+          <div class="body"><h3>Slash menu</h3>
+            <p>Type <code>/</code> to insert anything — blocks, embeds, sources.</p>
+            <a class="more" href="docs/slash-menu/">Slash menu guide</a></div>
+        </div>
+        <div class="card">
+          <img src="assets/image-dialog-chosen.png" alt="The insert-image dialog with the Upload tab active, showing a chosen file preview and an alt-text field.">
+          <div class="body"><h3>Images</h3>
+            <p>Paste, drag-drop, or upload with a live preview and alt text.</p>
+            <a class="more" href="docs/editor/">Editor guide</a></div>
+        </div>
+        <div class="card">
+          <img src="assets/inline-tags.png" alt="Inline hashtag pills for roadmap, q3-planning and tech-debt inside a paper's body text.">
+          <div class="body"><h3>Inline #tags</h3>
+            <p>Tag inline; click through to every paper that mentions it.</p>
+            <a class="more" href="docs/links-mentions-tags/">Links &amp; tags guide</a></div>
+        </div>
+        <div class="card">
+          <img src="assets/mentions.png" alt="An at-sign mention autocomplete in the editor, with resolved mention pills for three teammates in a standup note.">
+          <div class="body"><h3>@ mentions</h3>
+            <p>Pull collaborators into the conversation by name.</p>
+            <a class="more" href="docs/links-mentions-tags/">Links &amp; tags guide</a></div>
+        </div>
+        <div class="card">
+          <img src="assets/date.png" alt="Inline date chips in a sprint schedule: a neutral date in prose, an overdue date in red, a due-today date in amber, and a struck-through completed task with a neutral date.">
+          <div class="body"><h3>Inline dates</h3>
+            <p>Type <code>/date</code> for a chip that tints overdue or due-today tasks automatically.</p>
+            <a class="more" href="docs/editor/">Editor guide</a></div>
+        </div>
+        <div class="card">
+          <img src="assets/callouts.png" alt="Four callout blocks in a deploy runbook, colored and iconed for note, tip, important and warning admonitions.">
+          <div class="body"><h3>Callouts</h3>
+            <p>GitHub-style admonitions — note, tip, important, warning — foldable and typed <code>&gt; [!NOTE]</code>.</p>
+            <a class="more" href="docs/editor/">Editor guide</a></div>
+        </div>
+        <div class="card">
+          <img src="assets/code-block.png" alt="A code block with Python syntax highlighting for a recursive fibonacci function, in a paper about language support.">
+          <div class="body"><h3>Code highlighting</h3>
+            <p>Real syntax highlighting, upgrading to a full CodeMirror editor on focus.</p>
+            <a class="more" href="docs/editor/">Editor guide</a></div>
+        </div>
+        <div class="card">
+          <img src="assets/index.png" alt="The paper index with Active, Archive, Trash and Templates tabs, My TODOs and Graph buttons, a theme toggle, and a New paper split button for creating from a template.">
+          <div class="body"><h3>Paper index &amp; templates</h3>
+            <p>Active / Archive / Trash / Templates tabs, one-click new papers or create-from-template, light or dark theme.</p>
+            <a class="more" href="docs/getting-started/">Getting started</a></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- DATA BAND -->
+<section class="band" id="data">
+  <div class="wrap">
+    <div>
+      <p class="kicker">Papers are just data</p>
+      <h2>Your documents live in SQLite</h2>
+      <p>No separate datastore. Every paper is rows in Datasette's internal
+        database — an append-only step log plus snapshots — so you can query,
+        back up, and pipe your documents like any other table.</p>
+      <p>That's also why a paper can read your data: it's all the same
+        Datasette. Everything is also reachable over a JSON API and a small
+        <code>datasette paper</code> CLI for scripting exports, backups and a
+        git-mirror of your papers as markdown, all without a server running.</p>
+      <a class="more" href="docs/papers-as-data/">Learn how papers are stored</a>
+      &nbsp;·&nbsp;
+      <a class="more" href="docs/cli/">See the CLI</a>
+    </div>
+    <pre class="codecard"><span class="c">-- the tables a paper lives in</span>
+_datasette_paper_doc       <span class="c">-- one row per paper</span>
+_datasette_paper_step      <span class="c">-- append-only edits</span>
+_datasette_paper_snapshot  <span class="c">-- periodic full docs</span>
+_datasette_paper_share     <span class="c">-- access grants</span>
+
+<span class="c">-- so this just works:</span>
+<span class="k">select</span> name, created_by <span class="k">from</span> _datasette_paper_doc;</pre>
+  </div>
+</section>
+
+<!-- FOOTER / INSTALL -->
+<footer>
+  <div class="wrap">
+    <p class="kicker">Get started</p>
+    <h2>Install it into your Datasette</h2>
+    <span class="cmd">datasette install datasette-paper
+      <button class="copy" onclick="navigator.clipboard?.writeText('datasette install datasette-paper')">copy</button>
+    </span>
+    <p class="note">Pass <code>--internal papers.db</code> to persist papers
+      across restarts, and grant the four <code>datasette-paper-*</code>
+      permissions. No user database required.</p>
+    <p class="note">See the <a href="docs/installation/">installation</a> and
+      <a href="docs/configuration/">configuration</a> guides for details.</p>
+    <div class="flinks">
+      <a href="https://github.com/datasette/datasette-paper">GitHub</a>
+      <a href="https://pypi.org/project/datasette-paper/">PyPI</a>
+      <a href="docs/">Docs</a>
+      <a href="docs/changelog/">Changelog</a>
+      <a href="https://github.com/datasette/datasette-paper/blob/main/LICENSE">Apache 2.0</a>
+    </div>
+    <p class="foot-legal">A plugin for <a href="https://datasette.io">Datasette</a>.</p>
+  </div>
+</footer>
+
+</body>
+</html>

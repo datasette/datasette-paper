@@ -37,6 +37,7 @@ dev = [
     "ruff==0.15.12",
     "solite>=0.0.1a36",
 ]
+docs = ["sphinx", "furo", "myst-parser", "sphinx-copybutton", "sphinx-autobuild"]
 
 [build-system]
 requires = ["setuptools"]

@@ -27,3 +27,7 @@ datasette_paper/manifest.json
 # Playwright artifacts
 test-results/
 playwright-report/
+
+# Docs / site build output
+docs/_build/
+_site/
