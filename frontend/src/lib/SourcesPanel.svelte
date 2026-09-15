@@ -38,7 +38,21 @@
     sourceStore?: SourceStore | null;
   } = $props();
 
-  type Row = { name: string | null; db: string | null; sql: string; pos: number; node: PMNode };
+  type Row = { name: string | null; db: string | null; sql: string; node: PMNode; key: string };
+
+  // Row keys follow the source node, not its position, so an edit above a
+  // source doesn't remount every row below it. PM may reuse one node object
+  // at several positions, so the occurrence index keeps keys unique.
+  const nodeIds = new WeakMap<PMNode, number>();
+  let nextNodeId = 0;
+  function nodeId(node: PMNode): number {
+    let id = nodeIds.get(node);
+    if (id === undefined) {
+      id = nextNodeId++;
+      nodeIds.set(node, id);
+    }
+    return id;
+  }
 
   // Capture the host's initial preference once; toggling is local thereafter.
   // Embedded: always open (the rail owns visibility, so there's no toggle here).
@@ -74,14 +88,19 @@
     void tick;
     if (!view) return [];
     const out: Row[] = [];
-    view.state.doc.descendants((node, pos) => {
+    // Scratch counter rebuilt on every derive; never read reactively.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const seen = new Map<PMNode, number>();
+    view.state.doc.descendants((node) => {
       if (node.type.name === "source") {
+        const occurrence = seen.get(node) ?? 0;
+        seen.set(node, occurrence + 1);
         out.push({
           name: node.attrs.name ?? null,
           db: node.attrs.db ?? null,
           sql: node.textContent,
-          pos,
           node,
+          key: `${nodeId(node)}:${occurrence}`,
         });
         return false;
       }
@@ -334,7 +353,7 @@
         </div>
       {:else}
         <ul class="sources-panel-list">
-          {#each sources as s (s.pos)}
+          {#each sources as s (s.key)}
             <li class="sources-panel-item">
               <div class="sources-panel-item-head">
                 <span class="sources-panel-name" title={s.name ?? "(unnamed)"}>

@@ -186,6 +186,27 @@ describe("SourcesPanel", () => {
     expect(v.names()).toEqual(["keep"]);
   });
 
+  it("keeps a row mounted when an edit above it shifts its position", async () => {
+    const v = makeView([
+      sourceNode("first", "data", "select 1"),
+      sourceNode("target", "data", "select 2"),
+    ]);
+    render(SourcesPanel, { view: v.view });
+    await open();
+    const row = screen.getByText("target").closest("li")!;
+    v.view.dispatch(v.view.state.tr.insert(0, sourceNode("added", "data", "select 0")));
+    await vi.waitFor(() => expect(screen.getAllByRole("button", { name: "Edit source" })).toHaveLength(3));
+    expect(screen.getByText("target").closest("li")).toBe(row);
+  });
+
+  it("renders one row per occurrence when a source node object is reused", async () => {
+    const shared = sourceNode("shared", "data", "select 1");
+    const v = makeView([shared, shared]);
+    render(SourcesPanel, { view: v.view });
+    await open();
+    expect(screen.getAllByRole("button", { name: "Edit source" })).toHaveLength(2);
+  });
+
   it("shows how many times each source is used", async () => {
     const value = schema.nodes.value.create({
       source: "revenue",
