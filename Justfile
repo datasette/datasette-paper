@@ -18,6 +18,37 @@ shots *names:
     npm --prefix frontend exec -- playwright install chromium
     node frontend/scripts/screenshots.mjs {{names}}
 
+# --- Docs ---
+
+# Build the docs locally (HTML -> docs/_build/html). -W turns warnings
+# (broken toctree refs, missing images) into failures.
+docs:
+    uv run --only-group docs sphinx-build -W -b dirhtml docs docs/_build/html
+
+# Live-reloading docs server (rebuilds + refreshes the browser on save).
+docs-live:
+    uv run --only-group docs sphinx-autobuild -b dirhtml docs docs/_build/html
+
+# Assemble the public site into _site/ (what GitHub Pages serves): the static
+# landing page from site/, only the screenshots it references (copied from
+# docs/screenshots/ so they aren't committed twice), and the docs at docs/.
+site:
+    rm -rf _site
+    mkdir -p _site/assets
+    cp site/index.html site/styles.css _site/
+    grep -oE 'assets/[a-z0-9-]+\.png' site/index.html | sort -u | sed 's|assets/||' \
+      | while read f; do cp "docs/screenshots/$f" "_site/assets/$f"; done
+    uv run --only-group docs sphinx-build -W -b dirhtml docs _site/docs
+    touch _site/.nojekyll
+
+# Build and serve _site/ under /datasette-paper/, mirroring the Pages project
+# URL so root-absolute links break locally the same way they would in prod.
+site-serve port="8000": site
+    mkdir -p /tmp/datasette-paper-pages
+    ln -sfn "{{justfile_directory()}}/_site" /tmp/datasette-paper-pages/datasette-paper
+    @echo "http://localhost:{{port}}/datasette-paper/"
+    python3 -m http.server -d /tmp/datasette-paper-pages {{port}}
+
 # --- Formatting ---
 # Frontend formatting (prettier) deferred — `just lint-frontend` covers it
 # for now via eslint rules.
