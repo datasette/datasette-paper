@@ -23,11 +23,33 @@ import { Plugin, type Command, TextSelection } from "prosemirror-state";
 import type { EditorView, NodeView } from "prosemirror-view";
 import { schema } from "./schema";
 import { TOOLBAR_ICONS } from "./icons";
+import { chipLabel } from "./dateView";
 
 export interface TocEntry {
   text: string;
   level: number;
   pos: number;
+}
+
+/** A heading's TOC label: its text plus each inline `date` / `tag` atom
+ *  rendered as its chip label (`textContent` would silently drop atoms). */
+function headingText(node: PMNode): string {
+  return node.textBetween(0, node.content.size, "", (leaf) => {
+    if (leaf.type.name === "date") {
+      return chipLabel(
+        {
+          date: String(leaf.attrs.date ?? ""),
+          time: leaf.attrs.time ?? null,
+          tz: leaf.attrs.tz ?? null,
+          format: leaf.attrs.format ?? null,
+        },
+        new Date(),
+      ).text;
+    }
+    // Mirrors TagView's chip label.
+    if (leaf.type.name === "tag") return `#${String(leaf.attrs.tag ?? "") || "?"}`;
+    return "";
+  });
 }
 
 /** Top-level headings as {text, level, pos}, in document order. */
@@ -36,7 +58,7 @@ export function extractHeadings(doc: PMNode): TocEntry[] {
   doc.forEach((node, offset) => {
     if (node.type.name !== "heading") return;
     out.push({
-      text: node.textContent,
+      text: headingText(node),
       level: node.attrs.level as number,
       pos: offset,
     });

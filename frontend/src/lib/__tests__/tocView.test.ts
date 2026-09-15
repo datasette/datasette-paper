@@ -37,6 +37,27 @@ describe("extractHeadings", () => {
     expect(got[1].pos).toBeLessThan(got[2].pos);
   });
 
+  it("includes an inline date atom's rendered chip label in the heading text", () => {
+    const year = new Date().getFullYear();
+    const d = doc(
+      schema.node("heading", { level: 1 }, [
+        schema.text("Launch: "),
+        schema.node("date", { date: `${year}-09-15` }),
+      ]),
+    );
+    expect(extractHeadings(d)[0].text).toBe("Launch: Sep 15");
+  });
+
+  it("includes an inline tag atom's #label in the heading text", () => {
+    const d = doc(
+      schema.node("heading", { level: 2 }, [
+        schema.text("Notes "),
+        schema.node("tag", { tag: "roadmap" }),
+      ]),
+    );
+    expect(extractHeadings(d)[0].text).toBe("Notes #roadmap");
+  });
+
   it("ignores non-heading blocks", () => {
     const d = doc(para(), para(), heading(1, "Only"));
     expect(extractHeadings(d).map((h) => h.text)).toEqual(["Only"]);
