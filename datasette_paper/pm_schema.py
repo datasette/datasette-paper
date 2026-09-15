@@ -181,10 +181,42 @@ _strike_mark_spec = {
     ],
     "toDOM": lambda _mark, _inline: ["s", 0],
 }
+
+# The four highlight color slots — mirrors HIGHLIGHT_COLORS in
+# frontend/src/lib/schema.ts. Slot keys, never hex: a palette config later
+# only remaps the `--pp-hl-*` CSS tokens.
+HIGHLIGHT_COLORS = ("hl1", "hl2", "hl3", "hl4")
+
+
+def clamp_highlight_color(color) -> str:
+    """Clamp an untrusted highlight ``color`` attr to a known slot, defaulting
+    to "hl1". Never raises — a crafted step carrying a bogus color must not
+    blow up ``Step.apply``; every sink (toDOM, both markdown serializers)
+    clamps instead of rejecting the step."""
+    return color if isinstance(color, str) and color in HIGHLIGHT_COLORS else "hl1"
+
+
+# Color highlight mark — mirrors schema.ts. Same-type marks exclude each other
+# by default, so a new color replaces the old one (no `excludes` override).
+# @feat highlight: server MarkSpec with clamped color slot attr (mirrors schema.ts)
+_highlight_mark_spec = {
+    "attrs": {"color": {"default": "hl1"}},
+    "parseDOM": [{"tag": "mark"}],
+    "toDOM": lambda mark: [
+        "mark",
+        {
+            "class": "pp-hl",
+            "data-color": clamp_highlight_color(mark.attrs.get("color")),
+        },
+        0,
+    ],
+}
+
 _marks = {
     **basic_schema.spec["marks"],
     "link": _link_mark_spec,
     "strike": _strike_mark_spec,
+    "highlight": _highlight_mark_spec,
 }
 
 # Custom task_list / task_item — mirrors frontend/src/lib/schema.ts.

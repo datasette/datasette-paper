@@ -17,8 +17,8 @@
  * the schema and fails on the next uncovered node.
  */
 
-import type { Node as PMNode } from "prosemirror-model";
-import { clampCalloutKind } from "./schema";
+import type { Mark, Node as PMNode } from "prosemirror-model";
+import { clampCalloutKind, clampHighlightColor } from "./schema";
 import { formatDateLabel, type DateAttrs } from "./dateFormat";
 import { encodeFormat, type ValueFormat } from "./formatValue";
 import { youtubeWatchUrl } from "./youtube";
@@ -407,7 +407,21 @@ export function buildMarkdownSerializer(m: PMMarkdown): MarkdownSerializer {
       ...defaultMarkdownSerializer.marks,
       // @feat strikethrough: client mark rule — GFM `~~…~~`, same bytes as markdown.py
       strike: { open: "~~", close: "~~", mixable: true, expelEnclosingWhitespace: true },
+      // @feat highlight: client serializer emits <mark data-color="hlN">…</mark> (twin of markdown.py)
+      // Tag form for every color (no `==` syntax); the color attr is
+      // untrusted, so clamp it. `mixable` lets an overlapping strong/em/link
+      // stay open across the boundary, matching markdown.py's mark rotation
+      // (PM rank-sorts highlight last, so without it the tag would churn).
+      highlight: {
+        open: (_state: MarkdownSerializerState, mark: Mark) =>
+          `<mark data-color="${clampHighlightColor(mark.attrs.color)}">`,
+        close: "</mark>",
+        mixable: true,
+      },
     },
+    // Backslash-escape a literal `<mark` / `</mark` in text so it can't
+    // re-parse as a highlight — mirror of markdown.py's _MARK_TAG_ESCAPE_RE.
+    { escapeExtraCharacters: /<(?=\/?mark\b)/g },
   );
   return serializer;
 }

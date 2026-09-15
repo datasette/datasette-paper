@@ -3,7 +3,8 @@
 Pairs with ``datasette_paper.markdown.doc_to_markdown`` for the reverse
 direction. Round-trip stable for the schema's supported node set;
 intentionally lossy for content outside ``pm_schema`` (raw HTML renders
-as plain text, unknown inline kinds drop, etc.).
+as plain text — except the exact ``<mark data-color="hlN">`` / ``</mark>``
+highlight tags — unknown inline kinds drop, etc.).
 
 Schema lock-step group: this module, ``datasette_paper.pm_schema``,
 ``datasette_paper.markdown``, and ``frontend/src/lib/schema.ts`` must
@@ -63,7 +64,41 @@ _MARK_OPEN_CLOSE = {
     # @feat strikethrough: GFM `~~…~~` (markdown-it `s_open`/`s_close`) → strike mark
     "s_open": ("s_close", "strike"),
     "link_open": ("link_close", "link"),
+    "highlight_open": ("highlight_close", "highlight"),
 }
+
+# @feat highlight: parse the exact <mark data-color="hlN"> / </mark> literals into mark tokens
+# ``html=False`` stays on — this narrow inline rule recognizes ONLY these two
+# byte-exact literals (the serializer's output), so any other HTML, an unknown
+# color, or extra attributes stay literal text. It emits ``highlight_open`` /
+# ``highlight_close`` tokens; ``_children_to_pm`` pairs them and demotes an
+# unbalanced one back to its literal text.
+_HIGHLIGHT_OPEN_RE = re.compile(r'<mark data-color="(hl1|hl2|hl3|hl4)">')
+_HIGHLIGHT_CLOSE = "</mark>"
+
+
+def _highlight_rule(state, silent: bool) -> bool:
+    src = state.src
+    pos = state.pos
+    if src[pos] != "<":
+        return False
+    if src.startswith(_HIGHLIGHT_CLOSE, pos, state.posMax):
+        literal, color, kind = _HIGHLIGHT_CLOSE, None, "highlight_close"
+    else:
+        m = _HIGHLIGHT_OPEN_RE.match(src, pos, state.posMax)
+        if not m:
+            return False
+        literal, color, kind = m.group(0), m.group(1), "highlight_open"
+    if not silent:
+        # nesting 0: stays out of the delimiter-scope stack, so emphasis
+        # pairs across the tags (and a stray </mark> can't underflow it).
+        token = state.push(kind, "mark", 0)
+        token.markup = literal
+        if color:
+            token.attrs = {"data-color": color}
+    state.pos += len(literal)
+    return True
+
 
 # Cap on the length of an inline `data:` image `src`. A multi-MB base64 blob
 # rides the append-only step log + every snapshot + the SSE broadcast, so an
@@ -115,12 +150,14 @@ def _build_md() -> MarkdownIt:
     # ``commonmark`` preset + tables + strikethrough (GFM) + tasklists. ``html=False`` keeps
     # raw HTML from sneaking into the doc — anything that looks like HTML
     # falls back to plain text, which is safe for our schema.
-    return (
+    md = (
         MarkdownIt("commonmark", {"html": False})
         .enable("table")
         .enable("strikethrough")
         .use(tasklists_plugin)
     )
+    md.inline.ruler.before("autolink", "highlight", _highlight_rule)
+    return md
 
 
 def markdown_to_doc(md_src: str) -> dict:
@@ -539,9 +576,17 @@ def _children_to_pm(children) -> list[dict]:
     # sentinel for an open mark we chose not to materialize (e.g. an empty
     # href link) — it keeps the stack balanced for the matching close.
     mark_stack: list[dict] = []
+    unpaired = _unpaired_highlight_tokens(children)
 
     def real_marks() -> list[dict]:
-        return [dict(m) for m in mark_stack if not m.get("_drop")]
+        marks = [dict(m) for m in mark_stack if not m.get("_drop")]
+        # Nested <mark> tags would stack two highlight marks, which PM
+        # forbids (same-type marks exclude) — the innermost color wins.
+        hl = [i for i, m in enumerate(marks) if m.get("type") == "highlight"]
+        if len(hl) > 1:
+            drop = set(hl[:-1])
+            marks = [m for i, m in enumerate(marks) if i not in drop]
+        return marks
 
     def push_text(text: str) -> None:
         if not text:
@@ -602,9 +647,16 @@ def _children_to_pm(children) -> list[dict]:
             # Drop anything else as a no-op.
             pass
 
+        elif id(c) in unpaired:
+            # An unbalanced <mark …> / </mark> stays literal text.
+            push_text(c.markup)
+
         elif t in _MARK_OPEN_CLOSE:
             mark_name = _MARK_OPEN_CLOSE[t][1]
-            if mark_name == "link":
+            if mark_name == "highlight":
+                color = (c.attrs or {}).get("data-color")
+                mark_stack.append({"type": "highlight", "attrs": {"color": color}})
+            elif mark_name == "link":
                 attrs = dict(c.attrs or {})
                 href = attrs.get("href") or ""
                 # `paper:/`-scheme hrefs are the mention/tag/paper-link/
@@ -632,7 +684,13 @@ def _children_to_pm(children) -> list[dict]:
             else:
                 mark_stack.append({"type": mark_name})
 
-        elif t in ("strong_close", "em_close", "s_close", "link_close"):
+        elif t in (
+            "strong_close",
+            "em_close",
+            "s_close",
+            "link_close",
+            "highlight_close",
+        ):
             wanted = "strike" if t == "s_close" else t.replace("_close", "")
             for j in range(len(mark_stack) - 1, -1, -1):
                 m = mark_stack[j]
@@ -649,6 +707,26 @@ def _children_to_pm(children) -> list[dict]:
     return _coalesce_text(
         _split_sql_values(_split_paper_links(_convert_paper_refs(raw)))
     )
+
+
+def _unpaired_highlight_tokens(children) -> set[int]:
+    """Ids of ``highlight_open`` / ``highlight_close`` tokens with no partner.
+
+    A close pairs with the most recent unpaired open (tags nest like HTML);
+    whatever is left over on either side is unbalanced and renders literally.
+    """
+    opens: list[int] = []
+    unpaired: set[int] = set()
+    for c in children:
+        if c.type == "highlight_open":
+            opens.append(id(c))
+        elif c.type == "highlight_close":
+            if opens:
+                opens.pop()
+            else:
+                unpaired.add(id(c))
+    unpaired.update(opens)
+    return unpaired
 
 
 def _coalesce_text(nodes: list[dict]) -> list[dict]:

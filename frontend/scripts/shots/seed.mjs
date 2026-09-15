@@ -215,6 +215,20 @@ confirmed; ~~the API shape is still open~~ the API shape is settled.
 - [ ] Legal review
 `;
 
+// Color highlight fixture — prose using all four highlight slots (one nested
+// with bold, one inside a link) for the highlight shot. Own doc: the shot only
+// moves the selection + opens the swatch popover, it never edits.
+const HIGHLIGHTS = `# Q3 planning notes
+
+The importer rewrite <mark data-color="hl1">moved to Q4</mark>, so the launch
+scope is smaller than we pitched. The <mark data-color="hl2">launch date is fixed</mark>
+and owners are confirmed, but the <mark data-color="hl3">API shape is still open</mark>
+and <mark data-color="hl4">**legal review is blocking**</mark> the pricing page.
+
+Next step: read the [<mark data-color="hl1">vendor contract summary</mark>](https://datasette.io)
+before Thursday's sync.
+`;
+
 // Callout (GitHub-style admonition) fixture — a "Deploy runbook" with one of
 // each of the five kinds, each carrying a title + a short body; the WARNING
 // one gets a multi-block body (a paragraph + a list) so the shot also proves
@@ -402,6 +416,7 @@ export async function seed(ctx) {
   const codeBlockId = await create("Language support", ACTOR, CODE_BLOCK);
   const calloutsId = await create("Deploy runbook", ACTOR, CALLOUTS);
   const strikethroughId = await create("Q3 plan", ACTOR, STRIKETHROUGH);
+  const highlightId = await create("Q3 planning notes", ACTOR, HIGHLIGHTS);
   // Inline `date` atom fixture for the date / date-format-picker shots.
   const dateId = await create("Sprint schedule", ACTOR, DATES);
   // Assigned/dated task fixture for the todos + profile-todos shots. Owned by
@@ -447,6 +462,7 @@ export async function seed(ctx) {
     codeBlockId,
     calloutsId,
     strikethroughId,
+    highlightId,
     teamWikiId,
     dateId,
     todosId,
