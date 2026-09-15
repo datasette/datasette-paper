@@ -2965,10 +2965,43 @@ mark.pp-hl[data-color="hl4"] {
 .editor-host ul.pm-toc-list {
   list-style: disc;
 }
-.editor-host .pm-toc > .pm-toc-list {
+.editor-host .pm-toc-body > .pm-toc-list {
   margin: 0;
   padding: 8px 12px 10px 30px;
   font-size: 14px;
+}
+/* Long TOC (tocView.ts TOC_CAP_ENTRIES): clip to ~10 rows with a fade into
+   the card surface; the "Show all" toggle below removes the cap. */
+.editor-host .pm-toc-body--capped {
+  position: relative;
+  max-height: 16em;
+  overflow: hidden;
+}
+.editor-host .pm-toc-body--capped::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3em;
+  background: linear-gradient(transparent, var(--pp-surface));
+  pointer-events: none;
+}
+.editor-host .pm-toc-toggle {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  border-top: 1px solid var(--pp-border);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--pp-link);
+  cursor: pointer;
+  text-align: left;
+}
+.editor-host .pm-toc-toggle:hover {
+  background: var(--pp-surface-2);
 }
 .editor-host .pm-toc-list .pm-toc-list {
   margin: 1px 0;

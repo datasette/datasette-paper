@@ -118,6 +118,10 @@ function svgIcon(name: keyof typeof TOOLBAR_ICONS): HTMLSpanElement {
   return span;
 }
 
+/** Above this many entries the TOC body is height-capped (see editor.css
+ *  `.pm-toc-body--capped`, sized to clip well before this many rows). */
+export const TOC_CAP_ENTRIES = 12;
+
 // Every mounted TocView — the driver plugin re-renders these on doc change.
 const mounted = new Set<TocView>();
 
@@ -127,6 +131,7 @@ export class TocView implements NodeView {
   private view: EditorView;
   private getPos: () => number | undefined;
   private menuEl: HTMLElement | null = null;
+  private expanded = false;
 
   constructor(node: PMNode, view: EditorView, getPos: () => number | undefined) {
     this.node = node;
@@ -159,7 +164,27 @@ export class TocView implements NodeView {
       return;
     }
 
-    this.dom.appendChild(this.buildList(entries, config.ordered));
+    const body = document.createElement("div");
+    body.className = "pm-toc-body";
+    body.appendChild(this.buildList(entries, config.ordered));
+    this.dom.appendChild(body);
+
+    // Long TOCs clip to a fixed height with a fade + "Show all" toggle.
+    // The expanded flag is per-viewer view state, deliberately not in config.
+    if (entries.length > TOC_CAP_ENTRIES) {
+      body.classList.toggle("pm-toc-body--capped", !this.expanded);
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "pm-toc-toggle";
+      toggle.textContent = this.expanded ? "Show less" : `Show all ${entries.length}`;
+      toggle.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.expanded = !this.expanded;
+        this.render();
+      });
+      this.dom.appendChild(toggle);
+    }
   }
 
   /**

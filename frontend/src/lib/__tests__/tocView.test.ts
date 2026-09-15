@@ -10,7 +10,11 @@ import {
   headingSignature,
   readTocConfig,
   tocEntries,
+  TocView,
+  TOC_CAP_ENTRIES,
 } from "../tocView";
+import { EditorState } from "prosemirror-state";
+import type { EditorView } from "prosemirror-view";
 import { buildSlashCommands } from "../slashMenu";
 
 function heading(level: number, text: string) {
@@ -127,6 +131,43 @@ describe("tocEntries (level filtering)", () => {
     const d = doc(heading(1, "H1"), heading(2, "H2"), heading(3, "H3"));
     const got = tocEntries(d, { minLevel: 2, maxLevel: 2, ordered: true });
     expect(got.map((h) => h.text)).toEqual(["H2"]);
+  });
+});
+
+describe("TocView height cap", () => {
+  function mount(n: number) {
+    const headings = Array.from({ length: n }, (_, i) => heading(2, `H${i}`));
+    const d = doc(schema.nodes.toc.create(), ...headings);
+    const view = { state: EditorState.create({ doc: d }) } as unknown as EditorView;
+    return new TocView(d.child(0), view, () => 0);
+  }
+
+  it("leaves a short TOC uncapped with no toggle", () => {
+    const tv = mount(TOC_CAP_ENTRIES);
+    expect(tv.dom.querySelector(".pm-toc-body--capped")).toBeNull();
+    expect(tv.dom.querySelector(".pm-toc-toggle")).toBeNull();
+    tv.destroy();
+  });
+
+  it("caps a long TOC and toggles Show all / Show less", () => {
+    const n = TOC_CAP_ENTRIES + 5;
+    const tv = mount(n);
+    expect(tv.dom.querySelector(".pm-toc-body--capped")).not.toBeNull();
+    const toggle = () => tv.dom.querySelector<HTMLButtonElement>(".pm-toc-toggle")!;
+    expect(toggle().textContent).toBe(`Show all ${n}`);
+    // every entry is still rendered — the cap is visual only
+    expect(tv.dom.querySelectorAll(".pm-toc-item").length).toBe(n);
+
+    toggle().click();
+    expect(tv.dom.querySelector(".pm-toc-body--capped")).toBeNull();
+    expect(toggle().textContent).toBe("Show less");
+
+    tv.render(); // expanded survives a heading-driven re-render
+    expect(tv.dom.querySelector(".pm-toc-body--capped")).toBeNull();
+
+    toggle().click();
+    expect(tv.dom.querySelector(".pm-toc-body--capped")).not.toBeNull();
+    tv.destroy();
   });
 });
 
