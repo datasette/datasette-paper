@@ -1905,13 +1905,15 @@ export class EditorConnection {
   private listen<T>(es: EventSource, name: string, handler: (data: T) => void): void {
     es.addEventListener(name, (evt) => {
       if (this.eventSource !== es) return;
-      let data: T;
+      let data: unknown;
       try {
         data = JSON.parse((evt as MessageEvent).data);
       } catch {
         return;
       }
-      handler(data);
+      // `null` or a bare scalar parses fine but has no fields to read.
+      if (data === null || typeof data !== "object") return;
+      handler(data as T);
     });
   }
 
@@ -2063,11 +2065,29 @@ export class EditorConnection {
           actor: this.selfActor,
           at: new Date().toISOString(),
         });
-        this.receiveBatch({
+        const ack: StepBatch = {
           steps: sendable.steps,
           clientIDs: new Array(sendable.steps.length).fill(sendable.clientID),
           version: version + sendable.steps.length,
-        });
+        };
+        try {
+          this.receiveBatch(ack);
+        } catch (err) {
+          // The server accepted the batch but confirming it locally
+          // failed. Letting this fall into the transport `catch` would
+          // `recover()` and resend the same steps at a stale version
+          // forever (409 → backlog → same throw). Lock the editor like
+          // any other unapplicable step instead.
+          this.sending = false;
+          this.pendingUpdates = [];
+          this.comm = "loaded";
+          this.reportStepError({
+            version: ack.version,
+            phase: "send",
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return;
+        }
         // Keep sends blocked until every queued remote step has been
         // rebased. Dispatching the acknowledgement can itself create more
         // sendable steps, but those must use the final confirmed version.

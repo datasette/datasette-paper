@@ -495,6 +495,28 @@ describe("collaboration request ordering", () => {
     } finally { conn.close(); }
   });
 
+  it("locks the editor when confirming an accepted batch fails, instead of resending it", async () => {
+    const { conn, pending, posts, errors } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      expect(posts).toHaveLength(1);
+      // Stand-in for a confirmation transaction that cannot be applied.
+      // Before the fix this fell into the transport catch → recover() →
+      // resend at the stale version → 409 → backlog → same throw, forever.
+      vi.spyOn(view, "dispatch").mockImplementationOnce(() => {
+        throw new Error("ack boom");
+      });
+      pending.resolve(response(200));
+      await waitFor(() => expect(errors).toHaveLength(1));
+      expect(errors[0]).toEqual({ version: 6, phase: "send", message: "ack boom" });
+      expect(view.editable).toBe(false);
+      view.dispatch(view.state.tr.insertText("B", 7));
+      await new Promise((done) => setTimeout(done, 20));
+      expect(posts).toHaveLength(1);
+    } finally { conn.close(); }
+  });
+
   it.each(["before", "after"])("confirms a replayed own batch only once when backlog arrives %s the POST reply", async (order) => {
     const { conn, pending, posts, errors } = await session();
     try {
