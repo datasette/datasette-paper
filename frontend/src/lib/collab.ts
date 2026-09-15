@@ -107,7 +107,11 @@ import {
   type EmbedKindFilter,
 } from "./slashMenu";
 import { SHORTCUTS } from "./shortcuts";
-import { indentListSelection, dedentListSelection } from "./listCommands";
+import {
+  indentListSelection,
+  dedentListSelection,
+  splitListItemUncollapsed,
+} from "./listCommands";
 import {
   cursorReporterPlugin,
   remoteCursorsPlugin,
@@ -431,6 +435,40 @@ export function buildPaperStructuralRules(): InputRule[] {
         node.childCount + (node.attrs.order as number) === +match[1],
     ),
     wrappingInputRule(/^\s*([-+*])\s$/, schema.nodes.bullet_list),
+    // `[>] ` at the start of a list item's first paragraph flips it to a
+    // toggle. Far cheaper than `taskListInputRule` below, which has to rebuild
+    // the whole list because it changes node *types* — here only an attr
+    // moves, so it is a delete + one `setNodeMarkup`. One transaction, so
+    // `undoInputRule` (Cmd-Z) puts the literal `[>] ` back. Deliberately no
+    // `>`-prefixed variant: `> ` is blockquote's, above.
+    // @feat toggle-list: `[>] ` at the start of a list item makes it a toggle
+    new InputRule(/^\[>\]\s$/, (state, _match, start, end) => {
+      const $start = state.doc.resolve(start);
+      // Need depth ≥ 3: list / list_item / paragraph / text-position.
+      if ($start.depth < 3) return null;
+      if ($start.parent.type !== schema.nodes.paragraph) return null;
+      const itemDepth = $start.depth - 1;
+      const item = $start.node(itemDepth);
+      if (item.type !== schema.nodes.list_item) return null;
+      // The item's own summary line only — its first paragraph, from column 0.
+      if ($start.index(itemDepth) !== 0) return null;
+      if ($start.parentOffset !== 0) return null;
+      const itemPos = $start.before(itemDepth);
+      const tr = state.tr.delete(start, end).setNodeMarkup(itemPos, undefined, {
+        ...item.attrs,
+        kind: "toggle",
+      });
+      // A chevron can't replace a number, so an ordered container becomes a
+      // bullet_list first — the same rule `setListItemKind` applies, so typing
+      // the marker and picking /toggle can't land in different states. Content
+      // shapes are identical (`list_item+`), so this is one setNodeMarkup and
+      // no position shifts.
+      const listDepth = itemDepth - 1;
+      if (listDepth > 0 && $start.node(listDepth).type === schema.nodes.ordered_list) {
+        tr.setNodeMarkup($start.before(listDepth), schema.nodes.bullet_list, {});
+      }
+      return tr;
+    }),
     // ` ```lang ` + space → a code_block tagged with `lang`. Replaces the old
     // instant ` ``` ` rule, which fired on the third backtick and made
     // ` ```python ` untypeable (the "python" landed inside the freshly-created
@@ -1544,6 +1582,15 @@ export class EditorConnection {
           Backspace: deleteRowOrColSelection(),
           Delete: deleteRowOrColSelection(),
         }),
+        // Enter inside a COLLAPSED toggle item, ahead of buildKeymap's generic
+        // `splitListItem(list_item)` — which copies every attr, so the new
+        // item (the one the split moves the children into) would arrive
+        // pre-collapsed with those children hidden. Declines everywhere else,
+        // so the stock binding below still owns every other Enter in a list.
+        // Its own keymap rather than an entry in the chain above, which
+        // plans/toggle-list ticket 03 freezes.
+        // @feat toggle-list: Enter in a collapsed toggle yields an expanded item
+        keymap({ Enter: splitListItemUncollapsed }),
         keymap(buildKeymap(schema)),
         // Own line-boundary motion (Cmd/Home + Left/Right). Chromium's native
         // handling breaks when a line begins with a link mark and leaks the

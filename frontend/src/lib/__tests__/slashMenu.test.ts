@@ -644,6 +644,61 @@ describe("popup renders non-interactive section headers (real EditorView)", () =
   });
 });
 
+// @feat toggle-list: test — the `/toggle` slash entry
+describe("toggle list slash entry", () => {
+  const entry = () => commands.find((c) => c.id === "toggle_list");
+
+  it("is registered in the styling group with no shortcut", () => {
+    const cmd = entry();
+    expect(cmd).toBeDefined();
+    // `styling` keeps it out of ＋ Insert, like the other list entries.
+    expect(cmd!.group).toBe("styling");
+    expect(cmd!.shortcut).toBeUndefined();
+    expect(cmd!.icon).toBe("chevronRight");
+  });
+
+  it("matches its keywords", () => {
+    for (const query of ["toggle", "fold", "collapse", "accordion"]) {
+      const state = stateWith([schema.node("paragraph")], 1, `/${query}`);
+      expect(
+        filterSlashCommands(commands, state, query).some((c) => c.id === "toggle_list"),
+        query,
+      ).toBe(true);
+    }
+  });
+
+  it("is enabled in a plain paragraph and inside a bullet list", () => {
+    const para = stateWith([schema.node("paragraph")], 1, "/");
+    expect(filterSlashCommands(commands, para, "").map((c) => c.id)).toContain("toggle_list");
+    const inList = stateWith(
+      [
+        schema.node("bullet_list", null, [
+          schema.node("list_item", null, [schema.node("paragraph")]),
+        ]),
+      ],
+      3,
+      "/",
+    );
+    expect(filterSlashCommands(commands, inList, "").map((c) => c.id)).toContain("toggle_list");
+  });
+
+  it("runs: wraps the paragraph in a bullet_list and makes the item a toggle", () => {
+    const place = document.createElement("div");
+    document.body.appendChild(place);
+    const state = EditorState.create({
+      doc: schema.node("doc", null, [schema.node("paragraph", null, [schema.text("hi")])]),
+    });
+    const view = new EditorView(place, { state });
+    entry()!.run(view);
+    const list = view.state.doc.firstChild!;
+    expect(list.type.name).toBe("bullet_list");
+    expect(list.child(0).attrs.kind).toBe("toggle");
+    expect(list.child(0).firstChild!.textContent).toBe("hi");
+    view.destroy();
+    place.remove();
+  });
+});
+
 describe("slash command shortcuts", () => {
   it("every command's shortcut is a registry id", () => {
     const withShortcut = buildSlashCommands().filter((c) => c.shortcut !== undefined);
