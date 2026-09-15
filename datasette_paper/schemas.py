@@ -109,6 +109,21 @@ class PresenceBody(BaseModel):
     head: int
 
 
+class EventsQuery(BaseModel):
+    """Query string of the SSE GET (``?version=N&clientID=M``).
+
+    The SSE route is raw ASGI so the router can't inject this; the handler
+    calls ``EventsQuery.model_validate(dict(request.args))`` itself and
+    answers 400 on a ``ValidationError``. ``version`` defaults to 0 (full
+    backlog). ``clientID`` is optional: when present the broadcast loop
+    skips this subscriber's own batches, and history-gone is reported
+    in-band as a ``reset`` event instead of an HTTP 410.
+    """
+
+    version: int = 0
+    client_id: Optional[int] = Field(default=None, alias="clientID")
+
+
 class EventsBody(BaseModel):
     """Collab step batch.
 

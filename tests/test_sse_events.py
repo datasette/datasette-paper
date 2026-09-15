@@ -292,6 +292,18 @@ async def test_sse_ready_marks_catchup_before_live_steps(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "query", ["version=abc", "version=0&clientID=abc", "version=0&clientID=1.5"]
+)
+async def test_sse_rejects_malformed_query_params(ds, query):
+    # A malformed clientID used to degrade silently to "no clientID", which
+    # also switched history-gone from the in-band reset to an invisible 410.
+    doc_id = await _create_doc(ds)
+    stream = await _sse_get(ds, f"/-/paper/api/docs/{doc_id}/events?{query}")
+    assert stream.status == 400
+
+
+@pytest.mark.asyncio
 # @feat collab-sse: test: evicted-history SSE subscribe returns 410
 async def test_sse_stale_version_410(ds_paper):
     import collections

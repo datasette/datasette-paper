@@ -521,3 +521,15 @@ async def test_registry_cancelled_caller_does_not_cancel_shared_hydrate(
     inst = await asyncio.wait_for(survivor, timeout=5)
     assert inst.doc_id == doc.id
     assert registry._instances[doc.id] is inst
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [(ConflictError, 409), (BadVersionError, 400), (GoneError, 410)],
+)
+def test_protocol_errors_carry_http_status(error, status):
+    exc = error("detail")
+    assert exc.status == status
+    assert str(exc) == "detail"
+    assert str(error()) == error.reason
+    assert InvalidStepError(2, "boom").status == 422

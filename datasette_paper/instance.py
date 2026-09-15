@@ -52,6 +52,7 @@ from typing import Optional
 from .db import PaperDB
 from .errors import BadVersionError, ConflictError, GoneError, InvalidStepError
 from .sql import _queries
+from .sse import SSEEvent
 
 logger = logging.getLogger("datasette_paper.instance")
 
@@ -471,7 +472,7 @@ class Instance:
         # parse them back to objects so the SSE payload is structured JSON,
         # not strings inside a JSON array.
         payload = {
-            "kind": "update",
+            "kind": SSEEvent.UPDATE,
             "version": self.version,
             "steps": [json.loads(r["step_json"]) for r in new_step_records],
             "clientIDs": [r["client_id"] for r in new_step_records],
@@ -742,7 +743,7 @@ class Instance:
         sliced = tail_list[tail_len - steps_needed :]
 
         return {
-            "kind": "update",
+            "kind": SSEEvent.UPDATE,
             "version": self.version,
             "steps": [json.loads(r["step_json"]) for r in sliced],
             "clientIDs": [r["client_id"] for r in sliced],
@@ -828,7 +829,7 @@ class Instance:
         restore routes so currently-editing collaborators see the doc
         switch state without needing to refetch the bootstrap.
         """
-        msg = {"kind": "state-changed", **payload}
+        msg = {"kind": SSEEvent.STATE_CHANGED, **payload}
         for q in list(self.subscribers):
             q.put_nowait(msg)
 
@@ -842,7 +843,7 @@ class Instance:
         lifecycle values and stays narrow.
         @feat breadcrumbs: server half of the live crumb rename.
         """
-        msg = {"kind": "renamed", "name": name, "updated_at": updated_at}
+        msg = {"kind": SSEEvent.RENAMED, "name": name, "updated_at": updated_at}
         for q in list(self.subscribers):
             q.put_nowait(msg)
 
@@ -869,7 +870,7 @@ class Instance:
             )
             q.put_nowait(
                 {
-                    "kind": "permissions-changed",
+                    "kind": SSEEvent.PERMISSIONS_CHANGED,
                     "canEdit": can_edit,
                     "locked": locked,
                 }
@@ -899,7 +900,7 @@ class Instance:
                 # Sentinel — the SSE loop checks `event_name == "closed"`
                 # and breaks out of its forwarding loop cleanly. Simpler
                 # than a separate channel.
-                q.put_nowait({"kind": "closed"})
+                q.put_nowait({"kind": SSEEvent.CLOSED})
                 self.subscribers.pop(q, None)
                 revoked += 1
         return revoked
@@ -951,7 +952,7 @@ class Instance:
 
     def _presence_payload(self) -> dict:
         return {
-            "kind": "presence",
+            "kind": SSEEvent.PRESENCE,
             "users": [
                 {
                     "clientID": cid,
