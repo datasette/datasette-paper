@@ -676,8 +676,19 @@ mark.pp-hl[data-color="hl4"] {
 }
 
 /* Click-to-edit popup — anchored below the chip. `contenteditable=false`, so
- * its input is exempt from the caret guard (see DateView). */
+ * its input is exempt from the caret guard (see DateView).
+ * The popup is a DOM child of the chip, so it would inherit the host block's
+ * type (H1 size, H6 uppercase, a bold/italic mark) and every `em` inside it
+ * would scale with it. Pin the body-paragraph metrics so it renders the same
+ * everywhere. */
 .editor-host .pm-date-popup {
+  font-size: 16px;
+  line-height: 1.65;
+  font-weight: 500;
+  font-style: normal;
+  color: var(--pp-fg-muted);
+  text-transform: none;
+  letter-spacing: normal;
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
@@ -1253,6 +1264,10 @@ mark.pp-hl[data-color="hl4"] {
   box-shadow: 0 4px 12px var(--pp-shadow);
   font: 13px/1.4 system-ui, sans-serif;
   font-weight: 400;
+  /* `font` pins size/weight/style, but these still inherit from the host
+   * heading (H6 is uppercase + tracked) since the popover lives in the chip. */
+  text-transform: none;
+  letter-spacing: normal;
   color: #1e293b;
   user-select: none;
   cursor: default;
