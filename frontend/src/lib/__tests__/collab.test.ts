@@ -1264,6 +1264,84 @@ describe("inline mark input rules", () => {
     conn.close();
   });
 
+  // @feat strikethrough: vitest proof of the `~~text~~` input rule, its mid-word guard, and the Mod-Shift-x toggle
+  it("`~~strike~~` autoformats as a strike mark and strips the delimiters", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    // `~~strike~` (9 chars, pos 1..10) → typing the final `~` completes it.
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("~~strike~")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 10, 10, "~", () => view.state.tr),
+    );
+    expect(handled).toBe(true);
+
+    const para = view.state.doc.firstChild!;
+    expect(para.textContent).toBe("strike");
+    expect(view.state.doc.rangeHasMark(1, 7, schema.marks.strike)).toBe(true);
+    // The rule clears the stored mark, so the next typed char is plain.
+    expect(schema.marks.strike.isInSet(view.state.storedMarks ?? [])).toBeFalsy();
+
+    conn.close();
+  });
+
+  it("the strike rule does not fire mid-word (`a~~b~~`)", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(view.state.tr.replaceWith(1, 6, schema.text("a~~b~")));
+
+    const handled = view.someProp("handleTextInput", (fn) =>
+      fn(view, 6, 6, "~", () => view.state.tr),
+    );
+    expect(handled).toBeFalsy();
+    let struck = false;
+    view.state.doc.descendants((n) => {
+      if (schema.marks.strike.isInSet(n.marks)) struck = true;
+    });
+    expect(struck).toBe(false);
+
+    conn.close();
+  });
+
+  it("Mod-Shift-x toggles strike on the selection", async () => {
+    const el = makeEl();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+
+    const conn = new EditorConnection(makeOpts(el));
+    await waitFor(() => expect(conn.view).not.toBeNull());
+
+    const view = conn.view!;
+    view.dispatch(
+      view.state.tr.setSelection(TextSelection.create(view.state.doc, 1, 6)),
+    );
+    const press = () => {
+      const evt = new KeyboardEvent("keydown", {
+        key: "X",
+        keyCode: 88,
+        ctrlKey: true,
+        shiftKey: true,
+      });
+      return view.someProp("handleKeyDown", (fn) => fn(view, evt));
+    };
+
+    expect(press()).toBe(true);
+    expect(view.state.doc.rangeHasMark(1, 6, schema.marks.strike)).toBe(true);
+    expect(press()).toBe(true);
+    expect(view.state.doc.rangeHasMark(1, 6, schema.marks.strike)).toBe(false);
+
+    conn.close();
+  });
+
   it("`[text](url)` autoformats as an inline link", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();

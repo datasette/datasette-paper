@@ -1,0 +1,257 @@
+{
+  "content": [
+    {
+      "attrs": {
+        "level": 1
+      },
+      "content": [
+        {
+          "text": "Strikethrough",
+          "type": "text"
+        }
+      ],
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "text": "The launch is ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strike"
+            }
+          ],
+          "text": "Tuesday",
+          "type": "text"
+        },
+        {
+          "text": " Thursday.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "marks": [
+            {
+              "type": "strike"
+            }
+          ],
+          "text": "Struck with ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strike"
+            },
+            {
+              "type": "strong"
+            }
+          ],
+          "text": "bold",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strike"
+            }
+          ],
+          "text": " and ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strike"
+            },
+            {
+              "type": "em"
+            }
+          ],
+          "text": "emphasis",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strike"
+            }
+          ],
+          "text": " inside",
+          "type": "text"
+        },
+        {
+          "text": ", then ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "text": "bold with ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strong"
+            },
+            {
+              "type": "strike"
+            }
+          ],
+          "text": "strike",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "type": "strong"
+            }
+          ],
+          "text": " inside",
+          "type": "text"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "text": "A ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://example.com/"
+              },
+              "type": "link"
+            },
+            {
+              "type": "strike"
+            }
+          ],
+          "text": "struck link",
+          "type": "text"
+        },
+        {
+          "text": " and a ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://example.com/"
+              },
+              "type": "link"
+            }
+          ],
+          "text": "link with ",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://example.com/"
+              },
+              "type": "link"
+            },
+            {
+              "type": "strike"
+            }
+          ],
+          "text": "struck",
+          "type": "text"
+        },
+        {
+          "marks": [
+            {
+              "attrs": {
+                "href": "https://example.com/"
+              },
+              "type": "link"
+            }
+          ],
+          "text": " text",
+          "type": "text"
+        },
+        {
+          "text": ".",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "text": "Literal tildes stay text: ~~not struck~~, about ~5 minutes, and a ~ b.",
+          "type": "text"
+        }
+      ],
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "attrs": {
+            "checked": true
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "marks": [
+                    {
+                      "type": "strike"
+                    }
+                  ],
+                  "text": "Ship the importer",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "task_item"
+        },
+        {
+          "attrs": {
+            "checked": false
+          },
+          "content": [
+            {
+              "content": [
+                {
+                  "text": "Write the docs",
+                  "type": "text"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          "type": "task_item"
+        }
+      ],
+      "type": "task_list"
+    }
+  ],
+  "type": "doc"
+}

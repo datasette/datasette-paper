@@ -749,6 +749,13 @@ def _flatten_text(nodes: list) -> str:
 # (re.sub does a single left-to-right pass, but listing it first is clearer).
 _ESCAPE_RE = re.compile(r"([\\`*_\[\]])")
 
+# A run of two or more `~` is a GFM strikethrough delimiter candidate once the
+# parser enables `strikethrough` (a lone `~` never is), so only doubled runs are
+# escaped — single-`~` prose (`~5 min`) stays byte-identical. Mirrored by
+# `unescapeSingleTildes` in frontend/src/lib/markdownSerializer.ts.
+# @feat strikethrough: escape literal `~~` runs so plain text doesn't re-parse as strike
+_TILDE_RUN_RE = re.compile(r"~{2,}")
+
 
 def _escape_text(text: str) -> str:
     """Backslash-escape inline markup characters in a plain-text run.
@@ -758,7 +765,8 @@ def _escape_text(text: str) -> str:
     minimal — block-level markers (`#`, `>`, `-`) at line start are handled
     by the block renderers, not here.
     """
-    return _ESCAPE_RE.sub(r"\\\1", text)
+    text = _ESCAPE_RE.sub(r"\\\1", text)
+    return _TILDE_RUN_RE.sub(lambda m: "\\~" * len(m.group(0)), text)
 
 
 # A run of `\r`/`\n` in an image src or alt — used to neutralize both before
@@ -854,6 +862,8 @@ def _mark_delims(mark: dict) -> tuple[str, str]:
         return "**", "**"
     if t == "em":
         return "*", "*"
+    if t == "strike":  # @feat strikethrough: serialize the mark as GFM `~~…~~`
+        return "~~", "~~"
     if t == "link":
         attrs = mark.get("attrs") or {}
         href = attrs.get("href", "")

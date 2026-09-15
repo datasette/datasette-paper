@@ -924,6 +924,30 @@ def test_code_span_content_is_not_escaped():
     assert md == "`a*b`\n"
 
 
+# @feat strikethrough: serializer emits `~~…~~` and escapes only doubled `~` runs
+def test_strike_mark_serializes_as_double_tilde():
+    md = doc_to_markdown(_doc(_para(_text("a "), _text("b", "strike"), _text(" c"))))
+    assert md == "a ~~b~~ c\n"
+
+
+def test_strike_nested_with_strong():
+    md = doc_to_markdown(
+        _doc(_para(_text("x ", "strike"), _text("y", "strike", "strong")))
+    )
+    assert md == "~~x **y**~~\n"
+
+
+def test_doubled_tilde_runs_are_escaped_single_tilde_is_not():
+    from datasette_paper.markdown_parser import markdown_to_doc
+
+    md = doc_to_markdown(_doc(_para(_text("~~x~~ ~5 a ~ b ~~~"))))
+    assert md == "\\~\\~x\\~\\~ ~5 a ~ b \\~\\~\\~\n"
+    back = markdown_to_doc(md)
+    assert back["content"][0]["content"] == [
+        {"type": "text", "text": "~~x~~ ~5 a ~ b ~~~"}
+    ]
+
+
 def test_overlapping_marks_em_outside_strong():
     # em on "foo ", em+strong on "bar" → strong opens *inside* the open em.
     md = doc_to_markdown(

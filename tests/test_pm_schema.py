@@ -346,6 +346,30 @@ def test_step_href_violation_finds_image_node_src():
     assert step_href_violation(step) is not None
 
 
+# @feat strikethrough: an AddMarkStep carrying `strike` applies through the server materializer
+def test_strike_add_mark_step_applies_over_snapshot():
+    from prosemirror.transform import Step
+
+    start_doc = Node.from_json(
+        schema,
+        {
+            "type": "doc",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": "hello"}]}
+            ],
+        },
+    )
+    step = Step.from_json(
+        schema,
+        {"stepType": "addMark", "from": 1, "to": 6, "mark": {"type": "strike"}},
+    )
+    result = step.apply(start_doc)
+    assert not result.failed
+    result.doc.check()
+    marks = result.doc.content.child(0).content.child(0).marks
+    assert [m.type.name for m in marks] == ["strike"]
+
+
 def test_step_href_violation_allows_safe_links_and_images():
     step = {
         "stepType": "replace",

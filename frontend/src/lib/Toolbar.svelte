@@ -256,6 +256,10 @@
     void tick;
     return markActive(schema.marks.em);
   });
+  const isStrike = $derived.by(() => {
+    void tick;
+    return markActive(schema.marks.strike);
+  });
   const isCode = $derived.by(() => {
     void tick;
     return markActive(schema.marks.code);
@@ -401,6 +405,8 @@
   <span class="tb-sep" aria-hidden="true"></span>
   {@render btn("bold", "Bold (⌘B)", toggle(schema.marks.strong), isBold)}
   {@render btn("italic", "Italic (⌘I)", toggle(schema.marks.em), isItalic)}
+  <!-- @feat strikethrough: toolbar button toggles strike, pressed while the mark is active -->
+  {@render btn("strikethrough", "Strikethrough (⌘⇧X)", toggle(schema.marks.strike), isStrike)}
   {@render btn("code", "Inline code (⌘`)", toggle(schema.marks.code), isCode)}
   {@render btn("link", "Link (⌘K)", toggleLink, isLink)}
   {@render btn("wikilink", "Link to a page ([[)", startWikiLink)}

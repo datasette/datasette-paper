@@ -203,6 +203,18 @@ def fibonacci(n):
 \`\`\`
 `;
 
+// Strikethrough fixture — a short status note with struck-through text in a
+// paragraph and a task list. Own doc: the shot clicks into the struck text.
+const STRIKETHROUGH = `# Q3 plan
+
+Ship the importer ~~in Q3~~ early Q4. The launch date is fixed and owners are
+confirmed; ~~the API shape is still open~~ the API shape is settled.
+
+- [x] ~~Draft the importer spec~~
+- [x] ~~Confirm owners~~
+- [ ] Legal review
+`;
+
 // Callout (GitHub-style admonition) fixture — a "Deploy runbook" with one of
 // each of the five kinds, each carrying a title + a short body; the WARNING
 // one gets a multi-block body (a paragraph + a list) so the shot also proves
@@ -389,6 +401,7 @@ export async function seed(ctx) {
   const tocId = await create("Engineering handbook", ACTOR, TOC);
   const codeBlockId = await create("Language support", ACTOR, CODE_BLOCK);
   const calloutsId = await create("Deploy runbook", ACTOR, CALLOUTS);
+  const strikethroughId = await create("Q3 plan", ACTOR, STRIKETHROUGH);
   // Inline `date` atom fixture for the date / date-format-picker shots.
   const dateId = await create("Sprint schedule", ACTOR, DATES);
   // Assigned/dated task fixture for the todos + profile-todos shots. Owned by
@@ -433,6 +446,7 @@ export async function seed(ctx) {
     tocId,
     codeBlockId,
     calloutsId,
+    strikethroughId,
     teamWikiId,
     dateId,
     todosId,

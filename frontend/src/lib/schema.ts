@@ -88,6 +88,17 @@ const baseMarks = basic.spec.marks
   .update("link", {
     ..._linkBase,
     toDOM: (node) => ["a", { href: safeHref(node.attrs.href), title: node.attrs.title }, 0],
+  })
+  // @feat strikethrough: client `strike` MarkSpec, appended after the basic marks (mirrors pm_schema.py; same rank order)
+  .addToEnd("strike", {
+    parseDOM: [
+      { tag: "s" },
+      { tag: "del" },
+      { tag: "strike" },
+      { style: "text-decoration=line-through" },
+      { style: "text-decoration-line=line-through" },
+    ],
+    toDOM: () => ["s", 0],
   });
 
 // Inline atom for template placeholders — e.g. {today}, {actor}. Only

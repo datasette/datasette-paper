@@ -168,7 +168,24 @@ _link_mark_spec = {
         0,
     ],
 }
-_marks = {**basic_schema.spec["marks"], "link": _link_mark_spec}
+# `strike` — appended after the basic marks so mark rank (which decides
+# serialization order) matches schema.ts.
+# @feat strikethrough: server `strike` MarkSpec (mirrors schema.ts; same rank order)
+_strike_mark_spec = {
+    "parseDOM": [
+        {"tag": "s"},
+        {"tag": "del"},
+        {"tag": "strike"},
+        {"style": "text-decoration=line-through"},
+        {"style": "text-decoration-line=line-through"},
+    ],
+    "toDOM": lambda _mark, _inline: ["s", 0],
+}
+_marks = {
+    **basic_schema.spec["marks"],
+    "link": _link_mark_spec,
+    "strike": _strike_mark_spec,
+}
 
 # Custom task_list / task_item — mirrors frontend/src/lib/schema.ts.
 # @feat task-list: server task_list node spec (task_item follows; mirrors schema.ts)

@@ -516,6 +516,31 @@ class TestMarks:
         assert text_node["text"] == "bold"
         assert text_node["marks"] == [{"type": "strong"}]
 
+    # @feat strikethrough: parser maps GFM `~~…~~` to the strike mark
+    def test_strike(self):
+        doc = parse_and_validate("~~gone~~\n")
+        text_node = doc["content"][0]["content"][0]
+        assert text_node["text"] == "gone"
+        assert text_node["marks"] == [{"type": "strike"}]
+
+    def test_strike_nested_with_strong(self):
+        doc = parse_and_validate("~~a **b**~~\n")
+        content = doc["content"][0]["content"]
+        assert content == [
+            {"type": "text", "text": "a ", "marks": [{"type": "strike"}]},
+            {
+                "type": "text",
+                "text": "b",
+                "marks": [{"type": "strike"}, {"type": "strong"}],
+            },
+        ]
+
+    def test_single_tilde_is_not_strike(self):
+        doc = parse_and_validate("~a~ and \\~\\~b\\~\\~\n")
+        assert doc["content"][0]["content"] == [
+            {"type": "text", "text": "~a~ and ~~b~~"}
+        ]
+
     def test_em(self):
         doc = parse_and_validate("*em*\n")
         text_node = doc["content"][0]["content"][0]
