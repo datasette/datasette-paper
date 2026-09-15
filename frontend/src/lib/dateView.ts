@@ -90,6 +90,41 @@ export const FORMAT_PRESETS: FormatPreset[] = [
   { key: "short", desc: "Short", format: "%b %-d" },
 ];
 
+// ── Remembered format ─────────────────────────────────────────────────────
+// The last format the viewer picked seeds newly inserted date chips. Stored
+// per actor in localStorage (`paperDateFormat:<actor>`, `anon` when logged
+// out) so switching users doesn't carry one person's preference to another.
+// Best-effort: a throwing localStorage just means no memory.
+const FORMAT_KEY_PREFIX = "paperDateFormat:";
+let formatActor: string | null = null;
+
+/** Scope the remembered format to `actor` (collab.ts calls this at bootstrap). */
+export function setDateFormatActor(actor: string | null): void {
+  formatActor = actor;
+}
+
+function formatKey(): string {
+  return FORMAT_KEY_PREFIX + (formatActor ?? "anon");
+}
+
+/** The current actor's last-picked format, or null (the smart default). */
+export function rememberedDateFormat(): string | null {
+  try {
+    return localStorage.getItem(formatKey()) || null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberDateFormat(format: string | null): void {
+  try {
+    if (format) localStorage.setItem(formatKey(), format);
+    else localStorage.removeItem(formatKey());
+  } catch {
+    /* storage unavailable — no memory */
+  }
+}
+
 // Distinct radio-group name per popup instance so two open date popups (or an
 // old one mid-teardown) never share a group. Module counter — no clock/random.
 let popupSeq = 0;
@@ -443,6 +478,7 @@ export class DateView implements NodeView {
    *  edit in the date field still needs Enter. `update()` re-renders the label
    *  in place without touching the popup. */
   private applyFormat(format: string | null): void {
+    rememberDateFormat(format);
     const pos = this.getPos();
     if (pos == null || (this.attrs.format ?? null) === format) return;
     this.view.dispatch(
@@ -464,6 +500,7 @@ export class DateView implements NodeView {
       tz: parsed.time ? Intl.DateTimeFormat().resolvedOptions().timeZone : null,
       format: this.selectedFormat,
     };
+    rememberDateFormat(this.selectedFormat);
     this.view.dispatch(this.view.state.tr.setNodeMarkup(pos, undefined, attrs));
     this.closePopup(true);
   }
@@ -508,6 +545,7 @@ export function insertDateAndEdit(view: EditorView): void {
     date: todayIso,
     time: null,
     tz: null,
+    format: rememberedDateFormat(),
   });
   const from = view.state.selection.from;
   view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
@@ -520,7 +558,8 @@ export function insertDateAndEdit(view: EditorView): void {
   });
 }
 
-/** A `date` atom resolved to `now + offsetDays`, date-only (no time/tz/format). */
+/** A `date` atom resolved to `now + offsetDays`, date-only (no time/tz), in
+ *  the viewer's remembered format. */
 function relativeDateNode(schema: Schema, offsetDays: number) {
   const now = new Date();
   const target = new Date(
@@ -532,7 +571,7 @@ function relativeDateNode(schema: Schema, offsetDays: number) {
     date: localYmd(target),
     time: null,
     tz: null,
-    format: null,
+    format: rememberedDateFormat(),
   });
 }
 

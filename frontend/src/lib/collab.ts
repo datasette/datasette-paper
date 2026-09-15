@@ -89,6 +89,7 @@ import {
   DateView,
   dateDecorationPlugin,
   insertRelativeDateCommand,
+  setDateFormatActor,
 } from "./dateView";
 import { DatasetteResolver } from "./datasetteResolver";
 import { InlineEmbedView } from "./inlineEmbedView";
@@ -1342,6 +1343,8 @@ export class EditorConnection {
   private _loaded(boot: BootstrapData): void {
     this.selfActor = boot.selfActor ?? null;
     this.opts.onSelfActor?.(this.selfActor);
+    // @feat date: scope the remembered date format to the bootstrapped actor
+    setDateFormatActor(this.selfActor);
     // Seed the snapshot-version baseline from the server's last
     // persisted snapshot. If the bootstrap has no snapshot field
     // (server is at version 0 or the field is missing), default to 0

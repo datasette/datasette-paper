@@ -18,7 +18,9 @@ import {
   classifyDate,
   dateDecorationSpecs,
   insertRelativeDateCommand,
+  rememberedDateFormat,
   resolveInstant,
+  setDateFormatActor,
 } from "../dateView";
 import type { DateAttrs } from "../dateFormat";
 
@@ -254,6 +256,9 @@ describe("insertRelativeDateCommand", () => {
 const mounted: EditorView[] = [];
 afterEach(() => {
   for (const v of mounted.splice(0)) v.destroy();
+  // Picking a format writes the remembered format — don't leak it across tests.
+  localStorage.clear();
+  setDateFormatActor(null);
 });
 
 function mountDate(attrs: DateAttrs) {
@@ -400,6 +405,44 @@ describe("DateView popup", () => {
     expect(attrs.date).toBe("2026-07-20");
     expect(chip.querySelector(".pm-date-label")?.textContent).toBe("July 20, 2026");
     expect(chip.querySelector(".pm-date-popup")).not.toBeNull();
+  });
+
+  // @feat date: test — the last-picked format is remembered per actor and seeds new chips
+  it("remembers the last-picked format per actor and seeds new chips with it", () => {
+    setDateFormatActor("alice");
+    const { chip } = mountDate({ date: "2026-07-20", time: null, tz: null });
+    chip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const radio = chip.querySelector<HTMLInputElement>(
+      '.pm-date-format[data-format="%A, %B %o"] .pm-date-format-radio',
+    )!;
+    radio.checked = true;
+    radio.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(rememberedDateFormat()).toBe("%A, %B %o");
+
+    // A new chip inserted by the same actor picks it up.
+    const state = EditorState.create({
+      doc: schema.nodes.doc.create(null, [schema.nodes.paragraph.create()]),
+      schema,
+    });
+    let next = state;
+    insertRelativeDateCommand(0)(state, (tr) => {
+      next = state.apply(tr);
+    });
+    expect(firstDate(next.doc)!.attrs.format).toBe("%A, %B %o");
+
+    // A different actor starts from the default; switching back restores it.
+    setDateFormatActor("bob");
+    expect(rememberedDateFormat()).toBeNull();
+    setDateFormatActor("alice");
+    expect(rememberedDateFormat()).toBe("%A, %B %o");
+
+    // Picking Default forgets it.
+    const defaultRadio = chip.querySelector<HTMLInputElement>(
+      '.pm-date-format[data-format=""] .pm-date-format-radio',
+    )!;
+    defaultRadio.checked = true;
+    defaultRadio.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(rememberedDateFormat()).toBeNull();
   });
 
   it("a custom strftime string commits verbatim", () => {
