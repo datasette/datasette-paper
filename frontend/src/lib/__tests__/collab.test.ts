@@ -3541,8 +3541,13 @@ describe("step-apply error handling", () => {
     await waitFor(() => expect(conn.view).not.toBeNull());
 
     // Editor mounted with the snapshot doc — the bad step at version 1
-    // was skipped, no later steps to attempt.
-    expect(conn.view!.state.doc.toJSON()).toEqual(BAD_STEP_BOOT.doc);
+    // was skipped, no later steps to attempt. Compared through the schema so
+    // the assertion tracks attr defaults (a bootstrap payload authored before
+    // an attr existed mounts with the default filled in — e.g. `list_item`'s
+    // toggle-list `kind`/`collapsed`).
+    expect(conn.view!.state.doc.toJSON()).toEqual(
+      schema.nodeFromJSON(BAD_STEP_BOOT.doc).toJSON(),
+    );
 
     // The error callback was called exactly once for the bad step.
     expect(errors).toHaveLength(1);

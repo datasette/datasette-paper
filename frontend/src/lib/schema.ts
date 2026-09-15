@@ -61,7 +61,7 @@ const codeBlockSpec: NodeSpec = {
 // @feat callout: doc content override — the no-nesting mechanism (mirrors pm_schema.py)
 const _docBase = basic.spec.nodes.get("doc") as NodeSpec;
 
-const baseNodes = addListNodes(
+const _listNodes = addListNodes(
   basic.spec.nodes
     .update("doc", { ..._docBase, content: "(block | callout)+" })
     .update("image", {
@@ -75,6 +75,40 @@ const baseNodes = addListNodes(
   "paragraph block*",
   "block",
 );
+
+// `addListNodes` ships `list_item` with no attrs. Widen it in place (same
+// `.update()` idiom as `doc`/`image`/`code_block` above) with the toggle-list
+// pair: `kind` selects the marker ("bullet" | "toggle") and `collapsed` is the
+// shared fold state. Both carry defaults, so every step and snapshot authored
+// before they existed still deserializes — see plans/toggle-list/design.md on
+// the replay constraint. Mirrors `_list_item_spec` in
+// datasette_paper/pm_schema.py.
+// @feat toggle-list: client list_item spec — kind/collapsed attrs (mirrors pm_schema.py)
+const _listItemBase = _listNodes.get("list_item") as NodeSpec;
+const listItemSpec: NodeSpec = {
+  ..._listItemBase,
+  attrs: { kind: { default: "bullet" }, collapsed: { default: false } },
+  parseDOM: [
+    {
+      tag: "li",
+      getAttrs: (el) => ({
+        kind: clampListItemKind((el as HTMLElement).getAttribute("data-kind")),
+        collapsed: (el as HTMLElement).getAttribute("data-collapsed") === "true",
+      }),
+    },
+  ],
+  // A bullet emits a bare `<li>` — no data-attrs — so every pre-existing
+  // document's rendered HTML (and its clipboard payload) stays byte-identical.
+  toDOM: (node) => {
+    const kind = clampListItemKind(node.attrs.kind);
+    const attrs: Record<string, string> = {};
+    if (kind !== "bullet") attrs["data-kind"] = kind;
+    if (node.attrs.collapsed) attrs["data-collapsed"] = "true";
+    return ["li", attrs, 0];
+  },
+};
+
+const baseNodes = _listNodes.update("list_item", listItemSpec);
 
 // `prosemirror-schema-basic` ships `code` without `inclusive: false`, so the
 // mark extends across the boundary when the cursor sits next to an existing
@@ -635,6 +669,27 @@ export function clampCalloutKind(kind: unknown): CalloutKind {
   return (CALLOUT_KINDS as readonly string[]).includes(kind as string)
     ? (kind as CalloutKind)
     : "note";
+}
+
+// The list-item marker kinds. Mirrors `_LIST_ITEM_KINDS` in
+// datasette_paper/pm_schema.py. An open set by design: a later kind (todo —
+// see plans/list-kinds) only widens this tuple, which is replay-safe because
+// an old client clamps the unknown value instead of failing.
+export const LIST_ITEM_KINDS = ["bullet", "toggle"] as const;
+export type ListItemKind = (typeof LIST_ITEM_KINDS)[number];
+
+/**
+ * Clamp an arbitrary `list_item.kind` attr value to a known kind, defaulting
+ * to "bullet". Never throws — a crafted collab step, a stale snapshot, or a
+ * kind authored by a newer client must degrade to a plain bullet rather than
+ * take the document down (the materializer's "never raises" contract, mirrored
+ * by `_clamp_list_item_kind` in datasette_paper/pm_schema.py).
+ */
+// @feat toggle-list: clamp an untrusted list_item kind (mirrors pm_schema.py)
+export function clampListItemKind(kind: unknown): ListItemKind {
+  return (LIST_ITEM_KINDS as readonly string[]).includes(kind as string)
+    ? (kind as ListItemKind)
+    : "bullet";
 }
 
 // Block node for a GitHub-style admonition (the `> [!NOTE]` markdown family) —

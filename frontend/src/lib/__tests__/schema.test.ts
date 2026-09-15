@@ -11,7 +11,7 @@ import { describe, it, expect } from "vitest";
 import { TextSelection } from "prosemirror-state";
 import { EditorState } from "prosemirror-state";
 import { DOMParser as PMDOMParser, DOMSerializer } from "prosemirror-model";
-import { schema } from "../schema";
+import { schema, clampListItemKind } from "../schema";
 
 /**
  * Round-trip a node through the clipboard DOM: serialize with the schema's
@@ -385,5 +385,94 @@ describe("source node", () => {
     expect(inserted.type.name).toBe("source");
     expect(inserted.attrs.name).toBe("revenue");
     expect(inserted.textContent).toBe("select 1");
+  });
+});
+
+// @feat toggle-list: schema-level guard for the kind/collapsed attr pair
+describe("list_item toggle attrs", () => {
+  it("declares kind + collapsed with replay-safe defaults", () => {
+    // `.update("list_item", …)` on the addListNodes output is easy to get
+    // silently wrong (a typo'd node name just doesn't take), and the defaults
+    // are the entire back-compat story for pre-existing steps and snapshots.
+    const attrs = schema.nodes.list_item.spec.attrs!;
+    expect(attrs.kind.default).toBe("bullet");
+    expect(attrs.collapsed.default).toBe(false);
+    const item = schema.nodes.list_item.create(null, schema.node("paragraph"));
+    expect(item.attrs).toEqual({ kind: "bullet", collapsed: false });
+  });
+
+  it("clamps an unknown kind instead of throwing", () => {
+    expect(clampListItemKind("toggle")).toBe("toggle");
+    expect(clampListItemKind("todo")).toBe("bullet");
+    expect(clampListItemKind(undefined)).toBe("bullet");
+    expect(clampListItemKind(42)).toBe("bullet");
+  });
+
+  it("toDOM emits a bare <li> for a bullet and data-attrs for a toggle", () => {
+    const spec = schema.nodes.list_item.spec.toDOM!;
+    const withAttrs = (attrs: Record<string, unknown> | null) =>
+      spec(schema.nodes.list_item.create(attrs, schema.node("paragraph"))) as [
+        string,
+        Record<string, string>,
+        unknown,
+      ];
+
+    // A bullet must stay byte-identical to what every existing doc renders.
+    expect(withAttrs(null)[0]).toBe("li");
+    expect(withAttrs(null)[1]).toEqual({});
+    expect(withAttrs({ kind: "toggle" })[1]).toEqual({ "data-kind": "toggle" });
+    expect(withAttrs({ kind: "toggle", collapsed: true })[1]).toEqual({
+      "data-kind": "toggle",
+      "data-collapsed": "true",
+    });
+    // An unknown kind renders as a plain bullet rather than leaking through.
+    expect(withAttrs({ kind: "todo" })[1]).toEqual({});
+  });
+
+  it("parses the data-attrs back off pasted HTML", () => {
+    const container = document.createElement("div");
+    container.innerHTML =
+      '<ul><li data-kind="toggle" data-collapsed="true"><p>s</p></li><li><p>b</p></li></ul>';
+    const parsed = PMDOMParser.fromSchema(schema).parse(container);
+    const list = parsed.firstChild!;
+    expect(list.type.name).toBe("bullet_list");
+    expect(list.child(0).attrs).toEqual({ kind: "toggle", collapsed: true });
+    expect(list.child(1).attrs).toEqual({ kind: "bullet", collapsed: false });
+  });
+
+  it("does not disturb how pasted task-list HTML resolves", () => {
+    // `list_item`'s `{tag: "li"}` rule is registered before `task_item`'s
+    // `li[data-task-item]` (addListNodes' output precedes taskNodes), so the
+    // `li` rule matches first and the content context decides what the node
+    // becomes. Giving that rule a `getAttrs` changes attrs, not matching —
+    // these two parses are byte-identical before and after the toggle attrs
+    // (verified against the pre-change schema), which is the property
+    // plans/toggle-list/design.md § Paste-priority note is really about.
+    const parse = (html: string, topNode?: import("prosemirror-model").Node) => {
+      const container = document.createElement("div");
+      container.innerHTML = html;
+      return PMDOMParser.fromSchema(schema).parse(container, { topNode });
+    };
+
+    // Inside a task_list, an `li` still resolves to `task_item`.
+    const inTaskList = parse(
+      '<li data-task-item data-checked="true"><p>done</p></li>',
+      schema.nodes.task_list.createAndFill()!,
+    );
+    expect(inTaskList.type.name).toBe("task_list");
+    expect(inTaskList.child(0).type.name).toBe("task_item");
+
+    // At the top level the `ul` rule for `bullet_list` wins on registration
+    // order, so foreign task HTML lands as a plain bullet list — pre-existing
+    // behaviour, unrelated to this feature, pinned so a future reader doesn't
+    // blame the `li` getAttrs for it.
+    const atTopLevel = parse(
+      '<ul data-task-list><li data-task-item data-checked="true"><p>done</p></li>' +
+        "<li data-task-item><p>open</p></li></ul>",
+    );
+    const list = atTopLevel.firstChild!;
+    expect(list.type.name).toBe("bullet_list");
+    expect(list.child(0).type.name).toBe("list_item");
+    expect(list.child(0).attrs).toEqual({ kind: "bullet", collapsed: false });
   });
 });

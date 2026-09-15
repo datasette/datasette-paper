@@ -195,6 +195,62 @@ async def test_materialize_live_doc_applies_pending_steps(ds_paper):
     assert para["content"][0]["text"] == "Hi"
 
 
+# @feat toggle-list: back-compat — history authored before list_item gained
+# `kind`/`collapsed` still replays in full through the materializer
+@pytest.mark.asyncio
+async def test_legacy_list_history_replays_after_toggle_attrs(ds_paper):
+    """Replay a stored snapshot + step sequence authored before the toggle
+    attrs existed. There is no PM-JSON migration harness — steps are stored as
+    authored, forever — so the attrs' defaults are the entire back-compat
+    mechanism (plans/toggle-list/design.md). A truncated doc here means the
+    attrs were added in a replay-unsafe way.
+    """
+    _, db = ds_paper
+    doc = await db.insert_doc(name="Legacy List")
+
+    # Snapshot exactly as an old client wrote it: no `attrs` key anywhere.
+    def legacy_item(text: str) -> dict:
+        return {
+            "type": "list_item",
+            "content": [
+                {"type": "paragraph", "content": [{"type": "text", "text": text}]}
+            ],
+        }
+
+    snapshot = {
+        "type": "doc",
+        "content": [
+            {"type": "bullet_list", "content": [legacy_item("a"), legacy_item("b")]}
+        ],
+    }
+    await db.insert_snapshot(doc_id=doc.id, version=0, doc_json=json.dumps(snapshot))
+
+    # …and a stored step from the same era: splice a third attr-less item in
+    # at the end of the list (pos 11 = just inside the bullet_list's close).
+    await db.insert_step(
+        doc_id=doc.id,
+        client_id=1,
+        step_json=json.dumps(
+            {
+                "stepType": "replace",
+                "from": 11,
+                "to": 11,
+                "slice": {"content": [legacy_item("c")]},
+            }
+        ),
+    )
+
+    inst = await Instance.hydrate(db, doc.id)
+    live = inst.materialize_live_doc()
+
+    items = live["content"][0]["content"]
+    assert [i["content"][0]["content"][0]["text"] for i in items] == ["a", "b", "c"]
+    # Nothing in the stored history mentions the attrs; the schema fills the
+    # defaults in on the way through, so the materialized doc reads as a plain
+    # expanded bullet list.
+    assert all(i["attrs"] == {"kind": "bullet", "collapsed": False} for i in items)
+
+
 @pytest.mark.asyncio
 async def test_materialize_live_doc_caches_until_version_changes(ds_paper):
     _, db = ds_paper
