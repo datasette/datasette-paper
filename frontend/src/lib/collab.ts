@@ -156,20 +156,33 @@ export interface DocStatePayload {
  * violation. Carries the failing step's 1-based version and the
  * underlying error message. See `EditorConnectionOpts.onStepError`.
  */
-export interface StepApplyError {
-  /** Server-assigned version of the step that failed. */
-  version: number;
+/** A step the editor could not apply. The doc stays at the last good
+ * version and is read-only until the history is repaired. */
+export interface StepFailure {
   /** Where the failure happened.
    *
    * - `bootstrap`: replaying history on initial mount.
    * - `sse`: applying a step batch broadcast from the server.
-   * - `send`: server rejected a POST /events with 422 (invalid_step).
-   * - `reset`: server history expired while this editor had unsaved edits.
+   * - `send`: server rejected a POST /events with 422 (invalid_step), or
+   *   our accepted batch could not be confirmed locally.
    */
-  phase: "bootstrap" | "sse" | "send" | "reset";
+  phase: "bootstrap" | "sse" | "send";
+  /** Server-assigned version of the step that failed. */
+  version: number;
   /** Error message from ProseMirror (or "StepResult.failed" text). */
   message: string;
 }
+
+/** Server history expired while this editor had unsaved edits, so they
+ * can't be rebased. Nothing failed to apply, so there is no version. */
+export interface HistoryGone {
+  phase: "reset";
+  /** User-facing instruction shown in the banner. */
+  message: string;
+}
+
+/** Why the editor locked itself read-only. Narrow on `phase`. */
+export type StepApplyError = StepFailure | HistoryGone;
 
 export interface ConnectionOpts {
   /** Document ID (used in API URL path). */
@@ -1844,7 +1857,6 @@ export class EditorConnection {
         this.closeStream();
         this.pendingUpdates = [];
         this.reportStepError({
-          version: getVersion(this.view.state),
           phase: "reset",
           message: "This document changed while you were disconnected. Copy your unsaved changes before reloading.",
         });

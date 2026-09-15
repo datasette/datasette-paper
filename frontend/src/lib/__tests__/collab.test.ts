@@ -3459,7 +3459,7 @@ describe("step-apply error handling", () => {
     // The error callback was called exactly once for the bad step.
     expect(errors).toHaveLength(1);
     expect(errors[0].phase).toBe("bootstrap");
-    expect(errors[0].version).toBe(1);
+    expect(errors[0]).toMatchObject({ version: 1 });
     expect(errors[0].message).toMatch(/list_item/i);
 
     // The view is forced read-only — even though the bootstrap permissions
@@ -3536,7 +3536,7 @@ describe("step-apply error handling", () => {
     expect(para.textContent).toBe("dcba");
 
     expect(errors).toHaveLength(1);
-    expect(errors[0].version).toBe(4);
+    expect(errors[0]).toMatchObject({ version: 4 });
     expect(errors[0].phase).toBe("bootstrap");
 
     conn.close();
@@ -3611,7 +3611,7 @@ describe("step-apply error handling", () => {
     // The handler captured the error rather than letting it escape.
     expect(errors).toHaveLength(1);
     expect(errors[0].phase).toBe("sse");
-    expect(errors[0].version).toBe(BOOTSTRAP.version + 1);
+    expect(errors[0]).toMatchObject({ version: BOOTSTRAP.version + 1 });
 
     // EventSource is still open — we only `close()` on explicit teardown.
     expect(es.readyState).not.toBe(2);
