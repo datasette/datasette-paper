@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import {
   createPaper,
   gotoPaper,
@@ -30,6 +30,18 @@ import {
  *     filter is wired even when we can't drive the positive UI flow)
  */
 
+async function pickTemplate(page: Page, name: string): Promise<void> {
+  await page
+    .locator("#app-root")
+    .getByRole("button", { name: "More ways to create a paper" })
+    .click();
+  await page
+    .locator("#app-root")
+    .getByRole("menu")
+    .getByRole("menuitem", { name })
+    .click();
+}
+
 test("Templates tab on the index lists only templates", async ({ page }) => {
   // Create a regular doc and a template; the regular doc should NOT
   // show up on the Templates tab even though both belong to the same
@@ -50,22 +62,21 @@ test("Templates tab on the index lists only templates", async ({ page }) => {
   await expect(page.getByRole("link", { name: doc.name })).toHaveCount(0);
 });
 
-test("New paper form lets you pick a template", async ({ page }) => {
+// @feat new-paper: the caret menu lists every template the actor can see.
+test("New paper caret menu lists templates", async ({ page }) => {
   const tmpl = await createPaper(page, { name: "Pickable", kind: "template" });
 
   await page.goto("/-/paper/");
+  await page
+    .locator("#app-root")
+    .getByRole("button", { name: "More ways to create a paper" })
+    .click();
+  const menu = page.locator("#app-root").getByRole("menu");
+  await expect(menu.getByRole("menuitem", { name: tmpl.name })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: "New template" })).toBeVisible();
 
-  // The template-picker <select> renders with a "No template" option
-  // plus one for every template the actor can see. Scope to #app-root:
-  // the datasette-debug-bar plugin (pulled in via the acl deps) injects
-  // its own "act as" <select>, so a bare locator("select") is ambiguous.
-  const select = page.locator("#app-root select");
-  await expect(select).toBeVisible();
-  // Wait for the template-list fetch to populate the dropdown.
-  await expect(select.locator("option")).toContainText([
-    "No template",
-    `From: ${tmpl.name}`,
-  ]);
+  await page.keyboard.press("Escape");
+  await expect(menu).toHaveCount(0);
 });
 
 test("creating a paper from a template clones the content", async ({ page }) => {
@@ -80,34 +91,57 @@ test("creating a paper from a template clones the content", async ({ page }) => 
 
   // Use the index page picker to instantiate.
   await page.goto("/-/paper/");
-  await page.getByPlaceholder("Paper name").fill("Today's standup");
-  // The template option appears once the dropdown finishes loading.
-  // <option> elements inside a closed <select> are considered hidden,
-  // so attach to the parent and assert the option text appears in it.
-  await expect(page.locator("#app-root select")).toContainText(
-    `From: ${tmpl.name}`,
-  );
-  await page
-    .locator("#app-root select")
-    .selectOption({ label: `From: ${tmpl.name}` });
-  await page.getByRole("button", { name: "New paper", exact: true }).click();
+  await pickTemplate(page, tmpl.name);
 
-  // The form navigates to the new doc; the cloned content is the seed
-  // snapshot so it appears immediately on the editor surface.
+  // Navigates to the new doc; the cloned content is the seed snapshot so
+  // it appears immediately on the editor surface. The new paper takes the
+  // template's name.
   await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 10000 });
   await expectEditorContains(page, "Wins / Blockers / Plans");
+  await expect(page.getByLabel("Document title")).toHaveValue(tmpl.name);
 });
 
 test("blank create still produces an empty doc", async ({ page }) => {
   await page.goto("/-/paper/");
-  // Default option is "No template"; type a name and submit.
-  await page.getByPlaceholder("Paper name").fill("Untouched blank");
-  await page.getByRole("button", { name: "New paper", exact: true }).click();
+  // One click: no name required.
+  await page
+    .locator("#app-root")
+    .getByRole("button", { name: "New paper", exact: true })
+    .click();
 
   await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 10000 });
+  await expect(page.getByLabel("Document title")).toHaveValue("Untitled");
   // Empty document — single empty paragraph, no seed content.
   const text = (await page.locator(".ProseMirror").innerText()).trim();
   expect(text).toBe("");
+});
+
+// @feat new-paper: a fresh paper lands with its title focused + selected, and
+// Enter hands off to the editor body.
+test("new paper lands in the title, Enter moves to the body", async ({ page }) => {
+  await page.goto("/-/paper/");
+  await page
+    .locator("#app-root")
+    .getByRole("button", { name: "New paper", exact: true })
+    .click();
+
+  const title = page.getByLabel("Document title");
+  await expect(title).toBeFocused({ timeout: 10000 });
+  await expect(title).toHaveValue("Untitled");
+  // The ?new=1 flag is stripped so a reload doesn't refocus.
+  expect(new URL(page.url()).searchParams.has("new")).toBe(false);
+
+  await page.keyboard.type("Q3 plan");
+  await page.keyboard.press("Enter");
+  await expect(page.locator(".ProseMirror")).toBeFocused();
+  await expect(title).toHaveValue("Q3 plan");
+  await page.keyboard.type("hello body");
+  await expectEditorContains(page, "hello body");
+
+  // Rename persisted server-side.
+  await page.reload();
+  await expect(page.getByLabel("Document title")).toHaveValue("Q3 plan");
+  await expect(page.getByLabel("Document title")).not.toBeFocused();
 });
 
 test("template doc shows a Template badge in the doc header", async ({ page }) => {
@@ -188,14 +222,7 @@ test("placeholder authored in a template resolves to text in the clone", async (
 
   // Instantiate via the index picker.
   await page.goto("/-/paper/");
-  await page.getByPlaceholder("Paper name").fill("Today");
-  await expect(page.locator("#app-root select")).toContainText(
-    `From: ${tmpl.name}`,
-  );
-  await page
-    .locator("#app-root select")
-    .selectOption({ label: `From: ${tmpl.name}` });
-  await page.getByRole("button", { name: "New paper", exact: true }).click();
+  await pickTemplate(page, tmpl.name);
 
   await expect(page.locator(".ProseMirror")).toBeVisible({ timeout: 10000 });
   // The clone has no placeholder chips — the substitution pass replaced

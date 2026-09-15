@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, tick, untrack } from "svelte";
   import { client } from "./client";
   import type { LastEditedInfo } from "./collab";
   import { ActorResolver } from "./actorResolver";
@@ -28,6 +28,7 @@
     lastEdited = null,
     remoteRename = null,
     copyMarkdown,
+    onTitleDone,
   }: {
     docId: string;
     users: number;
@@ -41,6 +42,8 @@
     lastEdited?: LastEditedInfo | null;
     remoteRename?: { name: string; updated_at: string } | null;
     copyMarkdown?: () => Promise<boolean>;
+    // Enter in the title hands focus to the editor body.
+    onTitleDone?: () => void;
   } = $props();
 
   // actor-json the dialog reads to mark the current user's row "(you)".
@@ -236,6 +239,17 @@
     });
   });
 
+  // @feat new-paper: the index's create flow lands on `?new=1`. Read it once,
+  // strip it (a reload or shared link shouldn't steal focus again), and once
+  // the title input renders, focus + select it so typing replaces "Untitled".
+  const freshPaper = (() => {
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("new")) return false;
+    url.searchParams.delete("new");
+    history.replaceState(history.state, "", url.pathname + url.search + url.hash);
+    return true;
+  })();
+
   async function load() {
     // The bootstrap envelope returns doc state; the doc row's metadata
     // (name, created_by, updated_at) lives on the per-doc API. We fetch
@@ -253,6 +267,11 @@
     if (found) {
       meta = found;
       titleInput = found.name;
+      if (freshPaper && canEdit && !locked) {
+        await tick();
+        titleEl?.focus();
+        titleEl?.select();
+      }
     }
   }
 
@@ -374,6 +393,7 @@
           if (e.key === "Enter") {
             e.preventDefault();
             (e.currentTarget as HTMLInputElement).blur();
+            onTitleDone?.();
           }
         }}
         aria-label="Document title"

@@ -304,6 +304,7 @@
     {remoteRename}
     docState={docState?.state ?? "active"}
     {copyMarkdown}
+    onTitleDone={() => view?.focus()}
   />
   {#if docState?.state === "trashed"}
     <div class="status-banner status-trashed" role="status">

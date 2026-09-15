@@ -1,7 +1,7 @@
 /**
  * PaperIndex chrome tests (issue #55 listing-page pass): per-tab
- * descriptions, deep-linkable URL hashes, and the reworked template
- * picker ("No template" + "Create a template").
+ * descriptions, deep-linkable URL hashes, and the New paper split button
+ * (1-click blank + caret menu of templates).
  *
  * Like PaperIndexTags.test.ts, PaperIndex talks to the backend through
  * the typed openapi-fetch `client`, so we mock that module and answer
@@ -103,13 +103,128 @@ describe("PaperIndex chrome", () => {
     expect(screen.getByText(/reusable starting points/i)).toBeTruthy();
   });
 
-  it("renders the reworked template picker options", async () => {
-    render(PaperIndex);
-    await vi.waitFor(() =>
-      expect(screen.getByRole("option", { name: "No template" })).toBeTruthy(),
-    );
-    expect(
-      screen.getByRole("option", { name: /Create a template/ }),
-    ).toBeTruthy();
+  // @feat new-paper: split button + caret menu create flows.
+  describe("New paper split button", () => {
+    let hrefSet: string | null;
+    beforeEach(() => {
+      hrefSet = null;
+      postMock.mockResolvedValue({ data: doc({ id: 42 }), error: undefined });
+      // jsdom can't navigate; capture the href assignment instead.
+      vi.spyOn(window, "location", "get").mockReturnValue({
+        ...window.location,
+        get hash() {
+          return "";
+        },
+        set hash(_v: string) {},
+        set href(v: string) {
+          hrefSet = v;
+        },
+      } as unknown as Location);
+    });
+    afterEach(() => vi.restoreAllMocks());
+
+    it("creates a blank paper in one click, name left to the server", async () => {
+      render(PaperIndex);
+      await fireEvent.click(
+        screen.getByRole("button", { name: "New paper" }),
+      );
+      await vi.waitFor(() => expect(hrefSet).toBe("/-/paper/doc/42?new=1"));
+      expect(postMock).toHaveBeenCalledWith("/-/paper/api/docs", { body: {} });
+    });
+
+    it("creates from a template picked in the caret menu", async () => {
+      render(PaperIndex);
+      await fireEvent.click(
+        screen.getByRole("button", { name: "More ways to create a paper" }),
+      );
+      const item = await screen.findByRole("menuitem", { name: "Weekly" });
+      await fireEvent.click(item);
+      await vi.waitFor(() => expect(hrefSet).toBe("/-/paper/doc/42?new=1"));
+      expect(postMock).toHaveBeenCalledWith("/-/paper/api/docs", {
+        body: { template_id: 9, name: "Weekly" },
+      });
+    });
+
+    it("New template posts kind=template", async () => {
+      render(PaperIndex);
+      await fireEvent.click(
+        screen.getByRole("button", { name: "More ways to create a paper" }),
+      );
+      await fireEvent.click(
+        await screen.findByRole("menuitem", { name: "New template" }),
+      );
+      await vi.waitFor(() =>
+        expect(postMock).toHaveBeenCalledWith("/-/paper/api/docs", {
+          body: { name: "Untitled template", kind: "template" },
+        }),
+      );
+    });
+
+    it("Escape closes the menu, returns focus to the caret, and is claimed", async () => {
+      render(PaperIndex);
+      const caret = screen.getByRole("button", {
+        name: "More ways to create a paper",
+      });
+      await fireEvent.click(caret);
+      const item = await screen.findByRole("menuitem", { name: "Weekly" });
+      const spy = vi.fn();
+      window.addEventListener("keydown", spy);
+      await fireEvent.keyDown(item, { key: "Escape" });
+      window.removeEventListener("keydown", spy);
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(document.activeElement).toBe(caret);
+      expect(spy).not.toHaveBeenCalled();
+    });
+
+    it("ArrowDown roves focus across menu items", async () => {
+      render(PaperIndex);
+      await fireEvent.click(
+        screen.getByRole("button", { name: "More ways to create a paper" }),
+      );
+      const first = await screen.findByRole("menuitem", { name: "Weekly" });
+      await vi.waitFor(() => expect(document.activeElement).toBe(first));
+      await fireEvent.keyDown(first, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(
+        screen.getByRole("menuitem", { name: "New template" }),
+      );
+    });
+
+    it("shows a filter input only past 8 templates", async () => {
+      const many = Array.from({ length: 9 }, (_, i) =>
+        doc({ id: 100 + i, name: `T${i}`, kind: "template" }),
+      );
+      getMock.mockImplementation(
+        (url: string, opts?: { params?: { query?: Record<string, unknown> } }) => {
+          if (url === "/-/paper/api/tags")
+            return Promise.resolve({ data: { tags: [] }, error: undefined });
+          const kind = opts?.params?.query?.kind;
+          return Promise.resolve({
+            data: kind === "template" ? many : [doc({})],
+            error: undefined,
+          });
+        },
+      );
+      render(PaperIndex);
+      await fireEvent.click(
+        screen.getByRole("button", { name: "More ways to create a paper" }),
+      );
+      const filter = await screen.findByRole("textbox", {
+        name: "Filter templates",
+      });
+      await fireEvent.input(filter, { target: { value: "T3" } });
+      await vi.waitFor(() =>
+        expect(screen.getAllByRole("menuitem").map((b) => b.textContent?.trim())).toEqual([
+          "T3",
+          "New template",
+          "Manage templates",
+        ]),
+      );
+      await fireEvent.keyDown(filter, { key: "Enter" });
+      await vi.waitFor(() =>
+        expect(postMock).toHaveBeenCalledWith("/-/paper/api/docs", {
+          body: { template_id: 103, name: "T3" },
+        }),
+      );
+    });
   });
 });

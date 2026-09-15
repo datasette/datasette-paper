@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import { client } from "./client";
   import GraphModal from "./GraphModal.svelte";
   import TagEditor from "./TagEditor.svelte";
@@ -107,7 +107,7 @@
       hash: "templates",
       title: "Reusable starting points for new papers",
       description:
-        "Templates are reusable starting points. Pick one in “New paper” to copy its contents.",
+        "Templates are reusable starting points. Pick one from the arrow next to “New paper” to copy its contents.",
     },
   };
 
@@ -123,10 +123,10 @@
   let tab = $state<IndexTab>("active");
   let loading = $state(false);
   let error = $state<string | null>(null);
-  let newName = $state("");
   let creating = $state(false);
-  // Template picker on the New paper form. Empty string means "blank".
-  let newTemplateId = $state<string>("");
+  // Templates offered in the New paper caret menu (null = not loaded yet).
+  let pickerTemplates = $state<DocRow[] | null>(null);
+  let pickerLoading = $state(false);
   // Per-row mutation in flight (keyed by `${state}:${id}`) so we can
   // disable just that row's buttons rather than the whole tab.
   let busyKey = $state<string | null>(null);
@@ -240,57 +240,135 @@
     if (bucket(target) === null) void loadTab(target);
   }
 
-  async function create(e: Event) {
-    e.preventDefault();
-    if (!newName.trim() || creating) return;
+  // @feat new-paper: one POST then a nav to the editor. Blank omits `name`
+  // (server defaults to "Untitled"); a template seeds from `template_id` and
+  // takes the template's name; `kind: "template"` makes a blank template.
+  // `?new=1` tells DocHeader to focus + select the title so the default name
+  // is one keystroke from gone.
+  async function createPaper(
+    body: { template_id?: number; name?: string; kind?: "template" },
+  ): Promise<void> {
+    if (creating) return;
+    closeNewMenu();
     creating = true;
     error = null;
-    // Default-blank: empty select → no template_id in the payload.
-    // Pick a template → server clones it as the seed snapshot.
-    const body: Record<string, unknown> = { name: newName.trim() };
-    if (newTemplateId !== "") body.template_id = Number(newTemplateId);
     const { data, error: err } = await client.POST("/-/paper/api/docs", {
       body: body as never,
     });
     creating = false;
     if (err || !data) {
-      error = "Failed to create paper";
+      error =
+        body.kind === "template"
+          ? "Failed to create template"
+          : "Failed to create paper";
       return;
     }
     const created = data as unknown as DocRow;
-    window.location.href = `/-/paper/doc/${created.id}`;
+    window.location.href = `/-/paper/doc/${created.id}?new=1`;
   }
 
-  // Sentinel option value for the "Create a template" action in the
-  // picker — chosen instead of a real template id.
-  const NEW_TEMPLATE = "__new_template__";
-
-  // Selecting "Create a template" in the picker: reset the select (it's
-  // an action, not a seed choice) and create a blank template, seeded
-  // with the typed name if there is one. Templates are just papers with
-  // kind='template', so this is one POST then a nav to the editor.
-  function onTemplatePick(): void {
-    if (newTemplateId !== NEW_TEMPLATE) return;
-    newTemplateId = "";
-    void createTemplate();
+  function createBlank(): Promise<void> {
+    return createPaper({});
   }
 
-  async function createTemplate(): Promise<void> {
-    if (creating) return;
-    creating = true;
-    error = null;
-    const name = newName.trim() || "Untitled template";
-    const { data, error: err } = await client.POST("/-/paper/api/docs", {
-      body: { name, kind: "template" } as never,
-    });
-    creating = false;
-    if (err || !data) {
-      error = "Failed to create template";
+  function createFromTemplate(t: DocRow): Promise<void> {
+    return createPaper({ template_id: t.id, name: t.name });
+  }
+
+  function createTemplate(): Promise<void> {
+    return createPaper({ name: "Untitled template", kind: "template" });
+  }
+
+  // @feat new-paper: the split button's caret menu (templates, New template,
+  // Manage templates). Arrow/Home/End rove focus across its menuitems; the
+  // filter input only appears past FILTER_THRESHOLD templates.
+  const FILTER_THRESHOLD = 8;
+  let newMenuOpen = $state(false);
+  let newMenuFilter = $state("");
+  let newMenuEl = $state<HTMLDivElement | null>(null);
+  let newCaretEl = $state<HTMLButtonElement | null>(null);
+
+  let filteredTemplates = $derived.by(() => {
+    const all = pickerTemplates ?? [];
+    const q = newMenuFilter.trim().toLowerCase();
+    return q ? all.filter((t) => t.name.toLowerCase().includes(q)) : all;
+  });
+  let showTemplateFilter = $derived(
+    (pickerTemplates?.length ?? 0) > FILTER_THRESHOLD,
+  );
+
+  function menuItems(): HTMLElement[] {
+    return newMenuEl
+      ? Array.from(newMenuEl.querySelectorAll<HTMLElement>('[role="menuitem"]'))
+      : [];
+  }
+
+  async function openNewMenu(): Promise<void> {
+    newMenuFilter = "";
+    newMenuOpen = true;
+    await ensurePickerTemplates();
+    await tick();
+    if (!newMenuOpen) return;
+    const filter = newMenuEl?.querySelector<HTMLInputElement>(".new-menu-filter");
+    (filter ?? menuItems()[0])?.focus();
+  }
+
+  function closeNewMenu(returnFocus = false): void {
+    if (!newMenuOpen) return;
+    newMenuOpen = false;
+    if (returnFocus) newCaretEl?.focus();
+  }
+
+  function toggleNewMenu(): void {
+    if (newMenuOpen) closeNewMenu();
+    else void openNewMenu();
+  }
+
+  function onNewMenuKeydown(e: KeyboardEvent): void {
+    if (e.key === "Escape") {
+      // Claim it so the row-menu window listener doesn't also act.
+      e.preventDefault();
+      e.stopPropagation();
+      closeNewMenu(true);
       return;
     }
-    const created = data as unknown as DocRow;
-    window.location.href = `/-/paper/doc/${created.id}`;
+    const inFilter = (e.target as Element | null)?.classList.contains(
+      "new-menu-filter",
+    );
+    if (inFilter && e.key === "Enter") {
+      e.preventDefault();
+      if (filteredTemplates[0]) void createFromTemplate(filteredTemplates[0]);
+      return;
+    }
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+    const items = menuItems();
+    if (!items.length) return;
+    e.preventDefault();
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    let next: number;
+    if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = items.length - 1;
+    else if (e.key === "ArrowDown") next = i < 0 ? 0 : (i + 1) % items.length;
+    else next = i <= 0 ? items.length - 1 : i - 1;
+    items[next].focus();
   }
+
+  function manageTemplates(): void {
+    closeNewMenu();
+    selectTab("templates");
+  }
+
+  // Outside click closes the caret menu.
+  $effect(() => {
+    if (!newMenuOpen) return;
+    const onClick = (e: MouseEvent) => {
+      const target = e.target as Element | null;
+      if (target?.closest(".new-paper")) return;
+      closeNewMenu();
+    };
+    window.addEventListener("click", onClick);
+    return () => window.removeEventListener("click", onClick);
+  });
 
   async function makeTemplate(doc: DocRow) {
     return mutate(doc, "/make_template", ["active", "archived", "templates"]);
@@ -446,7 +524,7 @@
       openMenuKey = null;
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") openMenuKey = null;
+      if (e.key === "Escape" && !e.defaultPrevented) openMenuKey = null;
     };
     window.addEventListener("click", onClick);
     window.addEventListener("keydown", onKey);
@@ -460,12 +538,10 @@
     return rows === null ? label : `${label} (${rows.length})`;
   }
 
-  // Templates are loaded lazily into the dropdown so the index page
-  // doesn't pay for an extra round-trip until the user opens the
-  // "create from template" widget. After any make/unmake mutation we
-  // invalidate the cached list so the picker reflects the new state.
-  let pickerTemplates = $state<DocRow[] | null>(null);
-  let pickerLoading = $state(false);
+  // Templates are loaded lazily into the New paper caret menu: prefetched
+  // on mount and again (if invalidated) when the menu opens. After any
+  // make/unmake mutation we invalidate the cached list so the menu
+  // reflects the new state.
 
   async function ensurePickerTemplates(): Promise<void> {
     if (pickerTemplates !== null || pickerLoading) return;
@@ -548,6 +624,80 @@
       >
         Graph
       </button>
+      <!-- @feat new-paper: split button — main half is the 1-click blank
+           paper, the caret opens the create-from-template menu. -->
+      <div class="new-paper">
+        <button
+          type="button"
+          class="new-paper-main"
+          disabled={creating}
+          onclick={createBlank}
+        >
+          {@render icon("plusLg")}
+          <span>{creating ? "Creating…" : "New paper"}</span>
+        </button>
+        <button
+          type="button"
+          class="new-paper-caret"
+          bind:this={newCaretEl}
+          aria-label="More ways to create a paper"
+          aria-haspopup="menu"
+          aria-expanded={newMenuOpen}
+          disabled={creating}
+          onclick={toggleNewMenu}
+          onpointerenter={() => void ensurePickerTemplates()}
+        >
+          {@render icon("chevronDown")}
+        </button>
+        {#if newMenuOpen}
+          <!-- svelte-ignore a11y_interactive_supports_focus -->
+          <div
+            class="new-menu"
+            role="menu"
+            aria-label="Create a paper"
+            bind:this={newMenuEl}
+            onkeydown={onNewMenuKeydown}
+          >
+            <div class="new-menu-heading">Start from a template</div>
+            {#if showTemplateFilter}
+              <input
+                type="text"
+                class="new-menu-filter"
+                placeholder="Filter templates"
+                aria-label="Filter templates"
+                bind:value={newMenuFilter}
+              />
+            {/if}
+            {#if pickerTemplates === null}
+              <div class="new-menu-empty">Loading…</div>
+            {:else if pickerTemplates.length === 0}
+              <div class="new-menu-empty">No templates yet</div>
+            {:else if filteredTemplates.length === 0}
+              <div class="new-menu-empty">No matching templates</div>
+            {:else}
+              {#each filteredTemplates as t (t.id)}
+                <button
+                  type="button"
+                  role="menuitem"
+                  onclick={() => createFromTemplate(t)}
+                >
+                  {@render icon("fileText")}
+                  <span class="new-menu-label">{t.name}</span>
+                </button>
+              {/each}
+            {/if}
+            <div class="new-menu-sep" role="separator"></div>
+            <button type="button" role="menuitem" onclick={createTemplate}>
+              {@render icon("plusLg")}
+              <span class="new-menu-label">New template</span>
+            </button>
+            <button type="button" role="menuitem" onclick={manageTemplates}>
+              <span class="new-menu-icon-spacer" aria-hidden="true"></span>
+              <span class="new-menu-label">Manage templates</span>
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
   </div>
 
@@ -556,33 +706,6 @@
   {#if error}
     <div class="error">{error}</div>
   {/if}
-
-  <form onsubmit={create}>
-    <input
-      type="text"
-      bind:value={newName}
-      placeholder="Paper name"
-      disabled={creating}
-      required
-    />
-    <select
-      bind:value={newTemplateId}
-      onchange={onTemplatePick}
-      disabled={creating}
-      title="Start from a template, or with no template"
-    >
-      <option value="">No template</option>
-      {#if pickerTemplates}
-        {#each pickerTemplates as t (t.id)}
-          <option value={String(t.id)}>From: {t.name}</option>
-        {/each}
-      {/if}
-      <option value={NEW_TEMPLATE}>＋ Create a template…</option>
-    </select>
-    <button type="submit" disabled={creating || !newName.trim()}>
-      {creating ? "Creating…" : "New paper"}
-    </button>
-  </form>
 
   <div class="tabs" role="tablist">
     {#each TAB_ORDER as t (t)}
@@ -634,8 +757,8 @@
       <p>Trash is empty.</p>
     {:else}
       <p>
-        No templates yet. Pick “Create a template” in New paper, or use the
-        menu on any active paper.
+        No templates yet. Pick “New template” from the arrow next to New
+        paper, or use the menu on any active paper.
       </p>
     {/if}
   {:else}
@@ -1057,16 +1180,111 @@
     padding: 6px 8px;
     text-align: left;
   }
-  form {
-    margin: 1em 0;
-    display: flex;
-    gap: 0.5em;
-    align-items: center;
+  .new-paper {
+    position: relative;
+    display: inline-flex;
   }
-  input[type="text"] {
-    width: 280px;
-    max-width: 100%;
+  .new-paper-main,
+  .new-paper-caret {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid var(--pp-accent);
+    background: var(--pp-accent);
+    color: var(--pp-accent-fg);
+    font: inherit;
+    cursor: pointer;
+  }
+  .new-paper-main {
+    border-radius: 4px 0 0 4px;
+    padding: 6px 12px;
+  }
+  .new-paper-caret {
+    border-radius: 0 4px 4px 0;
+    border-left-color: color-mix(in srgb, var(--pp-accent-fg) 35%, transparent);
     padding: 6px 8px;
+  }
+  .new-paper-main:hover:not(:disabled),
+  .new-paper-caret:hover:not(:disabled),
+  .new-paper-caret[aria-expanded="true"] {
+    background: color-mix(in srgb, var(--pp-accent) 85%, var(--pp-fg));
+  }
+  .new-paper-main:disabled,
+  .new-paper-caret:disabled {
+    opacity: 0.7;
+    cursor: progress;
+  }
+  .new-paper-main:focus-visible,
+  .new-paper-caret:focus-visible {
+    outline: 2px solid var(--pp-focus-ring);
+    outline-offset: 2px;
+  }
+  .new-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 20;
+    min-width: 240px;
+    max-width: min(320px, 90vw);
+    max-height: 60vh;
+    overflow-y: auto;
+    background: var(--pp-bg);
+    border: 1px solid var(--pp-border-strong);
+    border-radius: 6px;
+    box-shadow: 0 4px 16px var(--pp-shadow);
+    padding: 4px 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .new-menu-heading {
+    padding: 6px 12px 4px;
+    font-size: 0.75em;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--pp-fg-muted);
+  }
+  .new-menu-filter {
+    margin: 2px 8px 4px;
+    padding: 4px 8px;
+    font: inherit;
+  }
+  .new-menu-empty {
+    padding: 6px 12px;
+    color: var(--pp-fg-muted);
+    font-size: 0.95em;
+  }
+  .new-menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: none;
+    background: transparent;
+    padding: 6px 12px;
+    text-align: left;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.95em;
+    color: inherit;
+  }
+  .new-menu button:hover,
+  .new-menu button:focus-visible {
+    background: var(--pp-surface-2);
+    outline: none;
+  }
+  .new-menu-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .new-menu-icon-spacer {
+    display: inline-block;
+    width: 16px;
+    flex: none;
+  }
+  .new-menu-sep {
+    border-top: 1px solid var(--pp-border);
+    margin: 4px 0;
   }
   .tabs {
     display: flex;
@@ -1254,13 +1472,6 @@
   @media (max-width: 640px) {
     .index-header {
       flex-wrap: wrap;
-    }
-    form {
-      flex-wrap: wrap;
-    }
-    form input[type="text"],
-    form select {
-      flex: 1 1 100%;
     }
     .tabs {
       flex-wrap: wrap;
