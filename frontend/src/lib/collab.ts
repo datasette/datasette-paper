@@ -302,6 +302,13 @@ interface StepBatch {
   version: number;
 }
 
+/** What `receiveBatch` did with a server version interval.
+ * - `applied`: the unseen suffix was dispatched.
+ * - `skipped`: nothing to do (already seen, or the editor is locked).
+ * - `gap`: the batch starts past our version; history must be fetched
+ *   before its positions mean anything. */
+type ReceiveOutcome = "applied" | "skipped" | "gap";
+
 /** Event names on the SSE stream. Mirrors `SSEEvent` in
  * `datasette_paper/sse.py` — change both sides together. */
 export const SSE_EVENT = {
@@ -1800,7 +1807,7 @@ export class EditorConnection {
         };
         if (this.sending) {
           this.pendingUpdates.push(batch);
-        } else if (!this.receiveBatch(batch)) {
+        } else if (this.receiveBatch(batch) === "gap") {
           // A gap must be filled from server history before these positions
           // can be used. Never apply a future batch to an older document.
           this.waitingForSync = true;
@@ -1926,31 +1933,32 @@ export class EditorConnection {
 
   /** Apply only the unconfirmed suffix of a server version interval. Both
    * reconnect backlogs and POST receipts may overlap steps already seen. */
-  private receiveBatch(batch: StepBatch): boolean {
-    if (!this.view || this.stepError) return true;
+  private receiveBatch(batch: StepBatch): ReceiveOutcome {
+    if (!this.view || this.stepError) return "skipped";
     const version = getVersion(this.view.state);
     const fromVersion = batch.version - batch.steps.length;
-    if (fromVersion > version) return false;
+    if (fromVersion > version) return "gap";
     const skip = version - fromVersion;
-    if (skip < batch.steps.length) {
-      this.view.dispatch(receiveTransaction(
-        this.view.state,
-        batch.steps.slice(skip),
-        batch.clientIDs.slice(skip),
-      ));
-    }
-    return true;
+    if (skip >= batch.steps.length) return "skipped";
+    this.view.dispatch(receiveTransaction(
+      this.view.state,
+      batch.steps.slice(skip),
+      batch.clientIDs.slice(skip),
+    ));
+    return "applied";
   }
 
-  private drainPendingUpdates(): void {
+  /** Apply batches held while a POST was in flight. Returns true when a
+   * gap made it reopen the stream, so callers don't open a second one. */
+  private drainPendingUpdates(): boolean {
     const updates = this.pendingUpdates;
     this.pendingUpdates = [];
     for (const batch of updates) {
       try {
-        if (!this.receiveBatch(batch)) {
+        if (this.receiveBatch(batch) === "gap") {
           this.waitingForSync = true;
           this.openStream();
-          return;
+          return true;
         }
       } catch (err) {
         this.reportStepError({
@@ -1958,9 +1966,41 @@ export class EditorConnection {
           phase: "sse",
           message: err instanceof Error ? err.message : String(err),
         });
-        return;
+        return false;
       }
     }
+    return false;
+  }
+
+  /** True when a new POST /events may go out now. */
+  private canSend(): boolean {
+    return (
+      this.view !== null &&
+      !this.sending &&
+      this.comm === "loaded" &&
+      !this.waitingForSync &&
+      !this.stepError
+    );
+  }
+
+  /**
+   * Leave the in-flight state of `_send`. Every response path goes through
+   * here exactly once, choosing what happens to remote batches held behind
+   * the POST: `drain` rebases them (the server accepted or conflicted, so
+   * they still apply); `drop` discards them (a reconnect backlog will
+   * resend them). Draining runs BEFORE `sending` clears so dispatches from
+   * the drain can't start a nested send at a half-rebased version.
+   * Returns whether the drain reopened the stream.
+   */
+  private endSend(pending: "drain" | "drop"): boolean {
+    let reopened = false;
+    if (pending === "drain") {
+      reopened = this.drainPendingUpdates();
+    } else {
+      this.pendingUpdates = [];
+    }
+    this.sending = false;
+    return reopened;
   }
 
   // ── Transaction dispatch ───────────────────────────────────────────────────
@@ -1979,13 +2019,7 @@ export class EditorConnection {
     if (tr.docChanged) this.sourceStore.sync(newState.doc);
 
     // If there are pending steps and we're not already sending, kick off send
-    if (
-      sendableSteps(newState) &&
-      !this.sending &&
-      this.comm === "loaded" &&
-      !this.waitingForSync &&
-      !this.stepError
-    ) {
+    if (sendableSteps(newState) && this.canSend()) {
       this._send();
     }
 
@@ -2037,11 +2071,11 @@ export class EditorConnection {
   }
 
   private async _send(): Promise<void> {
-    if (!this.view || this.sending || this.waitingForSync || this.stepError || this.comm !== "loaded") return;
+    if (!this.canSend()) return;
 
-    const view = this.view;
+    const view = this.view!;
     const version = getVersion(view.state);
-    const sendable = sendableSteps(this.view.state) as SendableResult | null;
+    const sendable = sendableSteps(view.state) as SendableResult | null;
     if (!sendable) return;
 
     this.sending = true;
@@ -2078,8 +2112,7 @@ export class EditorConnection {
           // `recover()` and resend the same steps at a stale version
           // forever (409 → backlog → same throw). Lock the editor like
           // any other unapplicable step instead.
-          this.sending = false;
-          this.pendingUpdates = [];
+          this.endSend("drop");
           this.comm = "loaded";
           this.reportStepError({
             version: ack.version,
@@ -2091,8 +2124,7 @@ export class EditorConnection {
         // Keep sends blocked until every queued remote step has been
         // rebased. Dispatching the acknowledgement can itself create more
         // sendable steps, but those must use the final confirmed version.
-        this.drainPendingUpdates();
-        this.sending = false;
+        this.endSend("drain");
         this.comm = "loaded";
         // A stream failure may have started recovery while this POST was
         // pending. Its timer must not be the only way to reopen now that
@@ -2101,15 +2133,14 @@ export class EditorConnection {
         this._send();
       // @feat collab-sse: 409 stale: catch up fully before resending at the new version
       } else if (resp.status === 409) {
-        this.drainPendingUpdates();
-        this.sending = false;
+        const reopened = this.endSend("drain");
         this.backOff = 0;
         this.comm = "loaded";
         // A zero-delay retry can beat (and repeatedly cancel) the backlog.
         // The server's ready event is the barrier, including when the
         // queued updates already brought us up to date.
         this.waitingForSync = true;
-        this.openStream();
+        if (!reopened) this.openStream();
       } else if (resp.status === 410) {
         // Document replaced — full restart
         this.restart();
@@ -2126,8 +2157,7 @@ export class EditorConnection {
           // Fall through with empty info.
         }
         if (this.view !== view || this.isDetached()) return;
-        this.sending = false;
-        this.pendingUpdates = [];
+        this.endSend("drop");
         this.reportStepError({
           version: version + (info.step_index ?? 0) + 1,
           phase: "send",
@@ -2140,8 +2170,7 @@ export class EditorConnection {
           ),
         );
       } else {
-        this.sending = false;
-        this.pendingUpdates = [];
+        this.endSend("drop");
         // Other server error — backoff
         const err = new Error("Send failed: " + resp.status);
         (err as Error & { status: number }).status = resp.status;
@@ -2149,8 +2178,7 @@ export class EditorConnection {
       }
     } catch (err) {
       if (this.view !== view || this.isDetached()) return;
-      this.sending = false;
-      this.pendingUpdates = [];
+      this.endSend("drop");
       this.recover(err instanceof Error ? err : new Error(String(err)));
     }
   }

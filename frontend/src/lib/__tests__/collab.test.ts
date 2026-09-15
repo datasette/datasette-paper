@@ -565,6 +565,22 @@ describe("collaboration request ordering", () => {
     } finally { conn.close(); }
   });
 
+  it("opens a single catch-up stream when a 409 drain already hit a gap", async () => {
+    const { conn, pending } = await session();
+    try {
+      const view = conn.view!;
+      view.dispatch(view.state.tr.insertText("A", 6));
+      // Held behind the in-flight POST, and starting past our v5 doc.
+      MockEventSource.instances[0].dispatchEvent("update", JSON.stringify({
+        version: 9, steps: [insert(1, "B")], clientIDs: [99999],
+      }));
+      pending.resolve(response(409));
+      await waitFor(() => expect(MockEventSource.instances.length).toBeGreaterThan(1));
+      await new Promise((done) => setTimeout(done, 20));
+      expect(MockEventSource.instances).toHaveLength(2);
+    } finally { conn.close(); }
+  });
+
   it("retries an unsaved edit after reconnect even when there is no backlog", async () => {
     const { conn, pending, posts } = await session();
     try {
