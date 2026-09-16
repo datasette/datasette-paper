@@ -519,7 +519,7 @@
   <span class="tb-menu-hint">{formatShortcut(SHORTCUTS[id].key)}</span>
 {/snippet}
 
-<div class="paper-toolbar" role="toolbar" aria-label="Editor toolbar" style={mobileBottomStyle}>
+<div class="paper-toolbar tb-shell" role="toolbar" aria-label="Editor toolbar" style={mobileBottomStyle}>
   {@render btn("undo", "Undo", () => run(undo), undefined, !canUndo, "undo")}
   <!-- Redo is dropped from the mobile strip (space; Shift-Mod-z and the iOS three-finger
        gesture cover it — design.md §Mobile). Undo stays. -->
@@ -935,14 +935,10 @@
 
 
 <style>
+  /* The box itself (flex row, gap, padding, border, radius, background) comes
+     from the shared `.tb-shell` in editor.css, which the selection bubble also
+     uses; only strip-specific chrome lives here. */
   .paper-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 4px 6px;
-    border: 1px solid var(--pp-border);
-    border-radius: 8px;
-    background: var(--pp-bg);
     /* deliberate literal: very faint toolbar elevation (.04), lighter than the
        --pp-shadow (.12) used by popovers/dialogs. */
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
@@ -953,199 +949,6 @@
     z-index: 10;
     margin: 0 auto 12px;
     width: fit-content;
-  }
-  .tb-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: 1px solid transparent;
-    background: transparent;
-    border-radius: 4px;
-    cursor: pointer;
-    color: var(--pp-fg);
-    padding: 0;
-  }
-  .tb-btn:hover:not(:disabled) {
-    background: var(--pp-surface-2);
-  }
-  .tb-btn:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  .tb-btn.active {
-    background: var(--pp-surface-3);
-    color: var(--pp-accent);
-    /* deliberate literal: light-blue active-button border, no matching token. */
-    border-color: #b8d3ee;
-  }
-  .tb-sep {
-    width: 1px;
-    height: 18px;
-    background: var(--pp-border-strong);
-    margin: 0 4px;
-  }
-
-  /* ─── shared dropdown (Text ▾; tickets 02/03 reuse for Link/List/Insert) ──── */
-  .tb-menu-wrap {
-    position: relative;
-    display: inline-flex;
-  }
-  /* Wide trigger: label (current block type) + chevron, sized past the 28px
-     icon square so text fits. */
-  .tb-trigger {
-    width: auto;
-    gap: 4px;
-    padding: 0 6px;
-  }
-  .tb-trigger-label {
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1;
-  }
-  .tb-trigger-chevron {
-    color: var(--pp-fg-muted);
-    flex: 0 0 auto;
-  }
-  /* Icon-first triggers (Link ▾ / List ▾): a 16px icon + chevron, tighter than
-     the text-label Text ▾ trigger. */
-  .tb-trigger-icon {
-    gap: 2px;
-    padding: 0 4px;
-  }
-  .tb-hl-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 20;
-    background: var(--pp-bg);
-    border: 1px solid var(--pp-border);
-    border-radius: 8px;
-    box-shadow: 0 4px 14px var(--pp-shadow);
-    padding: 6px;
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-  .tb-hl-swatch {
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid var(--pp-border-strong);
-    cursor: pointer;
-    background: var(--pp-bg);
-  }
-  .tb-hl-swatch[data-color="hl1"] { background: var(--pp-hl-1-swatch); }
-  .tb-hl-swatch[data-color="hl2"] { background: var(--pp-hl-2-swatch); }
-  .tb-hl-swatch[data-color="hl3"] { background: var(--pp-hl-3-swatch); }
-  .tb-hl-swatch[data-color="hl4"] { background: var(--pp-hl-4-swatch); }
-  /* `.sel` is the shared $effect's keyboard roving position (it starts on the
-     `.active` swatch); `.current` outlines the selection's color. */
-  .tb-hl-swatch:hover,
-  .tb-hl-swatch:global(.sel) {
-    transform: scale(1.15);
-  }
-  .tb-hl-swatch.current {
-    outline: 2px solid var(--pp-accent);
-    outline-offset: 1px;
-  }
-  /* Smaller, non-interactive swatch used as the Highlight ▾ trigger glyph
-     (same footprint as the 16px icons in neighboring buttons). */
-  .tb-hl-trigger-dot {
-    width: 15px;
-    height: 15px;
-    cursor: inherit;
-    flex: 0 0 auto;
-  }
-  .tb-btn:hover .tb-hl-trigger-dot {
-    transform: none;
-  }
-  /* "Remove highlight" (and the no-highlight trigger): an empty dot with a
-     diagonal slash. */
-  .tb-hl-none {
-    position: relative;
-    overflow: hidden;
-  }
-  .tb-hl-none::after {
-    content: "";
-    position: absolute;
-    left: calc(50% - 0.75px);
-    top: -2px;
-    bottom: -2px;
-    width: 1.5px;
-    background: var(--pp-fg-muted);
-    transform: rotate(45deg);
-  }
-  .tb-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 20;
-    min-width: 200px;
-    background: var(--pp-bg);
-    border: 1px solid var(--pp-border);
-    border-radius: 8px;
-    box-shadow: 0 4px 14px var(--pp-shadow);
-    padding: 4px;
-    display: flex;
-    flex-direction: column;
-  }
-  .tb-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 10px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    font: inherit;
-    text-align: left;
-    color: var(--pp-fg);
-    cursor: pointer;
-  }
-  /* `.sel` is the keyboard roving highlight (toggled at runtime via classList
-     from the shared $effect, so it's :global to Svelte); hover mirrors it. */
-  .tb-menu-item:hover,
-  .tb-menu-item:global(.sel) {
-    background: var(--pp-surface-2);
-  }
-  /* `.active` marks the current block type. */
-  .tb-menu-item.active {
-    color: var(--pp-accent);
-  }
-  .tb-menu-item.active :is(svg, .tb-menu-glyph) {
-    color: var(--pp-accent);
-  }
-  .tb-menu-item svg,
-  .tb-menu-glyph {
-    flex: 0 0 auto;
-    color: var(--pp-fg-muted);
-  }
-  .tb-menu-glyph {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 15px;
-    height: 15px;
-    font-size: 14px;
-    line-height: 1;
-  }
-  .tb-menu-label {
-    flex: 1 1 auto;
-  }
-  .tb-menu-hint {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--pp-fg-subtle);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  .tb-menu-sep {
-    height: 1px;
-    background: var(--pp-border);
-    margin: 4px 6px;
   }
   /* ─── ＋ Insert menu ───────────────────────────────────────────────────────
    * Reuses the shared `.tb-menu` shell + `.tb-menu-item` rows; adds group
