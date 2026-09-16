@@ -11,6 +11,16 @@
   import { blockTypeLabel } from "./blockTypeLabel";
   import { activeListType } from "./activeListType";
   import { wrapSelectionInCallout, unwrapCallout } from "./callout";
+  // Shared with the selection bubble (selectionBubble.ts) — see textCommands.ts
+  // for why these three commands and the two active-state predicates live
+  // outside this component.
+  import {
+    markActive as isMarkActive,
+    nodeActive as isNodeActive,
+    setHeading,
+    startWikiLink,
+    toggleLink,
+  } from "./textCommands";
   import type { SlashCommand } from "./slashMenu";
   import { insertMenuGroups } from "./insertMenuItems";
   import {
@@ -196,21 +206,13 @@
 
   // ─── helpers ──────────────────────────────────────────────────────────────
 
+  // Thin view-aware wrappers over the shared state predicates.
   function markActive(type: MarkType): boolean {
-    if (!view) return false;
-    const sel = view.state.selection;
-    if (sel.empty) {
-      return !!type.isInSet(view.state.storedMarks || sel.$from.marks());
-    }
-    return view.state.doc.rangeHasMark(sel.from, sel.to, type);
+    return view ? isMarkActive(view.state, type) : false;
   }
 
   function nodeActive(type: NodeType, attrs: Record<string, unknown> = {}): boolean {
-    if (!view) return false;
-    const sel = view.state.selection;
-    const node = sel.$from.node(sel.$from.depth);
-    if (node.type !== type) return false;
-    return Object.entries(attrs).every(([k, v]) => node.attrs[k] === v);
+    return view ? isNodeActive(view.state, type, attrs) : false;
   }
 
   function run(cmd: (state: EditorView["state"], dispatch?: EditorView["dispatch"]) => boolean) {
@@ -221,18 +223,6 @@
 
   function toggle(mark: MarkType) {
     return () => run(toggleMark(mark));
-  }
-
-  function setHeading(level: number) {
-    return () => {
-      if (!view) return;
-      // Toggle: if already this heading, go back to paragraph
-      if (nodeActive(schema.nodes.heading, { level })) {
-        run(setBlockType(schema.nodes.paragraph));
-      } else {
-        run(setBlockType(schema.nodes.heading, { level }));
-      }
-    };
   }
 
   function wrapList(node: NodeType) {
@@ -263,37 +253,6 @@
   function toggleCallout() {
     if (!view) return;
     run(isCallout ? unwrapCallout : wrapSelectionInCallout("note"));
-  }
-
-  function toggleLink() {
-    if (!view) return;
-    const linkType = schema.marks.link;
-    const { from, to, empty } = view.state.selection;
-    if (empty) {
-      view.focus();
-      return;
-    }
-    if (view.state.doc.rangeHasMark(from, to, linkType)) {
-      run(toggleMark(linkType));
-      return;
-    }
-    const href = window.prompt("Link URL");
-    if (!href) {
-      view.focus();
-      return;
-    }
-    run(toggleMark(linkType, { href }));
-  }
-
-  // Insert `[[` at the cursor to launch the wiki-link autocomplete. The
-  // wikiLinkSuggest plugin recomputes from doc+selection on every transaction
-  // (no dedicated open command), so a plain insert trips its trigger exactly
-  // like typing the brackets by hand.
-  function startWikiLink() {
-    if (!view) return;
-    const tr = view.state.tr.insertText("[[");
-    view.dispatch(tr);
-    view.focus();
   }
 
   function isLinkActive(): boolean {
@@ -565,7 +524,7 @@
           role="menuitem"
           class="tb-menu-item"
           class:active={isH1}
-          onclick={chooseBlock(setHeading(1))}
+          onclick={chooseBlock(() => run(setHeading(1)))}
           aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading1.key)}
         >
           {@render menuIcon("h1")}
@@ -577,7 +536,7 @@
           role="menuitem"
           class="tb-menu-item"
           class:active={isH2}
-          onclick={chooseBlock(setHeading(2))}
+          onclick={chooseBlock(() => run(setHeading(2)))}
           aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading2.key)}
         >
           {@render menuIcon("h2")}
@@ -589,7 +548,7 @@
           role="menuitem"
           class="tb-menu-item"
           class:active={isH3}
-          onclick={chooseBlock(setHeading(3))}
+          onclick={chooseBlock(() => run(setHeading(3)))}
           aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading3.key)}
         >
           {@render menuIcon("h3")}
@@ -726,7 +685,7 @@
           role="menuitem"
           class="tb-menu-item"
           class:active={isLink}
-          onclick={chooseBlock(toggleLink)}
+          onclick={chooseBlock(() => run(toggleLink))}
           aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.link.key)}
         >
           {@render menuIcon("link")}
@@ -737,7 +696,7 @@
           type="button"
           role="menuitem"
           class="tb-menu-item"
-          onclick={chooseBlock(startWikiLink)}
+          onclick={chooseBlock(() => run(startWikiLink))}
         >
           {@render menuIcon("wikilink")}
           <span class="tb-menu-label">Link to a page</span>
