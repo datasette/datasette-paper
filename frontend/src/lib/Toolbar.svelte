@@ -456,20 +456,14 @@
   </button>
 {/snippet}
 
-<!-- Leading icon for a dropdown menu row / trigger. Falls back to a text glyph
-     for the `paragraph` ("¶") and `plus` ("＋") slots until their bootstrap
-     paths (`text-paragraph` / `plus-lg`) are pasted into icons.ts — the swap is
-     then a one-line addition there, no markup change. -->
+<!-- Leading icon for a dropdown menu row / trigger. Renders nothing for an
+     unknown name, so a row can be added before its icon slot exists. -->
 {#snippet menuIcon(name: string)}
   {#if TOOLBAR_ICONS[name]}
     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
       {@html TOOLBAR_ICONS[name]}
     </svg>
-  {:else if name === "paragraph"}
-    <span class="tb-menu-glyph" aria-hidden="true">¶</span>
-  {:else if name === "plus"}
-    <span class="tb-menu-glyph" aria-hidden="true">＋</span>
   {/if}
 {/snippet}
 

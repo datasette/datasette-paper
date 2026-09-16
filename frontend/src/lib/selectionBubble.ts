@@ -406,7 +406,7 @@ export class SelectionBubbleView {
     menu.append(
       this.menuRow(
         "Text",
-        paragraphGlyph(),
+        iconEl("paragraph", ROW_ICON_PX),
         () => setBlockType(paragraph),
         (s) => blockTypeLabel(s) === "Text",
         "paragraph",
@@ -929,19 +929,6 @@ const CHEVRON_PX = 12;
 
 function chevron(): Element {
   return iconEl("chevronDown", CHEVRON_PX, "tb-trigger-chevron");
-}
-
-/**
- * The Text row's glyph. `icons.ts` has no `paragraph` slot, so this is the same
- * `.tb-menu-glyph` "¶" fallback `Toolbar.svelte`'s `menuIcon` snippet renders;
- * when the bootstrap `text-paragraph` path lands, both become an icon.
- */
-function paragraphGlyph(): HTMLSpanElement {
-  const span = document.createElement("span");
-  span.className = "tb-menu-glyph";
-  span.setAttribute("aria-hidden", "true");
-  span.textContent = "¶";
-  return span;
 }
 
 /** Does any ancestor of the selection head have type `type`? */

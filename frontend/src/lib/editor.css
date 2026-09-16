@@ -1777,22 +1777,12 @@ mark.pp-hl[data-color="hl4"] {
 .tb-menu-item.active {
   color: var(--pp-accent);
 }
-.tb-menu-item.active :is(svg, .tb-menu-glyph) {
+.tb-menu-item.active svg {
   color: var(--pp-accent);
 }
-.tb-menu-item svg,
-.tb-menu-glyph {
+.tb-menu-item svg {
   flex: 0 0 auto;
   color: var(--pp-fg-muted);
-}
-.tb-menu-glyph {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 15px;
-  height: 15px;
-  font-size: 14px;
-  line-height: 1;
 }
 .tb-menu-label {
   flex: 1 1 auto;
