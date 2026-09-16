@@ -35,9 +35,14 @@ test.describe("highlight mark", () => {
     // Select "world".
     for (let i = 0; i < 5; i++) await page.keyboard.press("Shift+ArrowLeft");
 
-    await app.getByRole("button", { name: "Highlight", exact: true }).click();
-    await app.getByLabel("Highlight color 2").click();
-    await expect(app.locator(".tb-hl-menu")).toHaveCount(0);
+    // Scoped to the docked strip: the selection bubble is the same component
+    // with the same labels, so an `#app-root`-wide getByLabel now matches both
+    // (getByLabel, unlike getByRole, also matches elements hidden from the
+    // accessibility tree).
+    const toolbar = app.locator(".paper-toolbar");
+    await toolbar.getByRole("button", { name: "Highlight", exact: true }).click();
+    await toolbar.getByLabel("Highlight color 2").click();
+    await expect(toolbar.locator(".tb-hl-menu")).toHaveCount(0);
 
     const mark = app.locator('.ProseMirror mark.pp-hl[data-color="hl2"]');
     await expect(mark).toHaveText("world");
@@ -68,8 +73,8 @@ test.describe("highlight mark", () => {
       const Sel = view.state.selection.constructor;
       view.dispatch(tr.setSelection(Sel.create(doc, 7, 12)));
     });
-    await app.getByRole("button", { name: "Highlight", exact: true }).click();
-    await app.getByLabel("Remove highlight").click();
+    await toolbar.getByRole("button", { name: "Highlight", exact: true }).click();
+    await toolbar.getByLabel("Remove highlight").click();
     await expect(app.locator(".ProseMirror mark.pp-hl")).toHaveCount(0);
     await expect
       .poll(() => documentMarkdown(page, host.id), { timeout: 10000 })

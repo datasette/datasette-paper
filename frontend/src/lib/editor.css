@@ -1809,6 +1809,31 @@ mark.pp-hl[data-color="hl4"] {
   margin: 4px 6px;
 }
 
+/* ─── Selection bubble ────────────────────────────────────────────────────
+ * The floating twin of the docked strip (`selectionBubble.ts`): same
+ * `.tb-shell` box and the same `.tb-*` controls above, so ONLY what differs
+ * belongs here — it floats, it sits in the slash-menu stacking tier (12, above
+ * the sticky toolbar's 10; its own popovers keep `.tb-menu`/`.tb-hl-menu`'s
+ * 20), it never wraps, and it carries the popover elevation (--pp-shadow)
+ * instead of the strip's fainter .04 literal. Absolutely positioned inside
+ * `.editor-host` (position: relative, above). */
+.pm-selection-bubble {
+  position: absolute;
+  z-index: 12;
+  white-space: nowrap;
+  box-shadow: 0 4px 14px var(--pp-shadow);
+  /* The JS sets `top` to the selection line's top and lets the transform lift
+     the bubble clear of it, so positioning never depends on having measured
+     our own height (which is 0 on the first render). */
+  transform: translateY(-100%);
+}
+/* Flipped below the selection when sitting above would collide with the sticky
+   toolbar — the `pm-tt-below` idiom from tableInsertTooltip.ts, where the class
+   inverts the y-transform and the JS re-points `top` at the line's bottom. */
+.pm-selection-bubble.pm-sb-below {
+  transform: none;
+}
+
 /* Inline Datasette ref pill — mirrors .pm-paper-link / .pm-mention. */
 .editor-host .pm-inline-embed {
   display: inline;

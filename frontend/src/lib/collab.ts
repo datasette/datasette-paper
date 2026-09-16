@@ -16,6 +16,7 @@ import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { tableRowDragPlugin } from "./tableRowDrag";
 import { linkTooltipPlugin } from "./linkTooltip";
+import { selectionBubblePlugin } from "./selectionBubble";
 import { linkOpenPlugin } from "./linkOpen";
 import {
   handleImagePaste,
@@ -1585,6 +1586,9 @@ export class EditorConnection {
         // URL + Open/Copy. Scoped to class-less links so embed titles are left
         // alone.
         linkTooltipPlugin(),
+        // Floating formatting menu over a non-empty text selection — the
+        // docked toolbar's controls, brought to the selection. Desktop only.
+        selectionBubblePlugin(),
         // In edit mode a click on a plain `<a>` link mark opens its URL in a
         // new tab (deterministic across browsers); view mode navigates natively.
         linkOpenPlugin(),
