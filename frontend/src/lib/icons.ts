@@ -190,6 +190,16 @@ export const TOOLBAR_ICONS: Record<string, string> = {
   // bootstrap-icons/plus-lg — the index page's "New paper" split button and
   // its "New template" menu row.
   plusLg: `<path fill-rule="evenodd" d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2"/>`,
+  // bootstrap-icons/paragraph — the "Text" row in both Text ▾ menus (the
+  // docked strip's and the selection bubble's). Until this landed, both
+  // rendered a "¶" text glyph.
+  paragraph: `<path d="M10.5 15a.5.5 0 0 1-.5-.5V2H9v12.5a.5.5 0 0 1-1 0V9H7a4 4 0 1 1 0-8h5.5a.5.5 0 0 1 0 1H11v12.5a.5.5 0 0 1-.5.5"/>`,
+
+  // bootstrap-icons/plus — the ＋ Insert trigger's menu-row glyph. Distinct
+  // from `plusLg` (bootstrap-icons/plus-lg), the heavier mark the index page's
+  // "New paper" split button uses.
+  plus: `<path d="M8 4a.5.5 0 0 1 .5.5v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3a.5.5 0 0 1 0-1h3v-3A.5.5 0 0 1 8 4"/>`,
+
   // bootstrap-icons/calendar-event — leading glyph on the inline `date` chip.
   calendarEvent: `<path d="M11 6.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5z"/><path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5M1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4z"/>`,
 };

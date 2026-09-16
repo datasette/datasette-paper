@@ -11,6 +11,16 @@
   import { blockTypeLabel } from "./blockTypeLabel";
   import { activeListType } from "./activeListType";
   import { wrapSelectionInCallout, unwrapCallout } from "./callout";
+  // Shared with the selection bubble (selectionBubble.ts) — see textCommands.ts
+  // for why these three commands and the two active-state predicates live
+  // outside this component.
+  import {
+    markActive as isMarkActive,
+    nodeActive as isNodeActive,
+    setHeading,
+    startWikiLink,
+    toggleLink,
+  } from "./textCommands";
   import type { SlashCommand } from "./slashMenu";
   import { insertMenuGroups } from "./insertMenuItems";
   import {
@@ -196,21 +206,13 @@
 
   // ─── helpers ──────────────────────────────────────────────────────────────
 
+  // Thin view-aware wrappers over the shared state predicates.
   function markActive(type: MarkType): boolean {
-    if (!view) return false;
-    const sel = view.state.selection;
-    if (sel.empty) {
-      return !!type.isInSet(view.state.storedMarks || sel.$from.marks());
-    }
-    return view.state.doc.rangeHasMark(sel.from, sel.to, type);
+    return view ? isMarkActive(view.state, type) : false;
   }
 
   function nodeActive(type: NodeType, attrs: Record<string, unknown> = {}): boolean {
-    if (!view) return false;
-    const sel = view.state.selection;
-    const node = sel.$from.node(sel.$from.depth);
-    if (node.type !== type) return false;
-    return Object.entries(attrs).every(([k, v]) => node.attrs[k] === v);
+    return view ? isNodeActive(view.state, type, attrs) : false;
   }
 
   function run(cmd: (state: EditorView["state"], dispatch?: EditorView["dispatch"]) => boolean) {
@@ -221,18 +223,6 @@
 
   function toggle(mark: MarkType) {
     return () => run(toggleMark(mark));
-  }
-
-  function setHeading(level: number) {
-    return () => {
-      if (!view) return;
-      // Toggle: if already this heading, go back to paragraph
-      if (nodeActive(schema.nodes.heading, { level })) {
-        run(setBlockType(schema.nodes.paragraph));
-      } else {
-        run(setBlockType(schema.nodes.heading, { level }));
-      }
-    };
   }
 
   function wrapList(node: NodeType) {
@@ -263,37 +253,6 @@
   function toggleCallout() {
     if (!view) return;
     run(isCallout ? unwrapCallout : wrapSelectionInCallout("note"));
-  }
-
-  function toggleLink() {
-    if (!view) return;
-    const linkType = schema.marks.link;
-    const { from, to, empty } = view.state.selection;
-    if (empty) {
-      view.focus();
-      return;
-    }
-    if (view.state.doc.rangeHasMark(from, to, linkType)) {
-      run(toggleMark(linkType));
-      return;
-    }
-    const href = window.prompt("Link URL");
-    if (!href) {
-      view.focus();
-      return;
-    }
-    run(toggleMark(linkType, { href }));
-  }
-
-  // Insert `[[` at the cursor to launch the wiki-link autocomplete. The
-  // wikiLinkSuggest plugin recomputes from doc+selection on every transaction
-  // (no dedicated open command), so a plain insert trips its trigger exactly
-  // like typing the brackets by hand.
-  function startWikiLink() {
-    if (!view) return;
-    const tr = view.state.tr.insertText("[[");
-    view.dispatch(tr);
-    view.focus();
   }
 
   function isLinkActive(): boolean {
@@ -497,20 +456,14 @@
   </button>
 {/snippet}
 
-<!-- Leading icon for a dropdown menu row / trigger. Falls back to a text glyph
-     for the `paragraph` ("¶") and `plus` ("＋") slots until their bootstrap
-     paths (`text-paragraph` / `plus-lg`) are pasted into icons.ts — the swap is
-     then a one-line addition there, no markup change. -->
+<!-- Leading icon for a dropdown menu row / trigger. Renders nothing for an
+     unknown name, so a row can be added before its icon slot exists. -->
 {#snippet menuIcon(name: string)}
   {#if TOOLBAR_ICONS[name]}
     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <!-- eslint-disable-next-line svelte/no-at-html-tags — static path data from icons.ts, never user input -->
       {@html TOOLBAR_ICONS[name]}
     </svg>
-  {:else if name === "paragraph"}
-    <span class="tb-menu-glyph" aria-hidden="true">¶</span>
-  {:else if name === "plus"}
-    <span class="tb-menu-glyph" aria-hidden="true">＋</span>
   {/if}
 {/snippet}
 
@@ -519,7 +472,7 @@
   <span class="tb-menu-hint">{formatShortcut(SHORTCUTS[id].key)}</span>
 {/snippet}
 
-<div class="paper-toolbar" role="toolbar" aria-label="Editor toolbar" style={mobileBottomStyle}>
+<div class="paper-toolbar tb-shell" role="toolbar" aria-label="Editor toolbar" style={mobileBottomStyle}>
   {@render btn("undo", "Undo", () => run(undo), undefined, !canUndo, "undo")}
   <!-- Redo is dropped from the mobile strip (space; Shift-Mod-z and the iOS three-finger
        gesture cover it — design.md §Mobile). Undo stays. -->
@@ -565,7 +518,7 @@
           role="menuitem"
           class="tb-menu-item"
           class:active={isH1}
-          onclick={chooseBlock(setHeading(1))}
+          onclick={chooseBlock(() => run(setHeading(1)))}
           aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading1.key)}
         >
           {@render menuIcon("h1")}
@@ -577,7 +530,7 @@
           role="menuitem"
           class="tb-menu-item"
           class:active={isH2}
-          onclick={chooseBlock(setHeading(2))}
+          onclick={chooseBlock(() => run(setHeading(2)))}
           aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading2.key)}
         >
           {@render menuIcon("h2")}
@@ -589,7 +542,7 @@
           role="menuitem"
           class="tb-menu-item"
           class:active={isH3}
-          onclick={chooseBlock(setHeading(3))}
+          onclick={chooseBlock(() => run(setHeading(3)))}
           aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.heading3.key)}
         >
           {@render menuIcon("h3")}
@@ -726,7 +679,7 @@
           role="menuitem"
           class="tb-menu-item"
           class:active={isLink}
-          onclick={chooseBlock(toggleLink)}
+          onclick={chooseBlock(() => run(toggleLink))}
           aria-keyshortcuts={ariaKeyshortcuts(SHORTCUTS.link.key)}
         >
           {@render menuIcon("link")}
@@ -737,7 +690,7 @@
           type="button"
           role="menuitem"
           class="tb-menu-item"
-          onclick={chooseBlock(startWikiLink)}
+          onclick={chooseBlock(() => run(startWikiLink))}
         >
           {@render menuIcon("wikilink")}
           <span class="tb-menu-label">Link to a page</span>
@@ -935,14 +888,10 @@
 
 
 <style>
+  /* The box itself (flex row, gap, padding, border, radius, background) comes
+     from the shared `.tb-shell` in editor.css, which the selection bubble also
+     uses; only strip-specific chrome lives here. */
   .paper-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    padding: 4px 6px;
-    border: 1px solid var(--pp-border);
-    border-radius: 8px;
-    background: var(--pp-bg);
     /* deliberate literal: very faint toolbar elevation (.04), lighter than the
        --pp-shadow (.12) used by popovers/dialogs. */
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.04);
@@ -953,199 +902,6 @@
     z-index: 10;
     margin: 0 auto 12px;
     width: fit-content;
-  }
-  .tb-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: 1px solid transparent;
-    background: transparent;
-    border-radius: 4px;
-    cursor: pointer;
-    color: var(--pp-fg);
-    padding: 0;
-  }
-  .tb-btn:hover:not(:disabled) {
-    background: var(--pp-surface-2);
-  }
-  .tb-btn:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-  .tb-btn.active {
-    background: var(--pp-surface-3);
-    color: var(--pp-accent);
-    /* deliberate literal: light-blue active-button border, no matching token. */
-    border-color: #b8d3ee;
-  }
-  .tb-sep {
-    width: 1px;
-    height: 18px;
-    background: var(--pp-border-strong);
-    margin: 0 4px;
-  }
-
-  /* ─── shared dropdown (Text ▾; tickets 02/03 reuse for Link/List/Insert) ──── */
-  .tb-menu-wrap {
-    position: relative;
-    display: inline-flex;
-  }
-  /* Wide trigger: label (current block type) + chevron, sized past the 28px
-     icon square so text fits. */
-  .tb-trigger {
-    width: auto;
-    gap: 4px;
-    padding: 0 6px;
-  }
-  .tb-trigger-label {
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1;
-  }
-  .tb-trigger-chevron {
-    color: var(--pp-fg-muted);
-    flex: 0 0 auto;
-  }
-  /* Icon-first triggers (Link ▾ / List ▾): a 16px icon + chevron, tighter than
-     the text-label Text ▾ trigger. */
-  .tb-trigger-icon {
-    gap: 2px;
-    padding: 0 4px;
-  }
-  .tb-hl-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 20;
-    background: var(--pp-bg);
-    border: 1px solid var(--pp-border);
-    border-radius: 8px;
-    box-shadow: 0 4px 14px var(--pp-shadow);
-    padding: 6px;
-    display: flex;
-    gap: 6px;
-    align-items: center;
-  }
-  .tb-hl-swatch {
-    width: 20px;
-    height: 20px;
-    padding: 0;
-    border-radius: 50%;
-    border: 1px solid var(--pp-border-strong);
-    cursor: pointer;
-    background: var(--pp-bg);
-  }
-  .tb-hl-swatch[data-color="hl1"] { background: var(--pp-hl-1-swatch); }
-  .tb-hl-swatch[data-color="hl2"] { background: var(--pp-hl-2-swatch); }
-  .tb-hl-swatch[data-color="hl3"] { background: var(--pp-hl-3-swatch); }
-  .tb-hl-swatch[data-color="hl4"] { background: var(--pp-hl-4-swatch); }
-  /* `.sel` is the shared $effect's keyboard roving position (it starts on the
-     `.active` swatch); `.current` outlines the selection's color. */
-  .tb-hl-swatch:hover,
-  .tb-hl-swatch:global(.sel) {
-    transform: scale(1.15);
-  }
-  .tb-hl-swatch.current {
-    outline: 2px solid var(--pp-accent);
-    outline-offset: 1px;
-  }
-  /* Smaller, non-interactive swatch used as the Highlight ▾ trigger glyph
-     (same footprint as the 16px icons in neighboring buttons). */
-  .tb-hl-trigger-dot {
-    width: 15px;
-    height: 15px;
-    cursor: inherit;
-    flex: 0 0 auto;
-  }
-  .tb-btn:hover .tb-hl-trigger-dot {
-    transform: none;
-  }
-  /* "Remove highlight" (and the no-highlight trigger): an empty dot with a
-     diagonal slash. */
-  .tb-hl-none {
-    position: relative;
-    overflow: hidden;
-  }
-  .tb-hl-none::after {
-    content: "";
-    position: absolute;
-    left: calc(50% - 0.75px);
-    top: -2px;
-    bottom: -2px;
-    width: 1.5px;
-    background: var(--pp-fg-muted);
-    transform: rotate(45deg);
-  }
-  .tb-menu {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    z-index: 20;
-    min-width: 200px;
-    background: var(--pp-bg);
-    border: 1px solid var(--pp-border);
-    border-radius: 8px;
-    box-shadow: 0 4px 14px var(--pp-shadow);
-    padding: 4px;
-    display: flex;
-    flex-direction: column;
-  }
-  .tb-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 10px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    font: inherit;
-    text-align: left;
-    color: var(--pp-fg);
-    cursor: pointer;
-  }
-  /* `.sel` is the keyboard roving highlight (toggled at runtime via classList
-     from the shared $effect, so it's :global to Svelte); hover mirrors it. */
-  .tb-menu-item:hover,
-  .tb-menu-item:global(.sel) {
-    background: var(--pp-surface-2);
-  }
-  /* `.active` marks the current block type. */
-  .tb-menu-item.active {
-    color: var(--pp-accent);
-  }
-  .tb-menu-item.active :is(svg, .tb-menu-glyph) {
-    color: var(--pp-accent);
-  }
-  .tb-menu-item svg,
-  .tb-menu-glyph {
-    flex: 0 0 auto;
-    color: var(--pp-fg-muted);
-  }
-  .tb-menu-glyph {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 15px;
-    height: 15px;
-    font-size: 14px;
-    line-height: 1;
-  }
-  .tb-menu-label {
-    flex: 1 1 auto;
-  }
-  .tb-menu-hint {
-    margin-left: auto;
-    font-size: 11px;
-    color: var(--pp-fg-subtle);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  }
-  .tb-menu-sep {
-    height: 1px;
-    background: var(--pp-border);
-    margin: 4px 6px;
   }
   /* ─── ＋ Insert menu ───────────────────────────────────────────────────────
    * Reuses the shared `.tb-menu` shell + `.tb-menu-item` rows; adds group
