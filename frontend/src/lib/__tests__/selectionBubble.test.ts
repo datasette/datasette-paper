@@ -1,29 +1,41 @@
 /**
  * Selection bubble (`selectionBubble.ts`): the mapped anchor in plugin state,
- * the show/hide gate, the controls' commands, and teardown.
+ * the suppression matrix, the two show triggers, the Escape ladder, the
+ * controls' commands, and teardown.
  *
  * jsdom has no layout — `coordsAtPos` throws (no `getClientRects`) and every
  * `offset*` reads 0 — so the positioning path must *degrade*, not throw; the
- * tests that care about it stub `coordsAtPos` explicitly. The view class is
- * driven directly where a test needs a handle on the instance (ProseMirror
- * doesn't expose plugin views), otherwise through the plugin, mounted the way
- * production does: an `EditorView` inside an `.editor-host` parent.
+ * tests that care about it stub `coordsAtPos` explicitly. The view is mounted
+ * the way production does (an `EditorView` inside an `.editor-host` parent,
+ * with the plugin and the Escape keymap installed); `selectionBubbleViewFor`
+ * is how a test gets a handle on the instance, since ProseMirror doesn't
+ * expose plugin views.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { EditorState, Selection, TextSelection } from "prosemirror-state";
+import {
+  EditorState,
+  NodeSelection,
+  Selection,
+  TextSelection,
+} from "prosemirror-state";
 import { EditorView } from "prosemirror-view";
+import { keymap } from "prosemirror-keymap";
 import type { Node as PMNode } from "prosemirror-model";
 
 import { schema } from "../schema";
 import { activeHighlightColor } from "../highlight";
 import {
-  SelectionBubbleView,
   selectionBubbleKey,
+  selectionBubbleKeymap,
   selectionBubblePlugin,
+  selectionBubbleViewFor,
+  shouldShowBubble,
   type BubbleAnchor,
+  type SelectionBubbleView,
 } from "../selectionBubble";
 
-const { doc, paragraph, heading } = schema.nodes;
+const { doc, paragraph, heading, code_block, sql_block, source } = schema.nodes;
+const { table, table_row, table_cell } = schema.nodes;
 const { strong, highlight } = schema.marks;
 
 const mounted: EditorView[] = [];
@@ -34,11 +46,35 @@ function hello(): PMNode {
   return doc.create(null, [paragraph.create(null, schema.text("Hello world"))]);
 }
 
-function mount(
-  d: PMNode = hello(),
-  sel?: { from: number; to: number },
-  opts: { plugin?: boolean } = {},
-): EditorView {
+/** `doc(paragraph("Hello world"), code_block("select 1"))` — code text 14..22. */
+function withCode(): PMNode {
+  return doc.create(null, [
+    paragraph.create(null, schema.text("Hello world")),
+    code_block.create(null, schema.text("select 1")),
+  ]);
+}
+
+/** A one-cell table; the cell's paragraph text occupies 4..8. */
+function withTable(): PMNode {
+  return doc.create(null, [
+    table.create(null, [
+      table_row.create(null, [
+        table_cell.create(null, paragraph.create(null, schema.text("Cell"))),
+      ]),
+    ]),
+  ]);
+}
+
+function stateOf(d: PMNode, sel?: { from: number; to: number }): EditorState {
+  return EditorState.create({
+    doc: d,
+    selection: sel
+      ? TextSelection.create(d, sel.from, sel.to)
+      : Selection.atStart(d),
+  });
+}
+
+function mount(d: PMNode = hello(), sel?: { from: number; to: number }): EditorView {
   const host = document.createElement("div");
   host.className = "editor-host";
   document.body.appendChild(host);
@@ -46,7 +82,7 @@ function mount(
   const state = EditorState.create({
     doc: d,
     selection: sel ? TextSelection.create(d, sel.from, sel.to) : Selection.atStart(d),
-    plugins: opts.plugin === false ? [] : [selectionBubblePlugin()],
+    plugins: [selectionBubblePlugin(), keymap(selectionBubbleKeymap())],
   });
   const view = new EditorView(host, { state });
   mounted.push(view);
@@ -58,6 +94,36 @@ const root = (view: EditorView): HTMLElement =>
 
 const control = (view: EditorView, label: string): HTMLButtonElement =>
   root(view).querySelector(`[aria-label="${label}"]`) as HTMLButtonElement;
+
+const bubbleOf = (view: EditorView): SelectionBubbleView =>
+  selectionBubbleViewFor(view)!;
+
+/** Fire the mouseup trigger and wait out its settle tick. */
+async function mouseup(view: EditorView): Promise<void> {
+  view.dom.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function contextmenu(view: EditorView, x = 40, y = 120): MouseEvent {
+  const evt = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+  });
+  view.dom.dispatchEvent(evt);
+  return evt;
+}
+
+function pressEscape(view: EditorView): KeyboardEvent {
+  const evt = new KeyboardEvent("keydown", {
+    key: "Escape",
+    bubbles: true,
+    cancelable: true,
+  });
+  view.dom.dispatchEvent(evt);
+  return evt;
+}
 
 /** Make `coordsAtPos` answer so the positioning path runs end to end. */
 function stubCoords(view: EditorView) {
@@ -76,13 +142,86 @@ afterEach(() => {
   while (hosts.length) hosts.pop()!.remove();
 });
 
+// ─── suppression matrix ──────────────────────────────────────────────────────
+
+describe("shouldShowBubble", () => {
+  const ok = { editable: true, mobile: false };
+
+  it("allows a non-empty selection in a plain paragraph", () => {
+    expect(shouldShowBubble(stateOf(hello(), { from: 1, to: 6 }), ok)).toBe(true);
+  });
+
+  it("rejects a collapsed selection", () => {
+    expect(shouldShowBubble(stateOf(hello()), ok)).toBe(false);
+  });
+
+  it("rejects a NodeSelection — an atom has its own chrome", () => {
+    const d = hello();
+    const state = EditorState.create({ doc: d, selection: NodeSelection.create(d, 0) });
+    expect(shouldShowBubble(state, ok)).toBe(false);
+  });
+
+  it("rejects a selection inside a code_block", () => {
+    expect(shouldShowBubble(stateOf(withCode(), { from: 14, to: 20 }), ok)).toBe(
+      false,
+    );
+  });
+
+  it("rejects a selection inside a sql_block", () => {
+    const d = doc.create(null, [sql_block.create(null, schema.text("select 1"))]);
+    expect(shouldShowBubble(stateOf(d, { from: 1, to: 7 }), ok)).toBe(false);
+  });
+
+  it("rejects a selection inside a source block", () => {
+    const d = doc.create(null, [source.create(null, schema.text("select 1"))]);
+    expect(shouldShowBubble(stateOf(d, { from: 1, to: 7 }), ok)).toBe(false);
+  });
+
+  it("rejects a selection inside a table cell — the table tooltip owns that UI", () => {
+    expect(shouldShowBubble(stateOf(withTable(), { from: 4, to: 8 }), ok)).toBe(
+      false,
+    );
+  });
+
+  it("rejects a selection spanning a paragraph and a code block", () => {
+    // Either end being code suppresses: half the range is a surface the
+    // controls can't act on.
+    const state = stateOf(withCode(), { from: 3, to: 16 });
+    expect(state.selection.$from.parent.type).toBe(paragraph);
+    expect(state.selection.$to.parent.type).toBe(code_block);
+    expect(shouldShowBubble(state, ok)).toBe(false);
+  });
+
+  it("rejects a read-only view", () => {
+    expect(
+      shouldShowBubble(stateOf(hello(), { from: 1, to: 6 }), {
+        editable: false,
+        mobile: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("rejects mobile widths", () => {
+    expect(
+      shouldShowBubble(stateOf(hello(), { from: 1, to: 6 }), {
+        editable: true,
+        mobile: true,
+      }),
+    ).toBe(false);
+  });
+});
+
 // ─── plugin state ────────────────────────────────────────────────────────────
 
 describe("selectionBubbleKey.apply", () => {
   /** A state carrying `anchor`, with no view attached. */
   function anchored(anchor: BubbleAnchor): EditorState {
+    const d = hello();
     const state = EditorState.create({
-      doc: hello(),
+      doc: d,
+      // Non-empty, as it always is when a trigger writes an anchor: the
+      // collapse rule below would otherwise drop it on the first transaction.
+      selection: TextSelection.create(d, 3, 7),
       plugins: [selectionBubblePlugin()],
     });
     return state.apply(state.tr.setMeta(selectionBubbleKey, anchor));
@@ -105,13 +244,26 @@ describe("selectionBubbleKey.apply", () => {
 
   it("does not grow when text lands on either edge (bias 1 / -1)", () => {
     const state = anchored({ from: 3, to: 7 });
-    const next = state.apply(state.tr.insertText("x", 7).insertText("y", 3));
+    // Bare inserts, not `tr.insertText`: the latter is the typing helper and
+    // re-places the caret (transaction.ts:179-180), which is a dismiss here.
+    // A collaborator's step arrives as a plain replacement.
+    const next = state.apply(
+      state.tr.insert(7, schema.text("x")).insert(3, schema.text("y")),
+    );
     expect(selectionBubbleKey.getState(next)).toEqual({ from: 4, to: 8 });
   });
 
   it("drops the anchor when a collaborator deletes the span", () => {
     const state = anchored({ from: 3, to: 7 });
     const next = state.apply(state.tr.delete(3, 7));
+    expect(selectionBubbleKey.getState(next)).toBeNull();
+  });
+
+  it("drops the anchor when the selection collapses", () => {
+    const state = anchored({ from: 3, to: 7 });
+    const next = state.apply(
+      state.tr.setSelection(TextSelection.create(state.doc, 5)),
+    );
     expect(selectionBubbleKey.getState(next)).toBeNull();
   });
 
@@ -130,94 +282,178 @@ describe("selectionBubbleKey.apply", () => {
   });
 });
 
-// ─── show / hide ─────────────────────────────────────────────────────────────
+// ─── triggers ────────────────────────────────────────────────────────────────
 
-describe("visibility", () => {
-  it("shows for a non-empty text selection", () => {
+describe("triggers", () => {
+  it("does not open from a selection alone — update() never summons", () => {
     const view = mount(hello(), { from: 1, to: 6 });
     expect(root(view)).not.toBeNull();
-    expect(root(view).style.display).toBe("");
-  });
-
-  it("stays hidden for a collapsed cursor", () => {
-    const view = mount();
     expect(root(view).style.display).toBe("none");
   });
 
-  it("hides again when the selection collapses", () => {
+  it("opens on the mouseup settle tick", async () => {
     const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    expect(root(view).style.display).toBe("");
+    expect(selectionBubbleKey.getState(view.state)).toEqual({ from: 1, to: 6 });
+  });
+
+  it("opens on a shift-arrow keyup", () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    view.dom.dispatchEvent(
+      new KeyboardEvent("keyup", { key: "ArrowRight", shiftKey: true, bubbles: true }),
+    );
+    expect(root(view).style.display).toBe("");
+  });
+
+  it("ignores a keyup that is neither shift nor an arrow", () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    view.dom.dispatchEvent(new KeyboardEvent("keyup", { key: "a", bubbles: true }));
+    expect(root(view).style.display).toBe("none");
+  });
+
+  it("closes on a mouseup that left the selection collapsed", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3)));
+    await mouseup(view);
+    expect(root(view).style.display).toBe("none");
+    expect(selectionBubbleKey.getState(view.state)).toBeNull();
+  });
+
+  it("stays shut for a selection inside a code block", async () => {
+    const view = mount(withCode(), { from: 14, to: 20 });
+    await mouseup(view);
+    expect(root(view).style.display).toBe("none");
+  });
+
+  it("typing hides a visible bubble", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    expect(root(view).style.display).toBe("");
+    // What typing over a selection does: replace it, leaving a collapsed cursor.
+    view.dispatch(view.state.tr.insertText("x"));
+    expect(root(view).style.display).toBe("none");
+    expect(selectionBubbleKey.getState(view.state)).toBeNull();
+  });
+
+  it("hides again when the selection collapses", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
     view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, 3)));
     expect(root(view).style.display).toBe("none");
   });
 
-  it("stays hidden on mobile widths", () => {
+  it("stays hidden on mobile widths", async () => {
     // This jsdom has no matchMedia at all (the plugin's `typeof … !== "function"`
     // guard is what keeps every other test here alive), so install one.
     const mq = { matches: true, addEventListener() {}, removeEventListener() {} };
     vi.stubGlobal("matchMedia", () => mq as unknown as MediaQueryList);
     const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    expect(root(view).style.display).toBe("none");
+  });
+});
+
+// ─── right-click ─────────────────────────────────────────────────────────────
+
+describe("contextmenu", () => {
+  it("over a selection opens the bubble at the pointer and takes the menu", () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    const evt = contextmenu(view, 40, 120);
+    expect(evt.defaultPrevented).toBe(true);
+    expect(root(view).style.display).toBe("");
+    // Placed from the pointer, so no coordsAtPos (which throws in jsdom) and
+    // no zero-rect host offset: 120 - GAP.
+    expect(root(view).style.top).toBe("114px");
+  });
+
+  it("over a collapsed cursor leaves the native menu alone", () => {
+    const view = mount();
+    const evt = contextmenu(view);
+    expect(evt.defaultPrevented).toBe(false);
     expect(root(view).style.display).toBe("none");
   });
 
-  it("does not throw without layout, and positions when coords exist", () => {
-    const view = mount(hello(), { from: 1, to: 6 }, { plugin: false });
-    const bubble = new SelectionBubbleView(view);
-    // No stub: coordsAtPos throws in jsdom. Shown, just not placed.
-    expect(() => bubble.update(view, null)).not.toThrow();
-    expect(root(view).style.top).toBe("");
-
-    stubCoords(view);
-    bubble.update(view, null);
-    // host rect is all-zero in jsdom, so top is the stubbed line top minus the gap.
-    expect(root(view).style.top).toBe("194px");
-    expect(root(view).classList.contains("pm-sb-below")).toBe(false);
-    bubble.destroy();
+  it("inside a code block leaves the native menu alone", () => {
+    const view = mount(withCode(), { from: 14, to: 20 });
+    const evt = contextmenu(view);
+    expect(evt.defaultPrevented).toBe(false);
+    expect(root(view).style.display).toBe("none");
   });
 
-  it("flips below when sitting above would collide with the sticky toolbar", () => {
-    const view = mount(hello(), { from: 1, to: 6 }, { plugin: false });
-    const bubble = new SelectionBubbleView(view);
-    // jsdom reports every offset as 0; the flip needs a real height to decide.
-    Object.defineProperty(root(view), "offsetHeight", { value: 38, configurable: true });
-    vi.spyOn(view, "coordsAtPos").mockReturnValue({
-      left: 100,
-      right: 100,
-      top: 20,
-      bottom: 36,
-    });
-    bubble.update(view, null);
-    expect(root(view).classList.contains("pm-sb-below")).toBe(true);
-    // Below the selection's line bottom, plus the gap.
-    expect(root(view).style.top).toBe("42px");
-    bubble.destroy();
+  it("re-summons the bubble after an Escape", () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    contextmenu(view);
+    pressEscape(view);
+    expect(root(view).style.display).toBe("none");
+    contextmenu(view);
+    expect(root(view).style.display).toBe("");
+  });
+});
+
+// ─── Escape ──────────────────────────────────────────────────────────────────
+
+describe("Escape", () => {
+  it("closes an open popover first, and consumes the key", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    control(view, "Turn into").click();
+    expect(control(view, "Turn into").getAttribute("aria-expanded")).toBe("true");
+
+    const evt = pressEscape(view);
+    expect(evt.defaultPrevented).toBe(true);
+    expect(control(view, "Turn into").getAttribute("aria-expanded")).toBe("false");
+    expect(root(view).style.display).toBe(""); // bubble itself survives
+  });
+
+  it("closes the bubble on the next Escape, clearing the anchor", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    const evt = pressEscape(view);
+    expect(evt.defaultPrevented).toBe(true);
+    expect(root(view).style.display).toBe("none");
+    expect(selectionBubbleKey.getState(view.state)).toBeNull();
+  });
+
+  it("does not consume an Escape with neither popover nor bubble open", () => {
+    // The case that protects the Sidebar's rail panel.
+    const view = mount(hello(), { from: 1, to: 6 });
+    const evt = pressEscape(view);
+    expect(evt.defaultPrevented).toBe(false);
   });
 });
 
 // ─── commands ────────────────────────────────────────────────────────────────
 
 describe("controls", () => {
-  it("B toggles strong over the selected range and keeps the selection", () => {
+  it("B toggles strong over the selected range and keeps the selection", async () => {
     const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
     control(view, "Bold").click();
     expect(view.state.doc.rangeHasMark(1, 6, strong)).toBe(true);
     expect(view.state.selection.from).toBe(1);
     expect(view.state.selection.to).toBe(6);
     expect(control(view, "Bold").classList.contains("active")).toBe(true);
     expect(control(view, "Bold").getAttribute("aria-pressed")).toBe("true");
+    // The bubble outlives the command — the anchor mapped across its step.
+    expect(root(view).style.display).toBe("");
   });
 
-  it("a mousedown on the bubble is prevented so the selection survives", () => {
+  it("a mousedown on the bubble is prevented so the selection survives", async () => {
     const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
     const evt = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
     control(view, "Bold").dispatchEvent(evt);
     expect(evt.defaultPrevented).toBe(true);
   });
 
-  it("a swatch applies its slot colour and the remove swatch clears it", () => {
+  it("a swatch applies its slot colour and the remove swatch clears it", async () => {
     const view = mount(hello(), { from: 1, to: 6 });
     // The highlight commands end in `scrollIntoView()`, which sends the view
     // through coordsAtPos on dispatch — jsdom needs it answered.
     stubCoords(view);
+    await mouseup(view);
     control(view, "Highlight").click();
     control(view, "Highlight color 2").click();
     expect(activeHighlightColor(view.state)).toBe("hl2");
@@ -229,9 +465,10 @@ describe("controls", () => {
     expect(view.state.doc.rangeHasMark(1, 6, highlight)).toBe(false);
   });
 
-  it("the trigger dot tracks activeHighlightColor", () => {
+  it("the trigger dot tracks activeHighlightColor", async () => {
     const view = mount(hello(), { from: 1, to: 6 });
     stubCoords(view);
+    await mouseup(view);
     const dot = () => root(view).querySelector(".tb-hl-trigger-dot") as HTMLElement;
     expect(dot().classList.contains("tb-hl-none")).toBe(true);
     expect(dot().dataset.color).toBeUndefined();
@@ -244,8 +481,9 @@ describe("controls", () => {
     expect(current.dataset.color).toBe("hl3");
   });
 
-  it("opening one dropdown closes the other", () => {
+  it("opening one dropdown closes the other", async () => {
     const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
     const textTrigger = control(view, "Turn into");
     const linkTrigger = control(view, "Link");
     textTrigger.click();
@@ -255,8 +493,9 @@ describe("controls", () => {
     expect(linkTrigger.getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("a Text ▾ row turns the block and closes the menu", () => {
+  it("a Text ▾ row turns the block and closes the menu", async () => {
     const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
     control(view, "Turn into").click();
     const row = [...root(view).querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
       (el) => el.textContent?.startsWith("Heading 2"),
@@ -274,43 +513,81 @@ describe("Text ▾ label", () => {
   const label = (view: EditorView) =>
     root(view).querySelector(".tb-trigger-label")!.textContent;
 
-  it("reads Text in a paragraph", () => {
-    expect(label(mount(hello(), { from: 1, to: 6 }))).toBe("Text");
+  it("reads Text in a paragraph", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    expect(label(view)).toBe("Text");
   });
 
-  it("reads H2, and marks the matching row active", () => {
+  it("reads H2, and marks the matching row active", async () => {
     const d = doc.create(null, [heading.create({ level: 2 }, schema.text("Title"))]);
     const view = mount(d, { from: 1, to: 4 });
+    await mouseup(view);
     expect(label(view)).toBe("H2");
     const active = root(view).querySelector(".tb-menu-item.active");
     expect(active!.textContent).toContain("Heading 2");
   });
 
-  it("reads H5 even though no row matches — Text is the way out", () => {
+  it("reads H5 even though no row matches — Text is the way out", async () => {
     const d = doc.create(null, [heading.create({ level: 5 }, schema.text("Deep"))]);
     const view = mount(d, { from: 1, to: 4 });
+    await mouseup(view);
     expect(label(view)).toBe("H5");
     expect(root(view).querySelector(".tb-menu-item.active")).toBeNull();
+  });
+});
+
+// ─── positioning ─────────────────────────────────────────────────────────────
+
+describe("positioning", () => {
+  it("does not throw without layout, and positions when coords exist", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    // No stub: coordsAtPos throws in jsdom. Shown, just not placed.
+    await mouseup(view);
+    expect(root(view).style.display).toBe("");
+    expect(root(view).style.top).toBe("");
+
+    stubCoords(view);
+    bubbleOf(view).update(view, null);
+    // host rect is all-zero in jsdom, so top is the stubbed line top minus the gap.
+    expect(root(view).style.top).toBe("194px");
+    expect(root(view).classList.contains("pm-sb-below")).toBe(false);
+  });
+
+  it("flips below when sitting above would collide with the sticky toolbar", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    // jsdom reports every offset as 0; the flip needs a real height to decide.
+    Object.defineProperty(root(view), "offsetHeight", { value: 38, configurable: true });
+    vi.spyOn(view, "coordsAtPos").mockReturnValue({
+      left: 100,
+      right: 100,
+      top: 20,
+      bottom: 36,
+    });
+    await mouseup(view);
+    expect(root(view).classList.contains("pm-sb-below")).toBe(true);
+    // Below the selection's line bottom, plus the gap.
+    expect(root(view).style.top).toBe("42px");
   });
 });
 
 // ─── lifecycle ───────────────────────────────────────────────────────────────
 
 describe("lifecycle", () => {
-  it("update() early-returns when neither doc nor selection changed", () => {
-    const view = mount(hello(), { from: 1, to: 6 }, { plugin: false });
-    const bubble = new SelectionBubbleView(view);
+  it("update() early-returns when neither doc, selection nor anchor changed", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    const bubble = bubbleOf(view);
     const coords = stubCoords(view);
     bubble.update(view, view.state);
     expect(coords).not.toHaveBeenCalled();
     bubble.update(view, null);
     expect(coords).toHaveBeenCalled();
-    bubble.destroy();
   });
 
   it("destroy() removes the root and drains every listener", () => {
-    const view = mount(hello(), { from: 1, to: 6 }, { plugin: false });
-    const bubble = new SelectionBubbleView(view);
+    const view = mount(hello(), { from: 1, to: 6 });
+    const bubble = bubbleOf(view);
     const listeners = (bubble as unknown as { listeners: unknown[] }).listeners;
     expect(listeners.length).toBeGreaterThan(0);
     expect(root(view)).not.toBeNull();
@@ -318,14 +595,15 @@ describe("lifecycle", () => {
     bubble.destroy();
     expect(root(view)).toBeNull();
     expect((bubble as unknown as { listeners: unknown[] }).listeners).toHaveLength(0);
+    expect(selectionBubbleViewFor(view)).toBeUndefined();
   });
 
-  it("close() hides the bubble and clears the stored anchor", () => {
-    const view = mount(hello(), { from: 1, to: 6 }, { plugin: false });
-    const bubble = new SelectionBubbleView(view);
-    bubble.close();
+  it("close() hides the bubble and clears the stored anchor", async () => {
+    const view = mount(hello(), { from: 1, to: 6 });
+    await mouseup(view);
+    bubbleOf(view).close();
     expect(root(view).style.display).toBe("none");
-    bubble.destroy();
+    expect(selectionBubbleKey.getState(view.state)).toBeNull();
   });
 
   it("no-ops when the editor view has no parent to anchor to", () => {

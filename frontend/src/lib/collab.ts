@@ -16,7 +16,7 @@ import { tabOrAddRow, deleteRowOrColSelection } from "./tables";
 import { tableInsertTooltipPlugin } from "./tableInsertTooltip";
 import { tableRowDragPlugin } from "./tableRowDrag";
 import { linkTooltipPlugin } from "./linkTooltip";
-import { selectionBubblePlugin } from "./selectionBubble";
+import { selectionBubbleKeymap, selectionBubblePlugin } from "./selectionBubble";
 import { linkOpenPlugin } from "./linkOpen";
 import {
   handleImagePaste,
@@ -1550,6 +1550,10 @@ export class EditorConnection {
         // keystroke to the browser's Back shortcut; this consumes it. Ahead of
         // baseKeymap (which binds none of these) for clarity.
         keymap(lineBoundaryKeymap()),
+        // Escape closes the selection bubble's popover, then the bubble.
+        // Declines when neither is open, so the Sidebar still gets its Escape.
+        // Must precede baseKeymap, whose Escape runs selectParentNode.
+        keymap(selectionBubbleKeymap()),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({

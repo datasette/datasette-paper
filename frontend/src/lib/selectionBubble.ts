@@ -24,10 +24,16 @@
  * `(max-width: 640px)` query `Toolbar.svelte` uses so JS and CSS agree on what
  * mobile means; phones keep the bottom strip.
  *
- * Scope note: this module ships the selection trigger and the desktop gate.
- * The full suppression matrix (code blocks, tables, read-only), the
- * right-click trigger and the Escape keymap are a follow-up ticket; `close()`
- * and the mapped-anchor plumbing are here for them to build on.
+ * Triggers are explicit, and `update()` is not one of them: it repositions an
+ * already-open bubble and hides it when the gate closes, but only a settled
+ * selection (`mouseup` on the next tick, shift/arrow `keyup`) or a
+ * `contextmenu` over a non-empty selection ever *opens* one. "Open" is the
+ * stored anchor, and `apply` drops it the moment a transaction leaves the
+ * selection collapsed — which is exactly what typing over the selected range
+ * does, so typing hides.
+ *
+ * `shouldShowBubble` is the whole suppression matrix in one pure function —
+ * exported so the truth table is testable without a view.
  */
 
 import { Plugin, PluginKey, TextSelection } from "prosemirror-state";
@@ -71,6 +77,68 @@ const MOBILE_QUERY = "(max-width: 640px)";
 /** Gap between the selection's line box and the bubble, above or below. */
 const GAP = 6;
 
+/**
+ * Surfaces CodeMirror owns (`code-cm-focus`). A mark menu is meaningless in
+ * them, and `Text ▾` would offer to turn a SQL block into a heading.
+ */
+const CODE_NODES = new Set(["code_block", "sql_block", "source"]);
+
+/**
+ * `tableInsertTooltip.ts` owns *all* in-table UI, and
+ * `plans/toolbar-redesign/design.md:165` makes "the toolbar keeps zero
+ * in-table actions" an invariant — the bubble inherits it.
+ */
+const CELL_NODES = new Set(["table_cell", "table_header"]);
+
+/**
+ * The suppression matrix (`plans/selection-bubble/design.md` §Suppression
+ * matrix), as one pure predicate over the state plus the two facts that live
+ * on the view rather than in it.
+ *
+ * `instanceof TextSelection` is what keeps `NodeSelection` (an embed, an
+ * image, a date atom — each with its own chrome) and `CellSelection` out;
+ * note `CellSelection` is *not* a `TextSelection`, so the cell check below is
+ * the belt-and-braces case of a plain text selection inside a single cell,
+ * which a `CellSelection` never covers.
+ *
+ * Both ends are walked, innermost-first, the shape `blockTypeLabel.ts:15-25`
+ * uses. A selection that starts in a paragraph and ends in a code block is
+ * therefore suppressed: half the range is a surface the controls can't act on,
+ * and a menu that silently applies to only part of what's highlighted is worse
+ * than no menu.
+ */
+export function shouldShowBubble(
+  state: EditorState,
+  opts: { editable: boolean; mobile: boolean },
+): boolean {
+  if (!opts.editable) return false; // read-only viewers can't dispatch
+  if (opts.mobile) return false; // phones keep the docked strip
+  const sel = state.selection;
+  if (!(sel instanceof TextSelection) || sel.empty) return false;
+  for (const $pos of [sel.$from, sel.$to]) {
+    for (let d = $pos.depth; d > 0; d--) {
+      const name = $pos.node(d).type.name;
+      if (CODE_NODES.has(name) || CELL_NODES.has(name)) return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * The bubble view mounted on an `EditorView`. ProseMirror doesn't expose
+ * plugin views, and the Escape keymap below (a `Command`, which only gets
+ * `state` / `dispatch` / `view`) has to reach the instance to read whether a
+ * popover or the bubble is open.
+ */
+const bubbleViews = new WeakMap<EditorView, SelectionBubbleView>();
+
+/** The bubble attached to `view`, if any. Used by the keymap and by tests. */
+export function selectionBubbleViewFor(
+  view: EditorView,
+): SelectionBubbleView | undefined {
+  return bubbleViews.get(view);
+}
+
 type MenuName = "text" | "highlight" | "link";
 
 interface MenuParts {
@@ -87,11 +155,14 @@ export class SelectionBubbleView {
   private host: HTMLElement | null;
   private root: HTMLDivElement | null;
 
-  // Bound listeners so destroy() detaches exactly what was attached.
+  // Bound listeners so destroy() detaches exactly what was attached. `opts` is
+  // carried because removeEventListener only matches when the capture flag
+  // matches — the window `scroll` listener below is capture-phase.
   private listeners: Array<{
     target: EventTarget;
     type: string;
     fn: EventListenerOrEventListenerObject;
+    opts?: AddEventListenerOptions | boolean;
   }> = [];
 
   // ── control refs, all re-read in sync() ──────────────────────────────────
@@ -117,6 +188,14 @@ export class SelectionBubbleView {
 
   private mq: MediaQueryList | null = null;
 
+  // Set by the right-click trigger: place at the pointer instead of the
+  // selection's visual end, until the next open or dismiss.
+  private pointer: { x: number; y: number } | null = null;
+
+  // The mouseup settle tick, cleared on teardown so it can't fire into a
+  // destroyed view.
+  private settleTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(private view: EditorView) {
     const host = view.dom.parentElement;
     if (!host) {
@@ -129,6 +208,7 @@ export class SelectionBubbleView {
     this.host = host;
     this.root = this.build();
     host.appendChild(this.root);
+    bubbleViews.set(view, this);
 
     // Without this a click on any control collapses the very selection being
     // formatted: the browser moves the selection on mousedown, before the
@@ -138,10 +218,119 @@ export class SelectionBubbleView {
 
     if (typeof window.matchMedia === "function") {
       this.mq = window.matchMedia(MOBILE_QUERY);
+      // Crossing 640px re-runs the gate: `update()` hides when it now fails.
       this.on(this.mq, "change", () => this.update(this.view, null));
     }
 
+    this.bindTriggers(view);
     this.update(view, null);
+  }
+
+  // ── triggers ──────────────────────────────────────────────────────────────
+
+  /**
+   * The two show gestures and the hide gestures that aren't transactions.
+   * Everything goes through the tracked `listeners` array, so `destroy()`
+   * drains them.
+   */
+  private bindTriggers(view: EditorView): void {
+    // The selection isn't final while `mouseup` is dispatching — the browser
+    // settles it after the event — so re-read it on the next tick.
+    this.on(view.dom, "mouseup", () => {
+      if (this.settleTimer !== null) clearTimeout(this.settleTimer);
+      this.settleTimer = setTimeout(() => {
+        this.settleTimer = null;
+        this.showFromSelection();
+      }, 0);
+    });
+
+    // Keyboard selection: shift-anything, or a bare arrow (which collapses,
+    // and so takes the close branch of showFromSelection).
+    this.on(view.dom, "keyup", (e) => {
+      const ev = e as KeyboardEvent;
+      if (ev.shiftKey || ev.key.startsWith("Arrow")) this.showFromSelection();
+    });
+
+    // The first `contextmenu` handler in the frontend. It claims the event
+    // *only* over a live text selection; over an embed, an image, empty space
+    // or a collapsed cursor the native menu survives, because spellcheck and
+    // "search with…" are worth more than uniformity. Unlike `caretGuard.ts`'s
+    // mousedown guard there is no caret to protect here — the browser leaves
+    // the selection alone on right-click — so this preventDefault is purely
+    // "don't open the native menu".
+    this.on(view.dom, "contextmenu", (e) => {
+      if (!shouldShowBubble(this.view.state, this.gate())) return;
+      const ev = e as MouseEvent;
+      ev.preventDefault();
+      this.showAt(ev.clientX, ev.clientY);
+    });
+
+    // Focus leaving the editor takes the bubble with it.
+    this.on(view.dom, "blur", () => this.close());
+
+    // `scroll` doesn't bubble, but a capture-phase listener on window still
+    // sees it from any scrolling ancestor of the editor. Skip our own
+    // popovers, which scroll internally.
+    this.on(
+      window,
+      "scroll",
+      (e) => {
+        const target = e.target as Node | null;
+        if (target && this.root?.contains(target)) return;
+        this.close();
+      },
+      true,
+    );
+  }
+
+  /** `editable` / `mobile` — the two gate inputs that aren't in the state. */
+  private gate(): { editable: boolean; mobile: boolean } {
+    return { editable: this.view.editable, mobile: this.mq?.matches ?? false };
+  }
+
+  /**
+   * Open on the current selection, or close when the gate says no. Storing the
+   * range as plugin state is what "open" means; `update()` renders it.
+   */
+  private showFromSelection(): void {
+    if (!this.root || this.view.isDestroyed) return;
+    const state = this.view.state;
+    if (!shouldShowBubble(state, this.gate())) {
+      this.close();
+      return;
+    }
+    this.pointer = null;
+    const { from, to } = state.selection;
+    this.view.dispatch(state.tr.setMeta(selectionBubbleKey, { from, to }));
+  }
+
+  /** Open at a viewport point (the right-click trigger). */
+  private showAt(x: number, y: number): void {
+    if (!this.root || this.view.isDestroyed) return;
+    const state = this.view.state;
+    this.pointer = { x, y };
+    const { from, to } = state.selection;
+    this.view.dispatch(state.tr.setMeta(selectionBubbleKey, { from, to }));
+  }
+
+  /**
+   * The Escape ladder, in order: an open popover first, then the bubble,
+   * then nothing. Returning false is the case that protects the Sidebar —
+   * `Sidebar.svelte:59-69` skips an Escape that is already `defaultPrevented`,
+   * and ProseMirror `preventDefault()`s exactly when a keymap command returns
+   * true, so consuming here leaves the rail panel open and declining here lets
+   * the panel have it.
+   */
+  handleEscape(): boolean {
+    if (!this.root) return false;
+    if (this.openMenu) {
+      this.setMenu(null);
+      return true;
+    }
+    if (this.root.style.display === "none") return false;
+    this.close();
+    this.view.focus();
+    return true;
   }
 
   // ── DOM ────────────────────────────────────────────────────────────────────
@@ -489,9 +678,9 @@ export class SelectionBubbleView {
       ev.preventDefault();
       items[this.menuIndex]?.click();
     }
-    // Escape is deliberately not handled here: the bubble's Escape ladder
-    // (popover first, then the bubble, both preventDefault()ed so the Sidebar
-    // leaves its panel open) is a keymap in the follow-up ticket.
+    // Escape is deliberately not handled here: the ladder (popover first,
+    // then the bubble) is `selectionBubbleKeymap()`, so it takes part in
+    // ProseMirror's key ordering instead of racing this window listener.
   };
 
   private bindWhileOpen(): void {
@@ -510,44 +699,36 @@ export class SelectionBubbleView {
 
   // ── lifecycle ─────────────────────────────────────────────────────────────
 
+  /**
+   * Reposition and hide — never open. The stored anchor is the open flag, and
+   * only a trigger writes it; without that rule every keystroke would re-summon
+   * the bubble over the text being replaced.
+   *
+   * Hiding here is `dismiss()` (DOM only), not `close()`: this runs inside
+   * `updateState`, where dispatching would re-enter it. The paths that clear
+   * the anchor are all DOM handlers — `linkTooltip.ts:441-453` splits its two
+   * closers for the same reason.
+   */
   update(view: EditorView, lastState: EditorState | null): void {
     this.view = view;
     if (!this.root) return;
     const state = view.state;
+    const anchor = selectionBubbleKey.getState(state);
     if (
       lastState &&
       lastState.doc.eq(state.doc) &&
-      lastState.selection.eq(state.selection)
+      lastState.selection.eq(state.selection) &&
+      anchor === selectionBubbleKey.getState(lastState)
     ) {
       return;
     }
-    const anchor = this.anchorFor(view);
-    if (!anchor) {
+    if (!anchor || !shouldShowBubble(state, this.gate())) {
       this.dismiss();
       return;
     }
     this.root.style.display = "";
     this.sync(state);
     this.position(view, anchor);
-  }
-
-  /**
-   * The range to anchor to, or null when the bubble must not show.
-   *
-   * A stored anchor wins when there is one — `apply()` maps it through remote
-   * steps, so it, not the local selection, is what survives a collaborator's
-   * edit. With none stored, a qualifying selection is its own trigger. The
-   * follow-up ticket makes the trigger authoritative (mouseup settle /
-   * right-click) and adds the rest of the suppression matrix.
-   */
-  private anchorFor(view: EditorView): BubbleAnchor | null {
-    if (!view.editable) return null;
-    if (this.mq?.matches) return null; // mobile keeps the docked strip
-    const sel = view.state.selection;
-    if (!(sel instanceof TextSelection) || sel.empty) return null;
-    const stored = selectionBubbleKey.getState(view.state);
-    if (stored) return stored;
-    return { from: sel.from, to: sel.to };
   }
 
   /**
@@ -593,29 +774,40 @@ export class SelectionBubbleView {
   }
 
   /**
-   * Centre above the selection's visual end, clamped to the host, flipped
-   * below when the sticky toolbar is in the way. The vertical offset itself is
-   * CSS (`translateY(-100%)`, dropped by `.pm-sb-below`) so positioning never
+   * Centre above the selection's visual end — or above the pointer, for the
+   * right-click trigger — clamped to the host, flipped below when the sticky
+   * toolbar is in the way. The vertical offset itself is CSS
+   * (`translateY(-100%)`, dropped by `.pm-sb-below`) so positioning never
    * depends on having measured our own height.
    */
   private position(view: EditorView, anchor: BubbleAnchor): void {
     const root = this.root;
     const host = this.host;
     if (!root || !host) return;
-    let start: { left: number; top: number; bottom: number };
-    let end: { left: number; top: number; bottom: number };
-    try {
-      start = view.coordsAtPos(anchor.from);
-      end = view.coordsAtPos(anchor.to);
-    } catch {
-      return; // jsdom: getClientRects unimplemented — skip positioning
+    let centerX: number;
+    let lineTop: number;
+    let lineBottom: number;
+    if (this.pointer) {
+      centerX = this.pointer.x;
+      lineTop = this.pointer.y;
+      lineBottom = this.pointer.y;
+    } else {
+      let start: { left: number; top: number; bottom: number };
+      let end: { left: number; top: number; bottom: number };
+      try {
+        start = view.coordsAtPos(anchor.from);
+        end = view.coordsAtPos(anchor.to);
+      } catch {
+        return; // jsdom: getClientRects unimplemented — skip positioning
+      }
+      // A wrapping selection anchors on its last line, so the bubble sits at
+      // the visual end instead of floating over the middle (linkTooltip.ts
+      // does the same with the link's last client rect).
+      const oneLine = Math.abs(start.top - end.top) < 1;
+      centerX = oneLine ? (start.left + end.left) / 2 : end.left;
+      lineTop = oneLine ? Math.min(start.top, end.top) : end.top;
+      lineBottom = end.bottom;
     }
-    // A wrapping selection anchors on its last line, so the bubble sits at the
-    // visual end instead of floating over the middle (linkTooltip.ts does the
-    // same with the link's last client rect).
-    const oneLine = Math.abs(start.top - end.top) < 1;
-    const centerX = oneLine ? (start.left + end.left) / 2 : end.left;
-    const lineTop = oneLine ? Math.min(start.top, end.top) : end.top;
 
     const hostRect = host.getBoundingClientRect();
     let left = centerX - hostRect.left - root.offsetWidth / 2;
@@ -632,7 +824,7 @@ export class SelectionBubbleView {
     const collides = height > 0 && lineTop - height - GAP < toolbarBottom + 4;
     if (collides) {
       root.classList.add("pm-sb-below");
-      root.style.top = `${end.bottom - hostRect.top + GAP}px`;
+      root.style.top = `${lineBottom - hostRect.top + GAP}px`;
     } else {
       root.classList.remove("pm-sb-below");
       root.style.top = `${lineTop - hostRect.top - GAP}px`;
@@ -645,6 +837,7 @@ export class SelectionBubbleView {
    */
   dismiss(): void {
     this.openMenu = null;
+    this.pointer = null;
     this.paintMenus();
     this.unbindWhileOpen();
     if (!this.root) return;
@@ -655,7 +848,7 @@ export class SelectionBubbleView {
   /**
    * Dismiss *and* clear the anchor from plugin state, so a stale range can't
    * re-show the bubble. The explicit `null` is what `apply()` distinguishes
-   * from "no opinion"; the follow-up ticket's Escape / dismiss paths call this.
+   * from "no opinion". Every hide that isn't `update()`'s goes through here.
    */
   close(): void {
     this.dismiss();
@@ -666,10 +859,15 @@ export class SelectionBubbleView {
 
   destroy(): void {
     this.dismiss();
-    for (const { target, type, fn } of this.listeners) {
-      target.removeEventListener(type, fn);
+    if (this.settleTimer !== null) {
+      clearTimeout(this.settleTimer);
+      this.settleTimer = null;
+    }
+    for (const { target, type, fn, opts } of this.listeners) {
+      target.removeEventListener(type, fn, opts);
     }
     this.listeners = [];
+    bubbleViews.delete(this.view);
     this.root?.remove();
     this.root = null;
   }
@@ -681,10 +879,15 @@ export class SelectionBubbleView {
     this.view.focus();
   }
 
-  private on(target: EventTarget, type: string, fn: (e: Event) => void): void {
+  private on(
+    target: EventTarget,
+    type: string,
+    fn: (e: Event) => void,
+    opts?: AddEventListenerOptions | boolean,
+  ): void {
     const listener = fn as EventListenerOrEventListenerObject;
-    target.addEventListener(type, listener);
-    this.listeners.push({ target, type, fn: listener });
+    target.addEventListener(type, listener, opts);
+    this.listeners.push({ target, type, fn: listener, opts });
   }
 }
 
@@ -750,6 +953,35 @@ function hasAncestor(state: EditorState, type: NodeType): boolean {
   return false;
 }
 
+/**
+ * Escape bindings for the bubble. Registered before `baseKeymap` — the
+ * ordering `slashMenu.ts:255-267` documents — and therefore *after*
+ * `slashKeymap`, so a `/` popup still wins the key.
+ *
+ * The ladder is the point: an open popover closes first, then the bubble,
+ * then nothing. Returning true is how the bubble consumes the key, which
+ * makes ProseMirror `preventDefault()` the keydown; `Sidebar.svelte:59-69`
+ * skips an already-`defaultPrevented` Escape, so one press never closes both
+ * the bubble and the rail panel.
+ *
+ * Two things this deliberately does *not* claim. A `Command` gets no event,
+ * so unlike `tocView.ts:393-400` there is nothing here to `stopPropagation()`
+ * on — every window-level Escape listener in the frontend is either
+ * `defaultPrevented`-guarded (Sidebar) or gated on its own open state, and
+ * none of those can be open while focus sits in the editor. And returning
+ * false does not hand the browser a live Escape: `captureKeyDown`
+ * (prosemirror-view/src/capturekeys.ts:328) preventDefaults keyCode 27
+ * unconditionally inside an editable view, so an Escape typed in the editor
+ * is already consumed before the Sidebar sees it, bubble or no bubble. False
+ * means "not mine" — it leaves the key to the plugins after us.
+ */
+export function selectionBubbleKeymap(): Record<string, Command> {
+  return {
+    Escape: (_state, _dispatch, view) =>
+      (view && bubbleViews.get(view)?.handleEscape()) ?? false,
+  };
+}
+
 export function selectionBubblePlugin(): Plugin<BubbleAnchor | null> {
   return new Plugin<BubbleAnchor | null>({
     key: selectionBubbleKey,
@@ -763,7 +995,14 @@ export function selectionBubblePlugin(): Plugin<BubbleAnchor | null> {
         // `!== undefined` is what makes an explicit null a dismiss rather than
         // "this transaction has no opinion".
         if (meta !== undefined) return meta;
-        if (!value || !tr.docChanged) return value;
+        if (!value) return value;
+        // A collapsed selection ends the bubble outright, not just visually:
+        // the anchor is what "open" means, and a range left behind by typing
+        // (which replaces the selection, so the mapping below keeps it alive
+        // as the inserted text) would let the next non-empty selection re-show
+        // the bubble anchored to text nobody selected.
+        if (tr.selectionSet && tr.selection.empty) return null;
+        if (!tr.docChanged) return value;
         // Bias the ends inward so text inserted at either edge by a
         // collaborator doesn't silently grow the range the bubble formats.
         const from = tr.mapping.map(value.from, 1);
