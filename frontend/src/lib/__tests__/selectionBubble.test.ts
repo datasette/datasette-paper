@@ -144,6 +144,8 @@ afterEach(() => {
 
 // ─── suppression matrix ──────────────────────────────────────────────────────
 
+// @feat selection-bubble: unit truth table — the suppression matrix, the mapped
+// anchor, both show triggers, the Escape ladder and the controls' commands
 describe("shouldShowBubble", () => {
   const ok = { editable: true, mobile: false };
 

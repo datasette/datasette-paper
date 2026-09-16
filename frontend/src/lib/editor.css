@@ -1816,7 +1816,8 @@ mark.pp-hl[data-color="hl4"] {
  * the sticky toolbar's 10; its own popovers keep `.tb-menu`/`.tb-hl-menu`'s
  * 20), it never wraps, and it carries the popover elevation (--pp-shadow)
  * instead of the strip's fainter .04 literal. Absolutely positioned inside
- * `.editor-host` (position: relative, above). */
+ * `.editor-host` (position: relative, above).
+ * @feat selection-bubble: the floating shell — stacking tier, elevation, flip */
 .pm-selection-bubble {
   position: absolute;
   z-index: 12;

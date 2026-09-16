@@ -66,7 +66,13 @@ template injects the matching JS+CSS via `datasette_vite.vite_entry`.
   table-mode controls to the toolbar.
 - **Tooltip z-index must stay above `.paper-toolbar` (sticky, z:10).**
   `.pm-table-tooltip-root` is z:11 — without that, the toolbar
-  intercepts pointer events on tables that scroll near the top.
+  intercepts pointer events on tables that scroll near the top. The
+  whole ladder, so new chrome joins a tier instead of inventing one:
+  10 `.paper-toolbar` · 11 `.pm-table-tooltip-root` /
+  `.pm-link-tooltip-root` / inline popups · 12 `.pm-slash-menu`,
+  NodeView menus and `.pm-selection-bubble` · 20 `.tb-menu` /
+  `.tb-hl-menu`, which the bubble's own popovers reuse. 13–18 are
+  unused; keep them that way.
 - **Name input commits on blur/Enter, never per-keystroke.** The
   pattern (`tableInsertTooltip.ts`) keeps a local draft synced from the
   doc only when entering a *different* table; calling `view.focus()`

@@ -1471,6 +1471,19 @@ export class EditorConnection {
         keymap(valueKeymap()),
         //   `/`   — slash command menu (also drives Tab while open).
         keymap(slashKeymap(this.slashCommands)),
+        // Escape closes the selection bubble's popover, then the bubble.
+        // Declines when neither is open, so nothing else loses its Escape.
+        // Placement is load-bearing in BOTH directions: after the suggestion
+        // keymaps above (an open `/` popup still owns the key) and before
+        // `buildKeymap`, which is where Escape → selectParentNode actually
+        // lives — prosemirror-example-setup binds it, NOT `baseKeymap`
+        // (prosemirror-commands binds no Escape at all). Sitting after
+        // buildKeymap, as this first shipped, made the whole ladder dead code:
+        // selectParentNode won every Escape and the bubble only *looked*
+        // closed, dismissed by update() once the NodeSelection failed the
+        // gate. `e2e/selection-bubble.spec.ts` is what caught it.
+        // @feat selection-bubble: Escape ladder — popover, then bubble, then decline
+        keymap(selectionBubbleKeymap()),
         keymap({
           // Paper-owned chords read their key from the display registry
           // (shortcuts.ts), so the hint and the binding can't drift.
@@ -1550,10 +1563,6 @@ export class EditorConnection {
         // keystroke to the browser's Back shortcut; this consumes it. Ahead of
         // baseKeymap (which binds none of these) for clarity.
         keymap(lineBoundaryKeymap()),
-        // Escape closes the selection bubble's popover, then the bubble.
-        // Declines when neither is open, so the Sidebar still gets its Escape.
-        // Must precede baseKeymap, whose Escape runs selectParentNode.
-        keymap(selectionBubbleKeymap()),
         keymap(baseKeymap),
         collab({ version: boot.version, clientID: this.clientID }),
         cursorReporterPlugin({
@@ -1592,6 +1601,7 @@ export class EditorConnection {
         linkTooltipPlugin(),
         // Floating formatting menu over a non-empty text selection — the
         // docked toolbar's controls, brought to the selection. Desktop only.
+        // @feat selection-bubble: registers the plugin on the editor's plugin stack
         selectionBubblePlugin(),
         // In edit mode a click on a plain `<a>` link mark opens its URL in a
         // new tab (deterministic across browsers); view mode navigates natively.

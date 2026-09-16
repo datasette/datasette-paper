@@ -29,20 +29,28 @@ export async function insertViaMenu(page: Page, label: string): Promise<void> {
   await menu.getByRole("menuitem", { name: label, exact: true }).click();
 }
 
-/** Open the Text ▾ (block-type "turn into") menu and return its `role=menu`. */
+// Text ▾ and Link ▾ are scoped to `.paper-toolbar`, not just `#app-root`: the
+// selection bubble (`selectionBubble.ts`) is the docked strip's floating twin
+// and builds buttons with the *same* accessible names. While it is visible an
+// `#app-root`-wide role query matches two elements and strict mode fails. A
+// caller with a collapsed cursor never sees the bubble, so this only bites
+// specs that select text first — but the scoping is correct either way.
+
+/** Open the Text ▾ (block-type "turn into") menu on the docked strip and
+ * return its `role=menu`. */
 export async function openTextMenu(page: Page): Promise<Locator> {
-  const root = page.locator("#app-root");
-  await root.getByRole("button", { name: "Turn into", exact: true }).click();
-  const menu = root.getByRole("menu", { name: "Turn into" });
+  const toolbar = page.locator("#app-root .paper-toolbar");
+  await toolbar.getByRole("button", { name: "Turn into", exact: true }).click();
+  const menu = toolbar.getByRole("menu", { name: "Turn into" });
   await expect(menu).toBeVisible();
   return menu;
 }
 
-/** Open the Link ▾ menu and return its `role=menu`. */
+/** Open the Link ▾ menu on the docked strip and return its `role=menu`. */
 export async function openLinkMenu(page: Page): Promise<Locator> {
-  const root = page.locator("#app-root");
-  await root.getByRole("button", { name: "Link", exact: true }).click();
-  const menu = root.getByRole("menu", { name: "Link" });
+  const toolbar = page.locator("#app-root .paper-toolbar");
+  await toolbar.getByRole("button", { name: "Link", exact: true }).click();
+  const menu = toolbar.getByRole("menu", { name: "Link" });
   await expect(menu).toBeVisible();
   return menu;
 }

@@ -6,6 +6,7 @@
  *         defaultPrevented Escapes)
  *   - B9  Datasette embed <dialog> (dialog stops the keydown)
  *   - B11 NodeView ⋮ menu with focus on its button (menu claims Escape)
+ *   - B12 selection bubble (a keymap inside the editor — see its case)
  *
  * Locators are scoped to `#app-root` per the debug-bar "act as" gotcha.
  */
@@ -89,5 +90,43 @@ test.describe("Escape with the Sidebar panel open", () => {
           .__pmView.state.selection.toJSON().type,
     );
     expect(selType).not.toBe("node");
+  });
+
+  // @feat selection-bubble: e2e — one Escape closes the bubble, not the rail panel
+  test("B12: closes the selection bubble, not the panel", async ({ page }) => {
+    // Unlike B4/B9/B11 this case is *not* evidence that the bubble's Escape
+    // hands the panel off correctly. `captureKeyDown`
+    // (prosemirror-view/src/capturekeys.ts) returns true for keyCode 27
+    // unconditionally inside an editable view, so every Escape typed in the
+    // editor is already defaultPrevented before `Sidebar.svelte:59-69` looks at
+    // it — with or without a bubble. What this locks down is that the handler
+    // stays a ProseMirror keymap living inside the editor: move it to a window
+    // listener (the obvious "simplification") and it starts closing the panel
+    // too, and this fails. See plans/selection-bubble/design.md §Escape
+    // coexistence, which corrects the original rationale.
+    await gotoPaper(
+      page,
+      await createSeededPaper(page, "Alpha bravo charlie delta echo foxtrot.\n"),
+    );
+    const app = page.locator("#app-root");
+    const flyout = await openLinksPanel(page);
+
+    // Double-click a word — the settle trigger the bubble opens on.
+    const spot = await page.evaluate(() => {
+      const text = document.querySelector("#app-root .ProseMirror p")!.firstChild!;
+      const i = text.textContent!.indexOf("charlie");
+      const range = document.createRange();
+      range.setStart(text, i);
+      range.setEnd(text, i + "charlie".length);
+      const r = range.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    });
+    await page.mouse.dblclick(spot.x, spot.y);
+    const bubble = app.locator(".pm-selection-bubble");
+    await expect(bubble).toBeVisible();
+
+    await page.keyboard.press("Escape");
+    await expect(bubble).toBeHidden();
+    await expect(flyout).toBeVisible();
   });
 });

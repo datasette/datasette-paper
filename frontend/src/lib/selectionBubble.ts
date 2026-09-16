@@ -954,9 +954,11 @@ function hasAncestor(state: EditorState, type: NodeType): boolean {
 }
 
 /**
- * Escape bindings for the bubble. Registered before `baseKeymap` — the
- * ordering `slashMenu.ts:255-267` documents — and therefore *after*
- * `slashKeymap`, so a `/` popup still wins the key.
+ * Escape bindings for the bubble. Registered *after* `slashKeymap`, so a `/`
+ * popup still wins the key, and *before* `buildKeymap` — which is where
+ * Escape → `selectParentNode` lives (prosemirror-example-setup binds it;
+ * `baseKeymap` binds no Escape at all). Behind buildKeymap this whole ladder
+ * is dead code, so `collab.ts`'s registration point is part of the contract.
  *
  * The ladder is the point: an open popover closes first, then the bubble,
  * then nothing. Returning true is how the bubble consumes the key, which
@@ -982,6 +984,8 @@ export function selectionBubbleKeymap(): Record<string, Command> {
   };
 }
 
+// @feat selection-bubble: the plugin — anchor state (mapped through remote
+// steps) plus the `Plugin.view` that builds, positions and syncs the bubble
 export function selectionBubblePlugin(): Plugin<BubbleAnchor | null> {
   return new Plugin<BubbleAnchor | null>({
     key: selectionBubbleKey,
