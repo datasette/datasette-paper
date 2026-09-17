@@ -22,6 +22,13 @@ from prosemirror.model import Schema
 from prosemirror.schema.basic import schema as basic_schema
 from prosemirror.schema.list import add_list_nodes
 
+from .pm_compat import install_bounded_resolve_cache
+
+# Every step-applying code path imports this schema first, so installing the
+# bounded ResolvedPos cache here covers materialization, validation, the
+# markdown ingest paths and the CLI. See pm_compat for why it is needed.
+install_bounded_resolve_cache()
+
 # ─── URL-scheme allowlists (mirror frontend/src/lib/safeHref.ts) ──────────────
 #
 # The stock prosemirror-schema-basic `link` mark and `image` node emit their

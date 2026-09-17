@@ -11,6 +11,12 @@ from enum import Enum
 from typing import Awaitable, Callable, TypedDict, Union
 
 HEARTBEAT_SECONDS = 25.0  # module-level so tests can monkeypatch
+# Upper bound on one body write. uvicorn's ``send`` parks in flow-control
+# ``drain()`` with no timeout once the peer stops reading, and a half-open
+# socket (proxy dropped the client leg, no TCP keepalive) never produces
+# ``http.disconnect`` — so without this a stalled stream would hold its
+# subscriber queue and pin its instance until process restart.
+SEND_TIMEOUT_SECONDS = 60.0
 
 Send = Callable[[dict], Awaitable[None]]
 

@@ -59,6 +59,13 @@ logger = logging.getLogger("datasette_paper.instance")
 MAX_INSTANCES = 20
 MAX_TAIL = 10000
 SNAPSHOT_THRESHOLD = 100
+# Cap on undelivered broadcasts per SSE subscriber. A healthy stream drains
+# its queue as fast as the socket accepts bytes, so only a peer that stopped
+# reading (half-open connection, severed proxy leg) ever fills it. Rather
+# than hold every later broadcast for a client that may never come back,
+# the subscriber is dropped and told to re-bootstrap via the ``closed``
+# sentinel — the same path ``revoke_unauthorized`` uses.
+MAX_SUBSCRIBER_QUEUE = 512
 
 # Hard cap on a single step's serialized JSON size. The markdown-parser and
 # browser-paste guards strip oversized inline `data:` images on the two normal
@@ -503,7 +510,7 @@ class Instance:
         for q, (sub_client_id, _actor_id) in list(self.subscribers.items()):
             if sub_client_id is not None and sub_client_id == client_id:
                 continue
-            q.put_nowait(payload)
+            self._offer(q, payload)
 
         self.last_active = time.monotonic()
         await self._maybe_auto_snapshot(actor_id)
@@ -780,9 +787,42 @@ class Instance:
         instead — it atomically pairs the subscribe with a backlog
         snapshot so events broadcast between the two can't be lost.
         """
-        q: asyncio.Queue = asyncio.Queue()
+        q: asyncio.Queue = asyncio.Queue(maxsize=MAX_SUBSCRIBER_QUEUE)
         self.subscribers[q] = (client_id, actor_id)
         return q
+
+    # @feat collab-sse: bounded subscriber queues — a lagging stream is closed,
+    # not buffered forever (the production OOM had zombie streams pinned here)
+    def _offer(self, q: asyncio.Queue, payload: dict) -> None:
+        """Enqueue a broadcast, dropping the subscriber if it has stopped draining.
+
+        Every broadcaster goes through here instead of ``put_nowait`` so a
+        full queue means one thing everywhere: the peer is not reading. The
+        subscriber is unsubscribed (so the instance can be evicted and no
+        further broadcasts accumulate) and its queue is replaced with the
+        ``closed`` sentinel, which the SSE loop turns into a clean end of
+        stream if it ever gets to read again; the client re-bootstraps.
+        """
+        try:
+            q.put_nowait(payload)
+        except asyncio.QueueFull:
+            logger.warning(
+                "doc_id=%s: dropping SSE subscriber with %d undelivered events",
+                self.doc_id,
+                q.qsize(),
+            )
+            self.unsubscribe(q)
+            self._close_queue(q)
+
+    @staticmethod
+    def _close_queue(q: asyncio.Queue) -> None:
+        """Leave only the ``closed`` sentinel in ``q``; never raises on a full queue."""
+        while True:
+            try:
+                q.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        q.put_nowait({"kind": SSEEvent.CLOSED})
 
     async def subscribe_with_backlog(
         self,
@@ -841,7 +881,7 @@ class Instance:
         """
         msg = {"kind": SSEEvent.STATE_CHANGED, **payload}
         for q in list(self.subscribers):
-            q.put_nowait(msg)
+            self._offer(q, msg)
 
     def broadcast_renamed(self, name: str, updated_at: str) -> None:
         """Push a ``renamed`` event to every subscriber.
@@ -855,7 +895,7 @@ class Instance:
         """
         msg = {"kind": SSEEvent.RENAMED, "name": name, "updated_at": updated_at}
         for q in list(self.subscribers):
-            q.put_nowait(msg)
+            self._offer(q, msg)
 
     async def broadcast_permissions_changed(self, datasette, locked: bool) -> None:
         """Push a per-subscriber ``permissions-changed`` event after a lock flip.
@@ -878,12 +918,13 @@ class Instance:
             can_edit = await datasette.allowed(
                 action=PAPER_EDIT, resource=resource, actor=actor
             )
-            q.put_nowait(
+            self._offer(
+                q,
                 {
                     "kind": SSEEvent.PERMISSIONS_CHANGED,
                     "canEdit": can_edit,
                     "locked": locked,
-                }
+                },
             )
 
     async def revoke_unauthorized(self, datasette) -> int:
@@ -910,8 +951,8 @@ class Instance:
                 # Sentinel — the SSE loop checks `event_name == "closed"`
                 # and breaks out of its forwarding loop cleanly. Simpler
                 # than a separate channel.
-                q.put_nowait({"kind": SSEEvent.CLOSED})
                 self.subscribers.pop(q, None)
+                self._close_queue(q)
                 revoked += 1
         return revoked
 
@@ -979,7 +1020,7 @@ class Instance:
         """Push the current presence list to every subscriber queue."""
         payload = self._presence_payload()
         for q in list(self.subscribers):
-            q.put_nowait(payload)
+            self._offer(q, payload)
 
     # @feat snapshot-log: write periodic snapshot, prune folded steps, compact log
     async def record_client_doc(
