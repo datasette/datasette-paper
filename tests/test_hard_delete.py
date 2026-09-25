@@ -107,3 +107,27 @@ async def test_rowid_reuse_does_not_inherit_links_or_tags():
     reused = await paper.insert_doc(name="Reused", created_by="alice")
     assert await count_links_for_src(paper, reused.id) == 0
     assert await count_tag_rows(paper, reused.id) == 0
+
+
+async def count_inline_tag_rows(ds: Datasette, doc_id: int) -> int:
+    rows = await ds.get_internal_database().execute(
+        "SELECT 1 FROM _datasette_paper_inline_tag WHERE doc_id = ?", [doc_id]
+    )
+    return len(rows.rows)
+
+
+@pytest.mark.asyncio
+async def test_hard_delete_removes_inline_tag_index_rows():
+    ds, paper = await make_paper_db()
+    doc = await paper.insert_doc(name="Doc", created_by="alice")
+    await paper.replace_inline_tags(doc_id=doc.id, src_version=1, tags={"q3": 2})
+    assert await count_inline_tag_rows(ds, doc.id) == 1
+
+    await paper.hard_delete_doc(doc_id=doc.id)
+
+    # doc.id held the max rowid, so the next insert reuses it; a leftover
+    # inline-tag row would list the new doc under the dead doc's #q3.
+    assert await count_inline_tag_rows(ds, doc.id) == 0
+    reused = await paper.insert_doc(name="Reused", created_by="alice")
+    assert reused.id == doc.id
+    assert await count_inline_tag_rows(ds, reused.id) == 0
