@@ -10,7 +10,7 @@ classifiers=[
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "datasette>=1.0a30",
+    "datasette>=1.0a41",
     "datasette-acl>=0.6a1",
     "datasette-acl-share>=0.0.1a4",
     "datasette-plugin-router>=0.0.1a4",
@@ -39,15 +39,6 @@ dev = [
     "ruff==0.15.12",
     "solite>=0.0.1a36",
 ]
-
-# DEV-ONLY PIN: the telemetry work imports Datasette's plugin telemetry kit
-# (datasette.telemetry_registry / datasette.telemetry / datasette.telemetry_testing),
-# which is public plugin API on the asg017/otel-phase1-6-plugin-kit branch
-# (PR #2899) and not yet in a release. Once the stack ships, delete this
-# [tool.uv.sources] block and raise the `datasette>=` floor above to the
-# release that includes PR #2899.
-[tool.uv.sources]
-datasette = { git = "https://github.com/simonw/datasette", branch = "asg017/otel-phase1-6-plugin-kit" }
 
 [build-system]
 requires = ["setuptools"]
