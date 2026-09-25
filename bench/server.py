@@ -36,11 +36,13 @@ def free_port() -> int:
 class Server:
     def __init__(self, repo_path: Path, workdir: Path, port: int | None = None):
         self.repo_path = repo_path.resolve()
-        self.workdir = workdir
+        # Absolute: the server runs with cwd=repo_path, so a relative
+        # --internal path would resolve inside the other checkout.
+        self.workdir = workdir.resolve()
         self.port = port or free_port()
         self.proc: subprocess.Popen | None = None
-        self.log_path = workdir / "server.log"
-        self.internal_db = workdir / "internal.db"
+        self.log_path = self.workdir / "server.log"
+        self.internal_db = self.workdir / "internal.db"
         self._ps: psutil.Process | None = None
         self._target_ps: psutil.Process | None = None
 
