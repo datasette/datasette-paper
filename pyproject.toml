@@ -10,13 +10,14 @@ classifiers=[
 ]
 requires-python = ">=3.10"
 dependencies = [
-    "datasette>=1.0a30",
+    "datasette>=1.0a41",
     "datasette-acl>=0.6a1",
     "datasette-acl-share>=0.0.1a4",
     "datasette-plugin-router>=0.0.1a4",
     "datasette-user-profiles>=0.1.0a8",
     "datasette-vite>=0.0.1a4",
     "markdown-it-py[plugins]>=3.0",
+    "opentelemetry-api>=1.37",
     "prosemirror>=0.6.1",
     "pydantic>=2",
     "sqlite-migrate>=0.1b0",
@@ -29,6 +30,7 @@ dev = [
     "datasette-debug-gotham>=0.1.0a3",
     "datasette-sidebar>=0.0.1a3",
     "llm-openrouter>=0.7",
+    "opentelemetry-sdk>=1.37",
     "pytest",
     "pytest-asyncio",
     # Pinned: ruff 0.16 formats code blocks in markdown and enables new

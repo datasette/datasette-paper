@@ -43,16 +43,43 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import contextlib
 import json
 import logging
 import time
 import weakref
 from typing import Optional
 
+from opentelemetry import trace as otel_trace
+from opentelemetry.trace import Status, StatusCode
+
+from . import telemetry
 from .db import PaperDB
 from .errors import BadVersionError, ConflictError, GoneError, InvalidStepError
 from .sql import _queries
 from .sse import SSEEvent
+from .telemetry_registry import (
+    BATCH_BYTES,
+    BROADCAST,
+    CACHE_HIT,
+    DOC_ID,
+    INDEX,
+    INSTANCE_HYDRATE,
+    MATERIALIZE,
+    POISONED,
+    REINDEX,
+    SNAPSHOT,
+    SNAPSHOT_BYTES,
+    SNAPSHOT_VERSION,
+    SKIPPED,
+    STEP_COUNT,
+    STEPS_APPLIED,
+    SUBSCRIBERS,
+    TAIL_LENGTH,
+    TAIL_TRIMMED,
+    TRIGGER,
+    VALIDATE_STEPS,
+)
 
 logger = logging.getLogger("datasette_paper.instance")
 
@@ -206,34 +233,44 @@ class Instance:
 
     @classmethod
     # @feat snapshot-log: load latest snapshot + steps_after into the in-memory tail
+    # @feat telemetry: the cold-start span + histogram + real-hydrate counter
     async def hydrate(cls, db: PaperDB, doc_id: int) -> "Instance":
         """Load instance state from the database."""
-        snapshot = await db.select_latest_snapshot(doc_id=doc_id)
-        if snapshot is None:
-            snapshot_version = 0
-            snapshot_doc_json = empty_doc_json()
-        else:
-            snapshot_version = snapshot.version
-            snapshot_doc_json = snapshot.doc_json
+        started = time.perf_counter()
+        with telemetry.tracer.start_as_current_span(INSTANCE_HYDRATE) as span:
+            snapshot = await db.select_latest_snapshot(doc_id=doc_id)
+            if snapshot is None:
+                snapshot_version = 0
+                snapshot_doc_json = empty_doc_json()
+            else:
+                snapshot_version = snapshot.version
+                snapshot_doc_json = snapshot.doc_json
 
-        steps_after = await db.select_steps_after(
-            doc_id=doc_id, after_version=snapshot_version
-        )
+            steps_after = await db.select_steps_after(
+                doc_id=doc_id, after_version=snapshot_version
+            )
 
-        steps_tail: collections.deque = collections.deque(maxlen=MAX_TAIL)
-        true_version = snapshot_version
-        for step in steps_after:
-            steps_tail.append(_step_record(step))
-            true_version = step.version
+            steps_tail: collections.deque = collections.deque(maxlen=MAX_TAIL)
+            true_version = snapshot_version
+            for step in steps_after:
+                steps_tail.append(_step_record(step))
+                true_version = step.version
 
-        return cls(
-            db=db,
-            doc_id=doc_id,
-            version=true_version,
-            snapshot_version=snapshot_version,
-            snapshot_doc_json=snapshot_doc_json,
-            steps_tail=steps_tail,
-        )
+            if span.is_recording():
+                span.set_attribute(DOC_ID, doc_id)
+                span.set_attribute(SNAPSHOT_VERSION, snapshot_version)
+                span.set_attribute(TAIL_LENGTH, len(steps_tail))
+            telemetry.hydrate_duration.record(time.perf_counter() - started)
+            telemetry.instances_hydrated.add(1)
+
+            return cls(
+                db=db,
+                doc_id=doc_id,
+                version=true_version,
+                snapshot_version=snapshot_version,
+                snapshot_doc_json=snapshot_doc_json,
+                steps_tail=steps_tail,
+            )
 
     # @feat snapshot-log: apply steps_tail over snapshot via prosemirror-py (cached)
     def materialize_live_doc(self) -> dict:
@@ -244,60 +281,91 @@ class Instance:
 
         On step-apply failure, returns the doc as far as steps successfully
         applied, plus logs a warning. Should never raise.
+
+        @feat telemetry: paper.materialize is **synchronous on the event
+        loop** — this span is the one that explains a slow trace whose SQL
+        is fast. The span status stays UNSET even when history is poisoned
+        (the method's contract is "never raises"); the
+        paper.instances.poisoned gauge is the alert.
         """
-        if (
+        started = time.perf_counter()
+        cache_hit = (
             self._cached_live_doc_json is not None
             and self._cached_live_version == self.version
-        ):
-            return json.loads(self._cached_live_doc_json)
-
-        # Late imports keep the prosemirror dep optional at module-load
-        # time and avoid pulling lxml on cold paths that don't need it.
-        from prosemirror.transform import Step
-
-        from .pm_schema import schema
-
-        # Re-materializing — wipe any prior poisoned-history marker so a
-        # subsequently repaired tail (admin trimmed the bad step, the
-        # registry was forced to re-hydrate) clears the gate cleanly.
-        self._materialization_error = None
-
-        try:
-            doc = schema.node_from_json(json.loads(self.snapshot_doc_json))
-        except Exception:
-            logger.exception(
-                "doc_id=%s: snapshot_doc_json failed to parse, returning raw",
-                self.doc_id,
-            )
-            return json.loads(self.snapshot_doc_json)
-
-        for record in self.steps_tail:
+        )
+        steps_applied = 0
+        snapshot_parse_failed = False
+        with telemetry.tracer.start_as_current_span(MATERIALIZE) as span:
             try:
-                step = Step.from_json(schema, json.loads(record["step_json"]))
-                result = step.apply(doc)
-                if result.failed:
-                    logger.warning(
-                        "doc_id=%s version=%s: Step.apply failed: %s",
-                        self.doc_id,
-                        record["version"],
-                        result.failed,
-                    )
-                    self._materialization_error = (record["version"], result.failed)
-                    break
-                doc = result.doc
-            except Exception as exc:
-                logger.exception(
-                    "doc_id=%s version=%s: Step.apply raised",
-                    self.doc_id,
-                    record["version"],
-                )
-                self._materialization_error = (record["version"], str(exc))
-                break
+                if cache_hit:
+                    return json.loads(self._cached_live_doc_json)
 
-        live = doc.to_json()
-        self._cached_live_doc_json = json.dumps(live)
-        self._cached_live_version = self.version
-        return live
+                # Late imports keep the prosemirror dep optional at
+                # module-load time and avoid pulling lxml on cold paths
+                # that don't need it.
+                from prosemirror.transform import Step
+
+                from .pm_schema import schema
+
+                # Re-materializing — wipe any prior poisoned-history marker
+                # so a subsequently repaired tail (admin trimmed the bad
+                # step, the registry was forced to re-hydrate) clears the
+                # gate cleanly.
+                self._materialization_error = None
+
+                try:
+                    doc = schema.node_from_json(json.loads(self.snapshot_doc_json))
+                except Exception:
+                    logger.exception(
+                        "doc_id=%s: snapshot_doc_json failed to parse, returning raw",
+                        self.doc_id,
+                    )
+                    snapshot_parse_failed = True
+                    return json.loads(self.snapshot_doc_json)
+
+                for record in self.steps_tail:
+                    try:
+                        step = Step.from_json(schema, json.loads(record["step_json"]))
+                        result = step.apply(doc)
+                        if result.failed:
+                            logger.warning(
+                                "doc_id=%s version=%s: Step.apply failed: %s",
+                                self.doc_id,
+                                record["version"],
+                                result.failed,
+                            )
+                            self._materialization_error = (
+                                record["version"],
+                                result.failed,
+                            )
+                            break
+                        doc = result.doc
+                        steps_applied += 1
+                    except Exception as exc:
+                        logger.exception(
+                            "doc_id=%s version=%s: Step.apply raised",
+                            self.doc_id,
+                            record["version"],
+                        )
+                        self._materialization_error = (record["version"], str(exc))
+                        break
+
+                live = doc.to_json()
+                self._cached_live_doc_json = json.dumps(live)
+                self._cached_live_version = self.version
+                return live
+            finally:
+                poisoned = (
+                    snapshot_parse_failed or self._materialization_error is not None
+                )
+                if span.is_recording():
+                    span.set_attribute(DOC_ID, self.doc_id)
+                    span.set_attribute(CACHE_HIT, cache_hit)
+                    span.set_attribute(STEPS_APPLIED, steps_applied)
+                    span.set_attribute(POISONED, poisoned)
+                telemetry.materialize_duration.record(
+                    time.perf_counter() - started, {CACHE_HIT: cache_hit}
+                )
 
     def _raise_if_poisoned(self) -> None:
         """Reject a write if a step in history couldn't be materialized.
@@ -316,6 +384,25 @@ class Instance:
                 0, f"history corrupted at version {bad_version}: {bad_msg}"
             )
 
+    @contextlib.asynccontextmanager
+    async def _hold_write_lock(self):
+        """Acquire ``self._write_lock``, measuring the wait.
+
+        @feat telemetry: emits the ``paper.write_lock.wait`` span (explicit
+        start/end times, the ``db.write.queue_wait`` idiom) and records the
+        matching histogram — always, including a zero wait, so the
+        histogram's p50 is honest. Shared by every site that takes the
+        lock: ``add_events``, ``subscribe_with_backlog``,
+        ``append_fragment`` and ``apply_markdown_edit``.
+        """
+        start_ns = time.time_ns()
+        await self._write_lock.acquire()
+        telemetry.record_write_lock_wait(self.doc_id, start_ns, time.time_ns())
+        try:
+            yield
+        finally:
+            self._write_lock.release()
+
     def _validate_steps(self, step_jsons: list[str]) -> None:
         """Apply each step against a clone of the live doc; raise on first failure.
 
@@ -326,6 +413,19 @@ class Instance:
 
         Raises ``InvalidStepError`` with the offending 0-based batch index.
         """
+        # @feat telemetry: prosemirror-py Step.apply runs per step on the
+        # event loop — this span is where a slow write with fast SQL shows.
+        # An InvalidStepError here is the protocol rejecting a bad batch
+        # (a 422), not a failure, so the SDK's default exception recording
+        # is off — the submit span maps it to outcome=invalid_step.
+        with telemetry.tracer.start_as_current_span(
+            VALIDATE_STEPS, record_exception=False, set_status_on_exception=False
+        ) as span:
+            if span.is_recording():
+                span.set_attribute(STEP_COUNT, len(step_jsons))
+            self._validate_steps_inner(step_jsons)
+
+    def _validate_steps_inner(self, step_jsons: list[str]) -> None:
         # Late imports keep prosemirror off the cold-path module import.
         from prosemirror.model import ReplaceError
         from prosemirror.transform import Step
@@ -393,36 +493,46 @@ class Instance:
         we're not adding new serialization beyond what the underlying
         write already requires.
         """
-        async with self._write_lock:
-            if version < 0 or version > self.version:
-                raise BadVersionError(
-                    f"Version {version} is invalid (server version: {self.version})"
+        # @feat telemetry: the whole pipeline, lock wait included, under
+        # one paper.events.submit span with origin=collab; protocol
+        # rejections are outcomes, not span errors.
+        with telemetry.submit_pipeline(
+            self.doc_id, "collab", step_count=len(steps)
+        ) as submit_state:
+            async with self._hold_write_lock():
+                if version < 0 or version > self.version:
+                    raise BadVersionError(
+                        f"Version {version} is invalid (server version: {self.version})"
+                    )
+                if version != self.version:
+                    raise ConflictError(
+                        f"Version {version} != server version {self.version}"
+                    )
+
+                if not steps:
+                    submit_state["outcome"] = "empty"
+                    return self.version
+
+                # The wire format delivers steps as parsed JSON
+                # (lists/dicts). The `step_json` column stores them as
+                # TEXT, so serialize each step back to a JSON string
+                # before binding. Strings come through as-is.
+                step_jsons = [s if isinstance(s, str) else json.dumps(s) for s in steps]
+
+                # Validate every step against the current live doc before
+                # writing any of them. The wire `Step.from_json` +
+                # `Step.apply` accepts malformed payloads silently —
+                # `apply` only catches `ReplaceError`, so a content-spec
+                # violation raises a bare `ValueError` from
+                # `Node.check_content` that escapes both apply and
+                # `StepResult`. Catch both shapes here and reject the
+                # batch with `InvalidStepError` so the client gets a
+                # structured 422 instead of a 200 that poisons the history.
+                self._validate_steps(step_jsons)
+
+                return await self._persist_and_broadcast(
+                    step_jsons, client_id, actor_id
                 )
-            if version != self.version:
-                raise ConflictError(
-                    f"Version {version} != server version {self.version}"
-                )
-
-            if not steps:
-                return self.version
-
-            # The wire format delivers steps as parsed JSON (lists/dicts).
-            # The `step_json` column stores them as TEXT, so serialize each
-            # step back to a JSON string before binding. Strings come
-            # through as-is.
-            step_jsons = [s if isinstance(s, str) else json.dumps(s) for s in steps]
-
-            # Validate every step against the current live doc before
-            # writing any of them. The wire `Step.from_json` + `Step.apply`
-            # accepts malformed payloads silently — `apply` only catches
-            # `ReplaceError`, so a content-spec violation raises a bare
-            # `ValueError` from `Node.check_content` that escapes both
-            # apply and `StepResult`. Catch both shapes here and reject
-            # the batch with `InvalidStepError` so the client gets a
-            # structured 422 instead of a 200 that poisons the history.
-            self._validate_steps(step_jsons)
-
-            return await self._persist_and_broadcast(step_jsons, client_id, actor_id)
 
     async def _persist_and_broadcast(
         self,
@@ -463,7 +573,12 @@ class Instance:
                 )
             return new_ver
 
-        new_version = await self.db.database.execute_write_fn(write_all)
+        # @feat telemetry: named after what it does so core's db.query span
+        # reads `datasette.callback == "insert_steps"`, plus paper's
+        # per-helper duration series — the same treatment as PaperDB's shims.
+        write_all.__qualname__ = "insert_steps"
+        with telemetry.db_query_timer("insert_steps", "write"):
+            new_version = await self.db.database.execute_write_fn(write_all)
 
         # Fetch the newly inserted steps to get their created_at values. Safe
         # under the lock — no other writer can have advanced the version while
@@ -493,6 +608,21 @@ class Instance:
             "lastActor": new_step_records[-1]["actor_id"],
             "lastEditedAt": new_step_records[-1]["created_at"],
         }
+        # @feat telemetry: batch size + fan-out. batch_bytes is computed
+        # unconditionally — it also feeds the paper.events.batch_bytes
+        # histogram, which has no is_recording() gate, and it is a sum of
+        # len() over strings that were just JSON-encoded anyway; do not
+        # "optimize" it behind the span check. The submit span (ambient
+        # current span here — add_events / append_fragment /
+        # apply_markdown_edit all hold it) gets the same attributes the
+        # design promises on paper.events.submit.
+        subscriber_count = len(self.subscribers)
+        batch_bytes = sum(len(r["step_json"]) for r in new_step_records)
+        telemetry.events_batch_bytes.record(batch_bytes)
+        submit_span = otel_trace.get_current_span()
+        if submit_span.is_recording():
+            submit_span.set_attribute(BATCH_BYTES, batch_bytes)
+            submit_span.set_attribute(SUBSCRIBERS, subscriber_count)
         # Skip the originator: their POST 200 already confirmed these steps
         # locally via prosemirror-collab's receiveTransaction. Sending the
         # echo would cause them to re-apply the step on top of the already-
@@ -500,10 +630,17 @@ class Instance:
         # it as a remote insertion and duplicate the change). API-originated
         # appends use a sentinel client_id (``_API_CLIENT_ID``) that matches
         # no real subscriber, so every live editor receives them.
-        for q, (sub_client_id, _actor_id) in list(self.subscribers.items()):
-            if sub_client_id is not None and sub_client_id == client_id:
-                continue
-            q.put_nowait(payload)
+        # put_nowait is cheap; the span exists for the count and to show
+        # ordering relative to the write.
+        with telemetry.tracer.start_as_current_span(BROADCAST) as span:
+            if span.is_recording():
+                span.set_attribute(SUBSCRIBERS, subscriber_count)
+                span.set_attribute(BATCH_BYTES, batch_bytes)
+            telemetry.broadcast_fanout.record(subscriber_count)
+            for q, (sub_client_id, _actor_id) in list(self.subscribers.items()):
+                if sub_client_id is not None and sub_client_id == client_id:
+                    continue
+                q.put_nowait(payload)
 
         self.last_active = time.monotonic()
         await self._maybe_auto_snapshot(actor_id)
@@ -521,27 +658,33 @@ class Instance:
         ``_datasette_paper_inline_tag`` current as of the latest write, which is
         what ``GET /tags/{slug}/refs`` joins against.
         """
-        if self._materialization_error is not None:
-            return
-        if self._tags_indexed_version == self.version:
-            return
-        try:
-            live_json = self.materialize_live_doc()
+        # @feat telemetry: one paper.reindex span per index, three per
+        # write; a swallowed failure marks the span ERROR and bumps the
+        # failure counter — the log line stays (spans don't replace logs).
+        with self._reindex_span("tags") as span:
             if self._materialization_error is not None:
                 return
-            from .tags import extract_tags
+            if self._tags_indexed_version == self.version:
+                return
+            try:
+                live_json = self.materialize_live_doc()
+                if self._materialization_error is not None:
+                    return
+                self._mark_reindex_ran(span)
+                from .tags import extract_tags
 
-            tags: dict[str, int] = {}
-            for slug in extract_tags(live_json):
-                tags[slug] = tags.get(slug, 0) + 1
-            await self.db.replace_inline_tags(
-                doc_id=self.doc_id,
-                src_version=self.version,
-                tags=tags,
-            )
-            self._tags_indexed_version = self.version
-        except Exception:
-            logger.exception("inline-tag reindex failed for doc %s", self.doc_id)
+                tags: dict[str, int] = {}
+                for slug in extract_tags(live_json):
+                    tags[slug] = tags.get(slug, 0) + 1
+                await self.db.replace_inline_tags(
+                    doc_id=self.doc_id,
+                    src_version=self.version,
+                    tags=tags,
+                )
+                self._tags_indexed_version = self.version
+            except Exception as exc:
+                self._record_reindex_failure(span, "tags", exc)
+                logger.exception("inline-tag reindex failed for doc %s", self.doc_id)
 
     # @feat task-assign: write-tail reindex of the assigned-task index off the
     # materialized doc — a third sibling beside reindex_links / reindex_tags.
@@ -556,25 +699,30 @@ class Instance:
         ?`` an indexed equality. Keeps ``_datasette_paper_task_assignment``
         current as of the latest write for the ``/todos`` endpoint.
         """
-        if self._materialization_error is not None:
-            return
-        if self._tasks_indexed_version == self.version:
-            return
-        try:
-            live_json = self.materialize_live_doc()
+        with self._reindex_span("tasks") as span:
             if self._materialization_error is not None:
                 return
-            from .markdown import extract_tasks
+            if self._tasks_indexed_version == self.version:
+                return
+            try:
+                live_json = self.materialize_live_doc()
+                if self._materialization_error is not None:
+                    return
+                self._mark_reindex_ran(span)
+                from .markdown import extract_tasks
 
-            rows = task_assignment_rows(extract_tasks(live_json))
-            await self.db.replace_task_assignments(
-                doc_id=self.doc_id,
-                src_version=self.version,
-                rows=rows,
-            )
-            self._tasks_indexed_version = self.version
-        except Exception:
-            logger.exception("task-assignment reindex failed for doc %s", self.doc_id)
+                rows = task_assignment_rows(extract_tasks(live_json))
+                await self.db.replace_task_assignments(
+                    doc_id=self.doc_id,
+                    src_version=self.version,
+                    rows=rows,
+                )
+                self._tasks_indexed_version = self.version
+            except Exception as exc:
+                self._record_reindex_failure(span, "tasks", exc)
+                logger.exception(
+                    "task-assignment reindex failed for doc %s", self.doc_id
+                )
 
     # @feat snapshot-log: write-tail reindex of derived rows off the materialized doc
     async def reindex_links(self) -> None:
@@ -585,27 +733,72 @@ class Instance:
         logs any persistence error (an edge-index failure must not fail the
         user's edit).
         """
-        if self._materialization_error is not None:
-            return
-        if self._links_indexed_version == self.version:
-            return
-        try:
-            live_json = self.materialize_live_doc()
+        with self._reindex_span("links") as span:
             if self._materialization_error is not None:
                 return
-            from .links import extract_links
+            if self._links_indexed_version == self.version:
+                return
+            try:
+                live_json = self.materialize_live_doc()
+                if self._materialization_error is not None:
+                    return
+                self._mark_reindex_ran(span)
+                from .links import extract_links
 
-            edges: dict[int, int] = {}
-            for dst in extract_links(live_json):
-                edges[dst] = edges.get(dst, 0) + 1
-            await self.db.replace_links(
-                src_doc_id=self.doc_id,
-                src_version=self.version,
-                edges=edges,
-            )
-            self._links_indexed_version = self.version
-        except Exception:
-            logger.exception("link reindex failed for doc %s", self.doc_id)
+                edges: dict[int, int] = {}
+                for dst in extract_links(live_json):
+                    edges[dst] = edges.get(dst, 0) + 1
+                await self.db.replace_links(
+                    src_doc_id=self.doc_id,
+                    src_version=self.version,
+                    edges=edges,
+                )
+                self._links_indexed_version = self.version
+            except Exception as exc:
+                self._record_reindex_failure(span, "links", exc)
+                logger.exception("link reindex failed for doc %s", self.doc_id)
+
+    @contextlib.contextmanager
+    def _reindex_span(self, index: str):
+        """One ``paper.reindex`` span, attributed by index kind.
+
+        @feat telemetry: ``paper.skipped`` starts True, so the early
+        returns (poisoned history, already indexed at this version) end the
+        span marked skipped; ``_mark_reindex_ran`` flips it to False once
+        a rebuild actually runs.
+        """
+        with telemetry.tracer.start_as_current_span(REINDEX) as span:
+            if span.is_recording():
+                span.set_attribute(DOC_ID, self.doc_id)
+                # index is one of the three code literals; the registry
+                # enum + conformance test enforce membership.
+                span.set_attribute(INDEX, index)
+                span.set_attribute(SKIPPED, True)
+            yield span
+
+    @staticmethod
+    def _mark_reindex_ran(span) -> None:
+        "Past the early returns: this reindex pass rebuilds the index."
+        if span.is_recording():
+            span.set_attribute(SKIPPED, False)
+
+    @staticmethod
+    def _record_reindex_failure(span, index: str, exc: Exception) -> None:
+        """Mark a swallowed reindex failure: span ERROR + failure counter.
+
+        The existing ``logger.exception`` at the call site stays — spans
+        do not replace logs; without this counter nothing but the log
+        surfaces these.
+
+        @feat telemetry: a redacted ``exception`` event — the class name
+        only. ``span.record_exception`` would record ``str(exc)`` and the
+        stacktrace, and a reindex error message can echo doc content (a
+        tag slug, task text); the full exception is in the log line.
+        """
+        if span.is_recording():
+            span.add_event("exception", {"exception.type": type(exc).__qualname__})
+        span.set_status(Status(StatusCode.ERROR))
+        telemetry.reindex_failures.add(1, {INDEX: index})
 
     async def _maybe_auto_snapshot(self, actor_id: Optional[str]) -> None:
         """Snapshot when the step tail has drifted past the threshold.
@@ -625,13 +818,14 @@ class Instance:
         if self._materialization_error is not None:
             return
         await self.record_client_doc(
-            self.version, json.dumps(materialized), actor_id=actor_id
+            self.version, json.dumps(materialized), actor_id=actor_id, trigger="auto"
         )
 
     async def append_fragment(
         self,
         fragment_json: list[dict],
         actor_id: Optional[str] = None,
+        origin: str = "api",
     ) -> int:
         """Append top-level block nodes to the end of the doc as one step.
 
@@ -644,38 +838,51 @@ class Instance:
 
         Raises :class:`InvalidStepError` if history is poisoned or the
         fragment can't be inserted at the end of the doc under the schema.
-        """
-        if not fragment_json:
-            return self.version
 
+        ``origin`` is stamped on the telemetry (``"api"`` for the append
+        route, ``"agent"`` from the agent tools) — passed by the caller,
+        never inferred.
+        """
         # Late imports keep prosemirror off the cold module-import path.
         from prosemirror.model import Fragment, Node, Slice
         from prosemirror.transform import ReplaceStep
 
         from .pm_schema import schema
 
-        async with self._write_lock:
-            live_json = self.materialize_live_doc()
-            self._raise_if_poisoned()
+        with telemetry.submit_pipeline(
+            self.doc_id, origin, step_count=1
+        ) as submit_state:
+            if not fragment_json:
+                submit_state["outcome"] = "empty"
+                return self.version
 
-            try:
-                doc = schema.node_from_json(live_json)
-                nodes = [Node.from_json(schema, block) for block in fragment_json]
-            except Exception as exc:
-                raise InvalidStepError(0, f"invalid fragment: {exc}") from exc
+            async with self._hold_write_lock():
+                live_json = self.materialize_live_doc()
+                self._raise_if_poisoned()
 
-            end = doc.content.size
-            step = ReplaceStep(end, end, Slice(Fragment.from_array(nodes), 0, 0))
-            result = step.apply(doc)
-            if result.failed:
-                raise InvalidStepError(0, result.failed)
+                try:
+                    doc = schema.node_from_json(live_json)
+                    nodes = [Node.from_json(schema, block) for block in fragment_json]
+                except Exception as exc:
+                    raise InvalidStepError(0, f"invalid fragment: {exc}") from exc
 
-            step_json = json.dumps(step.to_json())
-            return await self._persist_and_broadcast(
-                [step_json], _API_CLIENT_ID, actor_id
-            )
+                end = doc.content.size
+                step = ReplaceStep(end, end, Slice(Fragment.from_array(nodes), 0, 0))
+                result = step.apply(doc)
+                if result.failed:
+                    raise InvalidStepError(0, result.failed)
 
-    async def apply_markdown_edit(self, edit_fn, actor_id: Optional[str] = None) -> int:
+                step_json = json.dumps(step.to_json())
+                return await self._persist_and_broadcast(
+                    [step_json], _API_CLIENT_ID, actor_id
+                )
+
+    async def apply_markdown_edit(
+        self,
+        edit_fn,
+        actor_id: Optional[str] = None,
+        origin: str = "api",
+    ) -> int:
         """Atomically read the doc as markdown, transform it, and replace it.
 
         ``edit_fn(markdown: str) -> str`` produces the new full-document
@@ -699,33 +906,46 @@ class Instance:
         from .markdown_parser import markdown_to_doc
         from .pm_schema import schema
 
-        async with self._write_lock:
-            live_json = self.materialize_live_doc()
-            self._raise_if_poisoned()
+        with telemetry.submit_pipeline(
+            self.doc_id, origin, step_count=1
+        ) as submit_state:
+            async with self._hold_write_lock():
+                live_json = self.materialize_live_doc()
+                self._raise_if_poisoned()
 
-            current_md = doc_to_markdown(live_json)
-            new_md = edit_fn(current_md)
-            if new_md == current_md:
-                return self.version  # no-op edit
+                # @feat telemetry: the serialize + reparse are the costly
+                # halves of a markdown read-modify-write; sizes only.
+                cached = self._cached_live_doc_json
+                with telemetry.markdown_serialize_span(
+                    len(cached) if cached is not None else None
+                ):
+                    current_md = doc_to_markdown(live_json)
+                new_md = edit_fn(current_md)
+                if new_md == current_md:
+                    submit_state["outcome"] = "empty"
+                    return self.version  # no-op edit
 
-            new_blocks = markdown_to_doc(new_md).get("content") or []
-            try:
-                old_doc = schema.node_from_json(live_json)
-                new_nodes = [Node.from_json(schema, b) for b in new_blocks]
-            except Exception as exc:
-                raise InvalidStepError(0, f"reparsed doc invalid: {exc}") from exc
+                with telemetry.markdown_parse_span(new_md):
+                    new_blocks = markdown_to_doc(new_md).get("content") or []
+                try:
+                    old_doc = schema.node_from_json(live_json)
+                    new_nodes = [Node.from_json(schema, b) for b in new_blocks]
+                except Exception as exc:
+                    raise InvalidStepError(0, f"reparsed doc invalid: {exc}") from exc
 
-            step = ReplaceStep(
-                0, old_doc.content.size, Slice(Fragment.from_array(new_nodes), 0, 0)
-            )
-            result = step.apply(old_doc)
-            if result.failed:
-                raise InvalidStepError(0, result.failed)
+                step = ReplaceStep(
+                    0,
+                    old_doc.content.size,
+                    Slice(Fragment.from_array(new_nodes), 0, 0),
+                )
+                result = step.apply(old_doc)
+                if result.failed:
+                    raise InvalidStepError(0, result.failed)
 
-            step_json = json.dumps(step.to_json())
-            return await self._persist_and_broadcast(
-                [step_json], _API_CLIENT_ID, actor_id
-            )
+                step_json = json.dumps(step.to_json())
+                return await self._persist_and_broadcast(
+                    [step_json], _API_CLIENT_ID, actor_id
+                )
 
     def get_events(self, since_version: int) -> Optional[dict]:
         """Return steps since since_version, or None if already up to date."""
@@ -808,7 +1028,7 @@ class Instance:
         Raises :class:`GoneError` / :class:`BadVersionError` the same
         way :meth:`get_events` does.
         """
-        async with self._write_lock:
+        async with self._hold_write_lock():
             backlog = self.get_events(since_version)
             # Compose with ``subscribe`` rather than inlining the queue
             # creation so tests / hooks that monkey-patch
@@ -896,6 +1116,10 @@ class Instance:
         queue is removed from ``self.subscribers``.
 
         Returns the number of subscribers that were revoked.
+
+        Telemetry: deliberately no counter here — the SSE loop's
+        ``revoked`` close reason (``paper.sse.streams.closed``) is the
+        count. Do not add a second one.
         """
         from .permissions import PaperDocResource, PAPER_VIEW
 
@@ -987,9 +1211,24 @@ class Instance:
         version: int,
         doc_json: str,
         actor_id: Optional[str] = None,
+        trigger: str = "client",
     ) -> None:
-        """Persist a snapshot if threshold since last snapshot has been reached."""
-        if (version - self.snapshot_version) >= SNAPSHOT_THRESHOLD:
+        """Persist a snapshot if threshold since last snapshot has been reached.
+
+        ``trigger`` says what asked: ``"client"`` (POST /snapshot) or
+        ``"auto"`` (``_maybe_auto_snapshot``). The below-threshold no-op
+        emits no telemetry.
+        """
+        if (version - self.snapshot_version) < SNAPSHOT_THRESHOLD:
+            return
+        # @feat telemetry: the snapshot write + tail trim, with sizes only
+        # (byte length of the doc JSON — never the doc).
+        trigger = telemetry.clamp(trigger, TRIGGER.values, "client")
+        with telemetry.tracer.start_as_current_span(SNAPSHOT) as span:
+            if span.is_recording():
+                span.set_attribute(DOC_ID, self.doc_id)
+                span.set_attribute(TRIGGER, trigger)
+                span.set_attribute(SNAPSHOT_BYTES, len(doc_json))
             await self.db.insert_snapshot(
                 doc_id=self.doc_id,
                 version=version,
@@ -1004,8 +1243,13 @@ class Instance:
             # materialize re-apply already-applied steps on top of the new
             # base — same positions, very different doc — and surface as e.g.
             # "Structure gap-replace would overwrite content" partway through.
+            tail_trimmed = 0
             while self.steps_tail and self.steps_tail[0]["version"] <= version:
                 self.steps_tail.popleft()
+                tail_trimmed += 1
+            if span.is_recording():
+                span.set_attribute(TAIL_TRIMMED, tail_trimmed)
+            telemetry.snapshots_written.add(1, {TRIGGER: trigger})
             # Cached live doc + any poisoned-history marker were computed
             # from the old base; both are stale now.
             self._cached_live_doc_json = None
@@ -1078,7 +1322,12 @@ class InstanceRegistry:
     async def get(self, db: PaperDB, doc_id: int) -> Instance:
         if doc_id not in self._instances:
             inst = self._evicted.pop(doc_id, None)
-            if inst is None:
+            # @feat telemetry: the two misses that don't hydrate are counted
+            # apart from paper.instances.hydrated (which Instance.hydrate
+            # bumps only for a real cold start).
+            if inst is not None:
+                telemetry.instances_reclaimed.add(1)
+            else:
                 task = self._hydrating.get(doc_id)
                 if task is None:
                     task = asyncio.create_task(Instance.hydrate(db, doc_id))
@@ -1094,6 +1343,16 @@ class InstanceRegistry:
                             else None
                         )
                     )
+                else:
+                    # The shared hydrate's span parents under the first
+                    # requester's trace only; a span event is how a joining
+                    # caller's trace shows where its wait went.
+                    telemetry.instances_hydrate_joined.add(1)
+                    span = otel_trace.get_current_span()
+                    if span.is_recording():
+                        span.add_event(
+                            "paper.instance.hydrate.joined", {DOC_ID: doc_id}
+                        )
                 # Shield: one cancelled request (client disconnect) must not
                 # cancel the hydrate other requests are awaiting.
                 inst = await asyncio.shield(task)
@@ -1109,6 +1368,10 @@ class InstanceRegistry:
         # write lock. Treat the cap as soft while docs are active, and prune
         # on cache hits too so disconnected docs get reclaimed. Never evict
         # the instance being returned.
+        # @feat telemetry: only a real LRU eviction counts — tests that
+        # force a re-hydrate by deleting from _instances directly, and
+        # ``discard`` for permanent deletion, are not evictions and must not
+        # inflate the churn counter.
         for candidate, cached in list(self._instances.items()):
             if len(self._instances) <= MAX_INSTANCES:
                 break
@@ -1116,6 +1379,7 @@ class InstanceRegistry:
                 continue
             self._evicted[candidate] = cached
             del self._instances[candidate]
+            telemetry.instances_evicted.add(1)
 
         return inst
 
@@ -1124,4 +1388,11 @@ def get_registry(datasette) -> InstanceRegistry:
     """Get or create the InstanceRegistry attached to this Datasette instance."""
     if not hasattr(datasette, "_paper_registry"):
         datasette._paper_registry = InstanceRegistry()
+        # @feat telemetry: weakly register the new registry so the gauge
+        # callbacks (open streams, live/poisoned instances, tail max,
+        # presence) can observe it from the SDK's collection thread. Weak
+        # registration is the whole lifecycle — Datasette.close() knows
+        # nothing about paper, so the registry simply vanishes from the
+        # gauges when the Datasette is garbage collected.
+        telemetry.register_instance_registry(datasette._paper_registry)
     return datasette._paper_registry

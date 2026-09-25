@@ -49,6 +49,7 @@ check-backend:
 check:
     just check-backend
     just check-features
+    just check-telemetry-docs-fresh
     just check-frontend
 
 # --- Lint ---
@@ -137,6 +138,26 @@ check-queries-fresh:
         exit 1
     }
 
+# --- Codegen: telemetry reference ---
+
+# Regenerate docs/TELEMETRY.md from datasette_paper/telemetry_registry.py.
+# Run after any registry change (new span/metric/attribute, renamed entry,
+# edited description). CI gate is `just check-telemetry-docs-fresh`.
+telemetry-docs:
+    uv run --prerelease=allow python tools/telemetry_doc.py
+
+# CI gate: render to a temp file and diff against the checked-in copy.
+check-telemetry-docs-fresh:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tmp=$(mktemp)
+    trap "rm -f $tmp" EXIT
+    uv run --prerelease=allow python tools/telemetry_doc.py "$tmp" >/dev/null
+    diff -u docs/TELEMETRY.md "$tmp" || {
+        echo "::error:: docs/TELEMETRY.md is stale — run \`just telemetry-docs\`"
+        exit 1
+    }
+
 # Validate that the FEATURES.md registry and the in-code `@feat` markers
 # stay in sync: no orphan/empty markers, every feature has a test marker,
 # the start file is real, and schema-lockstep features touch all four
@@ -200,6 +221,35 @@ dev *flags:
         datasette \
             --internal {{INTERNAL_DEV_DB}} \
             --plugins-dir tests/sample-plugin \
+            -s permissions.datasette-paper-create true \
+            -s permissions.datasette-sidebar-access true \
+            -s permissions.profile_access true \
+            -s settings.max_post_body_bytes 13631488 \
+            {{flags}}
+
+# The dev server with datasette-otel-viewer: it installs its own
+# TracerProvider + MeterProvider and stores what paper and core emit, so
+# traces and metrics are browsable in-instance at /-/otel — no collector,
+# no Jaeger, no OTEL_* env vars.
+#
+# The other dev plugins come from the `dev` dependency group, but the
+# viewer stays on a `--with ../` sibling path: it isn't on PyPI, and uv
+# locks *every* dependency group, so an unresolvable path or git source in
+# pyproject.toml would fail plain `uv run` — breaking `just test` and CI
+# for anyone without the sibling checkout. A failing `--with` only breaks
+# this recipe. Once the viewer is published, move it into the `dev` group.
+#
+# Flow: `just dev-otel`, open a doc and type, then /-/otel/traces — the
+# POST /events trace (paper.events.submit → write_lock.wait /
+# validate_steps / db.query with `datasette.callback: insert_steps` /
+# broadcast / reindex ×3) is there, and the paper.* metrics too.
+dev-otel *flags:
+    DATASETTE_SECRET=abc123 uv run --prerelease=allow \
+        --with ../datasette-otel-viewer \
+        datasette \
+            --internal {{INTERNAL_DEV_DB}} \
+            --plugins-dir tests/sample-plugin \
+            -s permissions.datasette-otel-viewer true \
             -s permissions.datasette-paper-create true \
             -s permissions.datasette-sidebar-access true \
             -s permissions.profile_access true \
