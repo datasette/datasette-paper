@@ -39,6 +39,11 @@ dev = [
     "ruff==0.15.12",
     "solite>=0.0.1a36",
 ]
+# Load benchmarker (bench/): `uv run --prerelease=allow --group bench python -m bench`
+bench = [
+    "httpx2",
+    "psutil",
+]
 
 [build-system]
 requires = ["setuptools"]

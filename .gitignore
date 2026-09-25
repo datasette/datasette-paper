@@ -27,3 +27,6 @@ datasette_paper/manifest.json
 # Playwright artifacts
 test-results/
 playwright-report/
+
+# Load bench output
+bench/results/

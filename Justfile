@@ -217,6 +217,14 @@ dev-with-hmr *flags:
             -s plugins.datasette-vite.dev_paths.datasette_paper "http://localhost:{{DEV_PORT}}/-/static-plugins/datasette_paper/" \
             {{flags}}
 
+# --- Load bench ---
+
+# Simulate ~N humans editing shared docs against a spawned server and
+# report latency / RSS slope. `just bench --users 100 --ramp 5m --hold 10m`
+# (see `bench/README.md`; `--url` targets a running server instead).
+bench *flags:
+    uv run --prerelease=allow --group bench python -m bench --serve {{flags}}
+
 # Wipe the dev internal DB. Useful when iterating on schema during
 # development (migrations are append-only in production).
 clean-dev-db:
