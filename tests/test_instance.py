@@ -311,8 +311,7 @@ async def test_materialize_clears_error_when_history_becomes_clean(ds_paper):
     # Simulate an admin trimming the bad step from the tail. The cache
     # has to drop so the loop re-runs against the clean tail.
     inst.steps_tail.clear()
-    inst._cached_live_doc_json = None
-    inst._cached_live_version = None
+    inst.invalidate_live_doc()
 
     inst.materialize_live_doc()
     assert inst._materialization_error is None

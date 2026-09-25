@@ -169,8 +169,16 @@ class Instance:
         # remote cursors show a profile name rather than the raw id.
         self.actor_names: dict[str, tuple[str, float]] = {}
         self.last_active: float = time.monotonic()
-        # Cached live doc (snapshot + applied steps_tail). Lazy: built on
-        # first materialize call, invalidated by version mismatch.
+        # Live doc as a prosemirror ``Node`` at ``_live_doc_version``. Built
+        # by a full snapshot + tail replay only on first use (hydrate) or
+        # after ``invalidate_live_doc``; every write then advances it with the
+        # doc its validation already produced (see ``_persist_and_broadcast``),
+        # so a write never replays the tail. prosemirror nodes are immutable,
+        # so holding and sharing it is safe.
+        self._live_doc = None
+        self._live_doc_version: Optional[int] = None
+        # JSON text of ``_live_doc``, derived lazily for the read routes and
+        # snapshots. Invalidated by version mismatch.
         self._cached_live_doc_json: Optional[str] = None
         self._cached_live_version: Optional[int] = None
         # Set by ``materialize_live_doc`` when a step in history fails to
@@ -244,21 +252,30 @@ class Instance:
             steps_tail=steps_tail,
         )
 
-    # @feat snapshot-log: apply steps_tail over snapshot via prosemirror-py (cached)
-    def materialize_live_doc(self) -> dict:
-        """Return the live doc as a JSON dict (snapshot + applied steps_tail).
+    def invalidate_live_doc(self) -> None:
+        """Drop the live doc and its derived JSON; the next read fully rebuilds.
 
-        Cached on the instance and invalidated automatically by version
-        mismatch — `add_events` doesn't have to actively bust the cache.
-
-        On step-apply failure, returns the doc as far as steps successfully
-        applied, plus logs a warning. Should never raise.
+        Also clears the poisoned-history marker, which only describes the
+        doc being dropped.
         """
-        if (
-            self._cached_live_doc_json is not None
-            and self._cached_live_version == self.version
-        ):
-            return json.loads(self._cached_live_doc_json)
+        self._live_doc = None
+        self._live_doc_version = None
+        self._cached_live_doc_json = None
+        self._cached_live_version = None
+        self._materialization_error = None
+
+    # @feat snapshot-log: apply steps_tail over snapshot via prosemirror-py (cached)
+    def _live_node(self):
+        """Return the live doc ``Node`` at ``self.version``, or ``None``.
+
+        Cached; the full snapshot + ``steps_tail`` replay only runs when the
+        node is missing or stale (hydrate, ``invalidate_live_doc``). On
+        step-apply failure the node is the doc as far as steps applied and
+        ``_materialization_error`` is set. ``None`` means the snapshot itself
+        doesn't parse.
+        """
+        if self._live_doc is not None and self._live_doc_version == self.version:
+            return self._live_doc
 
         # Late imports keep the prosemirror dep optional at module-load
         # time and avoid pulling lxml on cold paths that don't need it.
@@ -275,10 +292,10 @@ class Instance:
             doc = schema.node_from_json(json.loads(self.snapshot_doc_json))
         except Exception:
             logger.exception(
-                "doc_id=%s: snapshot_doc_json failed to parse, returning raw",
+                "doc_id=%s: snapshot_doc_json failed to parse",
                 self.doc_id,
             )
-            return json.loads(self.snapshot_doc_json)
+            return None
 
         for record in self.steps_tail:
             try:
@@ -303,10 +320,38 @@ class Instance:
                 self._materialization_error = (record["version"], str(exc))
                 break
 
-        live = doc.to_json()
-        self._cached_live_doc_json = json.dumps(live)
+        self._live_doc = doc
+        self._live_doc_version = self.version
+        return doc
+
+    def _live_doc_json(self) -> str:
+        """JSON text of the live doc (cached per version)."""
+        if (
+            self._cached_live_doc_json is not None
+            and self._cached_live_version == self.version
+        ):
+            return self._cached_live_doc_json
+        node = self._live_node()
+        if node is None:
+            # Unparseable snapshot: surface it raw, don't cache.
+            return self.snapshot_doc_json
+        self._cached_live_doc_json = json.dumps(node.to_json())
         self._cached_live_version = self.version
-        return live
+        return self._cached_live_doc_json
+
+    def materialize_live_doc(self) -> dict:
+        """Return the live doc as a JSON dict (snapshot + applied steps_tail).
+
+        Cached on the instance and invalidated automatically by version
+        mismatch — `add_events` doesn't have to actively bust the cache.
+        Always a fresh dict the caller may mutate: ``Node.to_json`` shares
+        ``attrs`` dicts with the node (and the schema's defaults), so that
+        view is never handed out.
+
+        On step-apply failure, returns the doc as far as steps successfully
+        applied, plus logs a warning. Should never raise.
+        """
+        return json.loads(self._live_doc_json())
 
     def _raise_if_poisoned(self) -> None:
         """Reject a write if a step in history couldn't be materialized.
@@ -325,13 +370,14 @@ class Instance:
                 0, f"history corrupted at version {bad_version}: {bad_msg}"
             )
 
-    def _validate_steps(self, step_jsons: list[str]) -> None:
-        """Apply each step against a clone of the live doc; raise on first failure.
+    def _validate_steps(self, step_jsons: list[str]):
+        """Apply each step to the live doc; raise on first failure.
 
         Runs purely in-memory — no DB writes happen until the caller has
-        cleared this gate. The doc clone is discarded; the real
-        materialization still flows through ``materialize_live_doc`` on
-        the next read.
+        cleared this gate. Nodes are immutable, so the live doc itself is
+        untouched; the returned ``Node`` is the doc with the whole batch
+        applied, which the caller installs as the new live doc only once the
+        write has landed.
 
         Raises ``InvalidStepError`` with the offending 0-based batch index.
         """
@@ -341,14 +387,12 @@ class Instance:
 
         from .pm_schema import schema, step_href_violation
 
-        live_json = self.materialize_live_doc()
+        doc = self._live_node()
         self._raise_if_poisoned()
-        try:
-            doc = schema.node_from_json(live_json)
-        except Exception as exc:
+        if doc is None:
             # Live doc itself doesn't parse — can't validate against
             # something we can't materialize. Surface as step 0.
-            raise InvalidStepError(0, f"materialized doc invalid: {exc}") from exc
+            raise InvalidStepError(0, "materialized doc invalid")
 
         for i, step_json in enumerate(step_jsons):
             # Broadest backstop: a step over the size cap is rejected before
@@ -384,6 +428,7 @@ class Instance:
             if result.failed:
                 raise InvalidStepError(i, result.failed)
             doc = result.doc
+        return doc
 
     # @feat collab-sse: server version check under write-lock: BadVersion/Conflict + validate
     async def add_events(
@@ -429,23 +474,29 @@ class Instance:
             # apply and `StepResult`. Catch both shapes here and reject
             # the batch with `InvalidStepError` so the client gets a
             # structured 422 instead of a 200 that poisons the history.
-            self._validate_steps(step_jsons)
+            new_doc = self._validate_steps(step_jsons)
 
-            return await self._persist_and_broadcast(step_jsons, client_id, actor_id)
+            return await self._persist_and_broadcast(
+                step_jsons, client_id, actor_id, new_doc
+            )
 
     async def _persist_and_broadcast(
         self,
         step_jsons: list[str],
         client_id: int,
         actor_id: Optional[str],
+        new_doc,
     ) -> int:
         """Write a validated, correctly-positioned step batch and broadcast it.
 
         **Caller must hold ``self._write_lock``** and must have already
         validated ``step_jsons`` against the current live doc — this method
-        does no version or content checking. It's the shared tail of
-        ``add_events`` (collab POSTs) and ``append_fragment`` (API ingest);
-        the two differ only in how they produce + position the steps.
+        does no version or content checking. ``new_doc`` is the live doc with
+        the batch applied (the validator's result); it becomes the live doc
+        only after the write commits, so a failed write leaves the old one in
+        place. It's the shared tail of ``add_events`` (collab POSTs),
+        ``append_fragment`` and ``apply_markdown_edit`` (API ingest); they
+        differ only in how they produce + position the steps.
         """
         base_version = self.version
 
@@ -486,6 +537,18 @@ class Instance:
             self.steps_tail.append(record)
 
         self.version = new_version
+        if new_version == base_version + len(step_jsons):
+            # Advance the live doc instead of replaying the tail. The count
+            # check is a guard: anything else means the DB and our batch
+            # disagree, so fall back to a full rebuild on the next read.
+            self._live_doc = new_doc
+            self._live_doc_version = new_version
+            # The JSON text is now stale; don't keep a dead doc-sized string
+            # alive until the next read replaces it.
+            self._cached_live_doc_json = None
+            self._cached_live_version = None
+        else:
+            self.invalidate_live_doc()
 
         # Broadcast to all subscribers. Steps are stored as JSON strings;
         # parse them back to objects so the SSE payload is structured JSON,
@@ -516,12 +579,19 @@ class Instance:
 
         self.last_active = time.monotonic()
         await self._maybe_auto_snapshot(actor_id)
-        await self.reindex_links()
-        await self.reindex_tags()
-        await self.reindex_tasks()
+        # One materialization for all three derived indexes. The walkers only
+        # read, so the node's to_json view is safe to share here and skips a
+        # dumps/loads round trip of the whole doc per index.
+        live_json = None
+        node = self._live_node()
+        if node is not None and self._materialization_error is None:
+            live_json = node.to_json()
+        await self.reindex_links(live_json)
+        await self.reindex_tags(live_json)
+        await self.reindex_tasks(live_json)
         return self.version
 
-    async def reindex_tags(self) -> None:
+    async def reindex_tags(self, live_json: Optional[dict] = None) -> None:
         """Rebuild this doc's inline-#tag index rows from the live doc.
 
         Mirror of :meth:`reindex_links`: called from the write tail, guarded so
@@ -529,13 +599,18 @@ class Instance:
         redundant re-run, swallows + logs any persistence error). Keeps
         ``_datasette_paper_inline_tag`` current as of the latest write, which is
         what ``GET /tags/{slug}/refs`` joins against.
+
+        ``live_json`` (read-only) lets the write tail share one
+        materialization across all three reindexers; omitted, each call
+        materializes its own copy.
         """
         if self._materialization_error is not None:
             return
         if self._tags_indexed_version == self.version:
             return
         try:
-            live_json = self.materialize_live_doc()
+            if live_json is None:
+                live_json = self.materialize_live_doc()
             if self._materialization_error is not None:
                 return
             from .tags import extract_tags
@@ -554,7 +629,7 @@ class Instance:
 
     # @feat task-assign: write-tail reindex of the assigned-task index off the
     # materialized doc — a third sibling beside reindex_links / reindex_tags.
-    async def reindex_tasks(self) -> None:
+    async def reindex_tasks(self, live_json: Optional[dict] = None) -> None:
         """Rebuild this doc's task-assignment rows from the live doc.
 
         Called from the write tail. Same contract as the link/tag reindex:
@@ -570,7 +645,8 @@ class Instance:
         if self._tasks_indexed_version == self.version:
             return
         try:
-            live_json = self.materialize_live_doc()
+            if live_json is None:
+                live_json = self.materialize_live_doc()
             if self._materialization_error is not None:
                 return
             from .markdown import extract_tasks
@@ -586,7 +662,7 @@ class Instance:
             logger.exception("task-assignment reindex failed for doc %s", self.doc_id)
 
     # @feat snapshot-log: write-tail reindex of derived rows off the materialized doc
-    async def reindex_links(self) -> None:
+    async def reindex_links(self, live_json: Optional[dict] = None) -> None:
         """Rebuild this doc's outgoing link edges from the live doc.
 
         Called from the write tail. Guarded so it never raises into the write
@@ -599,7 +675,8 @@ class Instance:
         if self._links_indexed_version == self.version:
             return
         try:
-            live_json = self.materialize_live_doc()
+            if live_json is None:
+                live_json = self.materialize_live_doc()
             if self._materialization_error is not None:
                 return
             from .links import extract_links
@@ -630,12 +707,10 @@ class Instance:
         """
         if (self.version - self.snapshot_version) < SNAPSHOT_THRESHOLD:
             return
-        materialized = self.materialize_live_doc()
+        doc_json = self._live_doc_json()
         if self._materialization_error is not None:
             return
-        await self.record_client_doc(
-            self.version, json.dumps(materialized), actor_id=actor_id
-        )
+        await self.record_client_doc(self.version, doc_json, actor_id=actor_id)
 
     async def append_fragment(
         self,
@@ -664,11 +739,12 @@ class Instance:
         from .pm_schema import schema
 
         async with self._write_lock:
-            live_json = self.materialize_live_doc()
+            doc = self._live_node()
             self._raise_if_poisoned()
+            if doc is None:
+                raise InvalidStepError(0, "materialized doc invalid")
 
             try:
-                doc = schema.node_from_json(live_json)
                 nodes = [Node.from_json(schema, block) for block in fragment_json]
             except Exception as exc:
                 raise InvalidStepError(0, f"invalid fragment: {exc}") from exc
@@ -681,7 +757,7 @@ class Instance:
 
             step_json = json.dumps(step.to_json())
             return await self._persist_and_broadcast(
-                [step_json], _API_CLIENT_ID, actor_id
+                [step_json], _API_CLIENT_ID, actor_id, result.doc
             )
 
     async def apply_markdown_edit(self, edit_fn, actor_id: Optional[str] = None) -> int:
@@ -709,17 +785,19 @@ class Instance:
         from .pm_schema import schema
 
         async with self._write_lock:
-            live_json = self.materialize_live_doc()
+            old_doc = self._live_node()
             self._raise_if_poisoned()
+            if old_doc is None:
+                raise InvalidStepError(0, "materialized doc invalid")
 
-            current_md = doc_to_markdown(live_json)
+            # A mutable copy: the serializer isn't audited as read-only.
+            current_md = doc_to_markdown(self.materialize_live_doc())
             new_md = edit_fn(current_md)
             if new_md == current_md:
                 return self.version  # no-op edit
 
             new_blocks = markdown_to_doc(new_md).get("content") or []
             try:
-                old_doc = schema.node_from_json(live_json)
                 new_nodes = [Node.from_json(schema, b) for b in new_blocks]
             except Exception as exc:
                 raise InvalidStepError(0, f"reparsed doc invalid: {exc}") from exc
@@ -733,7 +811,7 @@ class Instance:
 
             step_json = json.dumps(step.to_json())
             return await self._persist_and_broadcast(
-                [step_json], _API_CLIENT_ID, actor_id
+                [step_json], _API_CLIENT_ID, actor_id, result.doc
             )
 
     def get_events(self, since_version: int) -> Optional[dict]:
@@ -1065,11 +1143,16 @@ class Instance:
             # "Structure gap-replace would overwrite content" partway through.
             while self.steps_tail and self.steps_tail[0]["version"] <= version:
                 self.steps_tail.popleft()
-            # Cached live doc + any poisoned-history marker were computed
-            # from the old base; both are stale now.
-            self._cached_live_doc_json = None
-            self._cached_live_version = None
-            self._materialization_error = None
+            # A snapshot of a clean live doc at the live version *is* the
+            # live doc, so the node (and its JSON) stay valid and the next
+            # write needs no rebuild. Otherwise the cached doc and any
+            # poisoned-history marker were computed from the old base.
+            if not (
+                version == self.version
+                and self._materialization_error is None
+                and self._live_doc_version == version
+            ):
+                self.invalidate_live_doc()
             # Compact the on-disk log to match: the steps we just popped from
             # the tail are now baked into the snapshot, and older snapshots are
             # dead weight. Without this both tables grow without bound. A client
