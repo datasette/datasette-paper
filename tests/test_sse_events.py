@@ -53,10 +53,20 @@ async def _post_step(datasette, doc_id, version, client_id=1):
 class SSEStream:
     """Low-level ASGI test harness for SSE endpoints."""
 
-    def __init__(self, app, path: str, *, cookie_header: bytes | None = None):
+    def __init__(
+        self,
+        app,
+        path: str,
+        *,
+        cookie_header: bytes | None = None,
+        extra_headers: list[tuple[bytes, bytes]] | None = None,
+    ):
         self._app = app
         self._path = path
         self._cookie_header = cookie_header
+        self._extra_headers = list(extra_headers or [])
+        # Every non-empty body write, in order, as the app handed it over.
+        self.sent_chunks: list[bytes] = []
         self._status: int | None = None
         self._headers: list | None = None
         self._body_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
@@ -77,6 +87,7 @@ class SSEStream:
         elif message["type"] == "http.response.body":
             body = message.get("body", b"")
             if body:
+                self.sent_chunks.append(body)
                 await self._body_queue.put(body)
             if not message.get("more_body", False):
                 await self._body_queue.put(None)
@@ -88,7 +99,7 @@ class SSEStream:
         qs = self._path.split("?", 1)
         path = qs[0]
         query_string = qs[1].encode() if len(qs) > 1 else b""
-        headers = []
+        headers = list(self._extra_headers)
         if self._cookie_header is not None:
             headers.append((b"cookie", self._cookie_header))
         scope = {
@@ -110,6 +121,10 @@ class SSEStream:
     @property
     def status(self) -> int | None:
         return self._status
+
+    @property
+    def headers(self) -> dict[bytes, bytes]:
+        return {k.lower(): v for k, v in (self._headers or [])}
 
     async def chunks(self) -> AsyncIterator[bytes]:
         while True:
@@ -468,3 +483,96 @@ async def test_sse_unsubscribe_on_disconnect(ds_paper):
     assert len(instance.subscribers) == 0, (
         f"Expected 0 subscribers, got {len(instance.subscribers)}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Compression middleware
+# ---------------------------------------------------------------------------
+
+GZIP_MAGIC = b"\x1f\x8b"
+
+
+def _gzipped_sse_stream(ds, asgi_gzip, doc_id: int) -> SSEStream:
+    """Open the SSE GET through asgi-gzip, as a browser EventSource would."""
+    signed = ds.sign({"a": {"id": "alice"}}, "actor")
+    stream = SSEStream(
+        asgi_gzip.GZipMiddleware(ds.app(), minimum_size=0),
+        f"/-/paper/api/docs/{doc_id}/events?version=0&clientID=1",
+        cookie_header=f"ds_actor={signed}".encode(),
+        extra_headers=[(b"accept-encoding", b"gzip, deflate, br")],
+    )
+    stream._task = asyncio.create_task(stream.run())  # type: ignore[attr-defined]
+    return stream
+
+
+async def _close(stream: SSEStream) -> None:
+    stream.disconnect()
+    await asyncio.wait_for(stream._task, timeout=2.0)  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("excludes_event_stream", [True, False])
+# @feat collab-sse: test: asgi-gzip leaves the SSE stream uncompressed and
+# forwards each event as its own chunk
+async def test_sse_passes_through_gzip_middleware(
+    ds, monkeypatch, excludes_event_stream
+):
+    asgi_gzip = pytest.importorskip("asgi_gzip")
+    if not excludes_event_stream:
+        # asgi-gzip 0.2 has no content-type exclusion; only the
+        # content-encoding header keeps the stream out of the compressor.
+        monkeypatch.setattr(
+            asgi_gzip, "DEFAULT_EXCLUDED_CONTENT_TYPES", (), raising=False
+        )
+    monkeypatch.setattr(sse_module, "HEARTBEAT_SECONDS", 0.05)
+    doc_id = await _create_doc(ds)
+    stream = _gzipped_sse_stream(ds, asgi_gzip, doc_id)
+
+    ready = await stream.read_one_event("ready")
+    assert ready == {"version": 0}
+
+    async def _until_heartbeat():
+        async for chunk in stream.chunks():
+            if chunk == sse_module.format_heartbeat():
+                return
+
+    await asyncio.wait_for(_until_heartbeat(), timeout=2.0)
+    await _close(stream)
+
+    encodings = [v for k, v in stream._headers if k.lower() == b"content-encoding"]
+    assert encodings == [b"identity"]
+    # cache-control is not asserted: Datasette rewrites it to
+    # ``private, no-store`` for this signed-in request.
+    # Every event reached the outer send as its own uncompressed frame, so a
+    # server writing to a socket puts each one on the wire immediately.
+    assert stream.sent_chunks[0] == sse_module.format_event("ready", ready)
+    assert sse_module.format_heartbeat() in stream.sent_chunks
+    assert not any(c.startswith(GZIP_MAGIC) for c in stream.sent_chunks)
+
+
+@pytest.mark.asyncio
+async def test_gzip_without_identity_header_starves_the_stream(ds, monkeypatch):
+    """Control for the test above: the harness does detect compression.
+
+    With no content-encoding header and no content-type exclusion, only the
+    gzip header ever leaves the middleware; every later event stays buffered
+    inside the compressor.
+    """
+    asgi_gzip = pytest.importorskip("asgi_gzip")
+    monkeypatch.setattr(asgi_gzip, "DEFAULT_EXCLUDED_CONTENT_TYPES", (), raising=False)
+    monkeypatch.setattr(
+        sse_module,
+        "EVENT_STREAM_HEADERS",
+        [h for h in sse_module.EVENT_STREAM_HEADERS if h[0] != b"content-encoding"],
+    )
+    monkeypatch.setattr(sse_module, "HEARTBEAT_SECONDS", 0.02)
+    doc_id = await _create_doc(ds)
+    stream = _gzipped_sse_stream(ds, asgi_gzip, doc_id)
+    # Long enough for the ready event and several heartbeats.
+    await asyncio.sleep(0.3)
+    sent_before_close = list(stream.sent_chunks)
+    await _close(stream)
+
+    assert stream.headers[b"content-encoding"] == b"gzip"
+    assert len(sent_before_close) == 1
+    assert sent_before_close[0].startswith(GZIP_MAGIC)

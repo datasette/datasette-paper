@@ -11,7 +11,11 @@ import { TextSelection } from "prosemirror-state";
 import type { EditorView } from "prosemirror-view";
 import { Slice, Fragment } from "prosemirror-model";
 import type { Node as PMNode } from "prosemirror-model";
-import { EditorConnection, preloadMarkdownParser } from "../collab";
+import {
+  EditorConnection,
+  HEALTHY_STREAM_MS,
+  preloadMarkdownParser,
+} from "../collab";
 import type { StepApplyError } from "../collab";
 import { schema } from "../schema";
 import { resetLastHighlightColor, setHighlight } from "../highlight";
@@ -944,7 +948,7 @@ describe("self-heal", () => {
     conn.close();
   });
 
-  it("backs off monotonically across stream failures and only resets after a good message", async () => {
+  it("backs off monotonically across stream failures", async () => {
     const el = makeEl();
     (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
 
@@ -970,16 +974,97 @@ describe("self-heal", () => {
     es2.dispatchEvent("error");
     expect(conn.backOff).toBe(800);
 
-    // The next reconnect actually delivers a well-formed message — only now
-    // is the stream proven healthy, so the backoff resets.
+    // A fresh stream delivering messages is not yet proof of health; the
+    // reset waits for HEALTHY_STREAM_MS (see "stream health" below).
     await waitFor(() => expect(MockEventSource.instances.length).toBe(4));
     const es3 = MockEventSource.instances.at(-1)!;
     es3.dispatchEvent(
       "message",
       JSON.stringify({ version: BOOTSTRAP.version, steps: [], clientIDs: [] }),
     );
+    es3.dispatchEvent("ready", JSON.stringify({ version: BOOTSTRAP.version }));
+    expect(conn.backOff).toBe(800);
+
+    conn.close();
+  });
+});
+
+describe("stream health", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function connect(): Promise<EditorConnection> {
+    vi.useFakeTimers();
+    (globalThis as Record<string, unknown>).fetch = makeBootstrapFetch();
+    const conn = new EditorConnection(makeOpts(makeEl()));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(conn.view).not.toBeNull();
+    return conn;
+  }
+
+  const ready = (es: MockEventSource) =>
+    es.dispatchEvent("ready", JSON.stringify({ version: BOOTSTRAP.version }));
+
+  // @feat collab-sse: test: a proxy that kills every stream soon after ready
+  // escalates the reconnect backoff to the cap and keeps the banner up
+  it("escalates to the cap when a proxy kills every stream after 30s", async () => {
+    const conn = await connect();
+    const seen: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      const es = MockEventSource.instances.at(-1)!;
+      ready(es);
+      expect(conn.report.state).toBe("ok");
+      await vi.advanceTimersByTimeAsync(30_000);
+      es.dispatchEvent("error");
+      seen.push(conn.backOff);
+      if (conn.backOff > 1000) expect(conn.report.state).toBe("delay");
+      const opened = MockEventSource.instances.length;
+      await vi.advanceTimersByTimeAsync(conn.backOff);
+      expect(MockEventSource.instances.length).toBe(opened + 1);
+    }
+    expect(seen).toEqual([
+      200, 400, 800, 1600, 3200, 6400, 12800, 25600, 51200, 60000, 60000, 60000,
+    ]);
+    conn.close();
+  });
+
+  it("resets the backoff once a stream stays up past HEALTHY_STREAM_MS", async () => {
+    const conn = await connect();
+    for (let i = 0; i < 4; i++) {
+      MockEventSource.instances.at(-1)!.dispatchEvent("error");
+      await vi.advanceTimersByTimeAsync(conn.backOff);
+    }
+    expect(conn.backOff).toBe(1600);
+    const es = MockEventSource.instances.at(-1)!;
+    ready(es);
+    expect(conn.report.state).toBe("ok");
+
+    await vi.advanceTimersByTimeAsync(HEALTHY_STREAM_MS - 1);
+    expect(conn.backOff).toBe(1600);
+    await vi.advanceTimersByTimeAsync(1);
     expect(conn.backOff).toBe(0);
 
+    // The next drop starts over at the bottom of the ladder.
+    es.dispatchEvent("error");
+    expect(conn.backOff).toBe(200);
+    conn.close();
+  });
+
+  it("does not reset the backoff for a stream that was already replaced", async () => {
+    const conn = await connect();
+    const es0 = MockEventSource.instances.at(-1)!;
+    es0.dispatchEvent("error");
+    await vi.advanceTimersByTimeAsync(conn.backOff);
+    const es1 = MockEventSource.instances.at(-1)!;
+    ready(es1);
+    await vi.advanceTimersByTimeAsync(10_000);
+    es1.dispatchEvent("error");
+    expect(conn.backOff).toBe(400);
+    // es1's health timer was cancelled with it; nothing resets the backoff
+    // while the replacement has not reached `ready`.
+    await vi.advanceTimersByTimeAsync(HEALTHY_STREAM_MS);
+    expect(conn.backOff).toBe(400);
     conn.close();
   });
 });

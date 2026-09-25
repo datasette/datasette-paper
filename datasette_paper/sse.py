@@ -59,7 +59,18 @@ class ResetEvent(TypedDict):
 
 EVENT_STREAM_HEADERS = [
     (b"content-type", b"text/event-stream"),
-    (b"cache-control", b"no-cache"),
+    # ``no-transform`` asks intermediaries not to recompress or rewrite the
+    # body. Datasette (>= 1.0a40) replaces cache-control with
+    # ``private, no-store`` on any request carrying an actor, cookie or
+    # authorization header, so this only survives for anonymous readers.
+    (b"cache-control", b"no-cache, no-transform"),
+    # asgi-gzip >= 0.2 and Starlette's GZipMiddleware pass a response
+    # through untouched once it already carries a content-encoding. That
+    # matters on asgi-gzip 0.2, which gzips text/event-stream (0.3 excludes
+    # it by content-type). Neither version sync-flushes streamed chunks, so a
+    # compressed stream only ever writes the gzip header and a proxy
+    # idle-kills it. asgi-gzip 0.1 ignores this header; pin >= 0.3.
+    (b"content-encoding", b"identity"),
     # Tell nginx-style proxies not to buffer the stream.
     (b"x-accel-buffering", b"no"),
 ]

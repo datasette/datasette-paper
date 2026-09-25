@@ -25,6 +25,8 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    # SSE tests run the stream through the gzip middleware production uses.
+    "asgi-gzip>=0.3",
     "datasette-agent",
     "datasette-debug-gotham>=0.1.0a3",
     "datasette-sidebar>=0.0.1a3",
