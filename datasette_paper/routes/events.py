@@ -108,11 +108,20 @@ async def sse_events(datasette, request, send, receive):
             disconnected.set()
 
     watcher = asyncio.create_task(watch_disconnect())
+
+    # Every body write goes through here. A peer that stopped reading makes
+    # uvicorn's ``send`` block indefinitely in flow control, and a half-open
+    # socket never delivers ``http.disconnect`` — so the write itself is the
+    # only place a zombie stream can be detected. ``send`` is wrapped in a
+    # task so ``wait_for`` can abandon it; the stream is then torn down.
+    async def timed_send(message: dict) -> None:
+        await asyncio.wait_for(send(message), timeout=sse.SEND_TIMEOUT_SECONDS)
+
     try:
         # The initial writes sit inside the try so a client that drops
         # during headers/backlog still hits the ``finally`` unsubscribe —
         # otherwise its queue keeps collecting every later edit.
-        await start_event_stream(send)
+        await start_event_stream(timed_send)
 
         # Flush any backlog before reading from the queue. The backlog
         # covers versions up to instance.version as observed at subscribe
@@ -120,7 +129,7 @@ async def sse_events(datasette, request, send, receive):
         # the order on the wire is (backlog, then live broadcasts) with no
         # overlap.
         if backlog is not None:
-            await send_event(send, SSEEvent.UPDATE, backlog)
+            await send_event(timed_send, SSEEvent.UPDATE, backlog)
 
         # Catch-up barrier: always follows the backlog, even an empty one,
         # so editors can hold pending sends until they're caught up instead
@@ -128,7 +137,7 @@ async def sse_events(datasette, request, send, receive):
         # — a write may already have advanced instance.version, and that
         # batch is queued to arrive after this event.
         await send_event(
-            send,
+            timed_send,
             SSEEvent.READY,
             {"version": backlog["version"] if backlog else version},
         )
@@ -136,7 +145,9 @@ async def sse_events(datasette, request, send, receive):
         # Send the current presence snapshot once so the new subscriber sees
         # everyone already on the doc.
         if instance.presence:
-            await send_event(send, SSEEvent.PRESENCE, instance._presence_payload())
+            await send_event(
+                timed_send, SSEEvent.PRESENCE, instance._presence_payload()
+            )
 
         while not disconnected.is_set():
             try:
@@ -146,8 +157,9 @@ async def sse_events(datasette, request, send, receive):
                 event_name = payload.get("kind", SSEEvent.UPDATE)
                 if event_name == SSEEvent.CLOSED:
                     # Server-initiated close — emitted by
-                    # Instance.revoke_unauthorized when an actor's
-                    # access is removed mid-session.
+                    # Instance.revoke_unauthorized when an actor's access
+                    # is removed mid-session, or by Instance._offer when
+                    # this stream fell too far behind.
                     break
                 body = format_event(event_name, payload)
             except asyncio.TimeoutError:
@@ -155,7 +167,7 @@ async def sse_events(datasette, request, send, receive):
                     break
                 body = format_heartbeat()
             try:
-                await send(
+                await timed_send(
                     {
                         "type": "http.response.body",
                         "body": body,
@@ -164,16 +176,19 @@ async def sse_events(datasette, request, send, receive):
                 )
             except Exception:
                 break
-    except (ConnectionError, OSError):
-        # The peer went away mid-write; ``finally`` releases the
-        # subscription. CancelledError deliberately propagates so the
-        # server's own teardown sees it.
+    except (ConnectionError, OSError, asyncio.TimeoutError):
+        # The peer went away mid-write, or stopped reading for longer than
+        # SEND_TIMEOUT_SECONDS; ``finally`` releases the subscription.
+        # CancelledError deliberately propagates so the server's own
+        # teardown sees it.
         pass
     finally:
         instance.unsubscribe(queue)
         watcher.cancel()
         try:
-            await send({"type": "http.response.body", "body": b"", "more_body": False})
+            await timed_send(
+                {"type": "http.response.body", "body": b"", "more_body": False}
+            )
         except Exception:
             pass
 

@@ -12,8 +12,9 @@ async def test_update_presence_stores_entry(ds_paper):
     _, db = ds_paper
     doc = await db.insert_doc(name="P")
     inst = await Instance.hydrate(db, doc.id)
+    await inst.subscribe(client_id=42)
 
-    inst.update_presence(client_id=42, actor_id="alice", anchor=3, head=7)
+    assert inst.update_presence(client_id=42, actor_id="alice", anchor=3, head=7)
 
     assert 42 in inst.presence
     assert inst.presence[42]["actor_id"] == "alice"
@@ -65,6 +66,47 @@ async def test_unsubscribe_removes_presence_and_rebroadcasts(ds_paper):
     assert 10 not in inst.presence
 
 
+@pytest.mark.asyncio
+# @feat presence: test: presence from a client without a live stream is not kept
+async def test_presence_without_live_subscription_is_ignored(ds_paper):
+    """Ghost cursors can't accumulate while another editor keeps the doc hot.
+
+    Covers both a client that never subscribed and one whose debounced POST
+    lands after its stream closed; unsubscribe is the only pruning path, so
+    either would otherwise stay in ``presence`` for the instance's lifetime.
+    """
+    _, db = ds_paper
+    doc = await db.insert_doc(name="P")
+    inst = await Instance.hydrate(db, doc.id)
+    keeper = await inst.subscribe(client_id=1)
+
+    for client_id in range(100, 150):
+        closed = await inst.subscribe(client_id=client_id)
+        inst.unsubscribe(closed)
+        assert not inst.update_presence(
+            client_id=client_id, actor_id="alice", anchor=0, head=0
+        )
+        assert not inst.update_presence(
+            client_id=client_id + 1000, actor_id="alice", anchor=0, head=0
+        )
+
+    assert inst.presence == {}
+    # Nothing was broadcast for the ignored posts.
+    assert keeper.empty()
+
+
+@pytest.mark.asyncio
+async def test_revoke_drops_presence(ds_paper):
+    ds, db = ds_paper
+    doc = await db.insert_doc(name="P")
+    inst = await Instance.hydrate(db, doc.id)
+    await inst.subscribe(client_id=3, actor_id="mallory")
+    inst.update_presence(client_id=3, actor_id="mallory", anchor=0, head=0)
+
+    assert await inst.revoke_unauthorized(ds) == 1
+    assert 3 not in inst.presence
+
+
 # ---------------------------------------------------------------------------
 # Route tests
 # ---------------------------------------------------------------------------
@@ -76,6 +118,9 @@ async def test_post_presence_endpoint(ds_paper):
 
     create = await ds.client.post("/-/paper/api/docs", json={"name": "P"})
     doc_id = create.json()["id"]
+    registry = get_registry(ds)
+    inst = await registry.get(paper_db, doc_id)
+    await inst.subscribe(client_id=99)
 
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/presence",
@@ -83,8 +128,6 @@ async def test_post_presence_endpoint(ds_paper):
     )
     assert resp.status_code == 204
 
-    registry = get_registry(ds)
-    inst = await registry.get(paper_db, doc_id)
     assert 99 in inst.presence
     assert inst.presence[99]["anchor"] == 4
     assert inst.presence[99]["head"] == 12
@@ -99,6 +142,7 @@ async def test_presence_payload_includes_name_fallback(ds_paper):
     inst = await Instance.hydrate(db, doc.id)
 
     await inst.ensure_actor_name(ds, "alice")
+    await inst.subscribe(client_id=7)
     inst.update_presence(client_id=7, actor_id="alice", anchor=0, head=0)
 
     user = {u["clientID"]: u for u in inst._presence_payload()["users"]}[7]
@@ -117,6 +161,8 @@ async def test_post_presence_resolves_display_name(ds_paper):
         "INSERT INTO datasette_user_profiles (actor_id, display_name) VALUES (?, ?)",
         ["alice", "Alice Anderson"],
     )
+    inst = await get_registry(ds).get(db, doc_id)
+    await inst.subscribe(client_id=5)
 
     resp = await ds.client.post(
         f"/-/paper/api/docs/{doc_id}/presence",
@@ -124,7 +170,6 @@ async def test_post_presence_resolves_display_name(ds_paper):
     )
     assert resp.status_code == 204
 
-    inst = await get_registry(ds).get(db, doc_id)
     assert inst._name_for("alice") == "Alice Anderson"
     user = {u["clientID"]: u for u in inst._presence_payload()["users"]}[5]
     assert user["name"] == "Alice Anderson"

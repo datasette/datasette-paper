@@ -463,6 +463,9 @@ class PaperDB:
             # kept (see m005: resolve-time decides 'not found').
             _queries.delete_links_for_src(conn, src_doc_id=doc_id)
             _queries.delete_tags_for_doc(conn, doc_id=doc_id)
+            # Inline #tag index (m007) — same rowid-reuse hazard: a stale row
+            # makes /tags/{slug}/refs list the new doc under the dead doc's tags.
+            _queries.delete_inline_tags_for_doc(conn, doc_id=doc_id)
             # Activity rollup carries no FK cascade (matching steps/snapshots),
             # so purge it here alongside the other child rows.
             _queries.delete_activity_for_doc(conn, doc_id=doc_id)

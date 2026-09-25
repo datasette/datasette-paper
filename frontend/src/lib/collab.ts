@@ -333,6 +333,13 @@ export const SSE_EVENT = {
   permissionsChanged: "permissions-changed",
 } as const;
 
+/** How long a stream must stay open past its `ready` event before the
+ * reconnect backoff resets: 2 × the server heartbeat (`HEARTBEAT_SECONDS`
+ * = 25 in `datasette_paper/sse.py`). A proxy that kills every stream sooner
+ * therefore escalates toward the 60 s cap instead of reconnecting every
+ * 200 ms forever. */
+export const HEALTHY_STREAM_MS = 50_000;
+
 /** `update` envelope: a step batch and/or ride-along metadata. */
 interface UpdateEvent {
   steps?: Array<Record<string, unknown>>;
@@ -1060,6 +1067,9 @@ export class EditorConnection {
 
   // Backoff (ms) for recover(); starts at 200, doubles up to 60_000
   backOff: number = 0;
+  // Armed by a stream's `ready`; resets `backOff` once that stream has
+  // stayed up for HEALTHY_STREAM_MS. Cleared whenever the stream closes.
+  private healthyTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Tracks in-flight send so we don't double-send
   private sending: boolean = false;
@@ -1808,16 +1818,6 @@ export class EditorConnection {
     const handleUpdate = (data: UpdateEvent) => {
       if (!this.view) return;
 
-      // A well-formed message proves the stream reconnected and is healthy.
-      // This is the confirmed-reconnect signal that clears the recover
-      // backoff — `recover()` deliberately no longer resets it from its own
-      // timer (the stream hadn't proven healthy yet), so a flapping server
-      // that errors before delivering anything keeps backing off.
-      if (this.backOff !== 0) {
-        this.backOff = 0;
-        this.report.success();
-      }
-
       if (typeof data.users === "number") {
         this.opts.onUsers?.(data.users);
       }
@@ -1882,8 +1882,15 @@ export class EditorConnection {
     this.listen<ReadyEvent>(es, SSE_EVENT.ready, () => {
       if (!this.view) return;
       this.waitingForSync = false;
-      this.backOff = 0;
+      // Connected again, so clear the banner. The backoff only resets once
+      // this stream has also stayed up: a stream that is caught up and then
+      // dropped within HEALTHY_STREAM_MS still counts as a failure.
       this.report.success();
+      if (this.healthyTimer !== null) clearTimeout(this.healthyTimer);
+      this.healthyTimer = setTimeout(() => {
+        this.healthyTimer = null;
+        if (this.eventSource === es) this.backOff = 0;
+      }, HEALTHY_STREAM_MS);
       this._send();
     });
     this.listen<ResetEvent>(es, SSE_EVENT.reset, () => {
@@ -1974,6 +1981,10 @@ export class EditorConnection {
   }
 
   private closeStream(): void {
+    if (this.healthyTimer !== null) {
+      clearTimeout(this.healthyTimer);
+      this.healthyTimer = null;
+    }
     if (this.eventSource) {
       this.eventSource.close();
       this.eventSource = null;
@@ -2240,7 +2251,10 @@ export class EditorConnection {
   recover(err: Error): void {
     if (this.isDetached()) return;
     const newBackOff = this.backOff ? Math.min(this.backOff * 2, 6e4) : 200;
-    if (newBackOff > 1000 && this.backOff < 1000) {
+    // Every wait over 1s shows the banner, not just the first: `ready`
+    // clears it on each reconnect, and a stream that keeps dropping must
+    // not go quiet once the backoff is high.
+    if (newBackOff > 1000) {
       this.report.delay(err);
     }
     this.backOff = newBackOff;
@@ -2252,8 +2266,8 @@ export class EditorConnection {
       if (this.comm === "recover") {
         this.comm = "loaded";
         // NB: do NOT reset `this.backOff` here — reopening the stream is not
-        // proof it's healthy. The reset happens once a good SSE message
-        // actually arrives (see `handleMessage`) or a send succeeds, so a
+        // proof it's healthy. The reset happens once the stream has stayed
+        // up HEALTHY_STREAM_MS past `ready` (or a send succeeds), so a
         // server that keeps dropping the stream backs off monotonically
         // instead of restarting at ~200ms every cycle.
         this.report.success();

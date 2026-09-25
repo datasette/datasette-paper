@@ -384,8 +384,7 @@ async def test_snapshot_does_not_corrupt_subsequent_materialization(ds_paper):
     assert resp.status_code == 200
 
     instance = await get_registry(ds).get(paper_db, doc_id)
-    instance._cached_live_doc_json = None
-    instance._cached_live_version = None
+    instance.invalidate_live_doc()
     instance.materialize_live_doc()
     assert instance._materialization_error is None
 
