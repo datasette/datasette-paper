@@ -29,7 +29,8 @@ Per-doc lifecycle:
         lock as ``add_events``, so the SSE handler can't miss a
         broadcast that fires between the two steps.
     subscribe(client_id, actor_id) → asyncio.Queue (key in self.subscribers)
-    update_presence(...) → broadcasts {kind:"presence", users:[…]}
+    update_presence(...) → broadcasts {kind:"presence", users:[…]}; ignored
+        for a clientID with no live subscription
     record_client_doc(...) → snapshot row when (version - last) >= 100;
         also driven automatically by ``_maybe_auto_snapshot`` at the end of
         every write, so API-only docs (no browser to POST /snapshot) still
@@ -159,7 +160,8 @@ class Instance:
         # has been removed.
         self.subscribers: dict[asyncio.Queue, tuple[Optional[int], Optional[str]]] = {}
         # client_id → {actor_id, anchor, head, ts}. Updated on every
-        # presence POST and pruned when subscribers leave.
+        # presence POST from a subscribed client and pruned when subscribers
+        # leave, so its keys are always a subset of the subscribers' ids.
         self.presence: dict[int, dict] = {}
         # actor_id → (display name, resolved-at monotonic ts). Populated
         # lazily by ``ensure_actor_name`` (re-resolved past
@@ -951,7 +953,9 @@ class Instance:
                 # Sentinel — the SSE loop checks `event_name == "closed"`
                 # and breaks out of its forwarding loop cleanly. Simpler
                 # than a separate channel.
-                self.subscribers.pop(q, None)
+                # ``unsubscribe`` (not a bare pop) so the revoked client's
+                # presence entry goes too.
+                self.unsubscribe(q)
                 self._close_queue(q)
                 revoked += 1
         return revoked
@@ -965,8 +969,21 @@ class Instance:
         actor_id: Optional[str],
         anchor: int,
         head: int,
-    ) -> None:
-        """Record a client's caret/selection and broadcast to subscribers."""
+    ) -> bool:
+        """Record a client's caret/selection and broadcast to subscribers.
+
+        Only clients with a live SSE subscription are recorded; returns
+        whether this one was. ``unsubscribe`` is the only place entries are
+        removed, so a POST from a client whose stream is down (the reporter
+        isn't gated on stream state, and its debounced POST can land just
+        after a tab closes) would otherwise leave a ghost cursor that lives
+        as long as the instance stays hot, and every later presence
+        broadcast would carry it.
+        """
+        # @feat presence: presence is only kept for clients with a live stream,
+        # so the dict stays bounded by the subscriber set
+        if not any(cid == client_id for cid, _actor in self.subscribers.values()):
+            return False
         self.presence[client_id] = {
             "actor_id": actor_id,
             "anchor": anchor,
@@ -974,6 +991,7 @@ class Instance:
             "ts": time.monotonic(),
         }
         self._broadcast_presence_nowait()
+        return True
 
     async def ensure_actor_name(self, datasette, actor_id: Optional[str]) -> None:
         """Resolve and cache an actor's display name, refreshing if stale.

@@ -81,7 +81,7 @@ async def test_lagging_subscriber_is_dropped_not_buffered(ds_paper, monkeypatch)
     assert instance.is_pinned
 
     for i in range(20):
-        instance.update_presence(client_id=9, actor_id=None, anchor=i, head=i)
+        instance.update_presence(client_id=8, actor_id=None, anchor=i, head=i)
         # Drain the healthy one as a live stream would.
         healthy.get_nowait()
 

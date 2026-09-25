@@ -403,7 +403,10 @@ async def test_sse_unsubscribes_when_initial_send_fails(
     doc_id = await _create_doc(ds)
     await _post_step(ds, doc_id, version=0)
     inst = await get_registry(ds).get(paper_db, doc_id)
+    # Presence is only kept for subscribed clients; this one stays connected.
+    other = await inst.subscribe(client_id=8)
     inst.update_presence(client_id=8, actor_id=None, anchor=1, head=1)
+    other.get_nowait()
 
     failed = asyncio.Event()
     original_send = SSEStream._send
@@ -423,7 +426,7 @@ async def test_sse_unsubscribes_when_initial_send_fails(
     )
     await asyncio.wait_for(stream._task, timeout=5)
     assert failed.is_set()
-    assert not inst.subscribers
+    assert set(inst.subscribers) == {other}
 
 
 @pytest.mark.asyncio
